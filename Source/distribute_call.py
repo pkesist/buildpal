@@ -12,6 +12,7 @@ import marshal
 import os
 import subprocess
 import tempfile
+import bz2
 
 from multiprocessing.connection import Client
 
@@ -35,7 +36,7 @@ class CmdLineOption:
                 self.sep or '',
                 self.val or '')
 
-    def __init__(self, name, esc, has_arg=True, allow_spaces=True, allow_equal=True):
+    def __init__(self, name, esc, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
         self.__name = name
         self.__has_arg = has_arg
         self.__allow_spaces = allow_spaces
@@ -47,6 +48,7 @@ class CmdLineOption:
         if not isinstance(esc, list):
             raise RuntimeError("Escape sequence parameter must be a string or list of strings.")
         self.__esc = esc
+        self.__def_sep = default_separator or (' ' if allow_spaces else '=' if allow_equal else '')
 
     def __value_regex(self):
         if not self.__has_arg: return "$"
@@ -62,6 +64,9 @@ class CmdLineOption:
 
     def __make_match(self, esc, sep, val):
         return CmdLineOption.Value(self, esc, sep, val)
+
+    def make_value(self, val):
+        return CmdLineOption.Value(self, self.esc(), self.__def_sep, val)
 
     def parse(self, option, iter):
         regex = r"^(?P<esc>.*){name}{end}".format(name=self.__name,
@@ -159,7 +164,10 @@ class CompilationDistributer(Distributor, CmdLineOptions):
     class LocalOption(CmdLineOption): pass
     class RemoteOption(CmdLineOption): pass
     
-    preprocessing = CmdLineOption('E', '/', False, False, False)
+    def __init__(self, preprocess, name):
+        self.__preprocess = preprocess
+        self.__name = name
+        CmdLineOptions.add_option(self, self.__name)
 
     def add_option(self, option):
         assert(isinstance(option, CompilationDistributer.LocalOption) or
@@ -177,11 +185,21 @@ class CompilationDistributer(Distributor, CmdLineOptions):
         executable = command[0]
         command = command[1:]
         tokens = list(self.get_options(command, CompilationDistributer.LocalOption))
-        tokens.append(CmdLineOption.Value(self.preprocessing, None, None, None))
+        tokens.append(CmdLineOption.Value(self.__preprocess, None, None, None))
         preprocessing_tasks = []
-        for input in self.get_options(command, FreeOption):
+        output = list(self.get_tokens(command, lambda token : token.option == self.__name))
+        if output:
+            output = output[-1]
+        else:
+            output = None
+
+        inputs = list(self.get_options(command, FreeOption))
+        if output and len(inputs) > 1:
+            raise RuntimeError("Cannot use {} with multiple sources.".format(self.__name.name()))
+        for input in inputs:
             file, filename = tempfile.mkstemp(text=True)
-            preprocessing_tasks.append((input, file, filename, ))
+            source = input.make_str()
+            preprocessing_tasks.append((input, file, filename, output or os.path.splitext(source)[0] + '.obj'))
             
         class LocalInvocation(object): pass
         local_invocation = LocalInvocation()
@@ -191,6 +209,7 @@ class CompilationDistributer(Distributor, CmdLineOptions):
         return local_invocation
 
     def preprocess(self, local_invocation):
+        print(local_invocation)
         call = [local_invocation.executable]
         call += [option.make_str() for option in local_invocation.tokens]
         for task in local_invocation.tasks:
@@ -198,7 +217,10 @@ class CompilationDistributer(Distributor, CmdLineOptions):
             print("Executing '{}' locally.".format(local_call))
             subprocess.check_call(local_call, stdout=task[1], stderr=subprocess.PIPE)
             os.close(task[1])
-        return [task[2] for task in local_invocation.tasks]
+        class Preprocessed: pass
+        preprocessed = Preprocessed()
+        preprocessed.files = [(task[2], task[3]) for task in local_invocation.tasks]
+        return preprocessed
 
     def create_remote_invocation(self, command, preprocessed):
         command = shlex.split(command)
@@ -210,19 +232,54 @@ class CompilationDistributer(Distributor, CmdLineOptions):
         remote_invocation = RemoteInvocation()
         setattr(remote_invocation, 'executable', executable)
         setattr(remote_invocation, 'tokens', tokens)
-        setattr(remote_invocation, 'files', preprocessed)
+        setattr(remote_invocation, 'files', preprocessed.files)
         return remote_invocation
 
     @classmethod
-    def server_function(calls):
+    def server_function(conn):
+        import tempfile
+        import bz2
+        import os
         import subprocess
+
+        call = conn.recv()
+        count = conn.recv()
+        files = []
+
+        def receive_file():
+            more = True
+            fileDesc, filename = tempfile.mkstemp()
+            decompressor = bz2.BZ2Decompressor()
+            with os.fdopen(fileDesc, "wb") as file:
+                while more:
+                    more, data = conn.recv()
+                    file.write(decompressor.decompress(data))
+            return filename
+
+        def send_file(name):
+            with open(name, "rb") as file:
+                data = file.read(4096)
+                while data:
+                    conn.send((True, data))
+                    data = file.read(4096)
+                conn.send((False, data))
+
+        for i in range(count):
+            files.append(receive_file())
+        
         result = []
         try:
-            for call in calls:
-                with subprocess.Popen(call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            conn.send(len(files))
+            fileDesc, objectFilename = tempfile.mkstemp(suffix=".obj")
+            os.close(fileDesc)
+            for file in files:
+                local_call = call + [file, "/Fo{}".format(objectFilename)]
+                print(local_call)
+                with subprocess.Popen(local_call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                     output = proc.communicate()
-                    result.append((proc.returncode, output[0], output[1],))
-            return result
+                    conn.send((proc.returncode, output[0], output[1],))
+                if proc.returncode == 0:
+                    send_file(objectFilename)
         except:
             import traceback
             traceback.print_exc()
@@ -234,13 +291,28 @@ class CompilationDistributer(Distributor, CmdLineOptions):
         address = ('localhost', 6000)
         conn = Client(address)
         conn.send(marshal.dumps(CompilationDistributer.server_function.__code__))
-        calls = [call + [file] for file in remote_invocation.files]
-        for local_call in calls:
-            print("Executing '{}' remotely.".format(local_call))
-        conn.send(calls)
-        result = conn.recv()
-        for c, r in zip(calls, result):
-            print("Calling '{}' resulted in error code '{}'".format(c, r[0]))
+        conn.send(call)
+        conn.send(len(remote_invocation.files))
+        for file, object in remote_invocation.files:
+            compressor = bz2.BZ2Compressor()
+            with open(file, 'rb') as file:
+                data = file.read(4096)
+                while data:
+                    conn.send((True, compressor.compress(data)))
+                    data = file.read(4096)
+                conn.send((False, compressor.flush()))
+        
+        incoming_len = conn.recv()
+        assert(incoming_len == len(remote_invocation.files))
+        for file, object in remote_invocation.files:
+            retcode, stdout, stderr = conn.recv()
+            if retcode == 0:
+                more = True
+                with open(object, "wb") as file:
+                    while more:
+                        more, data = conn.recv()
+                        file.write(data)
+                print("Got '{}' from server.".format(object))
         
 
 def test_cmdline_options():
@@ -266,13 +338,14 @@ def test_cmdline_options():
             print(token, token.option.type())
 
 def test_compiler_separation():
-    distributer = CompilationDistributer()
+    preprocess=CmdLineOption('E', '/', False)
+    name=CmdLineOption('Fo', '/', True, False, False)
+    distributer = CompilationDistributer(preprocess, name)
     distributer.add_option(CompilationDistributer.LocalOption('I', '-', True, True, False))
     distributer.add_option(CompilationDistributer.LocalOption('D', '-', True, False, False))
-    distributer.add_option(CompilationDistributer.RemoteOption('Fo', '/', True, True, False))
     distributer.add_option(CompilationDistributer.RemoteOption('c', '-', False, False, False))
     distributer.add_option(CompilationDistributer.RemoteOption('EHsc', '/', False, False, False))
-    distributer.execute('cl.exe /EHsc -DTEST -DTEST=asdf -I"LALALA lala" -c /Fo output.obj test.cpp test2.cpp')
+    distributer.execute('cl.exe /EHsc -DTEST -DTEST=asdf -I"LALALA lala" -c test.cpp test2.cpp')
 
 if __name__ == "__main__":
     test_compiler_separation()

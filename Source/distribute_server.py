@@ -1,5 +1,6 @@
 from multiprocessing.connection import Listener
 import subprocess
+import traceback
 import types
 import marshal
 address = ('localhost', 6000)
@@ -14,8 +15,8 @@ while True:
         code = conn.recv()
         code = marshal.loads(code)
         function = types.FunctionType(code, globals())
-        request = conn.recv()
-        conn.send(function(request))
+        function(conn)
     except:
         print("Failed to execute client task.")
+        traceback.print_exc()
         

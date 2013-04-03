@@ -146,34 +146,55 @@ class CmdLineOptions:
         return CmdLineOption.Value(FreeOption(), None, None, None, token)
         
 
-class Distributor:
-    def create_preprocessing_info(self, command):
-        raise NotImplementedError("Distributor.create_preprocessing_info")
+class Distributer:
+    def create_context(self, command):
+        raise NotImplementedError("Distributer.create_context")
 
-    def preprocess(self, local_invocation):
-        raise NotImplementedError("Distributor.preprocess")
+    def preprocess(self, context):
+        raise NotImplementedError("Distributer.preprocess")
 
-    def create_remote_invocation(self, command, preprocessed):
-        raise NotImplementedError("Distributor.create_remote_invocation")
+    def execute_remotely(self, context, remote_invocation):
+        raise NotImplementedError("Distributer.execute_remotely")
 
-    def execute_remotely(self, remote_invocation):
-        raise NotImplementedError("Distributor.execute_remotely")
-
-    def postprocess(self, command, remote_result):
+    def postprocess(self, context):
         pass
-
+    
     def execute(self, command):
-        preprocessing_info = self.create_preprocessing_info(command)
-        preprocessed = self.preprocess(preprocessing_info)
-        remote_inv = self.create_remote_invocation(command, preprocessed)
-        remote_result = self.execute_remotely(remote_inv)
-        self.postprocess(command, remote_result)
+        ctx = self.create_context(command)
+        self.preprocess(ctx)
+        self.execute_remotely(ctx)
+        self.postprocess(ctx)
 
 
-class CompilationDistributer(Distributor, CmdLineOptions):
+class CompilationDistributer(Distributer, CmdLineOptions):
     class PreprocessingOption(CmdLineOption): pass
     class CompilationOption(CmdLineOption): pass
-    
+
+    class Context:
+        def __init__(self, command, option_parser):
+            self.__executable = command[0]
+            self.__options = list(option_parser.parse_options(command[1:]))
+
+        def executable(self): return self.__executable
+        def options(self): return self.__options
+        
+        def filter_options(self, filter):
+            callable = filter
+            if isinstance(filter, type):
+                callable = lambda token : type(token.option) == filter
+            for token in self.__options:
+                if callable(token):
+                    yield token
+
+        def source_files(self):
+            return (input.make_str() for input in self.filter_options(FreeOption))
+
+        
+    def create_context(self, command):
+        print("Processing '{}'.".format(command))
+        result = CompilationDistributer.Context(command, self)
+        return result
+
     def __init__(self, preprocess_option, obj_name_option, compile_no_link_option):
         self.__preprocess = preprocess_option
         self.__name = obj_name_option
@@ -182,86 +203,90 @@ class CompilationDistributer(Distributor, CmdLineOptions):
         CmdLineOptions.add_option(self, self.__compile)
 
     def add_option(self, option):
-        assert(isinstance(option, CompilationDistributer.PreprocessingOption) or
+        assert (isinstance(option, CompilationDistributer.PreprocessingOption) or
             isinstance(option, CompilationDistributer.CompilationOption))
         CmdLineOptions.add_option(self, option)
 
-    def get_tokens(self, command, condition):
-        for token in self.parse_options(command):
-            if condition(token):
-                yield token
-
-    def __get_source_files(self, command):
-        # This should be handled better.
-        # Currently we expect there is no /TC, /TP,
-        # /Tc or /Tp options on the command line
-        inputs = [input.make_str() for input in self.get_options(command, FreeOption)]
-        for input in inputs:
-            if os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']:
-                yield input
-
-    def should_invoke_linker(self, command):
+    def should_invoke_linker(self, ctx):
         return True
 
-    def create_preprocessing_info(self, command):
-        print("Processing '{}'.".format(command))
-        executable = command[0]
-        command = command[1:]
-        tokens = list(self.get_options(command, CompilationDistributer.PreprocessingOption))
+    def get_source_files(self, ctx):
+        return ctx.source_files()
+
+    def preprocess(self, ctx):
+        tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingOption))
         tokens.append(CmdLineOption.Value(self.__preprocess, None, None, None, None))
-        preprocessing_tasks = []
         # See if user specified an explicit name for the object file.
-        output = list(self.get_tokens(command, lambda token : token.option == self.__name))
+        output = list(ctx.filter_options(lambda token : token.option == self.__name))
         if output:
             output = output[-1].val
         else:
             output = None
-        sources = list(self.__get_source_files(command))
+        sources = list(self.get_source_files(ctx))
         if output and len(sources) > 1:
             raise RuntimeError("Cannot use {}{} with multiple sources."
                 .format(self.__name.esc(), self.__name.name()))
         class PreprocessingTask: pass
+
+        call = [ctx.executable()]
+        call.extend(option.make_str() for option in tokens)
+
+        ctx.tasks = []
         for source in sources:
-            file, filename = tempfile.mkstemp(text=True)
             task = PreprocessingTask()
             task.source = source
-            task.file = file
-            task.filename = filename
             task.object = output or os.path.splitext(source)[0] + '.obj'
             task.type = os.path.splitext(source)[1]
-            preprocessing_tasks.append(task)
-            
-        class PreprocessingInfo(object): pass
-        preprocessing_info = PreprocessingInfo()
-        preprocessing_info.executable = executable
-        preprocessing_info.tokens = tokens
-        preprocessing_info.tasks = preprocessing_tasks
-        return preprocessing_info
-
-    def preprocess(self, preprocessing_info):
-        call = [preprocessing_info.executable]
-        call += [option.make_str() for option in preprocessing_info.tokens]
-        files = []
-        for task in preprocessing_info.tasks:
+            file, filename = tempfile.mkstemp(text=True)
             local_call = call + [task.source]
             print("Executing '{}' locally.".format(local_call))
-            subprocess.check_call(local_call, stdout=task.file, stderr=subprocess.PIPE)
-            os.close(task.file)
-        class Preprocessed: pass
-        preprocessed = Preprocessed()
-        preprocessed.files = [(task.filename, task.object, task.type, task.source) for task in preprocessing_info.tasks]
-        return preprocessed
+            subprocess.check_call(local_call, stdout=file, stderr=subprocess.PIPE)
+            os.close(file)
+            task.filename = filename
+            ctx.tasks.append(task)
 
-    def create_remote_invocation(self, command, preprocessed):
-        executable = command[0]
-        command = command[1:]
-        tokens = list(self.get_options(command, CompilationDistributer.CompilationOption))
-        class RemoteInvocation(object): pass
-        remote_invocation = RemoteInvocation()
-        setattr(remote_invocation, 'executable', executable)
-        setattr(remote_invocation, 'tokens', tokens)
-        setattr(remote_invocation, 'files', preprocessed.files)
-        return remote_invocation
+    def execute_remotely(self, ctx):
+        tokens = list(ctx.filter_options(CompilationDistributer.CompilationOption))
+        call = [ctx.executable()]
+        call += [option.make_str() for option in tokens]
+        address = ('localhost', 6000)
+        param = {'outputOption' : self.__name.make_value('{}').make_str(),
+            'compileNoLink' : self.__compile.make_value().make_str()}
+        conn = Client(address)
+        conn.send((marshal.dumps(CompilationDistributer.server_function.__code__), param))
+        conn.send(call)
+        conn.send(len(ctx.tasks))
+        for task in ctx.tasks:
+            conn.send(task.type)
+            compressor = bz2.BZ2Compressor()
+            with open(task.source, 'rb') as file:
+                data = file.read(4096)
+                while data:
+                    conn.send((True, compressor.compress(data)))
+                    data = file.read(4096)
+                conn.send((False, compressor.flush()))
+        
+        incoming_len = conn.recv()
+        assert incoming_len == len(ctx.tasks)
+        errors = False
+        for task in ctx.tasks:
+            retcode, stdout, stderr = conn.recv()
+            sys.stderr.write("---------------------------- STDERR ----------------------------\n")
+            sys.stderr.write(stderr.decode())
+            sys.stderr.write("----------------------------------------------------------------\n")
+            sys.stdout.write("---------------------------- STDOUT ----------------------------\n")
+            sys.stdout.write(stdout.decode())
+            sys.stdout.write("----------------------------------------------------------------\n")
+            if retcode == 0:
+                more = True
+                with open(task.object, "wb") as file:
+                    while more:
+                        more, data = conn.recv()
+                        file.write(data)
+            else:
+                errors = True
+        if errors:
+            raise RuntimeError("Errors occurred during remote compilation.")
 
     @classmethod
     def server_function(param, conn):
@@ -315,65 +340,18 @@ class CompilationDistributer(Distributor, CmdLineOptions):
             traceback.print_exc()
             raise
 
-    def execute_remotely(self, remote_invocation):
-        call = [remote_invocation.executable]
-        call += [option.make_str() for option in remote_invocation.tokens]
-        address = ('localhost', 6000)
-        param = {'outputOption' : self.__name.make_value('{}').make_str(),
-            'compileNoLink' : self.__compile.make_value().make_str()
-        }
-        conn = Client(address)
-        conn.send((marshal.dumps(CompilationDistributer.server_function.__code__), param))
-        conn.send(call)
-        conn.send(len(remote_invocation.files))
-        for file, object, type, source in remote_invocation.files:
-            conn.send(type)
-            compressor = bz2.BZ2Compressor()
-            with open(file, 'rb') as file:
-                data = file.read(4096)
-                while data:
-                    conn.send((True, compressor.compress(data)))
-                    data = file.read(4096)
-                conn.send((False, compressor.flush()))
-        
-        incoming_len = conn.recv()
-        assert(incoming_len == len(remote_invocation.files))
-        errors = False
-        objects = {}
-        for file, object, type, source in remote_invocation.files:
-            retcode, stdout, stderr = conn.recv()
-            sys.stderr.write("---------------------------- STDERR ----------------------------\n")
-            sys.stderr.write(stderr.decode())
-            sys.stderr.write("----------------------------------------------------------------\n")
-            sys.stdout.write("---------------------------- STDOUT ----------------------------\n")
-            sys.stdout.write(stdout.decode())
-            sys.stdout.write("----------------------------------------------------------------\n")
-            if retcode == 0:
-                more = True
-                with open(object, "wb") as file:
-                    while more:
-                        more, data = conn.recv()
-                        file.write(data)
-                objects[source] = object
-            else:
-                errors = True
-        if errors:
-            raise RuntimeError("Errors occurred during remote compilation.")
-        class RemoteResult: pass
-        remoteResult = RemoteResult()
-        remoteResult.objects = objects
-        return remoteResult
-
-    def postprocess(self, command, remote_result):
-        executable = command[0]
-        command = command[1:]
-        if not self.should_invoke_linker(command):
+    def postprocess(self, ctx):
+        if not self.should_invoke_linker(ctx):
             return
-        call = [executable]
-        inputs = [input.make_str() for input in self.get_options(command, FreeOption)]
-        for input in inputs:
-            if input in remote_result.objects:
-                call.append(remote_result.objects[input])
+
+        objects = {}
+        for task in ctx.tasks:
+            objects[task.filename] = task.object
+
+        call = [ctx.executable()]
+        for input in self.get_source_files(ctx):
+            if input in objects:
+                call.append(objects[input])
             else:
                 call.append(input)
         retcode = subprocess.call(call)

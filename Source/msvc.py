@@ -1,3 +1,4 @@
+import os
 import sys
 from distribute_call import CompilationDistributer, CmdLineOption, FreeOption
 
@@ -11,8 +12,16 @@ class MSVCDistributer(CompilationDistributer):
         for option_desc in self.compilation_options:
             self.add_option(MSVCDistributer.CompilationOption(*option_desc))
 
-    def should_invoke_linker(self, command):
-        for value in self.get_tokens(command, lambda token : type(token) != FreeOption):
+    def get_source_files(self, ctx):
+        # This should be handled better.
+        # Currently we expect there is no /TC, /TP,
+        # /Tc or /Tp options on the command line
+        for input in ctx.source_files():
+            if os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']:
+                yield input
+
+    def should_invoke_linker(self, ctx):
+        for value in ctx.filter_options(FreeOption):
             if value.option.name() in ['c', 'E', 'EP', 'P', 'Zg', 'Zs']:
                 return False
         return True

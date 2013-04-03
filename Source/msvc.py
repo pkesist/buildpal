@@ -12,13 +12,11 @@ class MSVCDistributer(CompilationDistributer):
         for option_desc in self.compilation_options:
             self.add_option(MSVCDistributer.CompilationOption(*option_desc))
 
-    def get_source_files(self, ctx):
+    def requires_preprocessing(self, input):
         # This should be handled better.
         # Currently we expect there is no /TC, /TP,
         # /Tc or /Tp options on the command line
-        for input in ctx.source_files():
-            if os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']:
-                yield input
+        return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
     def should_invoke_linker(self, ctx):
         for value in ctx.filter_options(FreeOption):

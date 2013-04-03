@@ -176,6 +176,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             self.__options = list(option_parser.parse_options(command[1:]))
 
         def executable(self): return self.__executable
+
         def options(self): return self.__options
         
         def filter_options(self, filter):
@@ -186,7 +187,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 if callable(token):
                     yield token
 
-        def source_files(self):
+        def input_files(self):
             return (input.make_str() for input in self.filter_options(FreeOption))
 
         
@@ -210,8 +211,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
     def should_invoke_linker(self, ctx):
         return True
 
-    def get_source_files(self, ctx):
-        return ctx.source_files()
+    def requires_preprocessing(self, file):
+        return False
 
     def preprocess(self, ctx):
         tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingOption))
@@ -222,15 +223,15 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             output = output[-1].val
         else:
             output = None
-        sources = list(self.get_source_files(ctx))
+        sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         if output and len(sources) > 1:
             raise RuntimeError("Cannot use {}{} with multiple sources."
                 .format(self.__name.esc(), self.__name.name()))
-        class PreprocessingTask: pass
 
         call = [ctx.executable()]
         call.extend(option.make_str() for option in tokens)
 
+        class PreprocessingTask: pass
         ctx.tasks = []
         for source in sources:
             task = PreprocessingTask()
@@ -349,7 +350,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             objects[task.filename] = task.object
 
         call = [ctx.executable()]
-        for input in self.get_source_files(ctx):
+        for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])
             else:

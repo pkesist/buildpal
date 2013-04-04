@@ -4,15 +4,21 @@ from distribute_call import CompilationDistributer, CmdLineOption, FreeOption
 
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):
-        super().__init__(preprocess_option=MSVCDistributer.PreprocessingOption('E', self.esc, False),
-            obj_name_option=CmdLineOption('Fo', self.esc, None, True, False, False),
-            compile_no_link_option=MSVCDistributer.CompilationOption('c', self.esc, None, False))
+        super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, False),
+            obj_name_option=MSVCDistributer.CompilerOption('Fo', self.esc, None, True, False, False),
+            compile_no_link_option=MSVCDistributer.CompilerOption('c', self.esc, None, False))
         for option_desc in self.preprocessing_options:
-            self.add_option(MSVCDistributer.PreprocessingOption(*option_desc))
+            self.add_preprocessing_option(*option_desc)
         for option_desc in self.compilation_options:
-            self.add_option(MSVCDistributer.CompilationOption(*option_desc))
+            self.add_compilation_option(*option_desc)
         for option_desc in self.pch_options:
-            self.add_option(MSVCDistributer.IgnoredOption(*option_desc))
+            # Recognized, but ignored.
+            self.add_option(MSVCDistributer.CompilerOption(*option_desc))
+        for option_desc in self.preprocess_and_compile:
+            option=MSVCDistributer.CompilerOption(*option_desc)
+            option.add_category(CompilationDistributer.PreprocessingCategory)
+            option.add_category(CompilationDistributer.CompilationCategory)
+            self.add_option(option)
 
     def requires_preprocessing(self, input):
         # This should be handled better.
@@ -21,7 +27,7 @@ class MSVCDistributer(CompilationDistributer):
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
     def should_invoke_linker(self, ctx):
-        for value in ctx.filter_options(MSVCDistributer.CompilationOption):
+        for value in ctx.options():
             if value.option.name() in ['c', 'E', 'EP', 'P', 'Zg', 'Zs']:
                 return False
         return True
@@ -44,13 +50,18 @@ class MSVCDistributer(CompilationDistributer):
     ]
 
     pch_options = [
-        ['Fp'                   , esc, None, True , False, False],
-        ['Yc'                   , esc, None, True , False, False],
-        ['Yl'                   , esc, None, True , False, False],
-        ['Yu'                   , esc, None, True , False, False],
-        ['Y-'                   , esc, None, False              ]
+        ['Fp', esc, None, True , False, False],
+        ['Yc', esc, None, True , False, False],
+        ['Yl', esc, None, True , False, False],
+        ['Yu', esc, None, True , False, False],
+        ['Y-', esc, None, False              ]
     ]
-    
+
+    preprocess_and_compile = [
+        # Preprocessor can determine whether exceptions are enabled
+        # or not.
+        ['EH', esc, None, True, False, False ],
+    ]
 
     compilation_options = [
         ['O1'                   , esc, None, False              ],
@@ -70,7 +81,6 @@ class MSVCDistributer(CompilationDistributer):
         ['GS'                   , esc, '-' , False              ],
         ['GR'                   , esc, '-' , False              ],
         ['GX'                   , esc, '-' , False              ],
-        ['EH'                   , esc, None, True, False, False ],
         ['fp'                   , esc, None, True, False, False ],
         ['Qfast_transcendentals', esc, None, False              ],
         ['GL'                   , esc, '-' , False              ],

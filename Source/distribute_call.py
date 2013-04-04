@@ -181,9 +181,21 @@ class Distributer:
 
 
 class CompilationDistributer(Distributer, CmdLineOptions):
-    class PreprocessingOption(CmdLineOption): pass
-    class CompilationOption(CmdLineOption): pass
-    class IgnoredOption(CmdLineOption): pass
+    class Category: pass
+    class PreprocessingCategory(Category): pass
+    class CompilationCategory(Category): pass
+    class LinkingCategory(Category): pass
+
+    class CompilerOption(CmdLineOption):
+        def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
+            super().__init__(name, esc, suff, has_arg, allow_spaces, allow_equal, default_separator)
+            self.__categories = set()
+
+        def add_category(self, cat):
+            self.__categories.add(cat)
+        
+        def test_category(self, cat):
+            return cat in self.__categories
 
     class Context:
         def __init__(self, command, option_parser):
@@ -194,18 +206,38 @@ class CompilationDistributer(Distributer, CmdLineOptions):
 
         def options(self): return self.__options
         
+        def free_options(self):
+            return (token for token in self.__options if type(token.option) == FreeOption)
+
         def filter_options(self, filter):
-            callable = filter
-            if isinstance(filter, type):
-                callable = lambda token : type(token.option) == filter
-            for token in self.__options:
-                if callable(token):
-                    yield token
+            if type(filter) == type and issubclass(filter, CompilationDistributer.Category):
+                return (token for token in self.__options
+                    if type(token.option) == CompilationDistributer.CompilerOption and
+                    token.option.test_category(filter))
+            if isinstance(filter, CompilationDistributer.CompilerOption):
+                return (token for token in self.__options
+                    if token.option == filter)
+            raise RuntimeError("Unknown option filter.")
+            
 
         def input_files(self):
-            return (input.make_str() for input in self.filter_options(FreeOption))
-
+            return (input.make_str() for input in self.free_options())
         
+    def add_preprocessing_option(self, *args, **kwargs):
+        option = CompilationDistributer.CompilerOption(*args, **kwargs)
+        option.add_category(CompilationDistributer.PreprocessingCategory)
+        self.add_option(option)
+
+    def add_compilation_option(self, *args, **kwargs):
+        option = CompilationDistributer.CompilerOption(*args, **kwargs)
+        option.add_category(CompilationDistributer.CompilationCategory)
+        self.add_option(option)
+
+    def add_linking_option(self, *args, **kwargs):
+        option = CompilationDistributer.CompilerOption(*args, **kwargs)
+        option.add_category(CompilationDistributer.LinkingCategory)
+        self.add_option(option)
+
     def create_context(self, command):
         print("Processing '{}'.".format(command))
         result = CompilationDistributer.Context(command, self)
@@ -215,14 +247,10 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         self.__preprocess = preprocess_option
         self.__name = obj_name_option
         self.__compile = compile_no_link_option
-        CmdLineOptions.add_option(self, self.__name)
-        CmdLineOptions.add_option(self, self.__compile)
-
-    def add_option(self, option):
-        assert (isinstance(option, CompilationDistributer.PreprocessingOption) or
-            isinstance(option, CompilationDistributer.CompilationOption) or
-            isinstance(option, CompilationDistributer.IgnoredOption))
-        CmdLineOptions.add_option(self, option)
+        #self.__name.add_category(CompilationDistributer.CompilationCategory)
+        self.__compile.add_category(CompilationDistributer.CompilationCategory)
+        self.add_option(self.__compile)
+        self.add_option(self.__name)
 
     def should_invoke_linker(self, ctx):
         return True
@@ -231,10 +259,10 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         return False
 
     def preprocess(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingOption))
+        tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingCategory))
         tokens.append(CmdLineOption.Value(self.__preprocess, None, None, None, None))
         # See if user specified an explicit name for the object file.
-        output = list(ctx.filter_options(lambda token : token.option == self.__name))
+        output = list(ctx.filter_options(self.__name))
         if output:
             output = output[-1].val
         else:
@@ -263,7 +291,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             ctx.tasks.append(task)
 
     def execute_remotely(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.CompilationOption))
+        tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
         call = [ctx.executable()]
         call += [option.make_str() for option in tokens]
         address = ('localhost', 6000)
@@ -367,25 +395,25 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         if not self.should_invoke_linker(ctx):
             return
 
+        print("Linking...")
         objects = {}
         for task in ctx.tasks:
-            objects[task.filename] = task.object
+            objects[task.source] = task.object
 
         call = [ctx.executable()]
         # We also preserve compiler options. Not sure if this is smart
         # thing to do.  Maybe add a need a new category ~ AlwaysUse
         # (e.g. for -nologo)
-        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.CompilationOption))
+        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.CompilationCategory))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])
             else:
                 call.append(input)
+        print("Calling '{}'.".format(call))
         retcode = subprocess.call(call)
         sys.exit(retcode)
         
-
-
 def test_cmdline_options():
     options = CmdLineOptions()
     options.add_option(CmdLineOption(*['x', '-', False]))

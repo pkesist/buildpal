@@ -4,13 +4,15 @@ from distribute_call import CompilationDistributer, CmdLineOption, FreeOption
 
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):
-        super().__init__(preprocess_option=CmdLineOption('E', self.esc, False),
+        super().__init__(preprocess_option=MSVCDistributer.PreprocessingOption('E', self.esc, False),
             obj_name_option=CmdLineOption('Fo', self.esc, None, True, False, False),
-            compile_no_link_option=CmdLineOption('c', self.esc, None, False))
+            compile_no_link_option=MSVCDistributer.CompilationOption('c', self.esc, None, False))
         for option_desc in self.preprocessing_options:
             self.add_option(MSVCDistributer.PreprocessingOption(*option_desc))
         for option_desc in self.compilation_options:
             self.add_option(MSVCDistributer.CompilationOption(*option_desc))
+        for option_desc in self.pch_options:
+            self.add_option(MSVCDistributer.IgnoredOption(*option_desc))
 
     def requires_preprocessing(self, input):
         # This should be handled better.
@@ -19,7 +21,7 @@ class MSVCDistributer(CompilationDistributer):
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
     def should_invoke_linker(self, ctx):
-        for value in ctx.filter_options(FreeOption):
+        for value in ctx.filter_options(MSVCDistributer.CompilationOption):
             if value.option.name() in ['c', 'E', 'EP', 'P', 'Zg', 'Zs']:
                 return False
         return True
@@ -40,6 +42,15 @@ class MSVCDistributer(CompilationDistributer):
         ['I' , esc, None, True , False, False],
         ['X' , esc, None, False              ],
     ]
+
+    pch_options = [
+        ['Fp'                   , esc, None, True , False, False],
+        ['Yc'                   , esc, None, True , False, False],
+        ['Yl'                   , esc, None, True , False, False],
+        ['Yu'                   , esc, None, True , False, False],
+        ['Y-'                   , esc, None, False              ]
+    ]
+    
 
     compilation_options = [
         ['O1'                   , esc, None, False              ],
@@ -88,7 +99,6 @@ class MSVCDistributer(CompilationDistributer):
         ['Fe'                   , esc, None, True , False, False],
         ['Fm'                   , esc, None, True , False, False],
         #['Fo'                   , esc, None, True , False, False],
-        ['Fp'                   , esc, None, True , False, False],
         ['Fr'                   , esc, None, True , False, False],
         ['FR'                   , esc, None, True , False, False],
         ['doc'                  , esc, None, True , False, False],
@@ -130,11 +140,7 @@ class MSVCDistributer(CompilationDistributer):
         ['WL'                   , esc, None, False              ],
         ['WX'                   , esc, None, False              ],
         ['W'                    , esc, None, True , False, False],
-        ['Yc'                   , esc, None, True , False, False],
         ['Yd'                   , esc, None, False              ],
-        ['Yl'                   , esc, None, True , False, False],
-        ['Yu'                   , esc, None, True , False, False],
-        ['Y-'                   , esc, None, False              ],
         ['Zm'                   , esc, None, True , False, False],
         ['Wp64'                 , esc, None, False              ],
         ['LD'                   , esc, None, False              ],

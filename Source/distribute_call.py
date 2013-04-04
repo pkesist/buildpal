@@ -54,6 +54,9 @@ class CmdLineOption:
         self.__suff = suff
         self.__def_sep = '' if not self.__has_arg else default_separator or (' ' if allow_spaces else '=' if allow_equal else '')
 
+    def __esc_regex(self):
+        return "(?P<esc>({}))".format("|".join([re.escape(esc) for esc in self.__esc]))
+
     def __value_regex(self):
         result = []
         result.append("(?P<suf>{})?".format(re.escape(self.__suff if self.__suff else '')))
@@ -79,7 +82,8 @@ class CmdLineOption:
         return CmdLineOption.Value(self, self.esc(), '', self.__def_sep, val)
 
     def parse(self, option, iter):
-        regex = r"^(?P<esc>.*){name}{end}".format(name=re.escape(self.__name),
+        regex = r"^{esc}{name}{end}".format(esc=self.__esc_regex(),
+            name=re.escape(self.__name),
             end=self.__value_regex())
         match = re.match(regex, option)
         if not match:
@@ -117,20 +121,30 @@ class CmdLineOptions:
         self.__options.append(option)
 
     def __parse_option(self, tokenIter):
+        result = []
         while True:
             try:
                 token = next(tokenIter)
-                match = None
+                if token[0] == '@':
+                    # Found a response file - read contents and parse it
+                    # recursively.
+                    options = None
+                    with open(token[1:], 'rt') as responseFile:
+                        options = shlex.split(" ".join(responseFile.readlines()))
+                    result.extend(self.parse_options(options))
+                    continue
+                found = False
                 for option in self.__options:
                     match = option.parse(token, tokenIter)
                     if match:
+                        found = True
+                        result.append(match)
                         break
-                if match:
-                    yield match
-                else:
-                    yield self.__free_option(token)
+                if not found:
+                    result.append(self.__free_option(token))
             except StopIteration:
                 break
+        return result
 
     def parse_options(self, options):
         return self.__parse_option( (option for option in options) )
@@ -169,6 +183,7 @@ class Distributer:
 class CompilationDistributer(Distributer, CmdLineOptions):
     class PreprocessingOption(CmdLineOption): pass
     class CompilationOption(CmdLineOption): pass
+    class IgnoredOption(CmdLineOption): pass
 
     class Context:
         def __init__(self, command, option_parser):
@@ -205,7 +220,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
 
     def add_option(self, option):
         assert (isinstance(option, CompilationDistributer.PreprocessingOption) or
-            isinstance(option, CompilationDistributer.CompilationOption))
+            isinstance(option, CompilationDistributer.CompilationOption) or
+            isinstance(option, CompilationDistributer.IgnoredOption))
         CmdLineOptions.add_option(self, option)
 
     def should_invoke_linker(self, ctx):
@@ -241,9 +257,9 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             file, filename = tempfile.mkstemp(text=True)
             local_call = call + [task.source]
             print("Executing '{}' locally.".format(local_call))
-            subprocess.check_call(local_call, stdout=file, stderr=subprocess.PIPE)
+            subprocess.check_call(local_call, stdout=file)
             os.close(file)
-            task.filename = filename
+            task.preprocessed = filename
             ctx.tasks.append(task)
 
     def execute_remotely(self, ctx):
@@ -260,12 +276,16 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         for task in ctx.tasks:
             conn.send(task.type)
             compressor = bz2.BZ2Compressor()
-            with open(task.source, 'rb') as file:
+            with open(task.preprocessed, 'rb') as file:
                 data = file.read(4096)
                 while data:
                     conn.send((True, compressor.compress(data)))
                     data = file.read(4096)
                 conn.send((False, compressor.flush()))
+            try:
+                os.remove(task.preprocessed)
+            except:
+                pass
         
         incoming_len = conn.recv()
         assert incoming_len == len(ctx.tasks)
@@ -297,7 +317,6 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         import subprocess
 
         call = conn.recv()
-        print(call)
         count = conn.recv()
         files = []
 
@@ -330,10 +349,13 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             os.close(fileDesc)
             for file in files:
                 local_call = call + [param['compileNoLink'], file, param['outputOption'].format(objectFilename)]
-                print(" ".join(local_call))
                 with subprocess.Popen(local_call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                     output = proc.communicate()
                     conn.send((proc.returncode, output[0], output[1],))
+                try:
+                    os.remove(file)
+                except:
+                    pass
                 if proc.returncode == 0:
                     send_file(objectFilename)
         except:
@@ -350,6 +372,10 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             objects[task.filename] = task.object
 
         call = [ctx.executable()]
+        # We also preserve compiler options. Not sure if this is smart
+        # thing to do.  Maybe add a need a new category ~ AlwaysUse
+        # (e.g. for -nologo)
+        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.CompilationOption))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])
@@ -358,8 +384,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         retcode = subprocess.call(call)
         sys.exit(retcode)
         
-        
-        
+
 
 def test_cmdline_options():
     options = CmdLineOptions()

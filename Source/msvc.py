@@ -165,10 +165,6 @@ class MSVCDistributer(CompilationDistributer):
         ['analyze'              , esc, None, True , False, False]
     ]
 
-def test_compiler_separation():
-    distributer = MSVCDistributer()
-    distributer.execute('cl.exe /EHsc -DTEST -DTEST=asdf -I"LALALA lala" -c test.cpp test2.cpp')
-
 if __name__ == "__main__":
     distributer = MSVCDistributer()
     distributer.execute(sys.argv[1:])

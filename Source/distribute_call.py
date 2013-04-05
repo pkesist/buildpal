@@ -12,9 +12,10 @@ import marshal
 import os
 import subprocess
 import sys
-import tempfile
-import bz2
+import zlib
 
+from tempfile import mkstemp
+from time import sleep
 from multiprocessing.connection import Client
 
 
@@ -223,21 +224,6 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         def input_files(self):
             return (input.make_str() for input in self.free_options())
         
-    def add_preprocessing_option(self, *args, **kwargs):
-        option = CompilationDistributer.CompilerOption(*args, **kwargs)
-        option.add_category(CompilationDistributer.PreprocessingCategory)
-        self.add_option(option)
-
-    def add_compilation_option(self, *args, **kwargs):
-        option = CompilationDistributer.CompilerOption(*args, **kwargs)
-        option.add_category(CompilationDistributer.CompilationCategory)
-        self.add_option(option)
-
-    def add_linking_option(self, *args, **kwargs):
-        option = CompilationDistributer.CompilerOption(*args, **kwargs)
-        option.add_category(CompilationDistributer.LinkingCategory)
-        self.add_option(option)
-
     def create_context(self, command):
         print("Processing '{}'.".format(command))
         result = CompilationDistributer.Context(command, self)
@@ -282,7 +268,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             task.source = source
             task.object = output or os.path.splitext(source)[0] + '.obj'
             task.type = os.path.splitext(source)[1]
-            file, filename = tempfile.mkstemp(text=True)
+            file, filename = mkstemp(text=True)
             local_call = call + [task.source]
             print("Executing '{}' locally.".format(local_call))
             subprocess.check_call(local_call, stdout=file)
@@ -294,26 +280,46 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
         call = [ctx.executable()]
         call += [option.make_str() for option in tokens]
+
         address = ('localhost', 6000)
         param = {'outputOption' : self.__name.make_value('{}').make_str(),
             'compileNoLink' : self.__compile.make_value().make_str()}
-        conn = Client(address)
-        conn.send((marshal.dumps(CompilationDistributer.server_function.__code__), param))
-        conn.send(call)
+        while True:
+            conn = Client(address)
+            conn.send((marshal.dumps(CompilationDistributer.server_function.__code__), param))
+            conn.send(call)
+            try:
+                accepted = conn.recv()
+                if accepted:
+                    break
+                conn.close()
+            except IOError:
+                pass
+            sleep(2)
+
         conn.send(len(ctx.tasks))
+        total = 0
+        compr = 0
         for task in ctx.tasks:
             conn.send(task.type)
-            compressor = bz2.BZ2Compressor()
+            compressor = zlib.compressobj(1)
             with open(task.preprocessed, 'rb') as file:
-                data = file.read(4096)
+                data = file.read(10 * 1024)
+                total += len(data)
                 while data:
-                    conn.send((True, compressor.compress(data)))
-                    data = file.read(4096)
-                conn.send((False, compressor.flush()))
+                    compressed = compressor.compress(data)
+                    compr += len(compressed)
+                    conn.send((True, compressed))
+                    data = file.read(10 * 1024)
+                    total += len(data)
+                compressed = compressor.flush(zlib.Z_FINISH)
+                compr += len(compressed)
+                conn.send((False, compressed))
             try:
                 os.remove(task.preprocessed)
             except:
                 pass
+        print("Compression ratio is {}%.".format(round(compr/total*100)))
         
         incoming_len = conn.recv()
         assert incoming_len == len(ctx.tasks)
@@ -338,11 +344,22 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             raise RuntimeError("Errors occurred during remote compilation.")
 
     @classmethod
-    def server_function(param, conn):
+    def server_function(param, conn, cpu_usage, free_memory):
         import tempfile
-        import bz2
+        import zlib
         import os
         import subprocess
+
+        # Can we accept this task?
+        if cpu_usage:
+            free = 100 * len(cpu_usage) - sum(cpu_usage)
+            accept = free >= 50
+        else:
+            accept = True
+
+        conn.send(accept)
+        if not accept:
+            return
 
         call = conn.recv()
         count = conn.recv()
@@ -352,11 +369,12 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             more = True
             type = conn.recv()
             fileDesc, filename = tempfile.mkstemp(suffix="{}".format(type))
-            decompressor = bz2.BZ2Decompressor()
+            decompressor = zlib.decompressobj()
             with os.fdopen(fileDesc, "wb") as file:
                 while more:
                     more, data = conn.recv()
                     file.write(decompressor.decompress(data))
+                file.write(decompressor.flush())
             return filename
 
         def send_file(name):
@@ -380,12 +398,10 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 with subprocess.Popen(local_call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                     output = proc.communicate()
                     conn.send((proc.returncode, output[0], output[1],))
-                try:
-                    os.remove(file)
-                except:
-                    pass
                 if proc.returncode == 0:
+                    os.remove(file)
                     send_file(objectFilename)
+                    os.remove(objectFilename)
         except:
             import traceback
             traceback.print_exc()

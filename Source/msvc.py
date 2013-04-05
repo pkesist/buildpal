@@ -8,9 +8,13 @@ class MSVCDistributer(CompilationDistributer):
             obj_name_option=MSVCDistributer.CompilerOption('Fo', self.esc, None, True, False, False),
             compile_no_link_option=MSVCDistributer.CompilerOption('c', self.esc, None, False))
         for option_desc in self.preprocessing_options:
-            self.add_preprocessing_option(*option_desc)
+            option=MSVCDistributer.CompilerOption(*option_desc)
+            option.add_category(CompilationDistributer.PreprocessingCategory)
+            self.add_option(option)
         for option_desc in self.compilation_options:
-            self.add_compilation_option(*option_desc)
+            option=MSVCDistributer.CompilerOption(*option_desc)
+            option.add_category(CompilationDistributer.CompilationCategory)
+            self.add_option(option)
         for option_desc in self.pch_options:
             # Recognized, but ignored.
             self.add_option(MSVCDistributer.CompilerOption(*option_desc))
@@ -18,6 +22,12 @@ class MSVCDistributer(CompilationDistributer):
             option=MSVCDistributer.CompilerOption(*option_desc)
             option.add_category(CompilationDistributer.PreprocessingCategory)
             option.add_category(CompilationDistributer.CompilationCategory)
+            self.add_option(option)
+        for option_desc in self.always:
+            option=MSVCDistributer.CompilerOption(*option_desc)
+            option.add_category(CompilationDistributer.PreprocessingCategory)
+            option.add_category(CompilationDistributer.CompilationCategory)
+            option.add_category(CompilationDistributer.LinkingCategory)
             self.add_option(option)
 
     def requires_preprocessing(self, input):
@@ -61,6 +71,15 @@ class MSVCDistributer(CompilationDistributer):
         # Preprocessor can determine whether exceptions are enabled
         # or not.
         ['EH', esc, None, True, False, False ],
+        # Testing whether this fixes some issues or not.
+        ['MD'                   , esc, None, False              ],
+        ['MT'                   , esc, None, False              ],
+        ['MDd'                  , esc, None, False              ],
+        ['MTd'                  , esc, None, False              ],
+    ]
+
+    always = [
+        ['nologo', esc, None, False ],
     ]
 
     compilation_options = [
@@ -134,7 +153,6 @@ class MSVCDistributer(CompilationDistributer):
         ['H'                    , esc, None, True , False, False],
         ['J'                    , esc, None, False              ],
         ['MP'                   , esc, None, True , False, False],
-        ['nologo'               , esc, None, False              ],
         ['showIncludes'         , esc, None, False              ],
         ['Tc'                   , esc, None, True , False, False],
         ['Tp'                   , esc, None, True , False, False],
@@ -158,10 +176,6 @@ class MSVCDistributer(CompilationDistributer):
         ['LN'                   , esc, None, False              ],
         ['F'                    , esc, None, True , False, False],
         ['link'                 , esc, None, False              ],
-        ['MD'                   , esc, None, False              ],
-        ['MT'                   , esc, None, False              ],
-        ['MDd'                  , esc, None, False              ],
-        ['MTd'                  , esc, None, False              ],
         ['analyze'              , esc, None, True , False, False]
     ]
 

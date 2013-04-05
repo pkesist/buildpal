@@ -5,6 +5,15 @@ import subprocess
 import traceback
 import types
 import marshal
+import sys
+
+try:
+    import psutil
+    psutil_available = False
+except:
+    psutil_available = False
+    
+
 address = ('localhost', 6000)
 
 listener = Listener(address)
@@ -14,21 +23,40 @@ def work(conn):
         conn = conn[0](*conn[1])
         code, param = conn.recv()
         function = types.FunctionType(marshal.loads(code), globals())
-        function(param, conn)
+        cpu_usage = psutil.cpu_percent(percpu=True) if psutil_available else None
+        freemem = psutil.virtual_memory().available if psutil_available else None
+        function(param, conn, cpu_usage, freemem)
     except:
         print("Failed to execute client task.")
         traceback.print_exc()
 
 
+def print_tasks():
+    global tasks
+    sys.stdout.write("Running {} tasks.{}".format(len(tasks), '\r'))
+
 if __name__ == "__main__":
-    pool = Pool(processes=6)
+    try:
+        if len(sys.argv) > 1:
+            processes = int(sys.argv[1])
+    except:
+        processes = 8
+    print("Spawning {} worker processes.".format(processes))
+    pool = Pool(processes=processes)
+    print("Starting server.")
+    global tasks
+    tasks = []
     while True:
-        print("Waiting for client...")
+        print_tasks()
+        to_remove = []
+        for i in range(len(tasks)):
+            task = tasks[i]
+            if task.ready():
+                to_remove.append(i)
+        to_remove.reverse()
+        for a in to_remove:
+            del tasks[a]
         conn = listener.accept()
-        print('connection accepted from', listener.last_accepted)
-        try:
-            pool.apply_async(func=work, args=(reduce_connection(conn),))
-        except:
-            print("Failed to execute client task.")
-            traceback.print_exc()
+        tasks.append(pool.apply_async(func=work, args=(reduce_connection(conn),)))
+
         

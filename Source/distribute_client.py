@@ -23,6 +23,9 @@ class Distributer:
     def create_context(self, command):
         raise NotImplementedError("Distributer.create_context")
 
+    def bailout(self, context):
+        return False
+
     def preprocess(self, context):
         raise NotImplementedError("Distributer.preprocess")
 
@@ -34,6 +37,8 @@ class Distributer:
     
     def execute(self, command):
         ctx = self.create_context(command)
+        if self.bailout(ctx):
+            return
         self.preprocess(ctx)
         self.execute_remotely(ctx)
         self.postprocess(ctx)
@@ -41,6 +46,7 @@ class Distributer:
 
 class CompilationDistributer(Distributer, CmdLineOptions):
     class Category: pass
+    class BailoutCategory(Category): pass
     class PreprocessingCategory(Category): pass
     class CompilationCategory(Category): pass
     class LinkingCategory(Category): pass
@@ -99,20 +105,36 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         def input_files(self):
             return (input.make_str() for input in self.free_options())
         
+    def bailout(self, ctx):
+        tokens = list(ctx.filter_options(CompilationDistributer.BailoutCategory))
+        if not tokens:
+            return False
+
+        print("Command does not require distributed compilation. Running locally.")
+        call = [ctx.executable()].extend(option.make_str() for option in ctx.options())
+        subprocess.check_call(call)
+        return True
+
     def create_context(self, command):
         result = CompilationDistributer.Context(command, self)
         return result
 
     def __init__(self, preprocess_option, obj_name_option, compile_no_link_option):
         self.__preprocess = preprocess_option
-        self.__name = obj_name_option
-        self.__compile = compile_no_link_option
-        self.__compile.add_category(CompilationDistributer.CompilationCategory)
-        self.add_option(self.__compile)
-        self.add_option(self.__name)
+        self.__object_name_option = obj_name_option
+        self.__compile_no_link_option = compile_no_link_option
+        self.__compile_no_link_option.add_category(CompilationDistributer.CompilationCategory)
+        self.add_option(self.__compile_no_link_option)
+        self.add_option(self.__object_name_option)
+
+    def object_name_option(self):
+        return self.__object_name_option
+
+    def compile_no_link_option(self):
+        return self.__compile_no_link_option
 
     def should_invoke_linker(self, ctx):
-        return True
+        return self.compile_no_link_option() not in [token.option for token in ctx.options()]
 
     def requires_preprocessing(self, file):
         return False
@@ -121,43 +143,42 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingCategory))
         tokens.append(CmdLineOption.Value(self.__preprocess, None, None, None, None))
         # See if user specified an explicit name for the object file.
-        output = list(ctx.filter_options(self.__name))
+        output = list(ctx.filter_options(self.object_name_option()))
         if output:
             output = output[-1].val
-        else:
-            output = None
         sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         if output and len(sources) > 1:
             raise RuntimeError("Cannot use {}{} with multiple sources."
-                .format(self.__name.esc(), self.__name.name()))
+                .format(self.object_name_option.esc(), self.object_name_option.name()))
 
-        call = [ctx.executable()]
-        call.extend(option.make_str() for option in tokens)
+        preprocess_call = [ctx.executable()]
+        preprocess_call.extend(option.make_str() for option in tokens)
 
-        class PreprocessingTask: pass
-        ctx.tasks = []
-        for source in sources:
-            task = PreprocessingTask()
-            task.source = source
-            task.object = output or os.path.splitext(source)[0] + '.obj'
-            task.type = os.path.splitext(source)[1]
+        def preprocess(source):
             file, filename = mkstemp(text=True)
-            local_call = call + [task.source]
-            subprocess.check_call(local_call, stdout=file)
+            subprocess.check_call(preprocess_call + [source], stdout=file)
             os.close(file)
-            task.preprocessed = filename
-            ctx.tasks.append(task)
+            return filename
+
+        tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
+        compile_call = [ctx.executable()]
+        compile_call.extend(option.make_str() for option in tokens)
+
+        ctx.tasks = [
+            CompileTask(
+                call = compile_call,
+                source = source,
+                source_type = os.path.splitext(source)[1],
+                input = preprocess(source),
+                output = output or os.path.splitext(source)[0] + '.obj',
+                distributer = self) for source in sources]
 
     def execute_remotely(self, ctx):
         tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
         call = [ctx.executable()]
-        call += [option.make_str() for option in tokens]
+        call.extend(option.make_str() for option in tokens)
 
-        param = {'outputOption' : self.__name.make_value('{}').make_str(),
-            'compileNoLink' : self.__compile.make_value().make_str()}
-
-        for task in ctx.tasks:
-            compile_task = CompileTask(call, task.preprocessed, task.type, task.object, param)
+        for compile_task in ctx.tasks:
             accepted = False
             while not accepted:
                 host = ctx.get_host()
@@ -174,14 +195,6 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                     pass
             print("Task sent to '{}:{}' via manager {}.".format(host[0], host[1], ctx.manager_id()))
             compile_task.accepted(conn)
-
-    @classmethod
-    def server_function(param, conn, cpu_usage, free_memory):
-        import tempfile
-        import zlib
-        import os
-        import subprocess
-
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

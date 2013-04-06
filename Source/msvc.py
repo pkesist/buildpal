@@ -9,22 +9,31 @@ class MSVCDistributer(CompilationDistributer):
         super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, False),
             obj_name_option=MSVCDistributer.CompilerOption('Fo', self.esc, None, True, False, False),
             compile_no_link_option=MSVCDistributer.CompilerOption('c', self.esc, None, False))
+        # Bailout
+        for option_desc in self.bailout_options:
+            option=MSVCDistributer.CompilerOption(*option_desc)
+            option.add_category(CompilationDistributer.BailoutCategory)
+            self.add_option(option)
+        # Preprocessing
         for option_desc in self.preprocessing_options:
             option=MSVCDistributer.CompilerOption(*option_desc)
             option.add_category(CompilationDistributer.PreprocessingCategory)
             self.add_option(option)
+        # Compilation
         for option_desc in self.compilation_options:
             option=MSVCDistributer.CompilerOption(*option_desc)
             option.add_category(CompilationDistributer.CompilationCategory)
             self.add_option(option)
+        # PCH options. Recognized, but ignored.
         for option_desc in self.pch_options:
-            # Recognized, but ignored.
             self.add_option(MSVCDistributer.CompilerOption(*option_desc))
+        # Both preprocessing and compilation.
         for option_desc in self.preprocess_and_compile:
             option=MSVCDistributer.CompilerOption(*option_desc)
             option.add_category(CompilationDistributer.PreprocessingCategory)
             option.add_category(CompilationDistributer.CompilationCategory)
             self.add_option(option)
+        # Always.
         for option_desc in self.always:
             option=MSVCDistributer.CompilerOption(*option_desc)
             option.add_category(CompilationDistributer.PreprocessingCategory)
@@ -38,21 +47,22 @@ class MSVCDistributer(CompilationDistributer):
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
-    def should_invoke_linker(self, ctx):
-        for value in ctx.options():
-            if value.option.name() in ['c', 'E', 'EP', 'P', 'Zg', 'Zs']:
-                return False
-        return True
-
     esc = ['/', '-']
+    
+    # If we run into these just run the damn thing locally
+    bailout_options = [
+        ['E' , esc, None, False],
+        ['EP', esc, None, False],
+        ['P' , esc, None, False],
+        ['Zg', esc, None, False],
+        ['Zs', esc, None, False],
+    ]
+
     preprocessing_options = [
         ['AI', esc, None, True , False, False],
         ['FU', esc, None, True , False, False],
         ['C' , esc, None, False              ],
         ['D' , esc, None, True , False, False],
-        #['E', esc, None, False              ],
-        ['EP', esc, None, False              ],
-        ['P' , esc, None, False              ],
         ['Fx', esc, None, False              ],
         ['FI', esc, None, True , False, False],
         ['U' , esc, None, True , False, False],
@@ -127,7 +137,6 @@ class MSVCDistributer(CompilationDistributer):
         ['Fd'                   , esc, None, True , False, False],
         ['Fe'                   , esc, None, True , False, False],
         ['Fm'                   , esc, None, True , False, False],
-        #['Fo'                   , esc, None, True , False, False],
         ['Fr'                   , esc, None, True , False, False],
         ['FR'                   , esc, None, True , False, False],
         ['doc'                  , esc, None, True , False, False],
@@ -137,8 +146,6 @@ class MSVCDistributer(CompilationDistributer):
         ['Za'                   , esc, None, False              ],
         ['Ze'                   , esc, None, False              ],
         ['Zl'                   , esc, None, False              ],
-        ['Zg'                   , esc, None, False              ],
-        ['Zs'                   , esc, None, False              ],
         ['vd'                   , esc, None, True , False, False],
         ['vm'                   , esc, None, True , False, False],
         ['Zc'                   , esc, None, True , False, False],
@@ -147,7 +154,6 @@ class MSVCDistributer(CompilationDistributer):
         ['?'                    , esc, None, False              ],
         ['help'                 , esc, None, False              ],
         ['bigobj'               , esc, None, False              ],
-        #['c'                   , esc, None, False              ],
         ['errorReport'          , esc, None, True , False, False],
         ['FC'                   , esc, None, False              ],
         ['H'                    , esc, None, True , False, False],

@@ -8,12 +8,14 @@ class Task:
     pass
 
 class CompileTask(Task):
-    def __init__(self, call, input, input_type, output, additional):
+    def __init__(self, call, source, source_type, input, output, distributer):
         self.__call = call
+        self.__source = source
         self.__input = input
-        self.__input_type = input_type
+        self.__source_type = source_type
         self.__output = output
-        self.__additional = additional
+        self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
+        self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
 
     def accept(self):
         return True
@@ -62,7 +64,7 @@ class CompileTask(Task):
     def complete(self, conn):
         def receive_file():
             more = True
-            fileDesc, filename = tempfile.mkstemp(suffix="{}".format(self.__input_type))
+            fileDesc, filename = tempfile.mkstemp(suffix="{}".format(self.__source_type))
             decompressor = zlib.decompressobj()
             with os.fdopen(fileDesc, "wb") as file:
                 while more:
@@ -84,8 +86,8 @@ class CompileTask(Task):
         try:
             fileDesc, objectFilename = tempfile.mkstemp(suffix=".obj")
             os.close(fileDesc)
-            noLink = self.__additional['compileNoLink']
-            output = self.__additional['outputOption'].format(objectFilename)
+            noLink = self.__compile_switch
+            output = self.__output_switch.format(objectFilename)
             local_call = self.__call + [noLink, output, file]
             with subprocess.Popen(local_call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()

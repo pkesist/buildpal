@@ -21,11 +21,12 @@ listener = Listener(address)
 def work(conn):
     try:
         conn = conn[0](*conn[1])
-        code, param = conn.recv()
-        function = types.FunctionType(marshal.loads(code), globals())
-        cpu_usage = psutil.cpu_percent(percpu=True) if psutil_available else None
-        freemem = psutil.virtual_memory().available if psutil_available else None
-        function(param, conn, cpu_usage, freemem)
+        task = conn.recv()
+        accept = task.accept()
+        conn.send(accept)
+        if not accept:
+            return
+        task.complete(conn)
     except:
         print("Failed to execute client task.")
         traceback.print_exc()
@@ -47,15 +48,8 @@ if __name__ == "__main__":
     global tasks
     tasks = []
     while True:
+        tasks = list(filter(lambda task : not task.ready(), tasks))
         print_tasks()
-        to_remove = []
-        for i in range(len(tasks)):
-            task = tasks[i]
-            if task.ready():
-                to_remove.append(i)
-        to_remove.reverse()
-        for a in to_remove:
-            del tasks[a]
         conn = listener.accept()
         tasks.append(pool.apply_async(func=work, args=(reduce_connection(conn),)))
 

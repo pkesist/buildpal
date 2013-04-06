@@ -1,6 +1,8 @@
+from cmdline_processing import CmdLineOption, FreeOption
+from distribute_client import CompilationDistributer
+
 import os
 import sys
-from distribute_call import CompilationDistributer, CmdLineOption, FreeOption
 
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):

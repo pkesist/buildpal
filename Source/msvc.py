@@ -68,14 +68,12 @@ class MSVCDistributer(CompilationDistributer):
     ]
 
     preprocess_and_compile = [
-        # Preprocessor can determine whether exceptions are enabled
-        # or not.
-        ['EH', esc, None, True, False, False ],
-        # Testing whether this fixes some issues or not.
-        ['MD'                   , esc, None, False              ],
-        ['MT'                   , esc, None, False              ],
-        ['MDd'                  , esc, None, False              ],
-        ['MTd'                  , esc, None, False              ],
+        # These affect MSVC #pragmas, so we need them on pp.
+        ['EH' , esc, None, True, False, False ],
+        ['MD' , esc, None, False              ],
+        ['MT' , esc, None, False              ],
+        ['MDd', esc, None, False              ],
+        ['MTd', esc, None, False              ],
     ]
 
     always = [

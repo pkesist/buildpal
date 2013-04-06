@@ -10,6 +10,7 @@ import re
 import shlex
 import marshal
 import os
+import random
 import subprocess
 import sys
 import zlib
@@ -17,7 +18,6 @@ import zlib
 from tempfile import mkstemp
 from time import sleep
 from multiprocessing.connection import Client
-
 
 class CmdLineOption:
     class Value:
@@ -281,21 +281,27 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         call = [ctx.executable()]
         call += [option.make_str() for option in tokens]
 
-        address = ('localhost', 6000)
+        rnd = random.Random()
+        rnd.seed()
+        hosts = [('localhost', 6000), ("192.168.5.88", 6000)]
         param = {'outputOption' : self.__name.make_value('{}').make_str(),
             'compileNoLink' : self.__compile.make_value().make_str()}
-        while True:
-            conn = Client(address)
+        accepted = False
+        while not accepted:
+            host = rnd.randint(0, len(hosts) - 1)
+            print("Using {}".format(hosts[host]))
+            conn = Client(address=hosts[host])
             conn.send((marshal.dumps(CompilationDistributer.server_function.__code__), param))
             conn.send(call)
             try:
                 accepted = conn.recv()
-                if accepted:
+                if not accepted:
+                    print("Turned down by '{}'".format(hosts[host]))
+                    conn.close()
+                else:
                     break
-                conn.close()
             except IOError:
                 pass
-            sleep(2)
 
         conn.send(len(ctx.tasks))
         total = 0
@@ -417,10 +423,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             objects[task.source] = task.object
 
         call = [ctx.executable()]
-        # We also preserve compiler options. Not sure if this is smart
-        # thing to do.  Maybe add a need a new category ~ AlwaysUse
-        # (e.g. for -nologo)
-        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.CompilationCategory))
+        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.LinkingCategory))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])

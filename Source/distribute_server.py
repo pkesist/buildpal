@@ -9,7 +9,7 @@ import sys
 
 try:
     import psutil
-    psutil_available = False
+    psutil_available = True
 except:
     psutil_available = False
     

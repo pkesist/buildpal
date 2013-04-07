@@ -6,7 +6,7 @@ import sys
 
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):
-        super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, False),
+        super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, None, False),
             obj_name_option=MSVCDistributer.CompilerOption('Fo', self.esc, None, True, False, False),
             compile_no_link_option=MSVCDistributer.CompilerOption('c', self.esc, None, False))
         # Bailout

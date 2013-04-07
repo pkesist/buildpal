@@ -7,12 +7,9 @@
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
 
-import marshal
 import os
 import random
 import subprocess
-import sys
-import zlib
 
 from tempfile import mkstemp
 from time import sleep
@@ -43,6 +40,16 @@ class Distributer:
         self.execute_remotely(ctx)
         self.postprocess(ctx)
 
+
+class LazyPreprocess:
+    def __init__(self, preprocess_call):
+        self.__preprocess_call = preprocess_call
+
+    def __call__(self, *args):
+        file, filename = mkstemp(text=True)
+        subprocess.check_call(self.__preprocess_call, stdout=file)
+        os.close(file)
+        return filename
 
 class CompilationDistributer(Distributer, CmdLineOptions):
     class Category: pass
@@ -100,7 +107,6 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 return (token for token in self.__options
                     if token.option == filter)
             raise RuntimeError("Unknown option filter.")
-            
 
         def input_files(self):
             return (input.make_str() for input in self.free_options())
@@ -116,8 +122,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         return True
 
     def create_context(self, command):
-        result = CompilationDistributer.Context(command, self)
-        return result
+        return CompilationDistributer.Context(command, self)
 
     def __init__(self, preprocess_option, obj_name_option, compile_no_link_option):
         self.__preprocess = preprocess_option
@@ -140,8 +145,6 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         return False
 
     def preprocess(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.PreprocessingCategory))
-        tokens.append(CmdLineOption.Value(self.__preprocess, None, None, None, None))
         # See if user specified an explicit name for the object file.
         output = list(ctx.filter_options(self.object_name_option()))
         if output:
@@ -152,36 +155,37 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 .format(self.object_name_option.esc(), self.object_name_option.name()))
 
         preprocess_call = [ctx.executable()]
-        preprocess_call.extend(option.make_str() for option in tokens)
+        preprocess_call.extend(option.make_str() for option in 
+            ctx.filter_options(CompilationDistributer.PreprocessingCategory))
+        preprocess_call.append(self.__preprocess.make_value().make_str())
 
-        def preprocess(source):
-            file, filename = mkstemp(text=True)
-            subprocess.check_call(preprocess_call + [source], stdout=file)
-            os.close(file)
-            return filename
-
-        tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
         compile_call = [ctx.executable()]
-        compile_call.extend(option.make_str() for option in tokens)
+        compile_call.extend(option.make_str() for option in
+            ctx.filter_options(CompilationDistributer.CompilationCategory))
 
         ctx.tasks = [
             CompileTask(
                 call = compile_call,
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                input = preprocess(source),
+                input = LazyPreprocess(preprocess_call + [source]),
                 output = output or os.path.splitext(source)[0] + '.obj',
                 distributer = self) for source in sources]
 
     def execute_remotely(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.CompilationCategory))
         call = [ctx.executable()]
-        call.extend(option.make_str() for option in tokens)
+        call.extend(option.make_str() for option in
+            ctx.filter_options(CompilationDistributer.CompilationCategory))
 
+        first = None
         for compile_task in ctx.tasks:
             accepted = False
             while not accepted:
                 host = ctx.get_host()
+                if not first:
+                    first = host
+                elif host == first:
+                    sleep(5)
                 conn = Client(address=host)
                 conn.send(compile_task)
                 try:
@@ -206,12 +210,12 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             objects[task.source] = task.object
 
         call = [ctx.executable()]
-        call.extend(o.make_str() for o in ctx.filter_options(CompilationDistributer.LinkingCategory))
+        call.extend(o.make_str() for o in
+            ctx.filter_options(CompilationDistributer.LinkingCategory))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])
             else:
                 call.append(input)
         print("Calling '{}'.".format(call))
-        retcode = subprocess.call(call)
-        sys.exit(retcode)
+        subprocess.check_call(call)

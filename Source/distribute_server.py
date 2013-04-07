@@ -7,13 +7,6 @@ import types
 import marshal
 import sys
 
-try:
-    import psutil
-    psutil_available = True
-except:
-    psutil_available = False
-    
-
 address = ('localhost', 6000)
 
 listener = Listener(address)

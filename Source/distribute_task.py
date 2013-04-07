@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import zlib
+import psutil
 
 class Task:
     pass
@@ -18,7 +19,10 @@ class CompileTask(Task):
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
 
     def accept(self):
-        return True
+        # Accept task if we have at least 50% of one processor.
+        usage = psutil.cpu_percent(percpu=True)
+        count = len(usage)
+        return count * 100 - sum(usage) >= 50
 
     def call(self):
         return self.__call
@@ -27,10 +31,13 @@ class CompileTask(Task):
         return self.__type
 
     def accepted(self, conn):
+        input = self.__input()
+        if callable(input):
+            input = input()
         total = 0
         compr = 0
         compressor = zlib.compressobj(1)
-        with open(self.__input, 'rb') as file:
+        with open(input, 'rb') as file:
             data = file.read(10 * 1024)
             total += len(data)
             while data:

@@ -7,13 +7,14 @@ DistriBuild
 (3.) Requirements.
 (4.) Quick-start.
 (5.) Design.
+(6.) Future development plans.
 
 --------------------------------------------------------------------------------
 ----------------
 (1.) Motivation.
 ----------------
 
-    DistriBuild is a tool which speeds up compilation of large C/C++ projects.
+    DistriBuild is a tool which speeds up build of large C/C++ projects.
     It works by distributing parts of compilation process to other machines on
     the network (i.e. the build farm).
     
@@ -25,7 +26,7 @@ DistriBuild
 (2.) Features.
 --------------
 
-    Task rejection with resource monitoring.
+    Task rejection.
         Server may reject task if it doesn't have enough resources. In this
         case the client will try another farm node. This allows you to run a lot
         of parallel tasks without the danger of suffocating the build farm or
@@ -34,33 +35,37 @@ DistriBuild
 
     Build consistency.
         DistriBuild takes special care that exact same compiler is used both on
-        the client and on the server.
+        the client and on the server. (more correctly - will soon ;)
         DistriBuild takes special care to preserve compilation environment, so
         that task distribution does not affect the produced objects.
+        (more correctly - will soon ;)
         
-    COMPILE_LOCALLY ...
+    Free.
+        DistriBuild is open-source, free and has a permissive license.
+
+    ALLOW_LOCAL_COMPILATION ...
     LAZY_PREPROCESS ...
 
 --------------------------------------------------------------------------------
 ------------------
-(4.) Requirements.
+(3.) Requirements.
 ------------------
 
-    DistriBuild is written in Python. All machines need to have pyton installed.
-    DistriBuild works only with Python 3. Python 2 is not, was not and probably
-    never will be supported.
+    DistriBuild is written in Python (www.python.org). All machines need to have
+    Pyhton installed. DistriBuild works only with Python 3. Python 2 is not, was
+    not and probably never will be supported.
     
     An additional Python package, psutil, is optional but recommended to utilize
     task rejection.
 
 --------------------------------------------------------------------------------
 -----------------
-(3.) Quick-start.
+(4.) Quick-start.
 -----------------
 
-    ------------------
-    Set up build farm.
-    ------------------
+    ----------------------
+    Set up the build farm.
+    ----------------------
     
     Place scripts on each of the farm machines. Compilers should already be
     installed. Set hostname and port. Run distribute_server.py.
@@ -84,7 +89,23 @@ DistriBuild
     Calling the compiler.
     ---------------------
 
-    Instead of calling cl.exe you need to call distribute_client.py <manager_id>
-    cl.exe.
+    Instead of calling 'cl.exe' you need to call 'msvc.py <manager_id> cl.exe'.
     
+--------------------------------------------------------------------------------
+------------
+(5.) Design.
+------------
+
+    * In progress.
+
+--------------------------------------------------------------------------------
+------------------------------
+(6.) Future development plans.
+------------------------------
+
+    * Support more complex tasks to delegate more work to the build farm.
+        * Remote preprocessing.
+        * PCH support.
+    * Support more platforms (Linux) and compilers (GCC/Clang).
+
 --------------------------------------------------------------------------------

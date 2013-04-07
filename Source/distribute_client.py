@@ -1,9 +1,3 @@
-# call -----> analyze                                      -----> local_invocation
-#                                                          -----> remote_invocation
-#      -----> preprocess(local_invocation)                 -----> local_output
-#      -----> remote_call(local_output, remote_invocation) -----> remote output
-#      -----> postprocess call(remote_output)              -----> output
-
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
 
@@ -177,15 +171,16 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         call.extend(option.make_str() for option in
             ctx.filter_options(CompilationDistributer.CompilationCategory))
 
-        first = None
         for compile_task in ctx.tasks:
+            first = None
             accepted = False
             while not accepted:
                 host = ctx.get_host()
                 if not first:
                     first = host
                 elif host == first:
-                    sleep(5)
+                    # If everyone rejected task.
+                    sleep(1)
                 conn = Client(address=host)
                 conn.send(compile_task)
                 try:

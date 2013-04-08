@@ -7,7 +7,7 @@ import types
 import marshal
 import sys
 
-address = ('', 6060)
+address = ('', 6070)
 
 listener = Listener(address, 'AF_INET')
 

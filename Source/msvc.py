@@ -22,6 +22,50 @@ def find_on_path(executable):
         if test_exe(location):
             return location
 
+import subprocess
+import tempfile
+import os
+
+def get_env_diff(batch, args):
+    delimiter = "TEMP_FILE_TESTER_DELIMITER_1351361363416436"
+    test_batch_name = None
+    with tempfile.NamedTemporaryFile(mode='wt', suffix=".bat", delete=False) as test_batch:
+        test_batch_name = test_batch.name
+        test_batch.write("""
+@echo off
+echo {batch}
+echo {delimiter}
+set
+echo {delimiter}
+call "{batch}" {args}
+echo {delimiter}
+set
+echo {delimiter}
+""".format(batch=os.path.join(os.getcwd(), batch), args=" ".join(a for a in args), delimiter=delimiter))
+    to_add={}
+    with subprocess.Popen(test_batch_name, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+        stdout, stderr = proc.communicate()
+        output = stdout.decode()
+        output = output.split('\r\n')
+        first = output.index(delimiter)
+        second = output.index(delimiter, first + 1)
+        third  = output.index(delimiter, second + 1)
+        fourth = output.index(delimiter, third + 1)
+        
+        before = output[first + 1 : second - 1]
+        after  = output[third + 1 : fourth - 1]
+        added = [a for a in after if not a in before]
+        removed = [b for b in before if not b in after]
+        for a in added:
+            eq = a.index('=')
+            to_add[a[:eq].upper()] = a[eq+1:]
+    try:
+        os.remove(test_batch_name)
+    except:
+        # Ah well.
+        pass
+    return to_add
+
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):
         super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, None, False),
@@ -82,17 +126,17 @@ class MSVCDistributer(CompilationDistributer):
     def setup_compiler(cls, compiler_info):
         compiler_id = compiler_info.id()
         info = cls.compiler_versions.get(compiler_id)
-        print("Compiler id", compiler_id)
         if not info:
             return None
-        script = [r'c:\Program Files (x86)\Microsoft Visual Studio {}.0\VC\vcvarsall.bat'
-            .format(info[0]), info[1], '&&']
-        def run_compiler(command):
-            print("Running '{}'.".format(command))
-            with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+        script = r'c:\Program Files (x86)\Microsoft Visual Studio {}.0\VC\vcvarsall.bat'.format(info[0])
+        to_add = get_env_diff(script, [info[1]])
+        def run_compiler(command, to_add):
+            env = dict(os.environ)
+            env.update(to_add)
+            with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
-        return lambda command : run_compiler(script + command)
+        return lambda command : run_compiler(command, to_add)
 
     esc = ['/', '-']
     

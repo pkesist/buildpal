@@ -214,7 +214,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 except IOError:
                     pass
             print("Task sent to '{}:{}' via manager {}.".format(host[0], host[1], ctx.manager_id()))
-            compile_task.accepted(conn)
+            if not compile_task.send_receive(conn):
+                raise RuntimeError("Sending/receiving compile data failed.")
             if rejections:
                 print("Task completed after {} rejections.".format(rejections))
 

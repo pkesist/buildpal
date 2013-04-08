@@ -31,7 +31,7 @@ class CompileTask(Task):
     def type(self):
         return self.__type
 
-    def accepted(self, conn):
+    def send_receive(self, conn):
         input = self.__input()
         if callable(input):
             input = input()
@@ -67,7 +67,8 @@ class CompileTask(Task):
                 while more:
                     more, data = conn.recv()
                     file.write(data)
-        return True
+            return True
+        return False
 
     def setup_compiler(self):
         if self.__compiler_info.toolset() == 'msvc':
@@ -79,7 +80,6 @@ class CompileTask(Task):
     def process(self, conn):
         accept = self.accept()
         compiler = self.setup_compiler()
-        print(compiler)
         conn.send((accept, compiler is not None))
         if not accept or compiler is None:
             return
@@ -120,5 +120,3 @@ class CompileTask(Task):
             import traceback
             traceback.print_exc()
             raise
-
-

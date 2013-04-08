@@ -7,9 +7,9 @@ import types
 import marshal
 import sys
 
-address = ('localhost', 6060)
+address = ('', 6060)
 
-listener = Listener(address)
+listener = Listener(address, 'AF_INET')
 
 def work(conn):
     try:

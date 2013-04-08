@@ -198,7 +198,11 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 elif host == first:
                     # If everyone rejected task.
                     sleep(1)
-                conn = Client(address=host)
+                try:
+                    conn = Client(address=host)
+                except:
+                    print("Connection to '{}:{}' failed. Moving on.".format(host[0], host[1]))
+                    continue
                 conn.send(compile_task)
                 try:
                     accepted, has_compiler = conn.recv()
@@ -211,7 +215,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                     pass
             print("Task sent to '{}:{}' via manager {}.".format(host[0], host[1], ctx.manager_id()))
             compile_task.accepted(conn)
-            print("Task completed after {} rejections.".format(rejections))
+            if rejections:
+                print("Task completed after {} rejections.".format(rejections))
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

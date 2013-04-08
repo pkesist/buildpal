@@ -7,7 +7,7 @@ import types
 import marshal
 import sys
 
-address = ('localhost', 6000)
+address = ('localhost', 6060)
 
 listener = Listener(address)
 
@@ -15,11 +15,7 @@ def work(conn):
     try:
         conn = conn[0](*conn[1])
         task = conn.recv()
-        accept = task.accept()
-        conn.send(accept)
-        if not accept:
-            return
-        task.complete(conn)
+        task.process(conn)
     except:
         print("Failed to execute client task.")
         traceback.print_exc()

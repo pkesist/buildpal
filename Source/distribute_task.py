@@ -9,7 +9,8 @@ class Task:
     pass
 
 class CompileTask(Task):
-    def __init__(self, call, source, source_type, input, output, distributer):
+    def __init__(self, call, source, source_type, input, output, compiler_info, distributer):
+        self.__compiler_info = compiler_info
         self.__call = call
         self.__source = source
         self.__input = input
@@ -68,7 +69,21 @@ class CompileTask(Task):
                     file.write(data)
         return True
 
-    def complete(self, conn):
+    def setup_compiler(self):
+        if self.__compiler_info.toolset() == 'msvc':
+            import msvc
+            return msvc.MSVCDistributer.setup_compiler(self.__compiler_info)
+        else:
+            raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
+
+    def process(self, conn):
+        accept = self.accept()
+        compiler = self.setup_compiler()
+        print(compiler)
+        conn.send((accept, compiler is not None))
+        if not accept or compiler is None:
+            return
+
         def receive_file():
             more = True
             fileDesc, filename = tempfile.mkstemp(suffix="{}".format(self.__source_type))
@@ -95,11 +110,9 @@ class CompileTask(Task):
             os.close(fileDesc)
             noLink = self.__compile_switch
             output = self.__output_switch.format(objectFilename)
-            local_call = self.__call + [noLink, output, file]
-            with subprocess.Popen(local_call, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-                output = proc.communicate()
-                conn.send((proc.returncode, output[0], output[1],))
-            if proc.returncode == 0:
+            retcode, stdout, stderr = compiler(self.__call + [noLink, output, file])
+            conn.send((retcode, stdout, stderr,))
+            if retcode == 0:
                 os.remove(file)
                 send_file(objectFilename)
                 os.remove(objectFilename)

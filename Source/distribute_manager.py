@@ -2,7 +2,8 @@ from multiprocessing.managers import BaseManager
 
 import sys
 
-hosts = [('localhost', 6000)]
+#hosts = [('localhost', 6060)]
+hosts = [('localhost', 6060), ('speedtest', 6060)]
 last_host = None
 
 def get_host():

@@ -1,8 +1,26 @@
 from cmdline_processing import CmdLineOption, FreeOption
-from distribute_client import CompilationDistributer
+from distribute_client import CompilationDistributer, CompilerInfo
+
+import subprocess
 
 import os
+import re
 import sys
+
+def find_on_path(executable):
+    def test_exe(location):
+        return os.path.isfile(location) and os.access(location, os.X_OK)
+    direct = os.path.join(os.getcwd(), executable)
+    if test_exe(direct):
+        return direct
+    # If searching PATH we must have only file name, without directory
+    # components.
+    if os.path.split(executable)[0]:
+        return None
+    for location in (os.path.join(path, executable) for path in
+        os.environ["PATH"].split(os.pathsep)):
+        if test_exe(location):
+            return location
 
 class MSVCDistributer(CompilationDistributer):
     def __init__(self):
@@ -47,8 +65,46 @@ class MSVCDistributer(CompilationDistributer):
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
+    def compiler_info(self, executable):
+        abs = find_on_path(executable)
+        if not abs:
+            raise RuntimeError("Cannot find compiler executable '{}'.".format(executable))
+        with subprocess.Popen(abs, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            stdout, stderr = proc.communicate()
+        m = re.search(b'C/C\+\+ Optimizing Compiler Version (?P<ver>.*) for (?P<plat>.*)\r\n', stderr)
+        if not m:
+            raise EnvironmentError("Failed to identify compiler - unexpected output.")
+        version = (m.group('ver'), m.group('plat'))
+        assert version in self.compiler_versions
+        return CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version)
+
+    @classmethod
+    def setup_compiler(cls, compiler_info):
+        compiler_id = compiler_info.id()
+        info = cls.compiler_versions.get(compiler_id)
+        print("Compiler id", compiler_id)
+        if not info:
+            return None
+        script = [r'c:\Program Files (x86)\Microsoft Visual Studio {}.0\VC\vcvarsall.bat'
+            .format(info[0]), info[1], '&&']
+        def run_compiler(command):
+            print("Running '{}'.".format(command))
+            with subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+                output = proc.communicate()
+                return proc.returncode, output[0], output[1]
+        return lambda command : run_compiler(script + command)
+
     esc = ['/', '-']
     
+    compiler_versions = {
+        (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
+        (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
+        (b'16.00.40219.01', b'80x86') : (10, 'x86'  ), # msvc10
+        (b'16.00.40219.01', b'x64'  ) : (10, 'amd64'), # msvc10 x64
+        (b'17.00.50727.01', b'x86'  ) : (11, 'x86'  ), # msvc11
+        (b'17.00.50727.01', b'x64'  ) : (11, 'amd64'), # msvc11 x64
+    }
+
     # If we run into these just run the damn thing locally
     bailout_options = [
         ['E' , esc, None, False],
@@ -80,16 +136,17 @@ class MSVCDistributer(CompilationDistributer):
     ]
 
     preprocess_and_compile = [
-        # These affect MSVC #pragmas, so we need them on pp.
-        ['EH' , esc, None, True, False, False ],
-        ['MD' , esc, None, False              ],
-        ['MT' , esc, None, False              ],
-        ['MDd', esc, None, False              ],
-        ['MTd', esc, None, False              ],
+        # These affect MSVC #pragmas, so we need them while preprocessing.
+        # TODO: Check if they are really needed for compilation.
+        ['EH' , esc, None, True, False, False],
+        ['MD' , esc, None, False             ],
+        ['MT' , esc, None, False             ],
+        ['MDd', esc, None, False             ],
+        ['MTd', esc, None, False             ],
     ]
 
     always = [
-        ['nologo', esc, None, False ],
+        ['nologo', esc, None, False],
     ]
 
     compilation_options = [

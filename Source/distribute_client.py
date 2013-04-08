@@ -45,6 +45,18 @@ class LazyPreprocess:
         os.close(file)
         return filename
 
+class CompilerInfo:
+    def __init__(self, toolset, executable, size, id):
+        self.__toolset = toolset
+        self.__executable = executable
+        self.__size = size
+        self.__id = id
+
+    def toolset(self): return self.__toolset
+    def executable(self): return self.__executable
+    def size(self): return self.__size
+    def id(self): return self.__id
+
 class CompilationDistributer(Distributer, CmdLineOptions):
     class Category: pass
     class BailoutCategory(Category): pass
@@ -118,6 +130,9 @@ class CompilationDistributer(Distributer, CmdLineOptions):
     def create_context(self, command):
         return CompilationDistributer.Context(command, self)
 
+    def compiler_info(self, executable):
+        raise NotImplementedError("Compiler identification not implemented.")
+
     def __init__(self, preprocess_option, obj_name_option, compile_no_link_option):
         self.__preprocess = preprocess_option
         self.__object_name_option = obj_name_option
@@ -164,6 +179,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 source_type = os.path.splitext(source)[1],
                 input = LazyPreprocess(preprocess_call + [source]),
                 output = output or os.path.splitext(source)[0] + '.obj',
+                compiler_info = self.compiler_info(ctx.executable()),
                 distributer = self) for source in sources]
 
     def execute_remotely(self, ctx):
@@ -174,6 +190,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         for compile_task in ctx.tasks:
             first = None
             accepted = False
+            rejections = 0
             while not accepted:
                 host = ctx.get_host()
                 if not first:
@@ -184,9 +201,9 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 conn = Client(address=host)
                 conn.send(compile_task)
                 try:
-                    accepted = conn.recv()
+                    accepted, has_compiler = conn.recv()
                     if not accepted:
-                        print("Task rejected by '{}', trying next one".format(host))
+                        rejections += 1
                         conn.close()
                     else:
                         break
@@ -194,6 +211,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                     pass
             print("Task sent to '{}:{}' via manager {}.".format(host[0], host[1], ctx.manager_id()))
             compile_task.accepted(conn)
+            print("Task completed after {} rejections.".format(rejections))
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

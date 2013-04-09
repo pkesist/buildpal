@@ -6,6 +6,7 @@ import subprocess
 import os
 import re
 import sys
+import winreg
 
 def find_on_path(executable):
     def test_exe(location):
@@ -128,7 +129,22 @@ class MSVCDistributer(CompilationDistributer):
         info = cls.compiler_versions.get(compiler_id)
         if not info:
             return None
-        script = r'c:\Program Files (x86)\Microsoft Visual Studio {}.0\VC\vcvarsall.bat'.format(info[0])
+
+        location = None
+        for location in ['', 'Wow6432Node\\']:
+            key = "SOFTWARE\\{}Microsoft\\VisualStudio\\{}.0\\Setup\\VC".format(location, info[0])
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
+                    location = winreg.QueryValueEx(reg_key, "ProductDir")[0]
+                    break
+            except:
+                pass
+        if not location:
+            return None
+
+        script = os.path.join(location, 'vcvarsall.bat')
+        if not os.path.exists(script):
+            return None
         to_add = get_env_diff(script, [info[1]])
         def run_compiler(command, to_add):
             env = dict(os.environ)

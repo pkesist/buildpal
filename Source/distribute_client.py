@@ -84,7 +84,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             try:
                 class TmpManager(BaseManager):
                     pass
-                TmpManager.register('get_host')
+                TmpManager.register('get_node')
                 self.__manager = TmpManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
                 self.__manager.connect()
             except:
@@ -94,8 +94,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         def manager_id(self):
             return self.__manager_id
 
-        def get_host(self):
-            return self.__manager.get_host()._getvalue()
+        def get_node(self):
+            return self.__manager.get_node()._getvalue()
 
         def executable(self): return self.__executable
 
@@ -192,16 +192,16 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             accepted = False
             rejections = 0
             while not accepted:
-                host = ctx.get_host()
+                node = ctx.get_node()
                 if not first:
-                    first = host
-                elif host == first:
+                    first = node
+                elif node == first:
                     # If everyone rejected task.
                     sleep(1)
                 try:
-                    conn = Client(address=host)
+                    conn = Client(address=node)
                 except:
-                    print("Connection to '{}:{}' failed. Moving on.".format(host[0], host[1]))
+                    print("Connection to '{}:{}' failed. Moving on.".format(node[0], node[1]))
                     continue
                 conn.send(compile_task)
                 try:
@@ -213,7 +213,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                         break
                 except IOError:
                     pass
-            print("Task sent to '{}:{}' via manager {}.".format(host[0], host[1], ctx.manager_id()))
+            print("Task sent to '{}:{}' via manager {}.".format(node[0], node[1], ctx.manager_id()))
             if not compile_task.send_receive(conn):
                 raise RuntimeError("Sending/receiving compile data failed.")
             if rejections:

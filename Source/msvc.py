@@ -145,8 +145,8 @@ class MSVCDistributer(CompilationDistributer):
         (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
         (b'16.00.40219.01', b'80x86') : (10, 'x86'  ), # msvc10
         (b'16.00.40219.01', b'x64'  ) : (10, 'amd64'), # msvc10 x64
-        (b'17.00.50727.01', b'x86'  ) : (11, 'x86'  ), # msvc11
-        (b'17.00.50727.01', b'x64'  ) : (11, 'amd64'), # msvc11 x64
+        (b'17.00.50727.1' , b'x86'  ) : (11, 'x86'  ), # msvc11
+        (b'17.00.50727.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
     }
 
     # If we run into these just run the damn thing locally

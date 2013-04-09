@@ -46,16 +46,10 @@ Usage:
 
 
     manager_section = 'Manager'
-    if not manager_section in config:
-        raise "ERROR: No '{}' section in '{}'.".format(manager_section, iniFile)
-        
-    section = config[manager_section]
-    id = 'id'
-    if not id in section:
-        raise "ERROR: Missing '{}' in '{}' section.".format(id, manager_section)
-    manager_id = section[id]
-
     nodes_section = 'Build Nodes'
+        
+    id = config.get(manager_section, 'id')
+
     if not nodes_section in config:
         raise "ERROR: No '{}' section in '{}'.".format(nodes_section, iniFile)
 
@@ -73,15 +67,17 @@ Usage:
             nodes.append((value[:index], int(value[index+1:])))
         else:
             done = True
+    if not nodes:
+        raise RuntimeErrors("No build nodes configured.")
    
     DistributeManager._set_nodes(nodes)
-    print("Spawning a manager with id '{}'".format(manager_id))
+    print("Spawning a manager with id '{}'".format(id))
     print("================")
     print("Build nodes:")
     print("================")
     for node in nodes:
         print('{}:{}'.format(node[0], node[1]))
     print("================")
-    manager = DistributeManager(r"\\.\pipe\{}".format(manager_id), b"")
+    manager = DistributeManager(r"\\.\pipe\{}".format(id), b"")
     server = manager.get_server()
     server.serve_forever()

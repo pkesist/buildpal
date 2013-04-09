@@ -2,27 +2,70 @@ from multiprocessing.connection import Listener
 from multiprocessing import Pool
 from multiprocessing.reduction import reduce_connection
 import configparser
+import psutil
 import traceback
 import sys
 import os
 
-address = ('', 6070)
-
-def work(conn):
+def work(server, conn):
     try:
         conn = conn[0](*conn[1])
         task = conn.recv()
-        task.process(conn)
+        task.process(server, conn)
     except:
         print("Failed to execute client task.")
         traceback.print_exc()
 
-def print_tasks():
-    global tasks
-    sys.stdout.write("Running {} tasks.{}".format(len(tasks), '\r'))
+class ServerRunner:
+    def __init__(self, port, processes, cpu_usage_hwm=None):
+        print("Starting server on port {} with {} worker processes.".format(
+            port, processes))
+        if cpu_usage_hwm:
+            print("CPU usage hwm is {}%.".format(cpu_usage_hwm))
+        self.__pool = Pool(processes = processes)
+        self.__listener = Listener(('', port), 'AF_INET')
 
-default_script = 'distribute_server.ini'
+        self.__tasks = []
+        self.__compiler = ServerCompiler(cpu_usage_hwm)
+
+    def print_tasks(self):
+        sys.stdout.write("Running {} tasks.\r".format(len(self.__tasks)))
+
+    def run(self):
+        while True:
+            conn = self.__listener.accept()
+            self.__tasks.append(self.__pool.apply_async(func=work, args=(self.__compiler, reduce_connection(conn),)))
+            self.__tasks = list(filter(lambda task : not task.ready(), self.__tasks))
+            self.print_tasks()
+
+
+class ServerCompiler:
+    def __init__(self, cpu_usage_hwm=None):
+        self.__hwm = cpu_usage_hwm
+        self.__compiler_setup = {}
+
+    def accept(self):
+        if not self.__hwm:
+            return True
+        return psutil.cpu_percent() < self.__hwm
+
+    def setup_compiler(self, compiler_info):
+        setup = self.__compiler_setup.get(compiler_info)
+        if setup:
+            return setup
+
+        if compiler_info.toolset() == 'msvc':
+            import msvc
+            setup = msvc.MSVCDistributer.setup_compiler(compiler_info)
+            if setup:
+                self.__compiler_setup[compiler_info]=setup
+            return setup
+        else:
+            raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
+
     
+default_script = 'distribute_server.ini'
+
 if __name__ == "__main__":
     if len(sys.argv) == 2:
         iniFile = os.path.join(os.getcwd(), sys.argv[1])
@@ -44,29 +87,13 @@ Usage:
             "'{}'.".format(iniFile))
 
     server_section = 'Server'
-    if not server_section in config:
-        raise Exception("ERROR: No '{}' section in '{}'.".format(server_section, iniFile))
-
-    section = config[server_section]
-    port = 'port'
-    if not port in section:
-        raise Exception("ERROR: Missing '{}' in '{}' section.".format(id, server_section))
-    server_port = int(section[port])
+    port = config.getint(server_section, 'port')
+    processes = config.getint(server_section, 'processes')
+    if config.has_option(server_section, 'cpu_usage_hwm'):
+        cpu_usage_hwm = config.getint(server_section, 'cpu_usage_hwm')
+        if cpu_usage_hwm < 0 or cpu_usage_hwm > 100:
+            raise RuntimeError("cpu_usage_hwm should be in range 0-100.")
+    else:
+        cpu_usage_hwm = None
     
-    processes = 'processes'
-    if not processes in section:
-        raise Exception("ERROR: Missing '{}' in '{}' section.".format(id, server_section))
-    processes = int(section[processes])
-
-    print("Starting server on port {} with {} worker processes.".format(server_port, processes))
-    pool = Pool(processes=processes)
-    listener = Listener(('', server_port), 'AF_INET')
-    global tasks
-    tasks = []
-    while True:
-        print_tasks()
-        conn = listener.accept()
-        tasks.append(pool.apply_async(func=work, args=(reduce_connection(conn),)))
-        tasks = list(filter(lambda task : not task.ready(), tasks))
-
-        
+    ServerRunner(port, processes, cpu_usage_hwm).run()

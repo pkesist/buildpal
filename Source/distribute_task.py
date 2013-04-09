@@ -3,7 +3,6 @@ import subprocess
 import sys
 import tempfile
 import zlib
-import psutil
 
 class Task:
     pass
@@ -18,12 +17,6 @@ class CompileTask(Task):
         self.__output = output
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
-
-    def accept(self):
-        # Accept task if we have at least 50% of one processor.
-        usage = psutil.cpu_percent(percpu=True)
-        count = len(usage)
-        return count * 100 - sum(usage) >= 50
 
     def call(self):
         return self.__call
@@ -70,16 +63,9 @@ class CompileTask(Task):
             return True
         return False
 
-    def setup_compiler(self):
-        if self.__compiler_info.toolset() == 'msvc':
-            import msvc
-            return msvc.MSVCDistributer.setup_compiler(self.__compiler_info)
-        else:
-            raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
-
-    def process(self, conn):
-        accept = self.accept()
-        compiler = self.setup_compiler()
+    def process(self, server, conn):
+        accept = server.accept()
+        compiler = server.setup_compiler(self.__compiler_info)
         conn.send((accept, compiler is not None))
         if not accept or compiler is None:
             return

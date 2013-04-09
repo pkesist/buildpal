@@ -25,13 +25,10 @@ class CompileTask(Task):
         return self.__type
 
     def send_receive(self, conn):
-        input = self.__input()
-        if callable(input):
-            input = input()
-        total = 0
-        compr = 0
-        compressor = zlib.compressobj(1)
-        with open(input, 'rb') as file:
+        with self.__input as file:
+            total = 0
+            compr = 0
+            compressor = zlib.compressobj(1)
             data = file.read(10 * 1024)
             total += len(data)
             while data:
@@ -43,10 +40,6 @@ class CompileTask(Task):
             compressed = compressor.flush(zlib.Z_FINISH)
             compr += len(compressed)
             conn.send((False, compressed))
-        try:
-            os.remove(self.__input)
-        except:
-            pass
 
         retcode, stdout, stderr = conn.recv()
         sys.stdout.write(stdout.decode())

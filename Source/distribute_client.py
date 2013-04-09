@@ -39,11 +39,21 @@ class LazyPreprocess:
     def __init__(self, preprocess_call):
         self.__preprocess_call = preprocess_call
 
-    def __call__(self, *args):
+    def __enter__(self):
         file, filename = mkstemp(text=True)
         subprocess.check_call(self.__preprocess_call, stdout=file)
         os.close(file)
-        return filename
+        self.__filename = filename
+        self.__file = open(self.__filename, 'rb')
+        return self.__file
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.__file.close()
+        try:
+            os.remove(self.__filename)
+        except:
+            pass
+
 
 class CompilerInfo:
     def __init__(self, toolset, executable, size, id):

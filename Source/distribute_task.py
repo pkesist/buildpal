@@ -1,8 +1,9 @@
 import os
 import subprocess
 import sys
-import tempfile
 import zlib
+
+from utils import TempFile
 
 class Task:
     pass
@@ -65,36 +66,32 @@ class CompileTask(Task):
 
         def receive_file():
             more = True
-            fileDesc, filename = tempfile.mkstemp(suffix="{}".format(self.__source_type))
+            tempfile = TempFile()
             decompressor = zlib.decompressobj()
-            with os.fdopen(fileDesc, "wb") as file:
+            with tempfile.open('wb') as file:
                 while more:
                     more, data = conn.recv()
                     file.write(decompressor.decompress(data))
                 file.write(decompressor.flush())
-            return filename
+            return tempfile
 
-        def send_file(name):
-            with open(name, "rb") as file:
+        def send_file(fileobj):
+            with fileobj.open("rb") as file:
                 data = file.read(4096)
                 while data:
                     conn.send((True, data))
                     data = file.read(4096)
                 conn.send((False, data))
 
-        file = receive_file()
-        
         try:
-            fileDesc, objectFilename = tempfile.mkstemp(suffix=".obj")
-            os.close(fileDesc)
-            noLink = self.__compile_switch
-            output = self.__output_switch.format(objectFilename)
-            retcode, stdout, stderr = compiler(self.__call + [noLink, output, file])
-            conn.send((retcode, stdout, stderr,))
-            if retcode == 0:
-                os.remove(file)
-                send_file(objectFilename)
-                os.remove(objectFilename)
+            with receive_file() as preprocessed_file:
+                with TempFile(suffix='.obj') as object_file:
+                    noLink = self.__compile_switch
+                    output = self.__output_switch.format(object_file.filename())
+                    retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                    conn.send((retcode, stdout, stderr,))
+                    if retcode == 0:
+                        send_file(object_file)
         except:
             import traceback
             traceback.print_exc()

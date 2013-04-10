@@ -33,10 +33,10 @@ class ServerRunner:
 
     def run(self):
         while True:
+            self.print_tasks()
             conn = self.__listener.accept()
             self.__tasks.append(self.__pool.apply_async(func=work, args=(self.__compiler, reduce_connection(conn),)))
             self.__tasks = list(filter(lambda task : not task.ready(), self.__tasks))
-            self.print_tasks()
 
 
 class ServerCompiler:

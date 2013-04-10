@@ -88,17 +88,17 @@ class MSVCDistributer(CompilationDistributer):
             return None
 
         location = None
-        for location in ['', 'Wow6432Node\\']:
-            key = "SOFTWARE\\{}Microsoft\\VisualStudio\\{}.0\\Setup\\VC".format(location, info[0])
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
-                    location = winreg.QueryValueEx(reg_key, "ProductDir")[0]
-                    break
-            except:
-                pass
+        for element in ['', 'Wow6432Node\\']:
+            for type in ['VisualStudio', 'VCExpress']:
+                key = "SOFTWARE\\{}Microsoft\\{}\\{}.0\\Setup\\VC".format(element, type, info[0])
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
+                        location = winreg.QueryValueEx(reg_key, "ProductDir")[0]
+                        break
+                except:
+                    pass
         if not location:
             return None
-
         script = os.path.join(location, 'vcvarsall.bat')
         if not os.path.exists(script):
             return None

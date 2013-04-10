@@ -4,12 +4,21 @@ import sys
 import zlib
 
 from utils import TempFile
+from multiprocessing.connection import Client
 
 class Task:
-    pass
+    def __init__(self):
+        self.__completed = False
+
+    def completed(self):
+        return self.__completed
+
+    def complete(self):
+        self.__completed = True
 
 class CompileTask(Task):
     def __init__(self, call, source, source_type, input, output, compiler_info, distributer):
+        super(CompileTask, self).__init__()
         self.__compiler_info = compiler_info
         self.__call = call
         self.__source = source
@@ -25,8 +34,8 @@ class CompileTask(Task):
     def type(self):
         return self.__type
 
-    def send_receive(self, conn):
-        with self.__input as file:
+    def send_receive(self, conn, lock, endpoint):
+        with open(self.__input, "rb") as file:
             total = 0
             compr = 0
             compressor = zlib.compressobj(1)
@@ -42,20 +51,25 @@ class CompileTask(Task):
             compr += len(compressed)
             conn.send((False, compressed))
 
+        done = conn.recv()
+        with lock:
+            if done:
+                if self.completed():
+                    conn.send(False)
+                    return
+            self.complete()
+            conn.send(True)
+
+        client_conn = Client(r"\\.\pipe\{}".format(endpoint), b"")
         retcode, stdout, stderr = conn.recv()
-        sys.stdout.write(stdout.decode())
-        if stderr:
-            sys.stderr.write("---------------------------- STDERR ----------------------------\n")
-            sys.stderr.write(stderr.decode())
-            sys.stderr.write("----------------------------------------------------------------\n")
+        client_conn.send((retcode, stdout, stderr))
         if retcode == 0:
             more = True
             with open(self.__output, "wb") as file:
                 while more:
                     more, data = conn.recv()
                     file.write(data)
-            return True
-        return False
+            client_conn.send(True)
 
     def process(self, server, conn):
         accept = server.accept()
@@ -89,6 +103,10 @@ class CompileTask(Task):
                     noLink = self.__compile_switch
                     output = self.__output_switch.format(object_file.filename())
                     retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                    conn.send(True)
+                    needsResult = conn.recv()
+                    if not needsResult:
+                        return
                     conn.send((retcode, stdout, stderr,))
                     if retcode == 0:
                         send_file(object_file)

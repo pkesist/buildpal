@@ -1,14 +1,16 @@
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
+from distribute_manager import DistributeManager
 
 import os
 import random
 import subprocess
+import string
+import sys
 
 from tempfile import mkstemp
-from time import sleep
+from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
-from multiprocessing.connection import Client
 
 class Distributer:
     def create_context(self, command):
@@ -35,15 +37,24 @@ class Distributer:
         self.postprocess(ctx)
 
 
-class LazyPreprocess:
+class Preprocessor:
     def __init__(self, preprocess_call):
+        self.__preprocessed = False
         self.__preprocess_call = preprocess_call
+        file, self.__filename = mkstemp(text=True)
+        os.close(file)
+
+    def preprocess(self):
+        with open(self.__filename, 'wt') as file:
+            subprocess.check_call(self.__preprocess_call, stdout=file)
+        self.__preprocessed = True
+
+    def filename(self):
+        return self.__filename
 
     def __enter__(self):
-        file, filename = mkstemp(text=True)
-        subprocess.check_call(self.__preprocess_call, stdout=file)
-        os.close(file)
-        self.__filename = filename
+        if not self.__preprocessed:
+            self.preprocess()
         self.__file = open(self.__filename, 'rb')
         return self.__file
 
@@ -92,20 +103,14 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             self.__manager_id = command[0]
 
             try:
-                class TmpManager(BaseManager):
-                    pass
-                TmpManager.register('get_node')
-                self.__manager = TmpManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
+                self.__manager = DistributeManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
                 self.__manager.connect()
             except:
                 raise EnvironmentError("Failed to connect to build manager "
                     "'{}'.".format(manager_id))
 
-        def manager_id(self):
-            return self.__manager_id
-
-        def get_node(self):
-            return self.__manager.get_node()._getvalue()
+        def queue_task(self, task, endpoint):
+            self.__manager.queue_task(task, endpoint)
 
         def executable(self): return self.__executable
 
@@ -182,52 +187,35 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         compile_call.extend(option.make_str() for option in
             ctx.filter_options(CompilationDistributer.CompilationCategory))
 
+        def preprocess(source):
+            preprocessor = Preprocessor(preprocess_call + [source])
+            preprocessor.preprocess()
+            return preprocessor.filename()
+
         ctx.tasks = [
             CompileTask(
                 call = compile_call,
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                input = LazyPreprocess(preprocess_call + [source]),
-                output = output or os.path.splitext(source)[0] + '.obj',
+                input = preprocess(source),
+                output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = self.compiler_info(ctx.executable()),
                 distributer = self) for source in sources]
 
     def execute_remotely(self, ctx):
-        call = [ctx.executable()]
-        call.extend(option.make_str() for option in
-            ctx.filter_options(CompilationDistributer.CompilationCategory))
-
+        endpoint = "".join(random.choice(string.ascii_uppercase) for x in range(15))
+        listener = Listener(r'\\.\pipe\{}'.format(endpoint), b"")
         for compile_task in ctx.tasks:
-            first = None
-            accepted = False
-            rejections = 0
-            while not accepted:
-                node = ctx.get_node()
-                if not first:
-                    first = node
-                elif node == first:
-                    # If everyone rejected task.
-                    sleep(1)
-                try:
-                    conn = Client(address=node)
-                except:
-                    print("Connection to '{}:{}' failed. Moving on.".format(node[0], node[1]))
-                    continue
-                conn.send(compile_task)
-                try:
-                    accepted, has_compiler = conn.recv()
-                    if not accepted:
-                        rejections += 1
-                        conn.close()
-                    else:
-                        break
-                except IOError:
-                    pass
-            print("Task sent to '{}:{}' via manager {}.".format(node[0], node[1], ctx.manager_id()))
-            if not compile_task.send_receive(conn):
-                raise RuntimeError("Sending/receiving compile data failed.")
-            if rejections:
-                print("Task completed after {} rejections.".format(rejections))
+            ctx.queue_task(compile_task, endpoint)
+            conn = listener.accept()
+            retcode, stdout, stderr = conn.recv()
+            sys.stdout.write(stdout.decode())
+            if stderr:
+                sys.stderr.write("---------------------------- STDERR ----------------------------\n")
+                sys.stderr.write(stderr.decode())
+                sys.stderr.write("----------------------------------------------------------------\n")
+            if retcode == 0:
+                done = conn.recv()
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

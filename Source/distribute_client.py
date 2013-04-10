@@ -203,7 +203,9 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 distributer = self) for source in sources]
 
     def execute_remotely(self, ctx):
-        endpoint = "".join(random.choice(string.ascii_uppercase) for x in range(15))
+        rnd = random.Random()
+        rnd.seed()
+        endpoint = "".join(rnd.choice(string.ascii_uppercase) for x in range(15))
         listener = Listener(r'\\.\pipe\{}'.format(endpoint), b"")
         for compile_task in ctx.tasks:
             ctx.queue_task(compile_task, endpoint)

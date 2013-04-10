@@ -107,7 +107,7 @@ class CompileTask(Task):
                     needsResult = conn.recv()
                     if not needsResult:
                         return
-                    conn.send((retcode, stdout, stderr,))
+                    conn.send((retcode, stdout, stderr))
                     if retcode == 0:
                         send_file(object_file)
         except:

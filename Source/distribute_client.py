@@ -7,6 +7,7 @@ import random
 import subprocess
 import string
 import sys
+import zlib
 
 from tempfile import mkstemp
 from multiprocessing.connection import Listener
@@ -45,8 +46,14 @@ class Preprocessor:
         os.close(file)
 
     def preprocess(self):
-        with open(self.__filename, 'wt') as file:
-            subprocess.check_call(self.__preprocess_call, stdout=file)
+        p = subprocess.Popen(self.__preprocess_call, stdout=subprocess.PIPE)
+        with open(self.__filename, 'wb') as file:
+            compressor = zlib.compressobj(1)
+            for data in iter(lambda : p.stdout.read(10 * 1024), b''):
+                compressed = compressor.compress(data)
+                file.write(compressed)
+            compressed = compressor.flush(zlib.Z_FINISH)
+            file.write(compressed)
         self.__preprocessed = True
 
     def filename(self):
@@ -138,7 +145,8 @@ class CompilationDistributer(Distributer, CmdLineOptions):
             return False
 
         print("Command does not require distributed compilation. Running locally.")
-        call = [ctx.executable()].extend(option.make_str() for option in ctx.options())
+        call = [ctx.executable()]
+        call.extend(option.make_str() for option in ctx.options())
         subprocess.check_call(call)
         return True
 
@@ -187,29 +195,32 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         compile_call.extend(option.make_str() for option in
             ctx.filter_options(CompilationDistributer.CompilationCategory))
 
-        def preprocess(source):
+        def make_task(source):
             preprocessor = Preprocessor(preprocess_call + [source])
-            preprocessor.preprocess()
-            return preprocessor.filename()
-
-        ctx.tasks = [
-            CompileTask(
+            task = CompileTask(
                 call = compile_call,
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                input = preprocess(source),
+                input = preprocessor.filename(),
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = self.compiler_info(ctx.executable()),
-                distributer = self) for source in sources]
+                distributer = self)
+            return preprocessor, task
+
+        ctx.tasks = [make_task(source) for source in sources]
 
     def execute_remotely(self, ctx):
         rnd = random.Random()
         rnd.seed()
         endpoint = "".join(rnd.choice(string.ascii_uppercase) for x in range(15))
         listener = Listener(r'\\.\pipe\{}'.format(endpoint), b"")
-        for compile_task in ctx.tasks:
+        for preprocessor, compile_task in ctx.tasks:
             ctx.queue_task(compile_task, endpoint)
             conn = listener.accept()
+            # Wait for preprocess signal.
+            preprocess = conn.recv()
+            preprocessor.preprocess()
+            conn.send(True)
             retcode, stdout, stderr = conn.recv()
             sys.stdout.write(stdout.decode())
             if stderr:

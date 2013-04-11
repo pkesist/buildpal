@@ -7,14 +7,7 @@ from utils import TempFile
 from multiprocessing.connection import Client
 
 class Task:
-    def __init__(self):
-        self.__completed = False
-
-    def completed(self):
-        return self.__completed
-
-    def complete(self):
-        self.__completed = True
+    pass
 
 class CompileTask(Task):
     def __init__(self, call, source, source_type, input, output, compiler_info, distributer):
@@ -34,40 +27,42 @@ class CompileTask(Task):
     def type(self):
         return self.__type
 
-    def send_receive(self, conn, lock, endpoint):
+    def send(self, server_conn, client_conn, wrapped_task, index):
+        with wrapped_task.lock():
+            if wrapped_task.is_completed():
+                return
+            if not wrapped_task.is_preprocessed():
+                print("Preprocessing")
+                client_conn.send(True)
+                client_conn.recv()
+                wrapped_task.mark_preprocessed()
+
         with open(self.__input, "rb") as file:
-            total = 0
-            compr = 0
-            compressor = zlib.compressobj(1)
-            data = file.read(10 * 1024)
-            total += len(data)
-            while data:
-                compressed = compressor.compress(data)
-                compr += len(compressed)
-                conn.send((True, compressed))
-                data = file.read(10 * 1024)
-                total += len(data)
-            compressed = compressor.flush(zlib.Z_FINISH)
-            compr += len(compressed)
-            conn.send((False, compressed))
+            for data in iter(lambda : file.read(10 * 1024), b''):
+                server_conn.send((True, data))
+            server_conn.send((False, b''))
 
-        done = conn.recv()
-        with lock:
-            if done:
-                if self.completed():
-                    conn.send(False)
-                    return
-            self.complete()
-            conn.send(True)
+    def receive(self, server_conn, client_conn, wrapped_task, index):
+        # Just block
+        server_conn.recv()
 
-        client_conn = Client(r"\\.\pipe\{}".format(endpoint), b"")
-        retcode, stdout, stderr = conn.recv()
+        with wrapped_task.lock():
+            if wrapped_task.is_completed():
+                server_conn.send(False)
+                return
+            wrapped_task.mark_completed(index)
+            server_conn.send(True)
+        try:
+            os.remove(self.__input)
+        except:
+            pass
+        retcode, stdout, stderr = server_conn.recv()
         client_conn.send((retcode, stdout, stderr))
         if retcode == 0:
             more = True
             with open(self.__output, "wb") as file:
                 while more:
-                    more, data = conn.recv()
+                    more, data = server_conn.recv()
                     file.write(data)
             client_conn.send(True)
 

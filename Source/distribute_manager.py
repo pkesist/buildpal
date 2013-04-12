@@ -19,13 +19,13 @@ class Worker(Process):
         super(Worker, self).__init__()
 
     def run(self):
-        self.__wrapped_task.task().send(
+        self.__wrapped_task.task().manager_send(
             self.__server_conn,
             self.__client_conn,
             self.__wrapped_task,
             self.__index)
 
-        self.__wrapped_task.task().receive(
+        self.__wrapped_task.task().manager_receive(
             self.__server_conn,
             self.__client_conn,
             self.__wrapped_task,
@@ -77,7 +77,8 @@ class TaskProcessor(Process):
         self.__queue = queue
         self.__nodes = nodes
         self.__tasks_completed = {}
-        self.__tasks_sent = {}
+        self.__new_tasks_sent = {}
+        self.__old_tasks_sent = {}
 
         self.__tasks = {}
         self.__task_map = {}
@@ -98,27 +99,33 @@ class TaskProcessor(Process):
             client_conn = Client(r"\\.\pipe\{}".format(endpoint), b"")
             self.__tasks[endpoint] = WrapTask(task, endpoint), client_conn
             self.__task_map[endpoint] = set()
-            self.run_task(endpoint)
+            self.run_task(endpoint, True)
         except Empty:
             pass
         finally:
             self.process_pq()
 
+    def new_tasks_sent(self, index):
+        return self.__new_tasks_sent.get(index, 0)
+
+    def old_tasks_sent(self, index):
+        return self.__old_tasks_sent.get(index, 0)
+
     def tasks_sent(self, index):
-        return self.__tasks_sent.get(index, 0)
+        return self.new_tasks_sent(index) + self.old_tasks_sent(index)
 
     def tasks_completed(self, index):
         return self.__tasks_completed.get(index, 0)
 
     def completion_ratio(self, index):
         if not self.tasks_sent(index):
-            return 1
-        return self.tasks_completed(index)/self.tasks_sent(index)
+            return 1.0
+        return self.tasks_completed(index) / self.tasks_sent(index)
 
     def process_pq(self):
         found_task = False
         while self.__priority_queue:
-            ignored_time, endpoint = heapq.heappop(self.__priority_queue)
+            stored_time, endpoint = heapq.heappop(self.__priority_queue)
             wrapped_task, client_conn = self.__tasks[endpoint]
             with wrapped_task.lock():
                 if wrapped_task.is_completed():
@@ -127,16 +134,19 @@ class TaskProcessor(Process):
                     self.__tasks_completed[wrapped_task.completer()] = \
                         self.tasks_completed(wrapped_task.completer()) + 1
                     self.print_stats()
-                    return
+                    continue
                 else:
+                    if time() - stored_time < 3:
+                        heapq.heappush(self.__priority_queue, (stored_time, endpoint))
+                        return
                     found_task = True
                     break
         if not found_task:
             return
-        self.run_task(endpoint)
+        self.run_task(endpoint, False)
 
 
-    def run_task(self, endpoint):
+    def run_task(self, endpoint, original):
         heapq.heappush(self.__priority_queue, (time(), endpoint))
         find_node_result = self.find_available_node(endpoint)
         if find_node_result is None:
@@ -146,7 +156,10 @@ class TaskProcessor(Process):
         self.__task_map[endpoint].add(node_index)
 
         # Create and run worker.
-        self.__tasks_sent[node_index] = self.tasks_sent(node_index) + 1
+        if original:
+            self.__new_tasks_sent[node_index] = self.new_tasks_sent(node_index) + 1
+        else:
+            self.__old_tasks_sent[node_index] = self.old_tasks_sent(node_index) + 1
         task, client_conn = self.__tasks[endpoint]
         worker = Worker(task, server_conn, client_conn, node_index)
         self.__processes.append(worker)
@@ -165,7 +178,10 @@ class TaskProcessor(Process):
         sys.stdout.write("================\n")
         for index in range(len(self.__nodes)):
             node = self.__nodes[index]
-            sys.stdout.write('{:15}:{:5} - Sent {:<3}  Completed {:<3} Ratio {:<3}\n'.format(node[0], node[1], self.tasks_sent(index), self.tasks_completed(index), self.completion_ratio(index)))
+            sys.stdout.write('{:15}:{:5} - New sent {:<3} Old sent {:<3} '
+                'Completed {:<3} Ratio {:<3}\n'.format(node[0], node[1],
+                self.new_tasks_sent(index), self.old_tasks_sent(index),
+                self.tasks_completed(index), self.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
 
@@ -197,13 +213,9 @@ class TaskProcessor(Process):
                     return
 
                 if nodes_processing_task:
-                    print("Nodes currently processing {}".format(nodes_processing_task))
-                    current_best = max([0] + [self.completion_ratio(node_index) for node in nodes_processing_task])
-                    print("Best node ratio is {}".format(current_best))
-                    print("Our ratio is {}.".format(self.completion_ratio(node_index)))
-                    if self.completion_ratio(node_index) < current_best:
+                    current_best = max([self.completion_ratio(node_index) for node_index in nodes_processing_task])
+                    if self.completion_ratio(node_index) <= current_best:
                         # We already have a better node working
-                        print("Decided not to send to '{}'.".format(self.__nodes[node_index]))
                         return
 
                 try:

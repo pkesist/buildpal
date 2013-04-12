@@ -229,6 +229,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 sys.stderr.write("----------------------------------------------------------------\n")
             if retcode == 0:
                 done = conn.recv()
+        listener.close()
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

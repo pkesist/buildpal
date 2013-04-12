@@ -11,7 +11,7 @@ def work(server, conn):
     try:
         conn = conn[0](*conn[1])
         task = conn.recv()
-        task.process(server, conn)
+        task.server_process(server, conn)
     except:
         print("Failed to execute client task.")
         traceback.print_exc()
@@ -33,10 +33,12 @@ class ServerRunner:
 
     def run(self):
         while True:
+            self.__tasks = list(filter(lambda task : not task.ready(),
+                self.__tasks))
             self.print_tasks()
             conn = self.__listener.accept()
-            self.__tasks.append(self.__pool.apply_async(func=work, args=(self.__compiler, reduce_connection(conn),)))
-            self.__tasks = list(filter(lambda task : not task.ready(), self.__tasks))
+            self.__tasks.append(self.__pool.apply_async(func=work, args=(
+                self.__compiler, reduce_connection(conn),)))
 
 
 class ServerCompiler:

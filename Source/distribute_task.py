@@ -27,12 +27,11 @@ class CompileTask(Task):
     def type(self):
         return self.__type
 
-    def send(self, server_conn, client_conn, wrapped_task, index):
+    def manager_send(self, server_conn, client_conn, wrapped_task, index):
         with wrapped_task.lock():
             if wrapped_task.is_completed():
                 return
             if not wrapped_task.is_preprocessed():
-                print("Preprocessing")
                 client_conn.send(True)
                 client_conn.recv()
                 wrapped_task.mark_preprocessed()
@@ -42,7 +41,7 @@ class CompileTask(Task):
                 server_conn.send((True, data))
             server_conn.send((False, b''))
 
-    def receive(self, server_conn, client_conn, wrapped_task, index):
+    def manager_receive(self, server_conn, client_conn, wrapped_task, index):
         # Just block
         server_conn.recv()
 
@@ -66,7 +65,7 @@ class CompileTask(Task):
                     file.write(data)
             client_conn.send(True)
 
-    def process(self, server, conn):
+    def server_process(self, server, conn):
         accept = server.accept()
         compiler = server.setup_compiler(self.__compiler_info)
         conn.send((accept, compiler is not None))

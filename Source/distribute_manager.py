@@ -1,5 +1,5 @@
 from queue import PriorityQueue, Empty
-from multiprocessing import Lock, Process, Queue, Value
+from multiprocessing import Lock, Process, Queue, Value, RawValue
 from multiprocessing.connection import Client
 from multiprocessing.managers import BaseManager
 from time import sleep, time
@@ -11,25 +11,77 @@ import os
 import configparser
 
 class Worker(Process):
-    def __init__(self, wrapped_task, server_conn, client_conn, index):
+    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original):
         self.__wrapped_task = wrapped_task
         self.__server_conn = server_conn
         self.__client_conn = client_conn
-        self.__index = index
+        self.__node_info = node_info
+        self.__original = original
         super(Worker, self).__init__()
 
-    def run(self):
-        self.__wrapped_task.task().manager_send(
-            self.__server_conn,
-            self.__client_conn,
-            self.__wrapped_task,
-            self.__index)
+    def wrapped_task(self): return self.__wrapped_task
+    def server_conn(self): return self.__server_conn
+    def client_conn(self): return self.__client_conn
 
-        self.__wrapped_task.task().manager_receive(
-            self.__server_conn,
-            self.__client_conn,
-            self.__wrapped_task,
-            self.__index)
+    def process_task(self):
+        with self.wrapped_task().lock():
+            if self.wrapped_task().is_completed():
+                return
+            if not self.wrapped_task().is_preprocessed():
+                self.client_conn().send(True)
+                self.client_conn().recv()
+                self.wrapped_task().mark_preprocessed()
+
+        self.wrapped_task().task().manager_send(
+            self.server_conn(),
+            self.client_conn(),
+            self.wrapped_task())
+
+        if self.__original:
+            self.__node_info.tasks_sent_new += 1
+        else:
+            self.__node_info.tasks_sent_old += 1
+
+        # Just block
+        self.server_conn().recv()
+
+        with self.wrapped_task().lock():
+            if self.wrapped_task().is_completed():
+                self.server_conn().send(False)
+                return False
+            self.wrapped_task().mark_completed()
+            self.server_conn().send(True)
+        try:
+            os.remove(self.__input)
+        except:
+            pass
+
+        return self.wrapped_task().task().manager_receive(
+            self.server_conn(),
+            self.client_conn(),
+            self.wrapped_task())
+
+
+    def run(self):
+        result = self.process_task()
+        # Did not process it after all.
+        if result is None:
+            return
+
+        if result:
+            self.__node_info.tasks_completed += 1
+        else:
+            self.__node_info.tasks_failed += 1
+
+
+class NodeInfo(ctypes.Structure):
+    _fields_ = [
+        ('index'          , ctypes.c_uint),
+        ('tasks_completed', ctypes.c_uint), 
+        ('tasks_failed'   , ctypes.c_uint), 
+        ('tasks_sent_new' , ctypes.c_uint),
+        ('tasks_sent_old' , ctypes.c_uint)]
+
 
 class WrapTask:
     def __init__(self, task, endpoint):
@@ -38,12 +90,10 @@ class WrapTask:
         self.__lock = Lock()
         self.__preprocessed = Value(ctypes.c_bool, False, lock=False)
         self.__completed = Value(ctypes.c_bool, False, lock=False)
-        self.__completer = Value(ctypes.c_byte, 0, lock=False)
         self.__nodes_processing = []
 
-    def mark_completed(self, node_index):
+    def mark_completed(self):
         self.__completed.value = True
-        self.__completer.value = node_index
 
     def mark_preprocessed(self):
         self.__preprocessed.value = True
@@ -53,9 +103,6 @@ class WrapTask:
 
     def is_preprocessed(self):
         return self.__preprocessed.value
-
-    def completer(self):
-        return self.__completer.value
 
     def task(self):
         return self.__task
@@ -76,9 +123,7 @@ class TaskProcessor(Process):
     def __init__(self, nodes, queue):
         self.__queue = queue
         self.__nodes = nodes
-        self.__tasks_completed = {}
-        self.__new_tasks_sent = {}
-        self.__old_tasks_sent = {}
+        self.__node_info = [Value(NodeInfo, index, 0, 0, 0, 0) for index in range(len(nodes))]
 
         self.__tasks = {}
         self.__task_map = {}
@@ -90,7 +135,8 @@ class TaskProcessor(Process):
     def run(self):
         self.print_stats()
         while True:
-            self.join_dead_processes()
+            if self.join_dead_processes():
+                self.print_stats()
             self.run_one()
 
     def run_one(self):
@@ -106,16 +152,22 @@ class TaskProcessor(Process):
             self.process_pq()
 
     def new_tasks_sent(self, index):
-        return self.__new_tasks_sent.get(index, 0)
+        return self.__node_info[index].tasks_sent_new
 
     def old_tasks_sent(self, index):
-        return self.__old_tasks_sent.get(index, 0)
+        return self.__node_info[index].tasks_sent_old
 
     def tasks_sent(self, index):
         return self.new_tasks_sent(index) + self.old_tasks_sent(index)
 
     def tasks_completed(self, index):
-        return self.__tasks_completed.get(index, 0)
+        return self.__node_info[index].tasks_completed
+
+    def tasks_failed(self, index):
+        return self.__node_info[index].tasks_failed
+
+    def tasks_processing(self, index):
+        return self.tasks_sent(index) - self.tasks_completed(index) - self.tasks_failed(index)
 
     def completion_ratio(self, index):
         if not self.tasks_sent(index):
@@ -131,12 +183,9 @@ class TaskProcessor(Process):
                 if wrapped_task.is_completed():
                     del self.__task_map[endpoint]
                     del self.__tasks[endpoint]
-                    self.__tasks_completed[wrapped_task.completer()] = \
-                        self.tasks_completed(wrapped_task.completer()) + 1
-                    self.print_stats()
                     continue
                 else:
-                    if time() - stored_time < 3:
+                    if time() - stored_time < 5:
                         heapq.heappush(self.__priority_queue, (stored_time, endpoint))
                         return
                     found_task = True
@@ -156,21 +205,19 @@ class TaskProcessor(Process):
         self.__task_map[endpoint].add(node_index)
 
         # Create and run worker.
-        if original:
-            self.__new_tasks_sent[node_index] = self.new_tasks_sent(node_index) + 1
-        else:
-            self.__old_tasks_sent[node_index] = self.old_tasks_sent(node_index) + 1
         task, client_conn = self.__tasks[endpoint]
-        worker = Worker(task, server_conn, client_conn, node_index)
+        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original)
         self.__processes.append(worker)
         worker.start()
 
 
     def join_dead_processes(self):
-        dead=filter(lambda p : not p.is_alive(), self.__processes)
+        dead=list(filter(lambda p : not p.is_alive(), self.__processes))
         self.__processes=[p for p in self.__processes if p not in dead]
-        for d in dead:
-            d.join()
+        for p in self.__processes:
+            p.join(0)
+        print("P {} D {}".format(len(self.__processes), len(dead)))
+        return bool(dead)
 
     def print_stats(self):
         sys.stdout.write("================\n")
@@ -179,9 +226,10 @@ class TaskProcessor(Process):
         for index in range(len(self.__nodes)):
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - New sent {:<3} Old sent {:<3} '
-                'Completed {:<3} Ratio {:<3}\n'.format(node[0], node[1],
-                self.new_tasks_sent(index), self.old_tasks_sent(index),
-                self.tasks_completed(index), self.completion_ratio(index)))
+                'Completed {:<3} Failed {:<3} Running {:<3} Ratio {:<3}\n'.format(node[0],
+                node[1], self.new_tasks_sent(index), self.old_tasks_sent(index),
+                self.tasks_completed(index), self.tasks_failed(index),
+                self.tasks_processing(index), self.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
 
@@ -192,9 +240,15 @@ class TaskProcessor(Process):
         first = None
         accepted = False
         rejections = 0
-        best_nodes = [(self.completion_ratio(index), -self.tasks_completed(index), -self.tasks_sent(index),
-            self.__nodes[index], index) for index in range(len(self.__nodes))
-            if not index in nodes_processing_task]
+        # Crucial part of the algorithm - ordering of nodes by quality.
+        best_nodes = [(
+             self.tasks_failed(index),
+             self.tasks_processing(index),
+             self.completion_ratio(index),
+             self.__nodes[index], index)
+             for index in range(len(self.__nodes))
+             if not index in nodes_processing_task]
+
         if not best_nodes:
             return
         best_nodes.sort(reverse=True)
@@ -209,6 +263,7 @@ class TaskProcessor(Process):
                         return
                     else:
                         sleep(1)
+                # A 'better' node is already working on this task.
                 if node_index in nodes_processing_task:
                     return
 

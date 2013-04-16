@@ -25,24 +25,36 @@ def find_on_path(executable):
             return location
 
 class MSVCDistributer(CompilationDistributer):
+    esc = ['/', '-']
+
+    def preprocess_option(self): return self.__preprocess_option
+    def object_name_option(self): return self.__object_name_option
+    def compile_no_link_option(self): return self.__compile_no_link_option
+    def include_file_option(self): return self.__include_file_option
+    def define_option(self): return self.__define_option
+
     def __init__(self):
-        super().__init__(preprocess_option=MSVCDistributer.CompilerOption('E', self.esc, None, False),
-            obj_name_option=MSVCDistributer.CompilerOption('Fo', self.esc, None, True, False, False),
-            compile_no_link_option=MSVCDistributer.CompilerOption('c', self.esc, None, False))
+        self.__preprocess_option = CompilationDistributer.CompilerOption('E', self.esc, None, False)
+        self.__object_name_option = CompilationDistributer.CompilerOption('Fo', self.esc, None, True, False, False)
+        self.__compile_no_link_option = CompilationDistributer.CompilerOption('c', self.esc, None, False)
+        self.__include_file_option = CompilationDistributer.CompilerOption('I' , self.esc, None, True , False, False)
+        self.__define_option = CompilationDistributer.CompilerOption('D' , self.esc, None, True , False, False)
+        super(MSVCDistributer, self).__init__()
+
         # Bailout
         for option_desc in self.bailout_options:
             option=MSVCDistributer.CompilerOption(*option_desc)
-            option.add_category(CompilationDistributer.BailoutCategory)
+            option.add_category(MSVCDistributer.BailoutCategory)
             self.add_option(option)
         # Preprocessing
         for option_desc in self.preprocessing_options:
             option=MSVCDistributer.CompilerOption(*option_desc)
-            option.add_category(CompilationDistributer.PreprocessingCategory)
+            option.add_category(MSVCDistributer.PreprocessingCategory)
             self.add_option(option)
         # Compilation
         for option_desc in self.compilation_options:
             option=MSVCDistributer.CompilerOption(*option_desc)
-            option.add_category(CompilationDistributer.CompilationCategory)
+            option.add_category(MSVCDistributer.CompilationCategory)
             self.add_option(option)
         # PCH options. Recognized, but ignored.
         for option_desc in self.pch_options:
@@ -50,15 +62,15 @@ class MSVCDistributer(CompilationDistributer):
         # Both preprocessing and compilation.
         for option_desc in self.preprocess_and_compile:
             option=MSVCDistributer.CompilerOption(*option_desc)
-            option.add_category(CompilationDistributer.PreprocessingCategory)
-            option.add_category(CompilationDistributer.CompilationCategory)
+            option.add_category(MSVCDistributer.PreprocessingCategory)
+            option.add_category(MSVCDistributer.CompilationCategory)
             self.add_option(option)
         # Always.
         for option_desc in self.always:
             option=MSVCDistributer.CompilerOption(*option_desc)
-            option.add_category(CompilationDistributer.PreprocessingCategory)
-            option.add_category(CompilationDistributer.CompilationCategory)
-            option.add_category(CompilationDistributer.LinkingCategory)
+            option.add_category(MSVCDistributer.PreprocessingCategory)
+            option.add_category(MSVCDistributer.CompilationCategory)
+            option.add_category(MSVCDistributer.LinkingCategory)
             self.add_option(option)
 
     def requires_preprocessing(self, input):
@@ -111,8 +123,6 @@ class MSVCDistributer(CompilationDistributer):
                 return proc.returncode, output[0], output[1]
         return lambda command : run_compiler(command, to_add)
 
-    esc = ['/', '-']
-    
     compiler_versions = {
         (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
         (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64

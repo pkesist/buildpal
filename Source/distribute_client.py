@@ -13,31 +13,6 @@ from tempfile import mkstemp
 from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
 
-class Distributer:
-    def create_context(self, command):
-        raise NotImplementedError("Distributer.create_context")
-
-    def bailout(self, context):
-        return False
-
-    def preprocess(self, context):
-        raise NotImplementedError("Distributer.preprocess")
-
-    def execute_remotely(self, context, remote_invocation):
-        raise NotImplementedError("Distributer.execute_remotely")
-
-    def postprocess(self, context):
-        pass
-    
-    def execute(self, command):
-        ctx = self.create_context(command)
-        if self.bailout(ctx):
-            return
-        self.preprocess(ctx)
-        self.execute_remotely(ctx)
-        self.postprocess(ctx)
-
-
 class Preprocessor:
     def __init__(self, preprocess_call):
         self.__preprocessed = False
@@ -72,7 +47,6 @@ class Preprocessor:
         except:
             pass
 
-
 class CompilerInfo:
     def __init__(self, toolset, executable, size, id):
         self.__toolset = toolset
@@ -85,7 +59,7 @@ class CompilerInfo:
     def size(self): return self.__size
     def id(self): return self.__id
 
-class CompilationDistributer(Distributer, CmdLineOptions):
+class CompilationDistributer(CmdLineOptions):
     class Category: pass
     class BailoutCategory(Category): pass
     class PreprocessingCategory(Category): pass
@@ -114,7 +88,7 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                 self.__manager.connect()
             except:
                 raise EnvironmentError("Failed to connect to build manager "
-                    "'{}'.".format(manager_id))
+                    "'{}'.".format(self.__manager_id))
 
         def queue_task(self, task, endpoint):
             self.__manager.queue_task(task, endpoint)
@@ -133,12 +107,16 @@ class CompilationDistributer(Distributer, CmdLineOptions):
                     token.option.test_category(filter))
             if isinstance(filter, CompilationDistributer.CompilerOption):
                 return (token for token in self.__options
-                    if token.option == filter)
+                    if token.option.name() == filter.name())
             raise RuntimeError("Unknown option filter.")
 
         def input_files(self):
             return (input.make_str() for input in self.free_options())
         
+
+    def create_context(self, command):
+        return CompilationDistributer.Context(command, self)
+
     def bailout(self, ctx):
         tokens = list(ctx.filter_options(CompilationDistributer.BailoutCategory))
         if not tokens:
@@ -150,25 +128,27 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         subprocess.check_call(call)
         return True
 
-    def create_context(self, command):
-        return CompilationDistributer.Context(command, self)
+    def execute(self, command):
+        ctx = self.create_context(command)
+        if self.bailout(ctx):
+            return
+        self.preprocess(ctx)
+        self.execute_remotely(ctx)
+        self.postprocess(ctx)
 
     def compiler_info(self, executable):
         raise NotImplementedError("Compiler identification not implemented.")
 
-    def __init__(self, preprocess_option, obj_name_option, compile_no_link_option):
-        self.__preprocess = preprocess_option
-        self.__object_name_option = obj_name_option
-        self.__compile_no_link_option = compile_no_link_option
-        self.__compile_no_link_option.add_category(CompilationDistributer.CompilationCategory)
-        self.add_option(self.__compile_no_link_option)
-        self.add_option(self.__object_name_option)
+    def preprocess_option(self): raise NotImplementedError()
+    def object_name_option(self): raise NotImplementedError()
+    def compile_no_link_option(self): raise NotImplementedError()
 
-    def object_name_option(self):
-        return self.__object_name_option
-
-    def compile_no_link_option(self):
-        return self.__compile_no_link_option
+    def __init__(self):
+        self.compile_no_link_option().add_category(CompilationDistributer.CompilationCategory)
+        self.include_file_option().add_category(CompilationDistributer.PreprocessingCategory)
+        self.define_option().add_category(CompilationDistributer.PreprocessingCategory)
+        self.add_option(self.compile_no_link_option())
+        self.add_option(self.object_name_option())
 
     def should_invoke_linker(self, ctx):
         return self.compile_no_link_option() not in [token.option for token in ctx.options()]
@@ -189,19 +169,27 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         preprocess_call = [ctx.executable()]
         preprocess_call.extend(option.make_str() for option in 
             ctx.filter_options(CompilationDistributer.PreprocessingCategory))
-        preprocess_call.append(self.__preprocess.make_value().make_str())
+        preprocess_call.append(self.preprocess_option().make_value().make_str())
 
         compile_call = [ctx.executable()]
         compile_call.extend(option.make_str() for option in
             ctx.filter_options(CompilationDistributer.CompilationCategory))
 
+        sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
+        includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
+        defines = [token.val for token in ctx.filter_options(self.define_option())]
+        defines += ['_MSC_VER=1500', '_CPPLIB_VER', '__cplusplus', '_WIN32']
+
         def make_task(source):
             preprocessor = Preprocessor(preprocess_call + [source])
             task = CompileTask(
                 call = compile_call,
+                cwd = os.getcwd(),
                 source = source,
                 source_type = os.path.splitext(source)[1],
                 input = preprocessor.filename(),
+                search_path = includes,
+                defines = defines,
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = self.compiler_info(ctx.executable()),
                 distributer = self)
@@ -217,18 +205,19 @@ class CompilationDistributer(Distributer, CmdLineOptions):
         for preprocessor, compile_task in ctx.tasks:
             ctx.queue_task(compile_task, endpoint)
             conn = listener.accept()
-            # Wait for preprocess signal.
-            preprocess = conn.recv()
-            preprocessor.preprocess()
-            conn.send(True)
-            retcode, stdout, stderr = conn.recv()
-            sys.stdout.write(stdout.decode())
-            if stderr:
-                sys.stderr.write("---------------------------- STDERR ----------------------------\n")
-                sys.stderr.write(stderr.decode())
-                sys.stderr.write("----------------------------------------------------------------\n")
-            if retcode == 0:
-                done = conn.recv()
+            while True:
+                task = conn.recv()
+                if task == "PREPROCESS":
+                    preprocessor.preprocess()
+                    conn.send("DONE")
+                if task == "COMPLETED":
+                    retcode, stdout, stderr = conn.recv()
+                    sys.stdout.write(stdout.decode())
+                    if stderr:
+                        sys.stderr.write("---------------------------- STDERR ----------------------------\n")
+                        sys.stderr.write(stderr.decode())
+                        sys.stderr.write("----------------------------------------------------------------\n")
+                    break
         listener.close()
 
     def postprocess(self, ctx):

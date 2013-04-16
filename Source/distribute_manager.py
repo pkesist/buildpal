@@ -24,18 +24,19 @@ class Worker(Process):
     def client_conn(self): return self.__client_conn
 
     def process_task(self):
-        with self.wrapped_task().lock():
-            if self.wrapped_task().is_completed():
-                return
-            if not self.wrapped_task().is_preprocessed():
-                self.client_conn().send(True)
-                self.client_conn().recv()
-                self.wrapped_task().mark_preprocessed()
+        if hasattr(self.wrapped_task().task(), 'manager_prepare'):
+            with self.wrapped_task().lock():
+                if self.wrapped_task().is_prepared():
+                    return
+                if not self.wrapped_task().is_prepared():
+                    if self.wrapped_task().task().manager_prepare(self.server_conn(), self.client_conn()):
+                        self.wrapped_task().mark_prepared()
+                    else:
+                        raise RuntimeError("Failed to prepare task.")
 
         self.wrapped_task().task().manager_send(
             self.server_conn(),
-            self.client_conn(),
-            self.wrapped_task())
+            self.client_conn())
 
         if self.__original:
             self.__node_info.tasks_sent_new += 1
@@ -58,8 +59,7 @@ class Worker(Process):
 
         return self.wrapped_task().task().manager_receive(
             self.server_conn(),
-            self.client_conn(),
-            self.wrapped_task())
+            self.client_conn())
 
 
     def run(self):
@@ -88,21 +88,21 @@ class WrapTask:
         self.__endpoint = endpoint
         self.__task = task
         self.__lock = Lock()
-        self.__preprocessed = Value(ctypes.c_bool, False, lock=False)
+        self.__prepared = Value(ctypes.c_bool, False, lock=False)
         self.__completed = Value(ctypes.c_bool, False, lock=False)
         self.__nodes_processing = []
-
-    def mark_completed(self):
-        self.__completed.value = True
-
-    def mark_preprocessed(self):
-        self.__preprocessed.value = True
 
     def is_completed(self):
         return self.__completed.value
 
-    def is_preprocessed(self):
-        return self.__preprocessed.value
+    def is_prepared(self):
+        return self.__prepared.value
+
+    def mark_completed(self):
+        self.__completed.value = True
+
+    def mark_prepared(self):
+        self.__prepared.value = True
 
     def task(self):
         return self.__task
@@ -216,7 +216,6 @@ class TaskProcessor(Process):
         self.__processes=[p for p in self.__processes if p not in dead]
         for p in self.__processes:
             p.join(0)
-        print("P {} D {}".format(len(self.__processes), len(dead)))
         return bool(dead)
 
     def print_stats(self):
@@ -286,10 +285,9 @@ class TaskProcessor(Process):
                         rejections += 1
                         conn.close()
                     else:
-                        break
+                        return node_index, conn
                 except IOError:
                     pass
-            return node_index, conn
 
 
 

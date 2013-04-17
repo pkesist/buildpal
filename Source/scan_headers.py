@@ -73,6 +73,8 @@ def collect_headers(cpp_file, rel_dir, search_path, defines, cache, zip_file):
                     zip.write(result[y], y)
         return True
     except:
+        import traceback
+        traceback.print_exc()
         pass
 
     # We failed to collect headers.

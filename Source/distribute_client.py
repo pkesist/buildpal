@@ -178,7 +178,6 @@ class CompilationDistributer(CmdLineOptions):
         sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
         defines = [token.val for token in ctx.filter_options(self.define_option())]
-        defines += ['_MSC_VER=1500', '_CPPLIB_VER', '__cplusplus', '_WIN32']
 
         def make_task(source):
             preprocessor = Preprocessor(preprocess_call + [source])

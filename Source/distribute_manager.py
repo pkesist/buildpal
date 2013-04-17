@@ -52,6 +52,7 @@ class Worker(Process):
                 return False
             self.wrapped_task().mark_completed()
             self.server_conn().send(True)
+
         try:
             os.remove(self.__input)
         except:

@@ -6,6 +6,9 @@ class ResolveInclude(Preprocessor):
         super(ResolveInclude, self).__init__(lexer)
         self.__callback = callback
 
+    def error(self,file,line,msg):
+        raise RuntimeError("%s:%d %s" % (file,line,msg))
+
     def include(self, tokens, ifstack):
         # Try to extract the filename and then process an include file
         if not tokens:
@@ -22,7 +25,7 @@ class ResolveInclude(Preprocessor):
                         break
                     i += 1
                 else:
-                    print("Malformed #include <...>")
+                    self.error(self.source, tokens[i].lineno, "Malformed #include <...>")
                     return
                 filename = "".join([x.value for x in tokens[1:i]])
                 path = self.path + [""] + self.temp_path
@@ -30,7 +33,7 @@ class ResolveInclude(Preprocessor):
                 filename = tokens[0].value[1:-1]
                 path = self.temp_path + [""] + self.path
             else:
-                print("Malformed #include statement '{}'({})".format(tokens[0].value, tokens[0].type))
+                self.error(self.source, tokens[0].lineno,"Malformed #include statement '{}'".format(tokens[0].value))
                 return
         for p in path:
             iname = os.path.join(p,filename)
@@ -40,8 +43,9 @@ class ResolveInclude(Preprocessor):
                 dname = os.path.dirname(iname)
                 if dname:
                     self.temp_path.insert(0,dname)
-                for tok in self.parsegen(data,filename, ifstack):
-                    yield tok
+                #for tok in self.parsegen(data,filename, ifstack):
+                #    yield tok
+                self.parsegen(data, filename, ifstack)
                 if dname:
                     del self.temp_path[0]
                 break
@@ -81,27 +85,28 @@ class ResolveInclude(Preprocessor):
                 else:
                     name = ""
                     args = []
-                
+
                 if name == 'define':
                     if enable:
                         for tok in self.expand_macros(chunk):
-                            yield tok
+                            pass #yield tok
                         chunk = []
                         self.define(args)
                 elif name == 'include':
                     if enable:
                         for tok in self.expand_macros(chunk):
-                            yield tok
+                            pass #yield tok
                         chunk = []
                         oldfile = self.macros['__FILE__']
-                        for tok in self.include(args, ifstack):
-                            yield tok
+                        #for tok in self.include(args, ifstack):
+                        #    yield tok
+                        self.include(args, ifstack)
                         self.macros['__FILE__'] = oldfile
                         self.source = source
                 elif name == 'undef':
                     if enable:
                         for tok in self.expand_macros(chunk):
-                            yield tok
+                            pass #yield tok
                         chunk = []
                         self.undef(args)
                 elif name == 'ifdef':
@@ -158,23 +163,38 @@ class ResolveInclude(Preprocessor):
                         enable,iftrigger = ifstack.pop()
                     else:
                         self.error(self.source,dirtokens[0].lineno,"Misplaced #endif")
+
+                elif name == 'pragma' and args[0].value == 'debug':
+                    if enable:
+                        if len(args)>1:
+                            i = 1
+                            while i < len(args):
+                                if args[i].type != 'CPP_ID':
+                                    i += 1
+                                    continue
+                                macro = args[i].value
+                                if macro in self.macros:
+                                    print('MACRO - {} - {}'.format(macro, "".join(x.value for x in self.macros[macro].value)))
+                                else:
+                                    print("MACRO '{}' not defined".format(macro))
+                                i += 1
+                        else:
+                            for macro in self.macros:
+                                print('MACRO - {} - {}'.format(macro, "".join(x.value for x in self.macros[macro].value)))
+
                 else:
                     # Unknown preprocessor directive
                     pass
 
-            else:
-                # Normal text
-                if enable:
-                    chunk.extend(x)
-
         for tok in self.expand_macros(chunk):
-            yield tok
+            pass #yield tok
         chunk = []
         
 def get_all_headers(file, search_path, defines):
     result = {}
 
     def found_include(name, file):
+        #print("Found '{}' as '{}'.".format(name, file))
         result[name] = file
 
     f = open(file)
@@ -188,11 +208,23 @@ def get_all_headers(file, search_path, defines):
     for define in defines:
         p.define(define.replace('=', ' '))
     p.parse(input, file)
+    return result
+
+
+if __name__ == '__main__':
+    import ply.lex as lex
+    lexer = lex.lex()
+
+    # Run a preprocessor
+    import sys
+    f = open(sys.argv[1])
+    input = f.read()
+
+    p = Preprocessor(lexer)
+    p.parse(input,sys.argv[1])
     while True:
         tok = p.token()
         if not tok: break
-
-    print("HEADERS")
-    for h in result:
-        print(h, result[h])
-    return result
+        print(p.source, tok)
+    for macro in p.macros:
+        print(macro, [x.value for x in p.macros[macro].value])

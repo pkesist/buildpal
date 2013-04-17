@@ -31,12 +31,13 @@ class CompileTask:
         cache = {}
         missing = set()
         zip = TempFile(suffix='.zip')
-        if collect_headers(self.__source, self.__cwd, self.__search_path, self.__defines, cache, zip.filename()):
-            print("Collected headers for {}.".format(self.__source))
-            self.__tempfile == zip
+        defines = self.__defines + ['_MSC_VER=1500', '_MSC_FULL_VER=150030729', '_CPPLIB_VER=505', '__cplusplus', '_WIN32', '_MSC_EXTENSIONS=1', '_MT=1', '_CPPUNWIND']
+
+        if collect_headers(self.__source, self.__cwd, self.__search_path, defines, cache, zip.filename()):
+            self.__tempfile = zip
         else:
-            print("Did not collect headers, preprocessing...")
-            # If we fail signal the client to do preprocessing.
+            print("Failed to determine required headers, preprocessing...")
+            # Signal the client to do preprocessing.
             client_conn.send("PREPROCESS")
             # Wait for 'done'.
             done = client_conn.recv()
@@ -46,11 +47,10 @@ class CompileTask:
     def manager_send(self, server_conn, client_conn):
         if self.__tempfile:
             server_conn.send("WITH_HEADERS")
-            with self.__tempfile as zip:
-                with zip.open('rb') as file:
-                    for data in iter(lambda : file.read(10 * 1024), b''):
-                        server_conn.send((True, data))
-                    server_conn.send((False, b''))
+            with open(self.__tempfile.filename(), 'rb') as file:
+                for data in iter(lambda : file.read(10 * 1024), b''):
+                    server_conn.send((True, data))
+                server_conn.send((False, b''))
             with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
                 for data in iter(cpp.readline, b''):
                     server_conn.send((True, data))
@@ -64,14 +64,15 @@ class CompileTask:
 
     def manager_receive(self, server_conn, client_conn):
         retcode, stdout, stderr = server_conn.recv()
-        client_conn.send("COMPLETED")
-        client_conn.send((retcode, stdout, stderr))
         if retcode == 0:
             more = True
             with open(self.__output, "wb") as file:
                 while more:
                     more, data = server_conn.recv()
                     file.write(data)
+        client_conn.send("COMPLETED")
+        client_conn.send((retcode, stdout, stderr))
+        print("Notified client")
         return True
 
     def server_process(self, server, conn):
@@ -120,7 +121,8 @@ class CompileTask:
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 
-                        retcode, stdout, stderr = compiler(self.__call + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
+                        defines = ['-D{}'.format(define) for define in self.__defines]
+                        retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
                         conn.send(True)
                         needsResult = conn.recv()
                         if not needsResult:

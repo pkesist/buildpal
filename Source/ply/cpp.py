@@ -446,16 +446,29 @@ class Preprocessor(object):
         # has been sorted in reverse order of patch location since replacements will cause the
         # size of the replacement sequence to expand from the patch point.
         
-        expanded = { }
         for ptype, argnum, i in macro.patch:
             # Concatenation.   Argument is left unexpanded
             if ptype == 'c':
                 rep[i:i+1] = args[argnum]
+
+        expanded = { }
+        for ptype, argnum, i in macro.patch:
             # Normal expansion.  Argument is macro expanded first
-            elif ptype == 'e':
+            if ptype == 'e':
                 if argnum not in expanded:
                     expanded[argnum] = self.expand_macros(args[argnum])
                 rep[i:i+1] = expanded[argnum]
+
+        i = 0
+        while True:
+            if i == len(rep):
+                break
+            if rep[i].value == '##':
+                assert (i > 0) and (i < len(rep) - 1)
+                rep[i-1].value += rep[i+1].value
+                del rep[i:i+2]
+            else:
+                i = i+1
 
         # Get rid of removed comma if necessary
         if comma_patch:
@@ -484,7 +497,7 @@ class Preprocessor(object):
                     expanded[t.value] = True
                     
                     m = self.macros[t.value]
-                    if not m.arglist:
+                    if m.arglist is None:
                         # A simple macro
                         ex = self.expand_macros([copy.copy(_x) for _x in m.value],expanded)
                         for e in ex:
@@ -496,7 +509,7 @@ class Preprocessor(object):
                         j = i + 1
                         while j < len(tokens) and tokens[j].type in self.t_WS:
                             j += 1
-                        if tokens[j].value == '(':
+                        if j != len(tokens) and tokens[j].value == '(':
                             tokcount,args,positions = self.collect_args(tokens[j:])
                             if not m.variadic and len(args) !=  len(m.arglist):
                                 self.error(self.source,t.lineno,"Macro %s requires %d arguments" % (t.value,len(m.arglist)))
@@ -597,8 +610,10 @@ class Preprocessor(object):
         try:
             result = eval(expr)
         except Exception:
-            self.error(self.source,tokens[0].lineno,"Couldn't evaluate expression '{}'".format(expr))
-            print([t.value for t in tokens])
+            self.error(self.source,99999,"Couldn't evaluate expression '{}'".format(expr))
+            result = 0
+        except SyntaxError:
+            self.error(self.source, 99999, "Found syntax error '{}'".format(expr))
             result = 0
         return result
 
@@ -740,6 +755,7 @@ class Preprocessor(object):
         # Try to extract the filename and then process an include file
         if not tokens:
             return
+
         if tokens:
             if tokens[0].value != '<' and tokens[0].type != self.t_STRING:
                 tokens = self.expand_macros(tokens)
@@ -752,7 +768,7 @@ class Preprocessor(object):
                         break
                     i += 1
                 else:
-                    print("Malformed #include <...>")
+                    self.error(self.source, tokens[i].lineno, "Malformed #include <...>")
                     return
                 filename = "".join([x.value for x in tokens[1:i]])
                 path = self.path + [""] + self.temp_path
@@ -760,7 +776,7 @@ class Preprocessor(object):
                 filename = tokens[0].value[1:-1]
                 path = self.temp_path + [""] + self.path
             else:
-                print("Malformed #include statement {}".format(tokens[0].type))
+                self.error(self.source, tokens[0].lineno,"Malformed #include statement {}".format(tokens[0].type))
                 return
         for p in path:
             iname = os.path.join(p,filename)
@@ -776,8 +792,6 @@ class Preprocessor(object):
                 break
             except IOError as e:
                 pass
-        else:
-            print("Couldn't find '%s'" % filename)
 
     # ----------------------------------------------------------------------
     # define()
@@ -789,6 +803,8 @@ class Preprocessor(object):
         if isinstance(tokens,str):
             tokens = self.tokenize(tokens)
 
+        if tokens[-1].type == 'CPP_COMMENT':
+            del tokens[-1]
         linetok = tokens
         try:
             name = linetok[0]
@@ -809,7 +825,7 @@ class Preprocessor(object):
                 variadic = False
                 for a in args:
                     if variadic:
-                        print("No more arguments may follow a variadic argument")
+                        self.error(self.source, linetok[0].lineno,"No more arguments may follow a variadic argument")
                         break
                     astr = "".join([str(_i.value) for _i in a])
                     if astr == "...":
@@ -828,26 +844,25 @@ class Preprocessor(object):
                             a[0].value = a[0].value[:-3]
                         continue
                     if len(a) > 1 or a[0].type != self.t_ID:
-                        print("Invalid macro argument")
+                        self.error(self.source, linetok[0].lineno, "Invalid macro argument")
                         break
-                else:
-                    mvalue = self.tokenstrip(linetok[1+tokcount:])
-                    i = 0
-                    while i < len(mvalue):
-                        if i+1 < len(mvalue):
-                            if mvalue[i].type in self.t_WS and mvalue[i+1].value == '##':
-                                del mvalue[i]
-                                continue
-                            elif mvalue[i].value == '##' and mvalue[i+1].type in self.t_WS:
-                                del mvalue[i+1]
-                        i += 1
-                    m = Macro(name.value,mvalue,[x[0].value for x in args],variadic)
-                    self.macro_prescan(m)
-                    self.macros[name.value] = m
+                mvalue = self.tokenstrip(linetok[1+tokcount:])
+                i = 0
+                while i < len(mvalue):
+                    if i+1 < len(mvalue):
+                        if mvalue[i].type in self.t_WS and mvalue[i+1].value == '##':
+                            del mvalue[i]
+                            continue
+                        elif mvalue[i].value == '##' and mvalue[i+1].type in self.t_WS:
+                            del mvalue[i+1]
+                    i += 1
+                m = Macro(name.value,mvalue,[x[0].value for x in args],variadic)
+                self.macro_prescan(m)
+                self.macros[name.value] = m
             else:
-                print("Bad macro definition")
+                self.error(self.source, linetok[0].lineno, "Bad macro definition")
         except LookupError:
-            print("Bad macro definition")
+            self.error(self.source, linetok[0].lineno, "Bad macro definition")
 
     # ----------------------------------------------------------------------
     # undef()
@@ -899,15 +914,6 @@ if __name__ == '__main__':
     while True:
         tok = p.token()
         if not tok: break
-        print(p.source, tok)
-    for macro in p.macros:
-        print(macro, [x.value for x in p.macros[macro].value])
-
-
-
-
-    
-
 
 
 

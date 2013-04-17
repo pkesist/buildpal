@@ -30,11 +30,19 @@
     <Compile Include="Source\distribute_server.py" />
     <Compile Include="Source\distribute_task.py" />
     <Compile Include="Source\msvc.py" />
+    <Compile Include="Source\ply\cpp.py" />
+    <Compile Include="Source\ply\ctokens.py" />
+    <Compile Include="Source\ply\lex.py" />
+    <Compile Include="Source\ply\yacc.py" />
+    <Compile Include="Source\ply\__init__.py" />
+    <Compile Include="Source\preprocessor.py" />
+    <Compile Include="Source\scan_headers.py" />
     <Compile Include="Source\utils.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
     <Folder Include="Source\" />
+    <Folder Include="Source\ply\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />

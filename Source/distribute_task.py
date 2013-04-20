@@ -1,4 +1,4 @@
-from scan_headers import collect_headers
+from scan_headers import collect_headers, collect_world
 
 import os
 import shutil
@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 import zlib
 
-from utils import TempFile
+from utils import TempFile, send_file, receive_file, receive_compressed_file
 from multiprocessing.connection import Client
 
 class CompileTask:
@@ -26,53 +26,97 @@ class CompileTask:
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
         self.__tempfile = None
 
-    def manager_prepare(self, server_conn, client_conn):
-        # Try to pack all required headers.
-        cache = {}
-        missing = set()
-        zip = TempFile(suffix='.zip')
-        defines = self.__defines + ['_MSC_VER=1500', '_MSC_FULL_VER=150030729', '_CPPLIB_VER=505', '__cplusplus', '_WIN32', '_MSC_EXTENSIONS=1', '_MT=1', '_CPPUNWIND']
+        #self.__algorithm = 'SEND_WORLD'
+        self.__algorithm = 'SCAN_HEADERS'
+        #self.__algorithm = 'PREPROCESS_LOCALLY'
 
-        if collect_headers(self.__source, self.__cwd, self.__search_path, defines, cache, zip.filename()):
-            self.__tempfile = zip
-        else:
-            print("Failed to determine required headers, preprocessing...")
+    def manager_prepare(self, manager_ctx):
+        if self.__algorithm == 'SEND_WORLD':
+            for path in self.__search_path:
+                print("Processing {}".format(path))
+                if not path in manager_ctx.global_dict:
+                    stuff = collect_world(self.__search_path, manager_ctx.extensions)
+                    print("Processed {}...".format(path))
+                    print("Stuff", stuff)
+                    print("Updating dict.")
+                    manager_ctx.global_dict.update(stuff)
+                    print("Updated dict.")
+
+        if self.__algorithm == 'SCAN_HEADERS':
+            cache = {}
+            missing = set()
+            defines = self.__defines + [
+                '_MSC_VER=1500',
+                '_MSC_FULL_VER=150030729',
+                '_CPPLIB_VER=505',
+                '__cplusplus',
+                '_WIN32',
+                '_MSC_EXTENSIONS=1',
+                '_MT=1',
+                '_CPPUNWIND',
+                '_HAS_TR1=1',
+                '_M_IX86',
+                '_NATIVE_WCHAR_T_DEFINED=1',
+                '_HAS_ITERATOR_DEBUGGING=1',
+                '_DEBUG',
+                '_CPPRTTI']
+
+            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, defines, cache)
+            if tempFile:
+                self.__tempfile = tempFile
+            else:
+                self.__algorithm = 'PREPROCESS_LOCALLY'
+
+        if self.__algorithm == 'PREPROCESS_LOCALLY':
             # Signal the client to do preprocessing.
-            client_conn.send("PREPROCESS")
+            manager_ctx.client_conn.send('PREPROCESS')
             # Wait for 'done'.
-            done = client_conn.recv()
-            assert done == "DONE"
+            done = manager_ctx.client_conn.recv()
+            assert done == 'DONE'
         return True
 
-    def manager_send(self, server_conn, client_conn):
-        if self.__tempfile:
-            server_conn.send("WITH_HEADERS")
-            with open(self.__tempfile.filename(), 'rb') as file:
-                for data in iter(lambda : file.read(10 * 1024), b''):
-                    server_conn.send((True, data))
-                server_conn.send((False, b''))
+    def manager_send(self, manager_ctx):
+        if self.__algorithm == 'SEND_WORLD':
+            print("Using send world algorithm")
+            manager_ctx.server_conn.send('SEND_WORLD')
+            for path in self.__search_path:
+                manager_ctx.server_conn.send('INCLUDE_PATH')
+                filename, checksum = manager_ctx.global_dict[path]
+                manager_ctx.server_conn.send((path, checksum))
+                print("path {} checksum {}".format(path, checksum))
+                needs_sending = manager_ctx.server_conn.recv()
+                print("Requesting include path {}".format(path))
+                if needs_sending:
+                    print("Needs sending.")
+                    with open(filename, 'rb') as file:
+                        send_file(manager_ctx.server_conn, file)
+            manager_ctx.server_conn.send('SOURCE_FILE')
             with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
-                for data in iter(cpp.readline, b''):
-                    server_conn.send((True, data))
-                server_conn.send((False, b''))
-        else:
-            server_conn.send("PREPROCESSED")
-            with open(self.__input, "rb") as file:
-                for data in iter(lambda : file.read(10 * 1024), b''):
-                    server_conn.send((True, data))
-                server_conn.send((False, b''))
+                send_file(manager_ctx.server_conn, cpp)
 
-    def manager_receive(self, server_conn, client_conn):
-        retcode, stdout, stderr = server_conn.recv()
+        if self.__algorithm == 'SCAN_HEADERS':
+            manager_ctx.server_conn.send('SCAN_HEADERS')
+            with open(self.__tempfile.filename(), 'rb') as file:
+                send_file(manager_ctx.server_conn, file)
+            manager_ctx.server_conn.send('SOURCE_FILE')
+            with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
+                send_file(manager_ctx.server_conn, cpp)
+
+        if self.__algorithm == 'PREPROCESS_LOCALLY':
+            manager_ctx.server_conn.send('PREPROCESS_LOCALLY')
+            with open(self.__input, "rb") as file:
+                send_file(manager_ctx.server_conn, file)
+
+    def manager_receive(self, manager_ctx):
+        retcode, stdout, stderr = manager_ctx.server_conn.recv()
         if retcode == 0:
             more = True
             with open(self.__output, "wb") as file:
                 while more:
-                    more, data = server_conn.recv()
+                    more, data = manager_ctx.server_conn.recv()
                     file.write(data)
-        client_conn.send("COMPLETED")
-        client_conn.send((retcode, stdout, stderr))
-        print("Notified client")
+        manager_ctx.client_conn.send('COMPLETED')
+        manager_ctx.client_conn.send((retcode, stdout, stderr))
         return True
 
     def server_process(self, server, conn):
@@ -82,65 +126,78 @@ class CompileTask:
         if not accept or compiler is None:
             return
 
-        def receive_file(*args, **kwargs):
-            tempfile = TempFile(*args, **kwargs)
-            with tempfile.open('wb') as file:
-                more = True
-                while more:
-                    more, data = conn.recv()
-                    file.write(data)
-            return tempfile
-
-        def receive_compressed_file():
-            more = True
-            tempfile = TempFile()
-            decompressor = zlib.decompressobj()
-            with tempfile.open('wb') as file:
-                while more:
-                    more, data = conn.recv()
-                    file.write(decompressor.decompress(data))
-                file.write(decompressor.flush())
-            return tempfile
-
-        def send_file(fileobj):
-            with fileobj.open("rb") as file:
-                for data in iter(lambda : file.read(10 * 1024), b''):
-                    conn.send((True, data))
-                conn.send((False, b''))
-
-        
         task = conn.recv()
-        if task == "WITH_HEADERS":       
-            with receive_file() as zip_file:
-                include_path =  tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
+        if task == 'SEND_WORLD':
+            include_paths = []
+            while True:
+                what = conn.recv()
+                if what == 'INCLUDE_PATH':
+                    include_path, checksum = conn.recv()
+                    local_include_path = server.local_include_path(include_path, checksum)
+                    conn.send(local_include_path is None)
+                    if local_include_path is None:
+                        zip_file = receive_file(conn)
+                        local_include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
+                        with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
+                            zip.extractall(path=local_include_path)
+                        server.store_includes(include_path, checksum, local_include_path)
+                    include_paths.append(local_include_path)
+                elif what == 'SOURCE_FILE':
+                    with receive_file(conn, suffix=self.__source_type) as source_file:
+                        with TempFile(suffix='.obj') as object_file:
+                            noLink = self.__compile_switch
+                            output = self.__output_switch.format(object_file.filename())
+
+                            defines = ['-D{}'.format(define) for define in self.__defines]
+                            includes = ['-I{}'.format(path) for path in include_paths]
+                            print("Includes", includes)
+                            retcode, stdout, stderr = compiler(self.__call + defines + includes + [noLink, output, source_file.filename()])
+                            conn.send('SERVER_DONE')
+                            needsResult = conn.recv()
+                            if not needsResult:
+                                return
+                            conn.send((retcode, stdout, stderr))
+                            if retcode == 0:
+                                with object_file.open('rb') as file:
+                                    send_file(conn, file)
+                    break
+
+        if task == 'SCAN_HEADERS':
+            with receive_file(conn) as zip_file:
+                include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
                 with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
                     zip.extractall(path=include_path)
-            
-                with receive_file(suffix=self.__source_type) as source_file:
+
+                src_file = conn.recv()
+                assert src_file == 'SOURCE_FILE'
+                with receive_file(conn, suffix=self.__source_type) as source_file:
                     with TempFile(suffix='.obj') as object_file:
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 
                         defines = ['-D{}'.format(define) for define in self.__defines]
                         retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
-                        conn.send(True)
+                        conn.send('SERVER_DONE')
                         needsResult = conn.recv()
                         if not needsResult:
                             return
                         conn.send((retcode, stdout, stderr))
                         if retcode == 0:
-                            send_file(object_file)
+                            with object_file.open('rb') as file:
+                                send_file(conn, file)
                         shutil.rmtree(include_path, ignore_errors=True)
-        if task == "PREPROCESSED":
-            with receive_compressed_file() as preprocessed_file:
+
+        if task == 'PREPROCESS_LOCALLY':
+            with receive_compressed_file(conn) as preprocessed_file:
                 with TempFile(suffix='.obj') as object_file:
                     noLink = self.__compile_switch
                     output = self.__output_switch.format(object_file.filename())
                     retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
-                    conn.send(True)
+                    conn.send('SERVER_DONE')
                     needsResult = conn.recv()
                     if not needsResult:
                         return
                     conn.send((retcode, stdout, stderr))
                     if retcode == 0:
-                        send_file(object_file)
+                        with object_file.open('rb') as file:
+                            send_file(conn, file)

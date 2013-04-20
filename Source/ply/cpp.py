@@ -15,10 +15,16 @@
 # -----------------------------------------------------------------------------
 
 tokens = (
-   'CPP_ID','CPP_INTEGER', 'CPP_FLOAT', 'CPP_STRING', 'CPP_CHAR', 'CPP_WS', 'CPP_COMMENT', 'CPP_POUND', 'CPP_DPOUND', 'CPP_OP'
+   'CPP_ID','CPP_INTEGER', 'CPP_FLOAT', 'CPP_STRING', 'CPP_CHAR', 'CPP_WS', 'CPP_COMMENT', 'CPP_POUND', 'CPP_DPOUND', 'CPP_OP', 'CPP_BRACKET'
 )
 
 literals = "+-*/%|&~^<>=!?()[]{}.,;:\\\'\""
+
+
+# Operators
+def t_CPP_BRACKET(t):
+    r'(\()|(\))'
+    return t
 
 # Operators
 def t_CPP_OP(t):
@@ -335,7 +341,7 @@ class Preprocessor(object):
     
         # Search for the opening '('.
         i = 0
-        while (i < tokenlen) and (tokenlist[i].type in self.t_WS):
+        while (i < tokenlen) and (tokenlist[i].type in (self.t_WS, 'CPP_COMMENT')):
             i += 1
 
         if (i < tokenlen) and (tokenlist[i].value == '('):
@@ -346,12 +352,23 @@ class Preprocessor(object):
 
         i += 1
 
+        last_is_comma = False
         while i < tokenlen:
             t = tokenlist[i]
             if t.value == '(':
                 current_arg.append(t)
+                last_is_comma = False
                 nesting += 1
             elif t.value == ')':
+                if last_is_comma:
+                    import ply.lex as lex
+                    dummy = lex.LexToken()
+                    dummy.value = ''
+                    dummy.type = 'CPP_ID'
+                    dummy.lineno = 1234
+                    dummy.lexpos = 1234
+                    current_arg.append(dummy)
+                last_is_comma = False
                 nesting -= 1
                 if nesting == 0:
                     if current_arg:
@@ -359,12 +376,17 @@ class Preprocessor(object):
                         positions.append(i)
                     return i+1,args,positions
                 current_arg.append(t)
-            elif t.value == ',' and nesting == 1:
-                args.append(self.tokenstrip(current_arg))
-                positions.append(i+1)
-                current_arg = []
+            elif t.value == ',':
+                last_is_comma = True
+                if nesting == 1:
+                    args.append(self.tokenstrip(current_arg))
+                    positions.append(i+1)
+                    current_arg = []
+                else:
+                    current_arg.append(t)
             else:
                 current_arg.append(t)
+                last_is_comma = False
             i += 1
     
         # Missing end argument
@@ -396,8 +418,9 @@ class Preprocessor(object):
                     continue
                 # Concatenation
                 elif (i > 0 and macro.value[i-1].value == '##'):
-                    macro.patch.append(('c',argnum,i-1))
-                    del macro.value[i-1]
+                    macro.patch.append(('c',argnum,i))
+                    #del macro.value[i-1]
+                    i += 1
                     continue
                 elif ((i+1) < len(macro.value) and macro.value[i+1].value == '##'):
                     macro.patch.append(('c',argnum,i))
@@ -465,8 +488,11 @@ class Preprocessor(object):
                 break
             if rep[i].value == '##':
                 assert (i > 0) and (i < len(rep) - 1)
-                rep[i-1].value += rep[i+1].value
-                del rep[i:i+2]
+                if rep[i-1].type != 'CPP_BRACKET' and rep[i+1].type != 'CPP_BRACKET':
+                    rep[i-1].value += rep[i+1].value
+                    del rep[i:i+2]
+                else:
+                    del rep[i]
             else:
                 i = i+1
 
@@ -485,7 +511,7 @@ class Preprocessor(object):
     # expanded.  This is used to prevent infinite recursion.
     # ----------------------------------------------------------------------
 
-    def expand_macros(self,tokens,expanded=None):
+    def expand_macros(self,tokens,expanded=None, indent=0):
         if expanded is None:
             expanded = {}
         i = 0
@@ -493,13 +519,12 @@ class Preprocessor(object):
             t = tokens[i]
             if t.type == self.t_ID:
                 if t.value in self.macros and t.value not in expanded:
-                    # Yes, we found a macro match
-                    expanded[t.value] = True
-                    
                     m = self.macros[t.value]
                     if m.arglist is None:
                         # A simple macro
+                        expanded[t.value] = True
                         ex = self.expand_macros([copy.copy(_x) for _x in m.value],expanded)
+                        del expanded[t.value]
                         for e in ex:
                             e.lineno = t.lineno
                         tokens[i:i+1] = ex
@@ -510,6 +535,7 @@ class Preprocessor(object):
                         while j < len(tokens) and tokens[j].type in self.t_WS:
                             j += 1
                         if j != len(tokens) and tokens[j].value == '(':
+                            expanded[t.value] = True
                             tokcount,args,positions = self.collect_args(tokens[j:])
                             if not m.variadic and len(args) !=  len(m.arglist):
                                 self.error(self.source,t.lineno,"Macro %s requires %d arguments" % (t.value,len(m.arglist)))
@@ -530,12 +556,14 @@ class Preprocessor(object):
                                         
                                 # Get macro replacement text
                                 rep = self.macro_expand_args(m,args)
-                                rep = self.expand_macros(rep,expanded)
+                                rep = self.expand_macros(rep,expanded, indent + 1)
                                 for r in rep:
                                     r.lineno = t.lineno
                                 tokens[i:j+tokcount] = rep
                                 i += len(rep)
-                    del expanded[t.value]
+                            del expanded[t.value]
+                        else:
+                            i += 1
                     continue
                 elif t.value == '__LINE__':
                     t.type = self.t_INTEGER
@@ -608,12 +636,14 @@ class Preprocessor(object):
 
         expr = "".join([transform_token(x) for x in tokens])
         try:
-            result = eval(expr)
+            if not expr:
+                return 0
+            return eval(expr)
         except Exception:
-            self.error(self.source,99999,"Couldn't evaluate expression '{}'".format(expr))
+            self.error(self.source,token[0].lineno,"Couldn't evaluate expression '{}'".format(expr))
             result = 0
         except SyntaxError:
-            self.error(self.source, 99999, "Found syntax error '{}'".format(expr))
+            self.error(self.source, token[0].lineno, "Found syntax error '{}'".format(expr))
             result = 0
         return result
 

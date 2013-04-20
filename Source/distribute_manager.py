@@ -1,5 +1,5 @@
 from queue import PriorityQueue, Empty
-from multiprocessing import Lock, Process, Queue, Value, RawValue
+from multiprocessing import Lock, Manager, Process, Queue, Value, RawValue
 from multiprocessing.connection import Client
 from multiprocessing.managers import BaseManager
 from time import sleep, time
@@ -10,18 +10,28 @@ import sys
 import os
 import configparser
 
+class Context:
+    pass
+
 class Worker(Process):
-    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original):
+    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict, extensions):
+        ctx = Context()
+        ctx.server_conn = server_conn
+        ctx.client_conn = client_conn
+        ctx.global_dict = global_dict
+        ctx.extensions = extensions
+
+        self.__ctx = ctx
+
         self.__wrapped_task = wrapped_task
-        self.__server_conn = server_conn
-        self.__client_conn = client_conn
         self.__node_info = node_info
         self.__original = original
         super(Worker, self).__init__()
 
     def wrapped_task(self): return self.__wrapped_task
-    def server_conn(self): return self.__server_conn
-    def client_conn(self): return self.__client_conn
+
+    def context(self):
+        return self.__ctx
 
     def process_task(self):
         if hasattr(self.wrapped_task().task(), 'manager_prepare'):
@@ -29,14 +39,12 @@ class Worker(Process):
                 if self.wrapped_task().is_prepared():
                     return
                 if not self.wrapped_task().is_prepared():
-                    if self.wrapped_task().task().manager_prepare(self.server_conn(), self.client_conn()):
+                    if self.wrapped_task().task().manager_prepare(self.context()):
                         self.wrapped_task().mark_prepared()
                     else:
                         raise RuntimeError("Failed to prepare task.")
 
-        self.wrapped_task().task().manager_send(
-            self.server_conn(),
-            self.client_conn())
+        self.wrapped_task().task().manager_send(self.context())
 
         if self.__original:
             self.__node_info.tasks_sent_new += 1
@@ -44,23 +52,22 @@ class Worker(Process):
             self.__node_info.tasks_sent_old += 1
 
         # Just block
-        self.server_conn().recv()
+        done = self.context().server_conn.recv()
+        assert done == "SERVER_DONE"
 
         with self.wrapped_task().lock():
             if self.wrapped_task().is_completed():
-                self.server_conn().send(False)
+                self.context().server_conn.send(False)
                 return False
             self.wrapped_task().mark_completed()
-            self.server_conn().send(True)
+            self.context().server_conn.send(True)
 
         try:
             os.remove(self.__input)
         except:
             pass
 
-        return self.wrapped_task().task().manager_receive(
-            self.server_conn(),
-            self.client_conn())
+        return self.wrapped_task().task().manager_receive(self.context())
 
 
     def run(self):
@@ -121,7 +128,7 @@ class WrapTask:
         return self.__lock
 
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue):
+    def __init__(self, nodes, queue, global_dict, extensions):
         self.__queue = queue
         self.__nodes = nodes
         self.__node_info = [Value(NodeInfo, index, 0, 0, 0, 0) for index in range(len(nodes))]
@@ -130,6 +137,9 @@ class TaskProcessor(Process):
         self.__task_map = {}
         self.__processes = []
         self.__priority_queue = []
+
+        self.__extensions = extensions
+        self.__global_dict = global_dict
 
         super(TaskProcessor, self).__init__()
 
@@ -195,7 +205,6 @@ class TaskProcessor(Process):
             return
         self.run_task(endpoint, False)
 
-
     def run_task(self, endpoint, original):
         heapq.heappush(self.__priority_queue, (time(), endpoint))
         find_node_result = self.find_available_node(endpoint)
@@ -207,10 +216,9 @@ class TaskProcessor(Process):
 
         # Create and run worker.
         task, client_conn = self.__tasks[endpoint]
-        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original)
+        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict, self.__extensions)
         self.__processes.append(worker)
         worker.start()
-
 
     def join_dead_processes(self):
         dead=list(filter(lambda p : not p.is_alive(), self.__processes))
@@ -232,7 +240,6 @@ class TaskProcessor(Process):
                 self.tasks_processing(index), self.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
-
 
     def find_available_node(self, endpoint):
         wrapped_task, client_conn = self.__tasks[endpoint]
@@ -298,9 +305,15 @@ class DistributeManager(BaseManager):
     pass
 
 def queue_task(task, endpoint):
+    print("Putting task")
     task_queue.put((task, endpoint))
 
+def get_task(*args, **kwargs):
+    return task_queue.get(*args, **kwargs)
+
+
 DistributeManager.register('queue_task', callable=queue_task)
+DistributeManager.register('get_task', callable=get_task)
 
 default_script = 'distribute_manager.ini'
 
@@ -323,7 +336,6 @@ Usage:
     if not config.read(iniFile):
         raise Exception("Error reading the configuration file "
             "'{}'.".format(iniFile))
-
 
     manager_section = 'Manager'
     nodes_section = 'Build Nodes'
@@ -352,7 +364,14 @@ Usage:
    
     manager = DistributeManager(r"\\.\pipe\{}".format(id), b"")
 
-    task_processor = TaskProcessor(nodes, task_queue)
+    
+    extensions=None
+    if config.has_option('Headers', 'extensions'):
+        extensions = config.get('Headers', 'extensions')
+
+    local_manager = Manager()
+
+    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict(), extensions)
     task_processor.start()
 
     server = manager.get_server()

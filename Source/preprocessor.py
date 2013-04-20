@@ -5,54 +5,79 @@ class ResolveInclude(Preprocessor):
     def __init__(self, callback, lexer):
         super(ResolveInclude, self).__init__(lexer)
         self.__callback = callback
+        self.__include_stack = []
+
+    class Include:
+        def __init__(self, stack):
+            self.__stack = stack
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.__stack.pop()
+
+    def start_include(self, source):
+        result = self.Include(self.__include_stack)
+        self.__include_stack.append(source)
+        return result
 
     def error(self,file,line,msg):
         raise RuntimeError("%s:%d %s" % (file,line,msg))
 
     def include(self, tokens, ifstack):
         # Try to extract the filename and then process an include file
-        if not tokens:
-            return
-        if tokens:
-            if tokens[0].value != '<' and tokens[0].type != self.t_STRING:
-                tokens = self.expand_macros(tokens)
-
-            if tokens[0].value == '<':
-                # Include <...>
-                i = 1
-                while i < len(tokens):
-                    if tokens[i].value == '>':
-                        break
-                    i += 1
-                else:
-                    self.error(self.source, tokens[i].lineno, "Malformed #include <...>")
-                    return
-                filename = "".join([x.value for x in tokens[1:i]])
-                path = self.path + [""] + self.temp_path
-            elif tokens[0].type == self.t_STRING:
-                filename = tokens[0].value[1:-1]
-                path = self.temp_path + [""] + self.path
-            else:
-                self.error(self.source, tokens[0].lineno,"Malformed #include statement '{}'".format(tokens[0].value))
+        with self.start_include(self.source):
+            if not tokens:
                 return
-        for p in path:
-            iname = os.path.join(p,filename)
-            try:
-                data = open(iname,"r").read()
-                self.__callback(filename, iname)
-                dname = os.path.dirname(iname)
-                if dname:
-                    self.temp_path.insert(0,dname)
-                #for tok in self.parsegen(data,filename, ifstack):
-                #    yield tok
-                self.parsegen(data, filename, ifstack)
-                if dname:
-                    del self.temp_path[0]
-                break
-            except IOError as e:
-                pass
-        else:
-            self.__callback(filename, None)
+            if tokens:
+                if tokens[0].value != '<' and tokens[0].type != self.t_STRING:
+                    before = [token.value for token in tokens]
+                    tokens = self.expand_macros(tokens)
+                    after = [token.value for token in tokens]
+                    if before != after:
+                        self.__callback(self.source, 'HAS_MACRO_INCLUDE', self.__include_stack)
+
+                if tokens[0].value == '<':
+                    # Include <...>
+                    i = 1
+                    while i < len(tokens):
+                        if tokens[i].value == '>':
+                            break
+                        i += 1
+                    else:
+                        self.error(self.source, tokens[i].lineno, "Malformed #include <...>")
+                        return
+                    filename = "".join([x.value for x in tokens[1:i]])
+                    path = self.path + [""] + self.temp_path
+                elif tokens[0].type == self.t_STRING:
+                    filename = tokens[0].value[1:-1]
+                    path = self.temp_path + [""] + self.path
+                else:
+                    self.error(self.source, tokens[0].lineno,"Malformed #include statement '{}'".format(tokens[0].value))
+                    return
+            # True if already known
+            if self.__callback(filename, 'IS_CACHED'):
+                return
+            for p in path:
+                iname = os.path.join(p,filename)
+                try:
+                    data = open(iname,"r").read()
+                    # Notify
+                    self.__callback(filename, 'CACHE', iname)
+                    dname = os.path.dirname(iname)
+                    if dname:
+                        self.temp_path.insert(0,dname)
+                    #for tok in self.parsegen(data,filename, ifstack):
+                    #    yield tok
+                    self.parsegen(data, filename, ifstack)
+                    if dname:
+                        del self.temp_path[0]
+                    break
+                except IOError as e:
+                    pass
+            else:
+                self.__callback(filename, 'NOT_FOUND')
 
     def parsegen(self, input, source=None, ifstack=[]):
         # Replace trigraph sequences
@@ -65,7 +90,7 @@ class ResolveInclude(Preprocessor):
         self.define("__FILE__ \"%s\"" % source)
 
         self.source = source
-        chunk = []
+        #chunk = []
         enable = True
         iftrigger = False
 
@@ -74,9 +99,9 @@ class ResolveInclude(Preprocessor):
                 if tok.type not in self.t_WS: break
             if tok.value == '#':
                 # Preprocessor directive
-                for tok in x:
-                    if tok in self.t_WS and '\n' in tok.value:
-                        chunk.append(tok)
+                #for tok in x:
+                #    if tok in self.t_WS and '\n' in tok.value:
+                #        chunk.append(tok)
                 
                 dirtokens = self.tokenstrip(x[i+1:])
                 if dirtokens:
@@ -88,15 +113,15 @@ class ResolveInclude(Preprocessor):
 
                 if name == 'define':
                     if enable:
-                        for tok in self.expand_macros(chunk):
-                            pass #yield tok
-                        chunk = []
+                        #for tok in self.expand_macros(chunk):
+                        #    yield tok
+                        #chunk = []
                         self.define(args)
                 elif name == 'include':
                     if enable:
-                        for tok in self.expand_macros(chunk):
-                            pass #yield tok
-                        chunk = []
+                        #for tok in self.expand_macros(chunk):
+                        #    yield tok
+                        #chunk = []
                         oldfile = self.macros['__FILE__']
                         #for tok in self.include(args, ifstack):
                         #    yield tok
@@ -105,9 +130,9 @@ class ResolveInclude(Preprocessor):
                         self.source = source
                 elif name == 'undef':
                     if enable:
-                        for tok in self.expand_macros(chunk):
-                            pass #yield tok
-                        chunk = []
+                        #for tok in self.expand_macros(chunk):
+                        #    yield tok
+                        #chunk = []
                         self.undef(args)
                 elif name == 'ifdef':
                     ifstack.append((enable,iftrigger))
@@ -165,7 +190,7 @@ class ResolveInclude(Preprocessor):
                         self.error(self.source,dirtokens[0].lineno,"Misplaced #endif")
 
                 elif name == 'pragma' and args[0].value == 'debug':
-                    if enable:
+                    if True:
                         if len(args)>1:
                             i = 1
                             while i < len(args):
@@ -186,16 +211,25 @@ class ResolveInclude(Preprocessor):
                     # Unknown preprocessor directive
                     pass
 
-        for tok in self.expand_macros(chunk):
-            pass #yield tok
-        chunk = []
+        #for tok in self.expand_macros(chunk):
+        #    yield tok
+        #chunk = []
         
 def get_all_headers(file, search_path, defines):
     result = {}
-
-    def found_include(name, file):
-        #print("Found '{}' as '{}'.".format(name, file))
-        result[name] = file
+    cannot_skip = set()
+    result = {}
+    def found_include(name, what, param = None):
+        if what == 'HAS_MACRO_INCLUDE':
+            cannot_skip.update(param)
+        elif what == 'IS_CACHED':
+            return name in result and not name in cannot_skip
+        elif what == 'CACHE':
+            result[name] = param
+        elif what == 'NOT_FOUND':
+            result[name] = None
+        else:
+            raise RuntimeError("Invalid callback verb '{}'.".format(what))
 
     f = open(file)
     input = f.read()

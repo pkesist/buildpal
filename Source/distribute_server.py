@@ -1,5 +1,5 @@
 from multiprocessing.connection import Listener
-from multiprocessing import Pool
+from multiprocessing import Manager, Pool
 from multiprocessing.reduction import reduce_connection
 import configparser
 import psutil
@@ -17,7 +17,7 @@ def work(server, conn):
         traceback.print_exc()
 
 class ServerRunner:
-    def __init__(self, port, processes, cpu_usage_hwm=None):
+    def __init__(self, port, processes, global_data, cpu_usage_hwm=None):
         print("Starting server on port {} with {} worker processes.".format(
             port, processes))
         if cpu_usage_hwm:
@@ -26,7 +26,7 @@ class ServerRunner:
         self.__listener = Listener(('', port), 'AF_INET')
 
         self.__tasks = []
-        self.__compiler = ServerCompiler(cpu_usage_hwm)
+        self.__compiler = ServerCompiler(global_data, cpu_usage_hwm)
 
     def print_tasks(self):
         sys.stdout.write("Running {} tasks.\r".format(len(self.__tasks)))
@@ -42,14 +42,29 @@ class ServerRunner:
 
 
 class ServerCompiler:
-    def __init__(self, cpu_usage_hwm=None):
+    def __init__(self, global_data, cpu_usage_hwm=None):
         self.__hwm = cpu_usage_hwm
         self.__compiler_setup = {}
+        self.__global_data = global_data
+
+        self.__checksum = {}
+        self.__include = {}
 
     def accept(self):
         if not self.__hwm:
             return True
         return psutil.cpu_percent() < self.__hwm
+
+    def local_include_path(self, include_path, checksum):
+        if not include_path in self.__global_data:
+            return None
+        stored_checksum, local_path = self.__global_data[include_path]
+        if stored_checksum == checksum:
+            return local_path
+        return None
+
+    def store_includes(self, include_path, checksum, local_path):
+        self.__global_data[include_path] = (checksum, local_path)
 
     def setup_compiler(self, compiler_info):
         setup = self.__compiler_setup.get(compiler_info)
@@ -98,4 +113,6 @@ Usage:
     else:
         cpu_usage_hwm = None
     
-    ServerRunner(port, processes, cpu_usage_hwm).run()
+    manager = Manager()
+
+    ServerRunner(port, processes, manager.dict(), cpu_usage_hwm).run()

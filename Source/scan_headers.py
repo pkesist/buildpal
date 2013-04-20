@@ -1,3 +1,6 @@
+from utils import TempFile
+
+import hashlib
 import os
 import re
 import sys
@@ -34,7 +37,7 @@ def scan_file(cpp_file, rel_dir, search_path, cache, preprocess, depth=0):
                     name = os.path.join(rel_cpp_dir, new_file_name)
                     cache[name] = abs_full_name
                     scan_file(rel_full_name, rel_dir, search_path, cache, depth+1)
-                    continue
+                    contineu
 
             success = False
             for path in search_path:
@@ -47,7 +50,32 @@ def scan_file(cpp_file, rel_dir, search_path, cache, preprocess, depth=0):
             if not success:
                 cache[new_file_name] = None
 
-def collect_headers(cpp_file, rel_dir, search_path, defines, cache, zip_file):
+def collect_world(search_path, extensions):
+    result = {}
+    for path in search_path:
+        h = hashlib.md5()
+        zip_file = TempFile(suffix='.zip')
+        with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
+            for root, dirs, files in os.walk(path):
+                print("Processing dir '{}'.".format(root))
+                dirs.sort()
+                files.sort()
+                rel = os.path.relpath(root, path)
+                def file_filter(files):
+                    for file in files:
+                        ext = os.path.splitext(file)[1]
+                        if ext and ext[1:] in extensions:
+                            yield file
+                for file in file_filter(files):
+                    with open(os.path.join(root, file), 'rb') as f:
+                        for data in iter(lambda : f.read(10 * 1024), b''):
+                            h.update(data)
+                    zip.write(os.path.join(root, file), os.path.join(rel, file))
+        result[path]=(zip_file.filename(), h.digest())
+    return result
+
+
+def collect_headers(cpp_file, rel_dir, search_path, defines, cache):
     # Try with the naive approach.
     try:
         for index in range(len(search_path)):
@@ -55,10 +83,11 @@ def collect_headers(cpp_file, rel_dir, search_path, defines, cache, zip_file):
             if not os.path.isabs(sp):
                 search_path[index] = os.path.join(rel_dir, sp)
         scan_file(cpp_file, rel_dir, search_path, cache, 0)
-        with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED, False) as zip:
+        zip_file = TempFile(suffix='.zip')
+        with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
             for y in cache:
                 zip.write(cache[y], y)
-        return True
+        return zip_file
     except:
         pass
 
@@ -66,16 +95,17 @@ def collect_headers(cpp_file, rel_dir, search_path, defines, cache, zip_file):
     try:
         import preprocessor
         result = preprocessor.get_all_headers(os.path.join(rel_dir, cpp_file), search_path, defines)
-        with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED, False) as zip:
+        zip_file = TempFile(suffix='.zip')
+        with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
             for y in result:
                 # todo...
                 if result[y] is not None:
                     zip.write(result[y], y)
-        return True
+        return zip_file
     except:
         import traceback
         traceback.print_exc()
         pass
 
     # We failed to collect headers.
-    return False
+    return None

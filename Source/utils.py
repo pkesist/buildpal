@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import zlib
 
 class TempFile:
     """
@@ -77,3 +78,29 @@ echo {delimiter}
                 to_add[a[:eq].upper()] = a[eq+1:]
         return to_add
 
+
+
+def receive_file(conn, *args, **kwargs):
+    tempfile = TempFile(*args, **kwargs)
+    with tempfile.open('wb') as file:
+        more = True
+        while more:
+            more, data = conn.recv()
+            file.write(data)
+    return tempfile
+
+def receive_compressed_file(conn, *args, **kwargs):
+    more = True
+    tempfile = TempFile(*args, **kwargs)
+    decompressor = zlib.decompressobj()
+    with tempfile.open('wb') as file:
+        while more:
+            more, data = conn.recv()
+            file.write(decompressor.decompress(data))
+        file.write(decompressor.flush())
+    return tempfile
+
+def send_file(conn, file):
+    for data in iter(lambda : file.read(10 * 1024), b''):
+        conn.send((True, data))
+    conn.send((False, b''))

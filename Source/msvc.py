@@ -24,9 +24,13 @@ def find_on_path(executable):
         if test_exe(location):
             return location
 
-class MSVCDistributer(CompilationDistributer):
-    esc = ['/', '-']
+esc = ['/', '-']
+def simple(name): return CompilationDistributer.CompilerOption(name, esc, None, False)
+def simple_w_minus(name): return CompilationDistributer.CompilerOption(name, esc, '-', False)
+def with_param(name): return CompilationDistributer.CompilerOption(name, esc, None, True, False, False)
 
+
+class MSVCDistributer(CompilationDistributer):
     def preprocess_option(self): return self.__preprocess_option
     def object_name_option(self): return self.__object_name_option
     def compile_no_link_option(self): return self.__compile_no_link_option
@@ -34,40 +38,35 @@ class MSVCDistributer(CompilationDistributer):
     def define_option(self): return self.__define_option
 
     def __init__(self):
-        self.__preprocess_option = CompilationDistributer.CompilerOption('E', self.esc, None, False)
-        self.__object_name_option = CompilationDistributer.CompilerOption('Fo', self.esc, None, True, False, False)
-        self.__compile_no_link_option = CompilationDistributer.CompilerOption('c', self.esc, None, False)
-        self.__include_file_option = CompilationDistributer.CompilerOption('I' , self.esc, None, True , False, False)
-        self.__define_option = CompilationDistributer.CompilerOption('D' , self.esc, None, True , False, False)
+        self.__preprocess_option = simple('E')
+        self.__object_name_option = with_param('Fo')
+        self.__compile_no_link_option = simple('c')
+        self.__include_file_option = with_param('I')
+        self.__define_option = with_param('D')
         super(MSVCDistributer, self).__init__()
 
         # Bailout
-        for option_desc in self.bailout_options:
-            option=MSVCDistributer.CompilerOption(*option_desc)
+        for option in self.bailout_options:
             option.add_category(MSVCDistributer.BailoutCategory)
             self.add_option(option)
         # Preprocessing
-        for option_desc in self.preprocessing_options:
-            option=MSVCDistributer.CompilerOption(*option_desc)
+        for option in self.preprocessing_options:
             option.add_category(MSVCDistributer.PreprocessingCategory)
             self.add_option(option)
         # Compilation
-        for option_desc in self.compilation_options:
-            option=MSVCDistributer.CompilerOption(*option_desc)
+        for option in self.compilation_options:
             option.add_category(MSVCDistributer.CompilationCategory)
             self.add_option(option)
         # PCH options. Recognized, but ignored.
-        for option_desc in self.pch_options:
-            self.add_option(MSVCDistributer.CompilerOption(*option_desc))
+        for option in self.pch_options:
+            self.add_option(option)
         # Both preprocessing and compilation.
-        for option_desc in self.preprocess_and_compile:
-            option=MSVCDistributer.CompilerOption(*option_desc)
+        for option in self.preprocess_and_compile:
             option.add_category(MSVCDistributer.PreprocessingCategory)
             option.add_category(MSVCDistributer.CompilationCategory)
             self.add_option(option)
         # Always.
-        for option_desc in self.always:
-            option=MSVCDistributer.CompilerOption(*option_desc)
+        for option in self.always:
             option.add_category(MSVCDistributer.PreprocessingCategory)
             option.add_category(MSVCDistributer.CompilationCategory)
             option.add_category(MSVCDistributer.LinkingCategory)
@@ -132,141 +131,141 @@ class MSVCDistributer(CompilationDistributer):
         (b'17.00.50727.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
     }
 
-    # If we run into these just run the damn thing locally
     bailout_options = [
-        ['E' , esc, None, False],
-        ['EP', esc, None, False],
-        ['P' , esc, None, False],
-        ['Zg', esc, None, False],
-        ['Zs', esc, None, False],
+        # If we run into these just run the damn thing locally
+        simple('E' ),
+        simple('EP'),
+        simple('P' ),
+        simple('Zg'),
+        simple('Zs'),
     ]
 
     preprocessing_options = [
-        ['AI', esc, None, True , False, False],
-        ['FU', esc, None, True , False, False],
-        ['C' , esc, None, False              ],
-        ['D' , esc, None, True , False, False],
-        ['Fx', esc, None, False              ],
-        ['FI', esc, None, True , False, False],
-        ['U' , esc, None, True , False, False],
-        ['u' , esc, None, False              ],
-        ['I' , esc, None, True , False, False],
-        ['X' , esc, None, False              ],
+        with_param('AI'),
+        with_param('FU'),
+        with_param('D' ),
+        with_param('FI'),
+        with_param('U' ),
+        with_param('I' ),
+        simple    ('C' ),
+        simple    ('Fx'),
+        simple    ('u' ),
+        simple    ('X' ),
     ]
 
     pch_options = [
-        ['Fp', esc, None, True , False, False],
-        ['Yc', esc, None, True , False, False],
-        ['Yl', esc, None, True , False, False],
-        ['Yu', esc, None, True , False, False],
-        ['Y-', esc, None, False              ]
+        with_param('Fp'),
+        with_param('Yc'),
+        with_param('Yl'),
+        with_param('Yu'),
+        simple    ('Y-')
     ]
 
     preprocess_and_compile = [
         # These affect MSVC #pragmas, so we need them while preprocessing.
         # TODO: Check if they are really needed for compilation.
-        ['EH' , esc, None, True, False, False],
-        ['MD' , esc, None, False             ],
-        ['MT' , esc, None, False             ],
-        ['MDd', esc, None, False             ],
-        ['MTd', esc, None, False             ],
+        with_param('EH' ), #defines _CPPUNWIND
+        simple    ('MD' ), #defines _MT, _DLL
+        simple    ('MT' ), #defines _MT
+        simple    ('MDd'), #defines _MT, _DLL, _DEBUG
+        simple    ('MTd'), #defines _MT, _DEBUG
     ]
 
     always = [
-        ['nologo', esc, None, False],
+        simple('nologo')
     ]
 
     compilation_options = [
-        ['O1'                   , esc, None, False              ],
-        ['O2'                   , esc, None, False              ],
-        ['Ob'                   , esc, None, True , False, False],
-        ['Od'                   , esc, None, False              ],
-        ['Og'                   , esc, None, False              ],
-        ['Oi'                   , esc, '-' , False              ],
-        ['Os'                   , esc, None, False              ],
-        ['Ot'                   , esc, None, False              ],
-        ['Ox'                   , esc, None, False              ],
-        ['Oy'                   , esc, '-' , False              ],
-        ['O'                    , esc, None, True , False, False],
-        ['GF'                   , esc, None, False              ],
-        ['Gm'                   , esc, '-' , False              ],
-        ['Gy'                   , esc, '-' , False              ],
-        ['GS'                   , esc, '-' , False              ],
-        ['GR'                   , esc, '-' , False              ],
-        ['GX'                   , esc, '-' , False              ],
-        ['fp'                   , esc, None, True, False, False ],
-        ['Qfast_transcendentals', esc, None, False              ],
-        ['GL'                   , esc, '-' , False              ],
-        ['GA'                   , esc, None, False              ],
-        ['Ge'                   , esc, None, False              ],
-        ['Gs'                   , esc, None, True, False, False ],
-        ['Gh'                   , esc, None, False              ],
-        ['GH'                   , esc, None, False              ],
-        ['GT'                   , esc, None, False              ],
-        ['RTC1'                 , esc, None, False              ],
-        ['RTCc'                 , esc, None, False              ],
-        ['RTCs'                 , esc, None, False              ],
-        ['RTCu'                 , esc, None, False              ],
-        ['clr'                  , esc, None, True, False, False ],
-        ['Gd'                   , esc, None, False              ],
-        ['Gr'                   , esc, None, False              ],
-        ['Gz'                   , esc, None, False              ],
-        ['GZ'                   , esc, None, False              ],
-        ['QIfist'               , esc, '-' , False              ],
-        ['hotpatch'             , esc, None, False              ],
-        ['arch'                 , esc, None, True , False, False],
-        ['Qimprecise_fwaits'    , esc, None, False              ],
-        ['Fa'                   , esc, None, True , False, False],
-        ['FA'                   , esc, None, True , False, False],
-        ['Fd'                   , esc, None, True , False, False],
-        ['Fe'                   , esc, None, True , False, False],
-        ['Fm'                   , esc, None, True , False, False],
-        ['Fr'                   , esc, None, True , False, False],
-        ['FR'                   , esc, None, True , False, False],
-        ['doc'                  , esc, None, True , False, False],
-        ['Zi'                   , esc, None, False              ],
-        ['Z7'                   , esc, None, False              ],
-        ['Zp'                   , esc, None, True , False, False],
-        ['Za'                   , esc, None, False              ],
-        ['Ze'                   , esc, None, False              ],
-        ['Zl'                   , esc, None, False              ],
-        ['vd'                   , esc, None, True , False, False],
-        ['vm'                   , esc, None, True , False, False],
-        ['Zc'                   , esc, None, True , False, False],
-        ['ZI'                   , esc, None, False              ],
-        ['openmp'               , esc, None, False              ],
-        ['?'                    , esc, None, False              ],
-        ['help'                 , esc, None, False              ],
-        ['bigobj'               , esc, None, False              ],
-        ['errorReport'          , esc, None, True , False, False],
-        ['FC'                   , esc, None, False              ],
-        ['H'                    , esc, None, True , False, False],
-        ['J'                    , esc, None, False              ],
-        ['MP'                   , esc, None, True , False, False],
-        ['showIncludes'         , esc, None, False              ],
-        ['Tc'                   , esc, None, True , False, False],
-        ['Tp'                   , esc, None, True , False, False],
-        ['TC'                   , esc, None, False              ],
-        ['TP'                   , esc, None, False              ],
-        ['V'                    , esc, None, True , False, False],
-        ['w'                    , esc, None, False              ],
-        ['wd'                   , esc, None, True , False, False],
-        ['we'                   , esc, None, True , False, False],
-        ['wo'                   , esc, None, True , False, False],
-        ['w'                    , esc, None, True , False, False],
-        ['Wall'                 , esc, None, False              ],
-        ['WL'                   , esc, None, False              ],
-        ['WX'                   , esc, None, False              ],
-        ['W'                    , esc, None, True , False, False],
-        ['Yd'                   , esc, None, False              ],
-        ['Zm'                   , esc, None, True , False, False],
-        ['Wp64'                 , esc, None, False              ],
-        ['LD'                   , esc, None, False              ],
-        ['LDd'                  , esc, None, False              ],
-        ['LN'                   , esc, None, False              ],
-        ['F'                    , esc, None, True , False, False],
-        ['link'                 , esc, None, False              ],
-        ['analyze'              , esc, None, True , False, False]
+        simple        ('O1'                   ),
+        simple        ('O2'                   ),
+        with_param    ('Ob'                   ),
+        simple        ('Od'                   ),
+        simple        ('Og'                   ),
+        simple_w_minus('Oi'                   ),
+        simple        ('Os'                   ),
+        simple        ('Ot'                   ),
+        simple        ('Ox'                   ),
+        simple_w_minus('Oy'                   ),
+        with_param    ('O'                    ),
+        simple        ('GF'                   ),
+        simple_w_minus('Gm'                   ),
+        simple_w_minus('Gy'                   ),
+        simple_w_minus('GS'                   ),
+        simple_w_minus('GR'                   ),
+        simple_w_minus('GX'                   ),
+        with_param    ('fp'                   ),
+        simple        ('Qfast_transcendentals'),
+        simple_w_minus('GL'                   ),
+        simple        ('GA'                   ),
+        simple        ('Ge'                   ),
+        with_param    ('Gs'                   ),
+        simple        ('Gh'                   ),
+        simple        ('GH'                   ),
+        simple        ('GT'                   ),
+        simple        ('RTC1'                 ),
+        simple        ('RTCc'                 ),
+        simple        ('RTCs'                 ),
+        simple        ('RTCu'                 ),
+        with_param    ('clr'                  ),
+        simple        ('Gd'                   ),
+        simple        ('Gr'                   ),
+        simple        ('Gz'                   ),
+        simple        ('GZ'                   ),
+        simple_w_minus('QIfist'               ),
+        simple        ('hotpatch'             ),
+        with_param    ('arch'                 ),
+        simple        ('Qimprecise_fwaits'    ),
+        with_param    ('Fa'                   ),
+        with_param    ('FA'                   ),
+        with_param    ('Fd'                   ),
+        with_param    ('Fe'                   ),
+        with_param    ('Fm'                   ),
+        with_param    ('Fr'                   ),
+        with_param    ('FR'                   ),
+        with_param    ('doc'                  ),
+        simple        ('Zi'                   ),
+        simple        ('Z7'                   ),
+        with_param    ('Zp'                   ),
+        simple        ('Za'                   ),
+        simple        ('Ze'                   ),
+        simple        ('Zl'                   ),
+        with_param    ('vd'                   ),
+        with_param    ('vm'                   ),
+        with_param    ('Zc'                   ),
+        simple        ('ZI'                   ),
+        simple        ('openmp'               ),
+        simple        ('?'                    ),
+        simple        ('help'                 ),
+        simple        ('bigobj'               ),
+        with_param    ('errorReport'          ),
+        simple        ('FC'                   ),
+        with_param    ('H'                    ),
+        simple        ('J'                    ),
+        with_param    ('MP'                   ),
+        simple        ('showIncludes'         ),
+        with_param    ('Tc'                   ),
+        with_param    ('Tp'                   ),
+        simple        ('TC'                   ),
+        simple        ('TP'                   ),
+        with_param    ('V'                    ),
+        simple        ('w'                    ),
+        with_param    ('wd'                   ),
+        with_param    ('we'                   ),
+        with_param    ('wo'                   ),
+        with_param    ('w'                    ),
+        simple        ('Wall'                 ),
+        simple        ('WL'                   ),
+        simple        ('WX'                   ),
+        with_param    ('W'                    ),
+        simple        ('Yd'                   ),
+        with_param    ('Zm'                   ),
+        simple        ('Wp64'                 ),
+        simple        ('LD'                   ),
+        simple        ('LDd'                  ),
+        simple        ('LN'                   ),
+        with_param    ('F'                    ),
+        simple        ('link'                 ),
+        with_param    ('analyze'              ),
     ]
 
 if __name__ == "__main__":

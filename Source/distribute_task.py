@@ -1,4 +1,4 @@
-from scan_headers import collect_headers, collect_world
+from scan_headers import collect_headers
 
 import os
 import shutil
@@ -26,22 +26,10 @@ class CompileTask:
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
         self.__tempfile = None
 
-        #self.__algorithm = 'SEND_WORLD'
         self.__algorithm = 'SCAN_HEADERS'
         #self.__algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self, manager_ctx):
-        if self.__algorithm == 'SEND_WORLD':
-            for path in self.__search_path:
-                print("Processing {}".format(path))
-                if not path in manager_ctx.global_dict:
-                    stuff = collect_world(self.__search_path, manager_ctx.extensions)
-                    print("Processed {}...".format(path))
-                    print("Stuff", stuff)
-                    print("Updating dict.")
-                    manager_ctx.global_dict.update(stuff)
-                    print("Updated dict.")
-
         if self.__algorithm == 'SCAN_HEADERS':
             cache = {}
             missing = set()
@@ -76,24 +64,6 @@ class CompileTask:
         return True
 
     def manager_send(self, manager_ctx):
-        if self.__algorithm == 'SEND_WORLD':
-            print("Using send world algorithm")
-            manager_ctx.server_conn.send('SEND_WORLD')
-            for path in self.__search_path:
-                manager_ctx.server_conn.send('INCLUDE_PATH')
-                filename, checksum = manager_ctx.global_dict[path]
-                manager_ctx.server_conn.send((path, checksum))
-                print("path {} checksum {}".format(path, checksum))
-                needs_sending = manager_ctx.server_conn.recv()
-                print("Requesting include path {}".format(path))
-                if needs_sending:
-                    print("Needs sending.")
-                    with open(filename, 'rb') as file:
-                        send_file(manager_ctx.server_conn, file)
-            manager_ctx.server_conn.send('SOURCE_FILE')
-            with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
-                send_file(manager_ctx.server_conn, cpp)
-
         if self.__algorithm == 'SCAN_HEADERS':
             manager_ctx.server_conn.send('SCAN_HEADERS')
             with open(self.__tempfile.filename(), 'rb') as file:
@@ -127,41 +97,6 @@ class CompileTask:
             return
 
         task = conn.recv()
-        if task == 'SEND_WORLD':
-            include_paths = []
-            while True:
-                what = conn.recv()
-                if what == 'INCLUDE_PATH':
-                    include_path, checksum = conn.recv()
-                    local_include_path = server.local_include_path(include_path, checksum)
-                    conn.send(local_include_path is None)
-                    if local_include_path is None:
-                        zip_file = receive_file(conn)
-                        local_include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
-                        with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
-                            zip.extractall(path=local_include_path)
-                        server.store_includes(include_path, checksum, local_include_path)
-                    include_paths.append(local_include_path)
-                elif what == 'SOURCE_FILE':
-                    with receive_file(conn, suffix=self.__source_type) as source_file:
-                        with TempFile(suffix='.obj') as object_file:
-                            noLink = self.__compile_switch
-                            output = self.__output_switch.format(object_file.filename())
-
-                            defines = ['-D{}'.format(define) for define in self.__defines]
-                            includes = ['-I{}'.format(path) for path in include_paths]
-                            print("Includes", includes)
-                            retcode, stdout, stderr = compiler(self.__call + defines + includes + [noLink, output, source_file.filename()])
-                            conn.send('SERVER_DONE')
-                            needsResult = conn.recv()
-                            if not needsResult:
-                                return
-                            conn.send((retcode, stdout, stderr))
-                            if retcode == 0:
-                                with object_file.open('rb') as file:
-                                    send_file(conn, file)
-                    break
-
         if task == 'SCAN_HEADERS':
             with receive_file(conn) as zip_file:
                 include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)

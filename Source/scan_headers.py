@@ -50,31 +50,6 @@ def scan_file(cpp_file, rel_dir, search_path, cache, preprocess, depth=0):
             if not success:
                 cache[new_file_name] = None
 
-def collect_world(search_path, extensions):
-    result = {}
-    for path in search_path:
-        h = hashlib.md5()
-        zip_file = TempFile(suffix='.zip')
-        with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for root, dirs, files in os.walk(path):
-                print("Processing dir '{}'.".format(root))
-                dirs.sort()
-                files.sort()
-                rel = os.path.relpath(root, path)
-                def file_filter(files):
-                    for file in files:
-                        ext = os.path.splitext(file)[1]
-                        if ext and ext[1:] in extensions:
-                            yield file
-                for file in file_filter(files):
-                    with open(os.path.join(root, file), 'rb') as f:
-                        for data in iter(lambda : f.read(10 * 1024), b''):
-                            h.update(data)
-                    zip.write(os.path.join(root, file), os.path.join(rel, file))
-        result[path]=(zip_file.filename(), h.digest())
-    return result
-
-
 def collect_headers(cpp_file, rel_dir, search_path, defines, cache):
     # Try with the naive approach.
     try:

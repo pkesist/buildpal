@@ -14,12 +14,11 @@ class Context:
     pass
 
 class Worker(Process):
-    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict, extensions):
+    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict):
         ctx = Context()
         ctx.server_conn = server_conn
         ctx.client_conn = client_conn
         ctx.global_dict = global_dict
-        ctx.extensions = extensions
 
         self.__ctx = ctx
 
@@ -128,7 +127,7 @@ class WrapTask:
         return self.__lock
 
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue, global_dict, extensions):
+    def __init__(self, nodes, queue, global_dict):
         self.__queue = queue
         self.__nodes = nodes
         self.__node_info = [Value(NodeInfo, index, 0, 0, 0, 0) for index in range(len(nodes))]
@@ -138,7 +137,6 @@ class TaskProcessor(Process):
         self.__processes = []
         self.__priority_queue = []
 
-        self.__extensions = extensions
         self.__global_dict = global_dict
 
         super(TaskProcessor, self).__init__()
@@ -216,7 +214,7 @@ class TaskProcessor(Process):
 
         # Create and run worker.
         task, client_conn = self.__tasks[endpoint]
-        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict, self.__extensions)
+        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict)
         self.__processes.append(worker)
         worker.start()
 
@@ -364,13 +362,9 @@ Usage:
     manager = DistributeManager(r"\\.\pipe\{}".format(id), b"")
 
     
-    extensions=None
-    if config.has_option('Headers', 'extensions'):
-        extensions = config.get('Headers', 'extensions')
-
     local_manager = Manager()
 
-    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict(), extensions)
+    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict())
     task_processor.start()
 
     server = manager.get_server()

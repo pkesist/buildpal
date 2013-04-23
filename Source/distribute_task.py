@@ -55,7 +55,7 @@ class CompileTask:
                 '_MT=1',
                 '_CPPUNWIND',
                 '_HAS_TR1=1',
-                '_M_IX86',
+                '_M_IX86=600',
                 '_NATIVE_WCHAR_T_DEFINED=1',
                 '_HAS_ITERATOR_DEBUGGING=1',
                 '_DEBUG',

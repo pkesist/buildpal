@@ -305,7 +305,6 @@ class DistributeManager(BaseManager):
     pass
 
 def queue_task(task, endpoint):
-    print("Putting task")
     task_queue.put((task, endpoint))
 
 def get_task(*args, **kwargs):

@@ -445,7 +445,7 @@ class Preprocessor(object):
     # representing the replacement macro tokens
     # ----------------------------------------------------------------------
 
-    def macro_expand_args(self,macro,args):
+    def macro_expand_args(self, macro, args, notify=None):
         # Make a copy of the macro token sequence
         rep = [copy.copy(_x) for _x in macro.value]
 
@@ -479,7 +479,7 @@ class Preprocessor(object):
             # Normal expansion.  Argument is macro expanded first
             if ptype == 'e':
                 if argnum not in expanded:
-                    expanded[argnum] = self.expand_macros(args[argnum])
+                    expanded[argnum] = self.expand_macros(args[argnum], notify=notify)
                 rep[i:i+1] = expanded[argnum]
 
         i = 0
@@ -511,10 +511,11 @@ class Preprocessor(object):
     # expanded.  This is used to prevent infinite recursion.
     # ----------------------------------------------------------------------
 
-    def expand_macros(self,tokens,expanded=None, indent=0):
+    def expand_macros(self, tokens_ro, expanded=None, notify=None):
         if expanded is None:
             expanded = {}
         i = 0
+        tokens = copy.deepcopy(tokens_ro)
         while i < len(tokens):
             t = tokens[i]
             if t.type == self.t_ID:
@@ -523,11 +524,13 @@ class Preprocessor(object):
                     if m.arglist is None:
                         # A simple macro
                         expanded[t.value] = True
-                        ex = self.expand_macros([copy.copy(_x) for _x in m.value],expanded)
+                        ex = self.expand_macros([copy.copy(_x) for _x in m.value],expanded, notify)
                         del expanded[t.value]
                         for e in ex:
                             e.lineno = t.lineno
                         tokens[i:i+1] = ex
+                        if notify:
+                            notify("".join(t.value for t in tokens), ex)
                         i += len(ex)
                     else:
                         # A macro with arguments
@@ -555,11 +558,13 @@ class Preprocessor(object):
                                         del args[len(m.arglist):]
                                         
                                 # Get macro replacement text
-                                rep = self.macro_expand_args(m,args)
-                                rep = self.expand_macros(rep,expanded, indent + 1)
+                                rep = self.macro_expand_args(m, args, notify)
+                                rep = self.expand_macros(rep, expanded, notify)
                                 for r in rep:
                                     r.lineno = t.lineno
                                 tokens[i:j+tokcount] = rep
+                                if notify:
+                                    notify("".join([r.value for r in tokens]), rep)
                                 i += len(rep)
                             del expanded[t.value]
                         else:
@@ -579,14 +584,15 @@ class Preprocessor(object):
     # integral expressions.
     # ----------------------------------------------------------------------
 
-    def evalexpr(self,tokens):
+    def evalexpr(self, tokens_ro):
         # tokens = tokenize(line)
         # Search for defined macros
+        tokens = copy.deepcopy(tokens_ro)
         i = 0
         while i < len(tokens):
             if tokens[i].type == 'CPP_COMMENT':
-                del tokens[i:]
-                break
+                del tokens[i]
+                continue
             if tokens[i].type == self.t_ID and tokens[i].value == 'defined':
                 j = i + 1
                 needparen = False
@@ -606,7 +612,7 @@ class Preprocessor(object):
                     elif tokens[j].value == ')':
                         break
                     else:
-                        self.error(self.source,tokens[i].lineno,"Malformed defined()")
+                        self.error(self.source, tokens[i].lineno,"Malformed defined()")
                     j += 1
                 tokens[i].type = self.t_INTEGER
                 tokens[i].value = self.t_INTEGER_TYPE(result)
@@ -640,10 +646,10 @@ class Preprocessor(object):
                 return 0
             return eval(expr)
         except Exception:
-            self.error(self.source,token[0].lineno,"Couldn't evaluate expression '{}'".format(expr))
+            self.error(self.source,tokens[0].lineno,"Couldn't evaluate expression '{}'".format(expr))
             result = 0
         except SyntaxError:
-            self.error(self.source, token[0].lineno, "Found syntax error '{}'".format(expr))
+            self.error(self.source, tokens[0].lineno, "Found syntax error '{}'".format(expr))
             result = 0
         return result
 

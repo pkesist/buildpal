@@ -69,8 +69,17 @@ class LexError(Exception):
 class LexToken(object):
     def __str__(self):
         return "LexToken(%s,%r,%d,%d)" % (self.type,self.value,self.lineno,self.lexpos)
+
     def __repr__(self):
         return str(self)
+
+    def __deepcopy__(self, memo):
+        result = self.__class__()
+        result.type = self.type
+        result.value = copy.deepcopy(self.value, memo)
+        result.lineno = self.lineno
+        result.lexpos = self.lexpos
+        return result
 
 # This object is a stand-in for a logging object created by the 
 # logging module.  

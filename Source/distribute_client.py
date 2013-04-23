@@ -216,8 +216,12 @@ class CompilationDistributer(CmdLineOptions):
                         sys.stderr.write("---------------------------- STDERR ----------------------------\n")
                         sys.stderr.write(stderr.decode())
                         sys.stderr.write("----------------------------------------------------------------\n")
-                    break
-        listener.close()
+                    listener.close()
+                    sys.exit(retcode)
+                    break # Never reached
+                if task == "FAILED":
+                    sys.exit(-1)
+                    break # Never reached
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

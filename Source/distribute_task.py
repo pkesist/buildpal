@@ -12,13 +12,14 @@ from utils import TempFile, send_file, receive_file, receive_compressed_file
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, input, search_path, defines, output, compiler_info, distributer):
+    def __init__(self, cwd, call, source, source_type, input, search_path, macros, builtin_macros, output, compiler_info, distributer):
         self.__call = call
         self.__cwd = cwd
         self.__source = source
         self.__input = input
         self.__search_path = search_path
-        self.__defines = defines
+        self.__macros = macros
+        self.__builtin_macros = builtin_macros
         self.__source_type = source_type
         self.__output = output
         self.__compiler_info = compiler_info
@@ -33,23 +34,9 @@ class CompileTask:
         if self.__algorithm == 'SCAN_HEADERS':
             cache = {}
             missing = set()
-            defines = self.__defines + [
-                '_MSC_VER=1500',
-                '_MSC_FULL_VER=150030729',
-                '_CPPLIB_VER=505',
-                '__cplusplus',
-                '_WIN32',
-                '_MSC_EXTENSIONS=1',
-                '_MT=1',
-                '_CPPUNWIND',
-                '_HAS_TR1=1',
-                '_M_IX86=600',
-                '_NATIVE_WCHAR_T_DEFINED=1',
-                '_HAS_ITERATOR_DEBUGGING=1',
-                '_DEBUG',
-                '_CPPRTTI']
+            macros = self.__macros + self.__builtin_macros + ['__cplusplus']
 
-            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, defines, cache)
+            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros, cache)
             if tempFile:
                 self.__tempfile = tempFile
             else:
@@ -110,7 +97,7 @@ class CompileTask:
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 
-                        defines = ['-D{}'.format(define) for define in self.__defines]
+                        defines = ['-D{}'.format(define) for define in self.__macros]
                         retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
                         conn.send('SERVER_DONE')
                         needsResult = conn.recv()

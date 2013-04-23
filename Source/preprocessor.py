@@ -161,7 +161,7 @@ class ResolveInclude(Preprocessor):
                                     print('MACRO - {} - {} - {}'.format(macro, "".join(x.value for x in self.macros[macro].value), "Enabled" if enable else "Disable"))
                                 else:
                                     print("MACRO '{}' not defined - {}".format(macro, "Enabled" if enable else "Disable"))
-                        i += 1
+                            i += 1
                     else:
                         for macro in self.macros:
                             print('MACRO - {} - {}'.format(macro, "".join(x.value for x in self.macros[macro].value), "Enabled" if enable else "Disable"))

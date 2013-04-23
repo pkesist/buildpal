@@ -48,16 +48,18 @@ class Preprocessor:
             pass
 
 class CompilerInfo:
-    def __init__(self, toolset, executable, size, id):
+    def __init__(self, toolset, executable, size, id, macros):
         self.__toolset = toolset
         self.__executable = executable
         self.__size = size
         self.__id = id
+        self.__macros = macros
 
     def toolset(self): return self.__toolset
     def executable(self): return self.__executable
     def size(self): return self.__size
     def id(self): return self.__id
+    def macros(self): return self.__macros
 
 class CompilationDistributer(CmdLineOptions):
     class Category: pass
@@ -70,12 +72,27 @@ class CompilationDistributer(CmdLineOptions):
         def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
             super().__init__(name, esc, suff, has_arg, allow_spaces, allow_equal, default_separator)
             self.__categories = set()
+            self.__macros = set()
 
         def add_category(self, cat):
             self.__categories.add(cat)
         
         def test_category(self, cat):
             return cat in self.__categories
+
+        def add_macro(self, macro):
+            self.__macros.add(macro)
+
+        def get_macros(self, value):
+            result = []
+            for macro in self.__macros:
+                if callable(macro):
+                    t = macro(value)
+                    if t:
+                        result.append(t)
+                else:
+                    result.append(macro)
+            return result
 
     class Context:
         def __init__(self, command, option_parser):
@@ -143,6 +160,17 @@ class CompilationDistributer(CmdLineOptions):
     def object_name_option(self): raise NotImplementedError()
     def compile_no_link_option(self): raise NotImplementedError()
 
+    def compiler_option_macros(self, tokens):
+        result = []
+        for token in (token for token in tokens
+            if type(token.option) == CompilationDistributer.CompilerOption and
+            token.option.test_category(CompilationDistributer.PreprocessingCategory)):
+            option = token.option
+            if not option:
+                continue
+            result += token.option.get_macros(token.val)
+        return result
+
     def __init__(self):
         self.compile_no_link_option().add_category(CompilationDistributer.CompilationCategory)
         self.include_file_option().add_category(CompilationDistributer.PreprocessingCategory)
@@ -177,7 +205,10 @@ class CompilationDistributer(CmdLineOptions):
 
         sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
-        defines = [token.val for token in ctx.filter_options(self.define_option())]
+        macros = [token.val for token in ctx.filter_options(self.define_option())]
+
+        compiler_info = self.compiler_info(ctx.executable())
+        builtin_macros = compiler_info.macros() + self.compiler_option_macros(ctx.options())
 
         def make_task(source):
             preprocessor = Preprocessor(preprocess_call + [source])
@@ -188,7 +219,8 @@ class CompilationDistributer(CmdLineOptions):
                 source_type = os.path.splitext(source)[1],
                 input = preprocessor.filename(),
                 search_path = includes,
-                defines = defines,
+                macros = macros,
+                builtin_macros = builtin_macros,
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = self.compiler_info(ctx.executable()),
                 distributer = self)

@@ -11,14 +11,20 @@ import os
 import configparser
 
 class Context:
-    pass
+    def add_time(self, type, value):
+        self.times[type] = self.get_time(type) + value
+
+    def get_time(self, type):
+        return self.times.get(type, 0)
 
 class Worker(Process):
-    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict):
+    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict, hdrcache, times):
         ctx = Context()
         ctx.server_conn = server_conn
         ctx.client_conn = client_conn
         ctx.global_dict = global_dict
+        ctx.hdrcache    = hdrcache
+        ctx.times       = times
 
         self.__ctx = ctx
 
@@ -38,12 +44,17 @@ class Worker(Process):
                 if self.wrapped_task().is_prepared():
                     return
                 if not self.wrapped_task().is_prepared():
+                    start = time()
                     if self.wrapped_task().task().manager_prepare(self.context()):
                         self.wrapped_task().mark_prepared()
                     else:
                         raise RuntimeError("Failed to prepare task.")
-
+                    self.context().add_time('prepare', time() - start)
+        
+        start = time()
         self.wrapped_task().task().manager_send(self.context())
+        sent = time()
+        self.context().add_time('send', sent - start)
 
         if self.__original:
             self.__node_info.tasks_sent_new += 1
@@ -52,7 +63,9 @@ class Worker(Process):
 
         # Just block
         done = self.context().server_conn.recv()
+        serverdone = time()
         assert done == "SERVER_DONE"
+        self.context().add_time('server_time', serverdone - sent)
 
         with self.wrapped_task().lock():
             if self.wrapped_task().is_completed():
@@ -66,7 +79,11 @@ class Worker(Process):
         except:
             pass
 
-        return self.wrapped_task().task().manager_receive(self.context())
+        
+        start = time()
+        result = self.wrapped_task().task().manager_receive(self.context())
+        self.context().add_time('receive', time() - start)
+        return result
 
 
     def run(self):
@@ -127,7 +144,7 @@ class WrapTask:
         return self.__lock
 
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue, global_dict):
+    def __init__(self, nodes, queue, global_dict, hdrcache, times):
         self.__queue = queue
         self.__nodes = nodes
         self.__node_info = [Value(NodeInfo, index, 0, 0, 0, 0) for index in range(len(nodes))]
@@ -138,6 +155,8 @@ class TaskProcessor(Process):
         self.__priority_queue = []
 
         self.__global_dict = global_dict
+        self.__hdrcache = hdrcache
+        self.__times = times
 
         super(TaskProcessor, self).__init__()
 
@@ -214,7 +233,7 @@ class TaskProcessor(Process):
 
         # Create and run worker.
         task, client_conn = self.__tasks[endpoint]
-        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict)
+        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict, self.__hdrcache, self.__times)
         self.__processes.append(worker)
         worker.start()
 
@@ -238,6 +257,9 @@ class TaskProcessor(Process):
                 self.tasks_processing(index), self.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
+        times = self.__times._getvalue()
+        for time in times:
+            print('{} - {}'.format(time, times[time]))
 
     def find_available_node(self, endpoint):
         wrapped_task, client_conn = self.__tasks[endpoint]
@@ -364,7 +386,7 @@ Usage:
     
     local_manager = Manager()
 
-    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict())
+    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict(), local_manager.dict(), local_manager.dict())
     task_processor.start()
 
     server = manager.get_server()

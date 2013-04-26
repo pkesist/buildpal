@@ -9,6 +9,7 @@ import zipfile
 import zlib
 
 from utils import TempFile, send_file, receive_file, receive_compressed_file
+from time import time
 from multiprocessing.connection import Client
 
 class CompileTask:
@@ -32,11 +33,10 @@ class CompileTask:
 
     def manager_prepare(self, manager_ctx):
         if self.__algorithm == 'SCAN_HEADERS':
-            cache = {}
-            missing = set()
             macros = self.__macros + self.__builtin_macros + ['__cplusplus']
 
-            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros, cache)
+            start = time()
+            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros, manager_ctx.hdrcache)
             if tempFile:
                 self.__tempfile = tempFile
             else:

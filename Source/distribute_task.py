@@ -36,7 +36,7 @@ class CompileTask:
             macros = self.__macros + self.__builtin_macros + ['__cplusplus']
 
             start = time()
-            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros, manager_ctx.hdrcache)
+            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros)
             if tempFile:
                 self.__tempfile = tempFile
             else:

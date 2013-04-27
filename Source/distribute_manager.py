@@ -18,12 +18,11 @@ class Context:
         return self.times.get(type, 0)
 
 class Worker(Process):
-    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict, hdrcache, times):
+    def __init__(self, wrapped_task, server_conn, client_conn, node_info, original, global_dict, times):
         ctx = Context()
         ctx.server_conn = server_conn
         ctx.client_conn = client_conn
         ctx.global_dict = global_dict
-        ctx.hdrcache    = hdrcache
         ctx.times       = times
 
         self.__ctx = ctx
@@ -144,7 +143,7 @@ class WrapTask:
         return self.__lock
 
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue, global_dict, hdrcache, times):
+    def __init__(self, nodes, queue, global_dict, times):
         self.__queue = queue
         self.__nodes = nodes
         self.__node_info = [Value(NodeInfo, index, 0, 0, 0, 0) for index in range(len(nodes))]
@@ -155,7 +154,6 @@ class TaskProcessor(Process):
         self.__priority_queue = []
 
         self.__global_dict = global_dict
-        self.__hdrcache = hdrcache
         self.__times = times
 
         super(TaskProcessor, self).__init__()
@@ -233,7 +231,7 @@ class TaskProcessor(Process):
 
         # Create and run worker.
         task, client_conn = self.__tasks[endpoint]
-        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict, self.__hdrcache, self.__times)
+        worker = Worker(task, server_conn, client_conn, self.__node_info[node_index], original, self.__global_dict, self.__times)
         self.__processes.append(worker)
         worker.start()
 
@@ -386,7 +384,7 @@ Usage:
     
     local_manager = Manager()
 
-    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict(), local_manager.dict(), local_manager.dict())
+    task_processor = TaskProcessor(nodes, task_queue, local_manager.dict(), local_manager.dict())
     task_processor.start()
 
     server = manager.get_server()

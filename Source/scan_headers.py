@@ -340,36 +340,6 @@ def collect_headers(cpp_file, rel_dir, search_path, defines):
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
             for file, full in preprocessor.scan_file(os.path.join(rel_dir, cpp_file)):
                 zip.write(full, file)
-        macros = [
-        ('BOOST_PP_FILENAME_1', 'BOOST_PP_FILENAME_1'),
-        ('BOOST_PP_ARRAY_ELEM', 'BOOST_PP_ARRAY_ELEM(2, BOOST_PP_ITERATION_PARAMS_1)'),
-        ('BOOST_PP_ARRAY_ELEM_I', 'BOOST_PP_ARRAY_ELEM_I(2, (3,(0,BOOST_RESULT_OF_NUM_ARGS,<boost/utility/detail/result_of_iterate.hpp>)))'),
-        ('BOOST_PP_TUPLE_ELEM', 'BOOST_PP_TUPLE_ELEM(3, 2, (0,16,<boost/utility/detail/result_of_iterate.hpp>))'),
-        ('BOOST_PP_TUPLE_ELEM_I_OO', 'BOOST_PP_TUPLE_ELEM_I_OO((3, 2, (0,16,<boost/utility/detail/result_of_iterate.hpp>)))'),
-        ('BOOST_PP_TUPLE_ELEM_I', 'BOOST_PP_TUPLE_ELEM_I(3, 2, (0,16,<boost/utility/detail/result_of_iterate.hpp>))'),
-        ('BOOST_PP_TUPLE_ELEM_E_3', 'BOOST_PP_TUPLE_ELEM_E_3 (0,16,<boost/utility/detail/result_of_iterate.hpp>)'),
-        ('BOOST_PP_TUPLE_ELEM_II', 'BOOST_PP_TUPLE_ELEM_II((2, (0, 16, <boost/utility/detail/result_of_iterate.hpp>, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)))'),
-        ('BOOST_PP_TUPLE_ELEM_III_OO', 'BOOST_PP_TUPLE_ELEM_III_OO((2, (0, 16, <boost/utility/detail/result_of_iterate.hpp>, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)))'),
-        #('BOOST_PP_ITERATION_PARAMS_1', 'BOOST_PP_ITERATION_PARAMS_1'),
-        #('BOOST_PP_TUPLE_ELEM', 'BOOST_PP_TUPLE_ELEM(3, 2, BOOST_PP_ARRAY_DATA(BOOST_PP_ITERATION_PARAMS_1))'),
-        ]
-
-        for macro, expr in macros:
-        #for macro in ['BOOST_PP_ARRAY_DATA_II']:
-            print("MACRO '{}'".format(macro))
-            for macro_value in preprocessor.macros[macro]:
-                print("-------------------------------------------------------------------")
-                print("-------------------------------------------------------------------")
-                print("-------------------------------------------------------------------")
-                print("Id '{}'".format(id(macro_value)))
-                print("Params '{}'".format(macro_value.params))
-                print("Expr   '{}'".format(macro_value.expr))
-                print("-------------------------------------------------------------------")
-                #import pdb
-                #pdb.set_trace()
-            for x in preprocessor.expand(expr, debug=True):
-                print("{} expanded to: '{}'".format(expr, x))
-            print("-------------------------------------------------------------------")
         return zip_file
     except:
         import traceback

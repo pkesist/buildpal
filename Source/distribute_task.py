@@ -40,7 +40,8 @@ class CompileTask:
             if tempFile:
                 self.__tempfile = tempFile
             else:
-                self.__algorithm = 'PREPROCESS_LOCALLY'
+                raise RuntimeError("Failed to preprocess.")
+                #self.__algorithm = 'PREPROCESS_LOCALLY'
 
         if self.__algorithm == 'PREPROCESS_LOCALLY':
             # Signal the client to do preprocessing.

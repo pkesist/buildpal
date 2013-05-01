@@ -74,18 +74,17 @@ def tokenize(expr):
 class Macro:
     def __init__(self, params, expr):
         self.params = params
+        self.variadic = False
         if self.params:
             if '...' in self.params[:-1]:
                 raise ValueError("Invalid elipsis in macro parameters")
             if self.params[-1] == '...':
-                self.params[-1] == '__VA_ARGS__'
+                self.params[-1] = '__VA_ARGS__'
                 self.variadic = True
-            else:
-                self.variadic = False
         self.expr = tokenize(expr.replace("\\\n", '').strip())
-        self.expand = []
-        self.stringize = []
-        self.cat = []
+        self.tokens_to_expand = []
+        self.tokens_to_stringize = []
+        self.tokens_to_catenate = []
         last = None
         skip_expand = False
         last_was_cat = None
@@ -98,7 +97,7 @@ class Macro:
                     if token.type == Identifier and params and token.value in self.params:
                         del self.expr[last_was_str]
                         i -= 1
-                        self.stringize.append(i)
+                        self.tokens_to_stringize.append(i)
                         skip_expand = True
                 if last_was_cat is not None:
                     assert self.expr[last_was_cat].type == HashHash
@@ -106,7 +105,7 @@ class Macro:
                     i -= 1
                     skip_expand = True
                     assert(last != i)
-                    self.cat.append((last, i))
+                    self.tokens_to_catenate.append((last, i))
                 last_was_str = None
                 last_was_cat = None
 
@@ -115,7 +114,7 @@ class Macro:
 
             if token.type == Identifier:
                 if self.params and token.value in self.params and not skip_expand:
-                    self.expand.append(i)
+                    self.tokens_to_expand.append(i)
                 skip_expand = False
 
             elif token.type == Hash:
@@ -123,28 +122,36 @@ class Macro:
 
             if token.type == HashHash:
                 last_was_cat = i
-                if self.expand and self.expand[-1] == last:
-                    del self.expand[-1]
+                if self.tokens_to_expand and self.tokens_to_expand[-1] == last:
+                    del self.tokens_to_expand[-1]
             i += 1
-        self.cat.reverse()
+        # Catenation will remove tokens thus destroying all trailing indices.
+        # Make sure we are catenating right-to-left.
+        # TODO: Ugly
+        self.tokens_to_catenate.reverse()
 
     def subst(self, macros, args, depth):
-        if len(args) != len(self.params):
-            if self.variadic:
-                assert(len(args) >= len(self.params) - 1)
-            else:
-                #raise Exception("Invalid number of parameters. Expected {}, got {}".format(len(self.params), len(args)))
-                args.extend([[Token(Other, '')] for x in range(len(self.params)-len(args))])
+        required = len(self.params)
+        if self.variadic:
+            required -= 1
+        if len(args) < required:
+            args.extend([[Token(Other, '')] for x in range(required-len(args))])
         result = []
         for i in range(len(self.expr)):
             token = self.expr[i]
             if token.type == Identifier and token.value in self.params:
                 if self.variadic and token.value == '__VA_ARGS__':
-                    result.extend(args[len(self.params-1):])
-                to_add = args[self.params.index(token.value)]
-                if i in self.expand:
-                    to_add = expand_tokens(macros, to_add, depth)
-                result.append(to_add)
+                    first = True
+                    for i in range(len(self.params) - 1, len(args)):
+                        if not first:
+                            result.append([Token(Other, ',')])
+                        result.append(args[i])
+                        first = False
+                else:
+                    to_add = args[self.params.index(token.value)]
+                    if i in self.tokens_to_expand:
+                        to_add = expand_tokens(macros, to_add, depth)
+                    result.append(to_add)
             elif token.type == Whitespace:
                 token.value = ' '
                 result.append([token])
@@ -152,25 +159,44 @@ class Macro:
                     i += 1
             else:
                 result.append([token])
-        assert len(result) == len(self.expr)
+        assert self.variadic or len(result) == len(self.expr)
+        self.process_stringize(result)
+        self.process_catenate(result)
+        return list(itertools.chain(*result))
 
-        for i in self.stringize:
-            print(args)
-            print(result[i])
+    def process_stringize(self, result):
+        for i in self.tokens_to_stringize:
             assert len(result[i]) == 1
             result[i][0].value = '"{}"'.format(result[i][0].value)
 
-        for a, b in self.cat:
+    def process_catenate(self, result):
+        """
+            The result parameter is actually a list of lists. Each internal list
+            is a token after parameter substitution. This way indices which need
+            to be catenated are preserved.
+        """
+        for a, b in self.tokens_to_catenate:
             assert a < b
             assert len(result[a]) >= 1 and len(result[b]) >= 1
-            if result[a][-1].type == Identifier and result[b][0].type == Identifier:
+            if result[a][-1].type == Identifier and (result[b][0].type in (Identifier, Digits)):
+                # Make sure we create a new identifier in this case.
                 result[a][-1].value += result[b][0].value
                 result[a].extend(result[b][1:])
             else:
+                # Two separate tokens are OK.
                 result[a].extend(result[b])
+                # TODO:
+                # In case catenate does not yield a valid preprocessor token
+                # MSVC C++ preprocessor simply removes ## and expands the entire
+                # expression. For example, given
+                # #define A 1
+                # #define B 2
+                # #define CAT(a,b) a##b
+                # CAT((A),B) becomes (1)2
+                # We do not emulate this behavior here, but there is a
+                # (disabled) test below.
+            # Get rid of all whitespace and '##' inbetween
             del result[a+1:b+1]
-        print("RESULT IS ", list(itertools.chain(*result)))
-        return list(itertools.chain(*result))
                 
 def trim_tokens(what):
     while what and what[0].type == Whitespace:
@@ -239,7 +265,9 @@ def expand_tokens(macros, expr, depth=0):
                         i += 1
                         continue
                 else:
-                    result.extend(macros[token.value].expr)
+                    tokens = [[tok] for tok in macros[token.value].expr]
+                    macros[token.value].process_catenate(tokens)
+                    result.extend(list(itertools.chain(*tokens)))
                 expanded = True
             else:
                 result.append(token)
@@ -353,19 +381,6 @@ if __name__ == '__main__':
     assert expand(dict(A=Macro(["xx", "x"], "xxx;xx")), "A(5,9)") == "xxx;5"
     assert expand(dict(A=Macro(["xx", "x"], "xx;xxx")), "A(5,9)") == "5;xxx"
 
-    # Invalid number of macro parameters.
-    # Implementation note:
-    #   We wish to match MS Visual C++ compiler behaviour here, therefore we
-    # allow function-like macro expansions with an invalid number of parameters
-    # by ignoring extra ones and expanding missing ones as empty strings.
-    #                                                (30.04.2013.) (Jurko)
-    assert expand(dict(AAA=Macro(["x", "y"], "a;x;y;b")), "AAA()") == "a;;;b"
-    assert expand(dict(AAA=Macro(["x", "y"], "a;x;y;b")), "AAA(1)") == "a;1;;b"
-    assert expand(dict(AAA=Macro(["x", "y"], "a;x;y;b")), "AAA(,2)") ==  \
-        "a;;2;b"
-    assert expand(dict(AAA=Macro(["x", "y"], "a;x;y;b")), "AAA(1,2,3)") ==  \
-        "a;1;2;b"
-
     # Comments replaced with a single space character.
     assert expand(noMacros, "puff/* unga */daddy") == "puff daddy"
     assert expand(noMacros, "puff /* unga */ daddy") == "puff daddy"
@@ -395,7 +410,6 @@ if __name__ == '__main__':
         "*/")), "A") == "x y"
 
     # Preprocessing token concatenation.
-    print("adgjkladghadgakadgdghjdhhadaagd '{}'".format(expand(dict(AAA=Macro(["x", "y"], "AA##BB")), "AAA(5,6)")))
     assert expand(dict(AAA=Macro(["x", "y"], "AA##BB")), "AAA(5,6)") == "AABB"
     assert expand(dict(AAA=Macro(["x", "y"], "x##BB")), "AAA(5,6)") == "5BB"
     assert expand(dict(AAA=Macro(["x", "y"], "AA##y")), "AAA(5,6)") == "AA6"
@@ -425,7 +439,7 @@ if __name__ == '__main__':
     concatMacros = dict(A=Macro(None, "1"), B=Macro(None, "2"), AB=Macro(None,
         "tupko"), MERGE=Macro(None, "A##B"), MERGE2=Macro(["x", "y"], "x##y"))
     assert expand(concatMacros, "A##B") == "1##2"
-    #assert expand(concatMacros, "MERGE") == "tupko"
+    assert expand(concatMacros, "MERGE") == "tupko"
     assert expand(concatMacros, "MERGE2(A, B)") == "tupko"
     # Non-standard MS VC++ behaviour we currently do not emulate.
     if enable_tests_for_unsupported_features:
@@ -448,7 +462,7 @@ if __name__ == '__main__':
     assert expand(dict(A=Macro(None, "pip"), B=Macro(None, "A(22)")), "B(9)")  \
         == "pip(22)(9)"
 
-    # Stringize.
+    # Stringize constant.
     stringizeMacros = dict(S=Macro(["x"], "S2(x)"), S2=Macro(["x"], "#x"))
     assert expand(noMacros, "#AAA") == "#AAA"
     assert expand(dict(AAA=Macro(None, "1")), "#AAA") == "#1"
@@ -459,9 +473,12 @@ if __name__ == '__main__':
     assert expand(dict(AAA=Macro(["x"], "ge#xfu")), "AAA(55)") == 'ge#xfu'
     assert expand(stringizeMacros, "S2(B)") == '"B"'
     assert expand(stringizeMacros, "S(B)") == '"B"'
-    stringizeMacros.update(B=Macro(None, '0'))
-    assert expand(stringizeMacros, "S2(B)") == '"B"'
-    assert expand(stringizeMacros, "S(B)") == '"0"'
+
+    # Stringize macro value.
+    macros = stringizeMacros.copy()
+    macros.update(B=Macro(None, "0"))
+    assert expand(macros, "S2(B)") == '"B"'
+    assert expand(macros, "S(B)") == '"0"'
 
     # Passing function-like macro name as parameter.
     assert expand(dict(BB=Macro([], "10"), B=Macro([], "5"), AAA=Macro(["x"],
@@ -473,4 +490,42 @@ if __name__ == '__main__':
     assert expand(dict(BB=Macro([], "10"), B=Macro([], "5"), AAA=Macro(["x"],
         "B##x"), BBB=Macro(["x"], "AAA(x)")), "BBB(B())") == "B5"
 
-    #TODO: variadic macros... ... = last parameter, __VA_ARGS__ = expands to the extra parameters
+    # Variadic macros.
+    assert expand(dict(A=Macro([], "__VA_ARGS__")), "A()") == "__VA_ARGS__"
+    assert expand(dict(A=Macro([], "__VA_ARGS__")), "A(1, 2, 3)") ==  \
+        "__VA_ARGS__"
+    assert expand(dict(A=Macro(["..."], "__VA_ARGS__")), "A()") == ""
+    assert expand(dict(A=Macro(["..."], "__VA_ARGS__")), "A(1, 2, 3)") ==  \
+        "1,2,3"
+    assert expand(dict(A=Macro(["..."], "__VA_ARGS__")), "A(1,2,3)") ==  \
+        "1,2,3"
+    assert expand(dict(A=Macro(["..."], "__VA_ARGS__")), "A(1,2,   3)") ==  \
+        "1,2,3"
+    assert expand(dict(A=Macro(["x", "..."], "__VA_ARGS__")), "A(1, 2, 3)")  \
+        == "2,3"
+    assert expand(dict(A=Macro(["x", "y", "..."], "__VA_ARGS__")), "A(1, 2, 3)"
+        ) == "3"
+    assert expand(dict(A=Macro(["x", "y", "z", "..."], "__VA_ARGS__")),  \
+        "A(1, 2, 3)") == ""
+    assert expand(dict(A=Macro(["x", "y", "z", "..."], "__VA_ARGS__, z, y, x")
+        ), "A(1, 2, 3)") == ", 3, 2, 1"
+
+    # Invalid number of macro parameters.
+    # Implementation note:
+    #   We wish to match MS Visual C++ compiler behaviour here, therefore we
+    # allow function-like macro expansions with an invalid number of parameters
+    # by ignoring extra ones and expanding missing ones as empty strings.
+    #                                                (30.04.2013.) (Jurko)
+    assert expand(dict(A=Macro(["x", "y"], "a;x;y;b")), "A()") == "a;;;b"
+    assert expand(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1)") == "a;1;;b"
+    assert expand(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(,2)") == "a;;2;b"
+    assert expand(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1,2,3)") ==  \
+        "a;1;2;b"
+    assert expand(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+        "A()") == "a;;;;b"
+    assert expand(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+        "A(1)") == "a;1;;;b"
+    assert expand(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+        "A(,2)") == "a;;2;;b"
+    assert expand(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+        "A(,,,4)") == "a;;;,4;b"

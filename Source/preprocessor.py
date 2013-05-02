@@ -241,7 +241,7 @@ def collect_args(tokens):
             current_arg.append(tok)
         i += 1
 
-def expand_tokens(macros, expr, depth=0):
+def expand_tokens(macros, expr, start=True, depth=0):
     assert isinstance(expr, list)
     indent = "    " * depth
     print(indent + "Expression '{}'".format(expr))
@@ -251,26 +251,29 @@ def expand_tokens(macros, expr, depth=0):
     expr = trim_tokens(expr)
     while i < len(expr):
         token = expr[i]
-        if token.type == Identifier:
-            if token.value in macros:
-                macro = macros[token.value]
-                if macro.params is not None:
-                    args, offset = collect_args(expr[i+1:])
-                    if args is not None:
-                        i += offset
-                        result.extend(macros[token.value].subst(macros, args, depth))
-                    else:
-                        expanded = False
-                        result.append(token)
-                        i += 1
-                        continue
+        if token.type == Identifier and token.value in macros:
+            macro = macros[token.value]
+            if macro.params is not None:
+                args, offset = collect_args(expr[i+1:])
+                if args is not None:
+                    i += offset
+                    result.extend(macros[token.value].subst(macros, args, depth))
                 else:
-                    tokens = [[tok] for tok in macros[token.value].expr]
-                    macros[token.value].process_catenate(tokens)
-                    result.extend(list(itertools.chain(*tokens)))
-                expanded = True
+                    expanded = False
+                    result.append(token)
+                    i += 1
+                    continue
             else:
-                result.append(token)
+                tokens = [[tok] for tok in macros[token.value].expr]
+                macros[token.value].process_catenate(tokens)
+                result.extend(list(itertools.chain(*tokens)))
+            if i + 1 < len(expr):
+                result.extend(expand_tokens(macros, expr[i+1:], False, depth))
+                i = len(expr)
+            if start:
+                return expand_tokens(macros, result, depth+1)
+            else:
+                return result
         elif token.type == Whitespace:
             token.value = ' '
             result.append(token)
@@ -279,7 +282,7 @@ def expand_tokens(macros, expr, depth=0):
         else:
             result.append(token)
         i += 1
-    return expand_tokens(macros, result, depth+1) if expanded else result
+    return result
 
 def expand(macros, expr):
     expr = expr.replace('\\\n', '')

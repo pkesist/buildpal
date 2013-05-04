@@ -130,14 +130,14 @@ class Macro:
         # TODO: Ugly
         self.tokens_to_catenate.reverse()
 
-    def subst(self, macros, args, depth):
+    def subst(self, macros, args, depth, start=True, pos=0):
         required = len(self.params)
         if self.variadic:
             required -= 1
         if len(args) < required:
             args.extend([[Token(Other, '')] for x in range(required-len(args))])
         result = []
-        i = 0
+        i = pos
         while i < len(self.expr):
             token = self.expr[i]
             if token.type == Identifier and token.value in self.params:
@@ -156,14 +156,31 @@ class Macro:
                     to_add = args[self.params.index(token.value)]
                     if to_add and i in self.tokens_to_expand:
                         to_add = expand_tokens(macros, to_add, True, depth)
-                    result.append(to_add)
+                    # XXX
+                    # pretend that we got multiple tokens
+                    to_add = [to_add] # [[x1] [x2] [x3]]
+                    zzz = []
+                    if i+1 < len(self.expr):
+                        tail = self.subst(macros, args, depth, False, i+1) # [[[a11 a12 a13], [a21 a22 a23]], [[b11 b12 b13]]]
+                        for possibility in tail:
+                            for x in to_add:
+                                zzz.append(result + [x] + possibility)
+                    else:
+                        for x in to_add:
+                            zzz.append(result + [x])
+                    if start:
+                        for z in zzz:
+                            self.process_stringize(z)
+                            self.process_catenate(z)
+                    return zzz
             else:
                 result.append([token])
             i += 1
-        assert self.variadic or len(result) == len(self.expr)
-        self.process_stringize(result)
-        self.process_catenate(result)
-        return result
+        assert self.variadic or len(result) == len(self.expr[pos:])
+        if start:
+            self.process_stringize(result)
+            self.process_catenate(result)
+        return [result]
 
     def process_stringize(self, result):
         for i in self.tokens_to_stringize:
@@ -268,6 +285,8 @@ def expand_tokens(macros, expr, start=True, depth=0, expanded_macros=None):
                 if args is not None:
                     i += offset
                     substitute = macros[token.value].subst(macros, args, depth)
+                    assert len(substitute) == 1
+                    substitute = substitute[0]
                     result.extend(list(itertools.chain(*substitute)))
                 else:
                     result.append(token)

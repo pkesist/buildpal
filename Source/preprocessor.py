@@ -140,39 +140,43 @@ class Macro:
         i = pos
         while i < len(self.expr):
             token = self.expr[i]
+            to_add = []
             if token.type == Identifier and token.value in self.params:
                 if self.variadic and token.value == '__VA_ARGS__':
                     first = True
-                    variadic = []
                     for k in range(len(self.params) - 1, len(args)):
                         if not first:
-                            variadic.append(Token(Other, ','))
-                        variadic.extend(args[k])
+                            to_add.append(Token(Other, ','))
+                        to_add.extend(args[k])
                         first = False
-                    if variadic and i in self.tokens_to_expand:
-                        variadic = expand_tokens(macros, variadic, True, depth)
-                    result.append(variadic)
                 else:
                     to_add = args[self.params.index(token.value)]
-                    if to_add and i in self.tokens_to_expand:
-                        to_add = expand_tokens(macros, to_add, True, depth)
-                    # XXX
-                    # pretend that we got multiple tokens
-                    to_add = [to_add] # [[x1] [x2] [x3]]
-                    zzz = []
-                    if i+1 < len(self.expr):
-                        tail = self.subst(macros, args, depth, False, i+1) # [[[a11 a12 a13], [a21 a22 a23]], [[b11 b12 b13]]]
-                        for possibility in tail:
-                            for x in to_add:
-                                zzz.append(result + [x] + possibility)
-                    else:
+                if to_add and i in self.tokens_to_expand:
+                    to_add = expand_tokens(macros, to_add, True, depth)
+                else:
+                    to_add = [to_add]
+                zzz = []
+                if i+1 < len(self.expr):
+                    tail = self.subst(macros, args, depth, False, i+1)
+                    for possibility in tail:
                         for x in to_add:
-                            zzz.append(result + [x])
-                    if start:
-                        for z in zzz:
-                            self.process_stringize(z)
-                            self.process_catenate(z)
-                    return zzz
+                            if result:
+                                x = result + [x]
+                            else:
+                                x = [x]
+                            zzz.append(x + possibility)
+                else:
+                    for x in to_add:
+                        if result:
+                            x = result + [x]
+                        else:
+                            x = [x]
+                        zzz.append(x)
+                if start:
+                    for z in zzz:
+                        self.process_stringize(z)
+                        self.process_catenate(z)
+                return zzz
             else:
                 result.append([token])
             i += 1
@@ -279,33 +283,44 @@ def expand_tokens(macros, expr, start=True, depth=0, expanded_macros=None):
     while i < len(expr):
         token = expr[i]
         if token.type == Identifier and token.value in macros and not token.value in expanded_macros:
-            macro = macros[token.value]
-            if macro.params is not None:
+            all_macro_values = []
+            if i+1 < len(expr):
                 args, offset = collect_args(expr[i+1:])
-                if args is not None:
-                    i += offset
-                    substitute = macros[token.value].subst(macros, args, depth)
-                    assert len(substitute) == 1
-                    substitute = substitute[0]
-                    result.extend(list(itertools.chain(*substitute)))
-                else:
-                    result.append(token)
-                    i += 1
-                    continue
             else:
-                tokens = [[tok] for tok in macros[token.value].expr]
-                macros[token.value].process_catenate(tokens)
-                result.extend(list(itertools.chain(*tokens)))
-            if i + 1 < len(expr):
-                result.extend(expand_tokens(macros, expr[i+1:], False, depth, expanded_macros))
-                i = len(expr)
+                args, offset = None, 0
+            for macro in macros[token.value]:
+                new_offset = i
+                current_macro_values = []
+                if macro.params is not None:
+                    if args is None:
+                        current_macro_values.append([token])
+                        new_offset += 1
+                    else:
+                        new_offset += offset
+                        substitute = macro.subst(macros, args, depth)
+                        assert len(substitute) == 1
+                        for p in substitute:
+                            current_macro_values.append(list(itertools.chain(*p)))
+                else:
+                    tokens = [[tok] for tok in macro.expr]
+                    macro.process_catenate(tokens)
+                    current_macro_values.append(list(itertools.chain(*tokens)))
+            if new_offset + 1 < len(expr):
+                tail = expand_tokens(macros, expr[new_offset+1:], False, depth, expanded_macros)
+                all_macro_values = [result + c + t for c in current_macro_values for t in tail]
+            else:
+                all_macro_values = [result + c for c in current_macro_values]
+            
             if start:
                 expanded_macros.add(token.value)
-                if result:
-                    result = expand_tokens(macros, result, True, depth+1, expanded_macros)
-                return result
-            else:
-                return result
+                tmp = []
+                for x in all_macro_values:
+                    if x:
+                        tmp.extend(expand_tokens(macros, x, True, depth+1, expanded_macros))
+                    else:
+                        tmp.append(x)
+                all_macro_values = tmp
+            return all_macro_values
         elif token.type == Whitespace:
             token.value = ' '
             result.append(token)
@@ -314,19 +329,28 @@ def expand_tokens(macros, expr, start=True, depth=0, expanded_macros=None):
         else:
             result.append(token)
         i += 1
-    return result
+    return [result]
 
-def expand(macros, expr):
+def expand_simple(macros, expr):
+    expr = expr.replace('\\\n', '')
+    if '\n' in expr:
+        raise Exception("Newline in expression.")
+    assert isinstance(expr, str)
+    macros = dict((macro, [macros[macro]]) for macro in macros)
+    expanded = expand_tokens(macros, tokenize(expr))
+    assert(len(expanded)==1)
+    expanded = expanded[0]
+    string = "".join(e.value for e in expanded)
+    return string
+
+def expand_complex(macros, expr):
     expr = expr.replace('\\\n', '')
     if '\n' in expr:
         raise Exception("Newline in expression.")
     assert isinstance(expr, str)
     expanded = expand_tokens(macros, tokenize(expr))
-    string = "".join(e.value for e in expanded)
-    if not string:
-        print(string, expr)
-    return string
-
+    result = ["".join(e.value for e in exp) for exp in expanded]
+    return result
     
 if __name__ == '__main__':
     enable_tests_for_unsupported_features = False
@@ -338,7 +362,7 @@ if __name__ == '__main__':
         DUMMY4=Macro(["x", "y"], "dummy4"))
 
     # Shortcuts for calling functions to be tested.
-    e = expand
+    e = expand_simple
 
     # Simple do-nothing no-macro expansion.
     for macros in [noMacros, dummyMacros]:
@@ -386,6 +410,7 @@ if __name__ == '__main__':
     assert e(noMacros, '"trla-\\"b   \\"   l"') == '"trla-\\"b   \\"   l"'
 
     # Simple macro expansions.
+    print("ZAZAZAZA", e(dict(AAA=Macro(None, "5")), "AAA"))
     assert e(dict(AAA=Macro(None, "5")), "AAA") == "5"
     assert e(dict(AAA=Macro(None, "55")), "AAA") == "55"
     assert e(dict(AAA=Macro([], "555")), "AAA()") == "555"
@@ -472,6 +497,10 @@ if __name__ == '__main__':
 
     # Preprocessing token concatenation.
     assert e(dict(AAA=Macro(["x", "y"], "AA##BB")), "AAA(5,6)") == "AABB"
+    print("======================================================================")
+    print("======================================================================")
+    print("======================================================================")
+    print("======================================================================")
     assert e(dict(AAA=Macro(["x", "y"], "x##BB")), "AAA(5,6)") == "5BB"
     assert e(dict(AAA=Macro(["x", "y"], "AA##y")), "AAA(5,6)") == "AA6"
     assert e(dict(AAA=Macro(["x", "y"], "x##y")), "AAA(5,6)") == "56"

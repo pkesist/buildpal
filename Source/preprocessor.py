@@ -137,7 +137,8 @@ class Macro:
         if len(args) < required:
             args.extend([[Token(Other, '')] for x in range(required-len(args))])
         result = []
-        for i in range(len(self.expr)):
+        i = 0
+        while i < len(self.expr):
             token = self.expr[i]
             if token.type == Identifier and token.value in self.params:
                 if self.variadic and token.value == '__VA_ARGS__':
@@ -156,17 +157,13 @@ class Macro:
                     if to_add and i in self.tokens_to_expand:
                         to_add = expand_tokens(macros, to_add, True, depth)
                     result.append(to_add)
-            elif token.type == Whitespace:
-                token.value = ' '
-                result.append([token])
-                while i + 1 < len(self.expr) and self.expr[i+1].type == Whitespace:
-                    i += 1
             else:
                 result.append([token])
+            i += 1
         assert self.variadic or len(result) == len(self.expr)
         self.process_stringize(result)
         self.process_catenate(result)
-        return list(itertools.chain(*result))
+        return result
 
     def process_stringize(self, result):
         for i in self.tokens_to_stringize:
@@ -270,9 +267,9 @@ def expand_tokens(macros, expr, start=True, depth=0, expanded_macros=None):
                 args, offset = collect_args(expr[i+1:])
                 if args is not None:
                     i += offset
-                    result.extend(macros[token.value].subst(macros, args, depth))
+                    substitute = macros[token.value].subst(macros, args, depth)
+                    result.extend(list(itertools.chain(*substitute)))
                 else:
-                    expanded = False
                     result.append(token)
                     i += 1
                     continue

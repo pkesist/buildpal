@@ -84,6 +84,9 @@ class Macro:
     def variadic(self):
         return self.__variadic
 
+    def __repr__(self):
+        return "<Macro object: Params '{}', Expr '{}'>".format(self.params, "".join([v.value for v in self.expr]))
+
     def __init__(self, params, expr):
         self.__params = params
         self.__variadic = False
@@ -287,6 +290,8 @@ def collect_args(tokens):
             current_arg.append(tok)
         i += 1
 
+class UndefinedMacro: pass
+
 def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True):
     """
     Main worker for macro expansion.
@@ -300,6 +305,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True
         expanded_macros = set()
     indent = "    " * depth
     prev_data = []
+    prev_depends = set()
     expanded = False
     i = 0
     if start:
@@ -339,9 +345,9 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True
                     if new_offset + 1 < len(expr):
                         if tail_with_args is None:
                             tail_with_args = expand_tokens(macros, expr[new_offset+1:], expanded_macros, False, depth, debug)
-                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c) + exp_macro.value, frozenset(exp_macro.expanded | {token.value}))) for c in current_macro_values for exp_macro in tail_with_args)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c) + exp_macro.value, frozenset(exp_macro.expanded | {(token.value, macro)}))) for c in current_macro_values for exp_macro in tail_with_args)
                     else:
-                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c), frozenset({token.value}))) for c in current_macro_values)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c), frozenset({(token.value, macro)}))) for c in current_macro_values)
                 else:
                     # Degenerate case - we cannot expand this macro yet as it
                     # expects arguments and we have none (yet).
@@ -371,6 +377,9 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True
                     print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]))
                     print(indent + "    It depends on:", e)
             return all_macro_values
+        if token.type == Identifier:
+            prev_data.append(token)
+            prev_depends.add((token.value, UndefinedMacro))
         elif token.type == Whitespace:
             token.value = ' '
             prev_data.append(token)
@@ -379,7 +388,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True
         else:
             prev_data.append(token)
         i += 1
-    return {ExpandedMacro(tuple(prev_data), frozenset())}
+    return {ExpandedMacro(tuple(prev_data), frozenset(prev_depends))}
 
 def expand_simple(macros, expr):
     expr = expr.replace('\\\n', '')

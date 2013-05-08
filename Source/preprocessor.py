@@ -1,35 +1,4 @@
 #! python3
-# #define BBB() 15
-# #define BB() 10
-# #define B() 5
-# 
-# #define AAA(x) B##x aaa #x
-# 
-# #define CCC AAA(B())
-# CCC
-# 
-# #define DDD(x) AAA(B ## x) ddd #x
-# DDD(B())
-# 
-# #define EEE(x) AAA(x) eee #x
-# EEE(B())
-# 
-# 
-# #define BOOST_PP_ITERATION_DEPTH() 0
-# #define BOOST_PP_INC(x) BOOST_PP_INC_I(x)
-# #define BOOST_PP_INC_I(x) BOOST_PP_INC_ ## x
-# #define BOOST_PP_CAT(x, y) BOOST_PP_CAT_I(x, y)
-# #define BOOST_PP_CAT_I(x, y) x ## y
-# 
-# 
-# 0  : BOOST_PP_CAT(BOOST_PP_ITERATE_, BOOST_PP_INC(BOOST_PP_ITERATION_DEPTH()))
-# 1.0: BOOST_PP_CAT_I(BOOST_PP_ITERATE_, BOOST_PP_INC(BOOST_PP_ITERATION_DEPTH()))
-# 1.1: BOOST_PP_CAT_I(BOOST_PP_ITERATE_, BOOST_PP_INC_I(BOOST_PP_ITERATION_DEPTH()))
-# 1.2: BOOST_PP_CAT_I(BOOST_PP_ITERATE_, BOOST_PP_INC_I(0))
-# 1.3: BOOST_PP_CAT_I(BOOST_PP_ITERATE_, 1)
-# 2  : BOOST_PP_ITERATE_ ## 1
-import sys
-print(sys.version_info)
 import copy
 import itertools
 import re
@@ -53,7 +22,10 @@ class Bracket:    expr = r"[\(\)]"
 class Comma:      expr = r","     
 class HashHash:   expr = r"##"    
 class Hash:       expr = r"#"     
-class Other:      expr = r"."     
+class Other:      expr = r"."
+
+# Used internally
+class Empty: pass
 
 # Order is important here
 token_types = (
@@ -73,6 +45,8 @@ def tokenize(expr):
         raise Exception("Got unexpected remainder '{}'.".format(remainder))
     return result
 
+
+class NotEnoughArguments(BaseException): pass
 
 class Macro:
     @property
@@ -153,29 +127,41 @@ class Macro:
         if self.variadic:
             required -= 1
         if len(args) < required:
-            args.extend([[Token(Other, '')] for x in range(required-len(args))])
+            raise NotEnoughArguments()
         result = []
         i = pos
         while i < len(self.expr):
             token = self.expr[i]
             to_add = []
             if token.type == Identifier and token.value in self.params:
+                arg_index = self.params.index(token.value)
                 if self.variadic and token.value == '__VA_ARGS__':
                     first = True
                     for k in range(len(self.params) - 1, len(args)):
                         if not first:
-                            to_add.append(Token(Other, ','))
+                            to_add.append(Token(Comma, ','))
                         to_add.extend(args[k])
                         first = False
+                    if not to_add:
+                        to_add.append(Token(Empty, ''))
                 else:
                     to_add = args[self.params.index(token.value)]
                 if to_add and i in self.tokens_to_expand:
-                    to_add, expanded = expand_tokens(macros, to_add, set(), True, depth)
+                    to_add = expand_tokens(macros, to_add, set(), True, depth)
+                    assert isinstance(to_add, set)
+                    assert all(isinstance(x, tuple) for x in to_add)
+                    assert all(len(x) == 2 for x in to_add)
+                    assert all(isinstance(x[0], tuple) for x in to_add)
+                    assert all(isinstance(x[1], frozenset) for x in to_add)
+                    to_add = [x[0] for x in to_add]
                 else:
                     to_add = [to_add]
                 zzz = []
                 if i+1 < len(self.expr):
-                    tail = self.subst(macros, args, depth, False, i+1)
+                    try:
+                        tail = self.subst(macros, args, depth, False, i+1)
+                    except NotEnoughArguments:
+                        assert False and "Should never happen"
                     for possibility in tail:
                         for x in to_add:
                             if result:
@@ -244,11 +230,11 @@ class Macro:
             del result[a+1:b+1]
                 
 def trim_tokens(what):
-    while what and what[0].type == Whitespace:
-        del what[0]
-    while what and what[-1].type == Whitespace:
-        del what[-1]
-    return what
+    first = 0
+    while what[first:] and what[first].type == Whitespace: first += 1
+    last = len(what)
+    while what[:last-1] and what[last-1].type == Whitespace: last -= 1
+    return what[first:last]
 
 def collect_args(tokens):
     i = 0
@@ -269,8 +255,7 @@ def collect_args(tokens):
         elif tok.value == ')':
             nesting -= 1
             if nesting == 0:
-                if current_arg:
-                    args.append(trim_tokens(current_arg))
+                args.append(trim_tokens(current_arg))
                 return args, i + 1
             else:
                 current_arg.append(tok)
@@ -284,22 +269,26 @@ def collect_args(tokens):
             current_arg.append(tok)
         i += 1
 
-def expand_tokens(macros, expr, expanded_macros, start=True, depth=0):
+def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=False):
     assert expr
-    assert isinstance(expr, list)
+    assert isinstance(expr, list) or isinstance(expr, tuple)
     if expanded_macros is None:
         expanded_macros = set()
     indent = "    " * depth
-    print(indent + "Expression '{}'".format("".join(t.value for t in expr)))
     result = []
     expanded = False
     i = 0
     if start:
         expr = trim_tokens(expr)
+    if debug: print(indent + "Expanding", "".join([e.value for e in expr]))
     while i < len(expr):
         token = expr[i]
         if token.type == Identifier and token.value in macros and not token.value in expanded_macros:
-            all_macro_values = []
+            all_macro_values = set()
+            all_new_expanded = set()
+
+            tail_with_args = None
+            tail_without_args = None
             if i + 1 < len(expr):
                 args, offset = collect_args(expr[i+1:])
             else:
@@ -314,46 +303,44 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0):
                         current_macro_values.append(list(itertools.chain(*tokens)))
                     else:
                         new_offset += offset
-                        substitute = macro.subst(macros, copy.deepcopy(args), depth)
+                        try:
+                            substitute = macro.subst(macros, copy.deepcopy(args), depth)
+                        except NotEnoughArguments:
+                            # Substitution failure - ignore this macro and continue.
+                            continue
                         for p in substitute:
                             current_macro_values.append(list(itertools.chain(*p)))
 
                     if new_offset + 1 < len(expr):
-                        tail, expanded = expand_tokens(macros, expr[new_offset+1:], expanded_macros, False, depth)
-                        all_macro_values.extend((result + c + t, True) for c in current_macro_values for t in tail)
+                        if tail_with_args is None:
+                            tail_with_args = expand_tokens(macros, expr[new_offset+1:], expanded_macros, False, depth, debug)
+                        all_macro_values.update((tuple(result + c) + t, frozenset(expanded | {token.value})) for c in current_macro_values for t, expanded in tail_with_args)
                     else:
-                        all_macro_values.extend((result + c, True) for c in current_macro_values)
-                    expanded_macros.add(token.value)
+                        all_macro_values.update((tuple(result + c), frozenset({token.value})) for c in current_macro_values)
                 else:
                     # Degenerate case - macro does not expand (yet)
                     # we should expand its RHS and try again, as that
                     # might become argument list.
                     result.append(token)
                     if new_offset + 1 < len(expr):
-                        tail, expanded = expand_tokens(macros, expr[new_offset + 1:], expanded_macros, False, depth)
-                        print("before - ", expr[new_offset + 1:])
-                        print("after - ", tail)
-                        print("DEGENERATE - RHS expanded", expanded)
-                        all_macro_values.extend((result + t, expanded) for t in tail)
+                        if tail_without_args is None:
+                            tail_without_args = expand_tokens(macros, expr[new_offset + 1:], expanded_macros, False, depth, debug)
+                        all_macro_values.update((tuple(result) + t, frozenset(expanded)) for t, expanded in tail_without_args)
                     else:
-                        all_macro_values.append((result, False))
-
-            was_expanded = False
+                        all_macro_values.add((tuple(result), frozenset()))
             if start:
-                tmp = []
-                for x, was_expanded in all_macro_values:
-                    if x and was_expanded:
-                        data, expanded = expand_tokens(macros, x, expanded_macros, True, depth + 1)
-                        tmp.extend(data)
-                        was_expanded = True
+                tmp = set()
+                for x, new_expanded in all_macro_values:
+                    if not x: continue
+                    if new_expanded:
+                        data = expand_tokens(macros, x, expanded_macros | new_expanded, True, depth + 1, debug)
+                        tmp.update((e, frozenset(m)) for e, m in data)
                     else:
-                        tmp.append(x)
+                        tmp.add((x, frozenset(expanded_macros)))
                 all_macro_values = tmp
-            else:
-                all_macro_values = [x for x, y in all_macro_values]
-            #for v in all_macro_values:
-            #    print(indent + "Expanded to ", "".join([a.value for a in v]))
-            return all_macro_values, was_expanded
+            for v, e in all_macro_values:
+                print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]))
+            return all_macro_values
         elif token.type == Whitespace:
             token.value = ' '
             result.append(token)
@@ -362,30 +349,28 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0):
         else:
             result.append(token)
         i += 1
-    return [result], False
+    return {(tuple(result), frozenset())}
 
-def expand_simple(macros, expr, expanded_macros = None):
+def expand_simple(macros, expr):
     expr = expr.replace('\\\n', '')
     if '\n' in expr:
         raise Exception("Newline in expression.")
     assert isinstance(expr, str)
     macros = dict((macro, [macros[macro]]) for macro in macros)
-    if expanded_macros is None: expanded_macros = set()
-    data, expanded = expand_tokens(macros, tokenize(expr), expanded_macros)
-    assert(len(data)==1)
-    data = data[0]
-    string = "".join(d.value for d in data)
-    return string
+    data = expand_tokens(macros, tokenize(expr), set())
+    assert(len(data) == 0 or len(data) == 1)
+    if len(data) == 0:
+        raise Exception("Macro expansion failure")
+    for expr, macros in data:
+        return "".join(d.value for d in expr)
 
-def expand_complex(macros, expr, expanded_macros = None):
+def expand_complex(macros, expr):
     expr = expr.replace('\\\n', '')
     if '\n' in expr:
         raise Exception("Newline in expression.")
     assert isinstance(expr, str)
-    if expanded_macros is None: expanded_macros = set()
-    data, expanded = expand_tokens(macros, tokenize(expr), expanded_macros)
-    result = ["".join(d.value for d in dat) for dat in data]
-    return result
+    data = expand_tokens(macros, tokenize(expr), set())
+    return [("".join(d.value for d in dat[0]), dat[1]) for dat in data]
     
 def tests():
     enable_tests_for_unsupported_features = False
@@ -798,25 +783,27 @@ def tests():
     assert e(macros, "A1(B, B, B)") == '"B" "B,B"'
     assert e(macros, "A2(B, B, B)") == '"0" "0"'
 
-    # Invalid number of macro parameters.
-    # Implementation note:
-    #   We wish to match MS Visual C++ preprocessor behaviour here, therefore
-    # we allow function-like macro expansions with an invalid number of
-    # parameters by ignoring extra ones and expanding missing ones as empty
-    # strings.
-    #                                                (30.04.2013.) (Jurko)
-    assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A()") == "a;;;b"
-    assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1)") == "a;1;;b"
-    assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(,2)") == "a;;2;b"
-    assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1,2,3)") == "a;1;2;b"
-    assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")), "A()")  \
-        == "a;;;;b"
-    assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
-        "A(1)") == "a;1;;;b"
-    assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
-        "A(,2)") == "a;;2;;b"
-    assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
-        "A(,,,4)") == "a;;;,4;b"
+    # Invalid number of macro arguments.
+    allow_invalid_number_of_arguments = False
+    if allow_invalid_number_of_arguments:
+        # Implementation note:
+        #   In case we wish to match MS Visual C++ preprocessor behavior, we
+        # should allow function-like macro expansions with an invalid number of
+        # parameters by ignoring extra ones and expanding missing ones as empty
+        # strings.
+        #                                            (08.05.2013.) (Juraj)
+        assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A()") == "a;;;b"
+        assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1,)") == "a;1;;b"
+        assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(,2)") == "a;;2;b"
+        assert e(dict(A=Macro(["x", "y"], "a;x;y;b")), "A(1,2,3)") == "a;1;2;b"
+        assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")), "A()")  \
+            == "a;;;;b"
+        assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+            "A(1)") == "a;1;;;b"
+        assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+            "A(,2)") == "a;;2;;b"
+        assert e(dict(A=Macro(["x", "y", "..."], "a;x;y;__VA_ARGS__;b")),
+            "A(,,,4)") == "a;;;,4;b"
 
     # Recursive macro expansion.
     assert e(dict(SELF=Macro(None, "SELF")), "SELF") == "SELF"

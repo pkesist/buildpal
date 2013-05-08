@@ -117,8 +117,8 @@ class Macro:
                 if self.tokens_to_expand and self.tokens_to_expand[-1] == last:
                     del self.tokens_to_expand[-1]
             i += 1
-        # Catenation will remove tokens thus destroying all trailing indices.
-        # Make sure we are catenating right-to-left.
+        # Catenation will remove tokens thus destroying all trailing indices, so
+        # make sure we are catenating right-to-left.
         # TODO: Ugly
         self.tokens_to_catenate.reverse()
 
@@ -128,7 +128,7 @@ class Macro:
             required -= 1
         if len(args) < required:
             raise NotEnoughArguments()
-        result = []
+        prev_data = []
         i = pos
         while i < len(self.expr):
             token = self.expr[i]
@@ -156,39 +156,36 @@ class Macro:
                     to_add = [x[0] for x in to_add]
                 else:
                     to_add = [to_add]
-                zzz = []
                 if i+1 < len(self.expr):
                     try:
                         tail = self.subst(macros, args, depth, False, i+1)
                     except NotEnoughArguments:
                         assert False and "Should never happen"
-                    for possibility in tail:
-                        for x in to_add:
-                            if result:
-                                x = result + [x]
-                            else:
-                                x = [x]
-                            zzz.append(x + possibility)
                 else:
+                    tail = [[]]
+
+                result = []
+                for possibility in tail:
                     for x in to_add:
-                        if result:
-                            x = result + [x]
-                        else:
-                            x = [x]
-                        zzz.append(x)
+                        x = [x]
+                        if prev_data:
+                            x = prev_data + x
+                        result.append(x + possibility)
+
                 if start:
-                    for z in zzz:
+                    for z in result:
                         self.process_stringize(z)
                         self.process_catenate(z)
-                return zzz
+
+                return result
             else:
-                result.append([token])
+                prev_data.append([token])
             i += 1
-        assert self.variadic or len(result) == len(self.expr[pos:])
+        assert self.variadic or len(prev_data) == len(self.expr[pos:])
         if start:
-            self.process_stringize(result)
-            self.process_catenate(result)
-        return [result]
+            self.process_stringize(prev_data)
+            self.process_catenate(prev_data)
+        return [prev_data]
 
     def process_stringize(self, result):
         for i in self.tokens_to_stringize:
@@ -270,12 +267,19 @@ def collect_args(tokens):
         i += 1
 
 def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=False):
+    """
+    Main worker for macro expansion.
+
+    It will return a collection of 2-tuples. Each tuple is a possible expanded
+    value, together with a set of macros which were expanded in the process.
+
+    """
     assert expr
     assert isinstance(expr, list) or isinstance(expr, tuple)
     if expanded_macros is None:
         expanded_macros = set()
     indent = "    " * depth
-    result = []
+    prev_data = []
     expanded = False
     i = 0
     if start:
@@ -296,6 +300,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
             for macro in macros[token.value]:
                 new_offset = i
                 if macro.params is None or args is not None:
+                    # We have enough data to expand this macro.
                     current_macro_values = []
                     if macro.params is None:
                         tokens = [[tok] for tok in macro.expr]
@@ -314,20 +319,21 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                     if new_offset + 1 < len(expr):
                         if tail_with_args is None:
                             tail_with_args = expand_tokens(macros, expr[new_offset+1:], expanded_macros, False, depth, debug)
-                        all_macro_values.update((tuple(result + c) + t, frozenset(expanded | {token.value})) for c in current_macro_values for t, expanded in tail_with_args)
+                        all_macro_values.update((tuple(prev_data + c) + t, frozenset(expanded | {token.value})) for c in current_macro_values for t, expanded in tail_with_args)
                     else:
-                        all_macro_values.update((tuple(result + c), frozenset({token.value})) for c in current_macro_values)
+                        all_macro_values.update((tuple(prev_data + c), frozenset({token.value})) for c in current_macro_values)
                 else:
-                    # Degenerate case - macro does not expand (yet)
-                    # we should expand its RHS and try again, as that
-                    # might become argument list.
-                    result.append(token)
+                    # Degenerate case - we cannot expand this macro yet as it
+                    # expects arguments and we have none (yet).
+                    # We should expand anything following this macro as that
+                    # might expand into argument list.
+                    prev_data.append(token)
                     if new_offset + 1 < len(expr):
                         if tail_without_args is None:
                             tail_without_args = expand_tokens(macros, expr[new_offset + 1:], expanded_macros, False, depth, debug)
-                        all_macro_values.update((tuple(result) + t, frozenset(expanded)) for t, expanded in tail_without_args)
+                        all_macro_values.update((tuple(prev_data) + t, frozenset(expanded)) for t, expanded in tail_without_args)
                     else:
-                        all_macro_values.add((tuple(result), frozenset()))
+                        all_macro_values.add((tuple(prev_data), frozenset()))
             if start:
                 tmp = set()
                 for x, new_expanded in all_macro_values:
@@ -343,13 +349,13 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
             return all_macro_values
         elif token.type == Whitespace:
             token.value = ' '
-            result.append(token)
+            prev_data.append(token)
             while i + 1 < len(expr) and expr[i+1].type == Whitespace:
                 i += 1
         else:
-            result.append(token)
+            prev_data.append(token)
         i += 1
-    return {(tuple(result), frozenset())}
+    return {(tuple(prev_data), frozenset())}
 
 def expand_simple(macros, expr):
     expr = expr.replace('\\\n', '')

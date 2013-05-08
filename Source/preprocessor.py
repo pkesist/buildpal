@@ -47,24 +47,26 @@ def tokenize(expr):
 
 
 class ExpandedMacro:
-    @property
-    def value(self): return self.__value
-
-    @property
-    def expanded(self): return self.__expanded
-
     def __init__(self, value, macros):
         assert isinstance(value, tuple)
         assert all(isinstance(t, Token) for t in value)
         assert isinstance(macros, set) or isinstance(macros, frozenset)
         self.__value = value
+        print("MACROS is ", macros)
         self.__expanded = frozenset(macros)
+        print("MACROS gaga ", self.__expanded)
 
     def __eq__(self, other):
         return self.__value == other.__value and self.__expanded == other.__expanded
 
     def __hash__(self):
         return (self.__value, self.__expanded).__hash__()
+
+    @property
+    def value(self): return self.__value
+
+    @property
+    def expanded(self): return self.__expanded
 
 
 class NotEnoughArguments(BaseException): pass
@@ -226,6 +228,7 @@ class Macro:
             assert a < b
             if len(result[a]) >= 1 and len(result[b]) >= 1 and result[a][-1].type == Identifier and (result[b][0].type in (Identifier, Digits)):
                 # Make sure we create a new identifier in this case.
+                # This way we can avoid re-tokenizing every intermediate result.
                 result[a][-1] = Token(Identifier, result[a][-1].value + result[b][0].value)
                 result[a].extend(result[b][1:])
             else:
@@ -284,7 +287,7 @@ def collect_args(tokens):
             current_arg.append(tok)
         i += 1
 
-def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=False):
+def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=True):
     """
     Main worker for macro expansion.
 
@@ -356,7 +359,8 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                 for expanded_macro in all_macro_values:
                     if not expanded_macro.value: continue
                     if expanded_macro.expanded:
-                        tmp.update(expand_tokens(macros, expanded_macro.value, expanded_macros | expanded_macro.expanded, True, depth + 1, debug))
+                        for reexpanded_macro in expand_tokens(macros, expanded_macro.value, expanded_macros | expanded_macro.expanded, True, depth + 1, debug):
+                            tmp.add(ExpandedMacro(reexpanded_macro.value, reexpanded_macro.expanded | expanded_macro.expanded | expanded_macros))
                     else:
                         tmp.add(ExpandedMacro(expanded_macro.value, frozenset(expanded_macros)))
                 all_macro_values = tmp
@@ -365,6 +369,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                     v = expanded_macro.value
                     e = expanded_macro.expanded
                     print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]))
+                    print(indent + "    It depends on:", e)
             return all_macro_values
         elif token.type == Whitespace:
             token.value = ' '
@@ -394,8 +399,7 @@ def expand_complex(macros, expr):
     if '\n' in expr:
         raise Exception("Newline in expression.")
     assert isinstance(expr, str)
-    data = expand_tokens(macros, tokenize(expr), set())
-    return [("".join(d.value for d in dat[0]), dat[1]) for dat in data]
+    return [("".join(d.value for d in expanded_macro.value), expanded_macro.expanded) for expanded_macro in expand_tokens(macros, tokenize(expr), set())]
     
 def tests():
     enable_tests_for_unsupported_features = False

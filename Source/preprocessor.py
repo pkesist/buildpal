@@ -46,6 +46,27 @@ def tokenize(expr):
     return result
 
 
+class ExpandedMacro:
+    @property
+    def value(self): return self.__value
+
+    @property
+    def expanded(self): return self.__expanded
+
+    def __init__(self, value, macros):
+        assert isinstance(value, tuple)
+        assert all(isinstance(t, Token) for t in value)
+        assert isinstance(macros, set) or isinstance(macros, frozenset)
+        self.__value = value
+        self.__expanded = frozenset(macros)
+
+    def __eq__(self, other):
+        return self.__value == other.__value and self.__expanded == other.__expanded
+
+    def __hash__(self):
+        return (self.__value, self.__expanded).__hash__()
+
+
 class NotEnoughArguments(BaseException): pass
 
 class Macro:
@@ -149,11 +170,8 @@ class Macro:
                 if to_add and i in self.tokens_to_expand:
                     to_add = expand_tokens(macros, to_add, set(), True, depth)
                     assert isinstance(to_add, set)
-                    assert all(isinstance(x, tuple) for x in to_add)
-                    assert all(len(x) == 2 for x in to_add)
-                    assert all(isinstance(x[0], tuple) for x in to_add)
-                    assert all(isinstance(x[1], frozenset) for x in to_add)
-                    to_add = [x[0] for x in to_add]
+                    assert all(isinstance(x, ExpandedMacro) for x in to_add)
+                    to_add = [x.value for x in to_add]
                 else:
                     to_add = [to_add]
                 if i+1 < len(self.expr):
@@ -272,7 +290,6 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
 
     It will return a collection of 2-tuples. Each tuple is a possible expanded
     value, together with a set of macros which were expanded in the process.
-
     """
     assert expr
     assert isinstance(expr, list) or isinstance(expr, tuple)
@@ -319,9 +336,9 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                     if new_offset + 1 < len(expr):
                         if tail_with_args is None:
                             tail_with_args = expand_tokens(macros, expr[new_offset+1:], expanded_macros, False, depth, debug)
-                        all_macro_values.update((tuple(prev_data + c) + t, frozenset(expanded | {token.value})) for c in current_macro_values for t, expanded in tail_with_args)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c) + exp_macro.value, frozenset(exp_macro.expanded | {token.value}))) for c in current_macro_values for exp_macro in tail_with_args)
                     else:
-                        all_macro_values.update((tuple(prev_data + c), frozenset({token.value})) for c in current_macro_values)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c), frozenset({token.value}))) for c in current_macro_values)
                 else:
                     # Degenerate case - we cannot expand this macro yet as it
                     # expects arguments and we have none (yet).
@@ -331,21 +348,23 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                     if new_offset + 1 < len(expr):
                         if tail_without_args is None:
                             tail_without_args = expand_tokens(macros, expr[new_offset + 1:], expanded_macros, False, depth, debug)
-                        all_macro_values.update((tuple(prev_data) + t, frozenset(expanded)) for t, expanded in tail_without_args)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data) + exp_macro.value, frozenset(exp_macro.expanded))) for exp_macro in tail_without_args)
                     else:
-                        all_macro_values.add((tuple(prev_data), frozenset()))
+                        all_macro_values.add(ExpandedMacro(tuple(prev_data), frozenset()))
             if start:
                 tmp = set()
-                for x, new_expanded in all_macro_values:
-                    if not x: continue
-                    if new_expanded:
-                        data = expand_tokens(macros, x, expanded_macros | new_expanded, True, depth + 1, debug)
-                        tmp.update((e, frozenset(m)) for e, m in data)
+                for expanded_macro in all_macro_values:
+                    if not expanded_macro.value: continue
+                    if expanded_macro.expanded:
+                        tmp.update(expand_tokens(macros, expanded_macro.value, expanded_macros | expanded_macro.expanded, True, depth + 1, debug))
                     else:
-                        tmp.add((x, frozenset(expanded_macros)))
+                        tmp.add(ExpandedMacro(expanded_macro.value, frozenset(expanded_macros)))
                 all_macro_values = tmp
-            for v, e in all_macro_values:
-                print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]))
+            if debug:
+                for expanded_macro in all_macro_values:
+                    v = expanded_macro.value
+                    e = expanded_macro.expanded
+                    print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]))
             return all_macro_values
         elif token.type == Whitespace:
             token.value = ' '
@@ -355,7 +374,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
         else:
             prev_data.append(token)
         i += 1
-    return {(tuple(prev_data), frozenset())}
+    return {ExpandedMacro(tuple(prev_data), frozenset())}
 
 def expand_simple(macros, expr):
     expr = expr.replace('\\\n', '')
@@ -367,8 +386,8 @@ def expand_simple(macros, expr):
     assert(len(data) == 0 or len(data) == 1)
     if len(data) == 0:
         raise Exception("Macro expansion failure")
-    for expr, macros in data:
-        return "".join(d.value for d in expr)
+    for expanded_macro in data:
+        return "".join(d.value for d in expanded_macro.value)
 
 def expand_complex(macros, expr):
     expr = expr.replace('\\\n', '')

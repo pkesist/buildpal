@@ -1,3 +1,4 @@
+#! python3
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
 from distribute_manager import DistributeManager

@@ -59,14 +59,11 @@ def tokenize(expr):
 
 class ExpandedMacro:
     def __init__(self, value, expanded=None, dependent=None):
+        assert isinstance(value, tuple)
         if dependent is None:
             dependent = frozenset()
         if expanded is None:
             expanded = frozenset()
-        assert isinstance(value, tuple)
-        assert all(isinstance(t, Token) or (isinstance(t, tuple) and all((isinstance(tt, Token) for tt in t))) for t in value)
-        assert isinstance(expanded, (set, frozenset))
-        assert isinstance(dependent, (set, frozenset))
         self.__value = value
         self.__expanded = frozenset(expanded)
         self.__dependent = frozenset(dependent)
@@ -133,7 +130,7 @@ class Macro:
         return type(other) == Macro and self.params == other.params and self.__orig_expr == other.__orig_expr
 
     def __hash__(self):
-        return (tuple(self.params) if self.params else None, self.__orig_expr).__hash__()
+        return hash((self.params, self.__orig_expr))
 
     def __repr__(self):
         return "<Macro object: Params '{}', Expr '{}'>".format(self.params, "".join([v.value for v in self.expr]))
@@ -147,6 +144,10 @@ class Macro:
             if self.__params[-1] == '...':
                 self.__params[-1] = '__VA_ARGS__'
                 self.__variadic = True
+            
+        if self.__params is not None:
+            self.__params = tuple(self.__params)
+
         if not expr:
             self.__expr = None
             self.__orig_expr = None
@@ -208,56 +209,54 @@ class Macro:
             raise InvalidNumberOfArguments()
 
         prev_data = []
-        i = pos
-        while i < len(self.expr):
-            token = self.expr[i]
-            arg_value = []
+        param = None
+        index = pos
+        for token in self.expr[pos:]:
             if token.type == Identifier and token.value in self.params:
-                arg_index = self.params.index(token.value)
-                if self.variadic and token.value == '__VA_ARGS__':
-                    first = True
-                    for k in range(len(self.params) - 1, len(args)):
-                        if not first:
-                            arg_value.append(Token(Comma, ','))
-                        arg_value.extend(args[k])
-                        first = False
-                    if not arg_value:
-                        # make __VA_ARGS__ expand to empty string
-                        arg_value.append(Token(Empty, ''))
-                else:
-                    arg_value = args[self.params.index(token.value)]
-                if arg_value and i in self.tokens_to_expand:
-                    arg_value = expand_wrapper(macros, arg_value, set(), True, depth, False, fixed)
-                    assert isinstance(arg_value, set)
-                    assert all(isinstance(x, ExpandedMacro) for x in arg_value)
-                else:
-                    arg_value = [ExpandedMacro(tuple(arg_value))]
-                if i+1 < len(self.expr):
-                    try:
-                        tail = self.subst(macros, args, depth, fixed, expand_wrapper, False, i+1)
-                        assert all(isinstance(t, ExpandedMacro) for t in tail)
-                    except InvalidNumberOfArguments:
-                        assert False and "Should never happen"
-                else:
-                    tail = [ExpandedMacro(())]
+                param = token
+                break
+            prev_data.append((token,))
+            index += 1
 
-                result = set()
-                for t in tail:
-                    for a in arg_value:
-                        assert(isinstance(a, ExpandedMacro))
-                        assert(isinstance(t, ExpandedMacro))
-                        assert(isinstance(prev_data, list))
-                        value = tuple(prev_data) + (a.value,) + t.value
-                        if start: value = self.postprocess(value)
-                        result.add(ExpandedMacro(value, a.expanded | t.expanded))
-                return result
-            else:
-                prev_data.append((token,))
-            i += 1
-        assert self.variadic or len(prev_data) == len(self.expr[pos:])
-        if start:
-            prev_data = self.postprocess(prev_data)
-        return [ExpandedMacro(tuple(prev_data)),]
+        if not param:
+            if start: prev_data = self.postprocess(prev_data)
+            return [ExpandedMacro(tuple(prev_data)),]
+
+        arg_value = []
+        arg_index = self.params.index(param.value)
+        if self.variadic and param.value == '__VA_ARGS__':
+            first = True
+            for k in range(len(self.params) - 1, len(args)):
+                if not first:
+                    arg_value.append(Token(Comma, ','))
+                arg_value.extend(args[k])
+                first = False
+            if not arg_value:
+                # make __VA_ARGS__ expand to empty string
+                arg_value.append(Token(Empty, ''))
+        else:
+            arg_value = args[self.params.index(param.value)]
+        if arg_value and index in self.tokens_to_expand:
+            arg_value = expand_wrapper(macros, arg_value, set(), True, depth, False, fixed)
+        else:
+            arg_value = [ExpandedMacro(tuple(arg_value))]
+        if index + 1 < len(self.expr):
+            try:
+                tail = self.subst(macros, args, depth, fixed, expand_wrapper, False, index + 1)
+            except InvalidNumberOfArguments:
+                assert False and "Should never happen"
+        else:
+            tail = [ExpandedMacro(())]
+
+        result = set()
+        for t, a in zip(tail, arg_value):
+            assert(isinstance(a, ExpandedMacro))
+            assert(isinstance(t, ExpandedMacro))
+            assert(isinstance(prev_data, list))
+            value = tuple(prev_data) + (a.value,) + t.value
+            if start: value = self.postprocess(value)
+            result.add(ExpandedMacro(value, a.expanded | t.expanded))
+        return result
 
     def postprocess(self, value):
         return self.process_catenate(self.process_stringize(value))
@@ -324,6 +323,7 @@ def collect_args(tokens):
     nesting = 0
     args = []
     current_arg = []
+    need_arg = False
     while True:
         assert i < len(tokens)
         tok = tokens[i]
@@ -334,15 +334,15 @@ def collect_args(tokens):
         elif tok.value == ')':
             nesting -= 1
             if nesting == 0:
-                if current_arg:
+                if need_arg or current_arg:
                     args.append(trim_tokens(tuple(current_arg)))
                 return tuple(args), i + 1
-            else:
-                current_arg.append(tok)
+            current_arg.append(tok)
         elif tok.value == ',':
             if nesting == 1:
                 args.append(trim_tokens(tuple(current_arg)))
                 current_arg = []
+                need_arg = True
             else:
                 current_arg.append(tok)
         else:
@@ -350,64 +350,77 @@ def collect_args(tokens):
         i += 1
 
 class UndefinedMacro: pass
-
+class DefinedMacro: pass
 
 hits = 0
 misses = 0
 total = 0
 size = 0
 complex_expr_cache = {}
-itermed_expr_cache = {}
 simple_expr_cache = {}
 
-def cache_expanded_macros(expr, cache, sequence, result):
-    all_dependencies = {}
-    for name, fs in sequence:
-        all_dependencies.setdefault(name, set()).add(fs)
-    key = set()
-    for entry in all_dependencies:
-        key.add((entry, frozenset(all_dependencies[entry])))
-    cache.setdefault(tuple(expr), dict())[frozenset(key)] = result
+def cache_expanded_macros(macros, expanded_macros, cache, expr, macro_names, result):
+    assert result
+    exprstr = "".join([e.value for e in expr])
+    key = frozenset(((name, DefinedMacro if name in expanded_macros else frozenset(macros[name]) if name in macros else UndefinedMacro) for name in macro_names))
+    cache.setdefault(tuple(expr), {})[key] = result
     global size
     size += 1
 
-def find_expr_in_cache(macros, cache, expr):
+def find_expr_in_cache(macros, expanded_macros, cache, expr):
     global total, hits, misses, size
     debug = False
-    if "".join([e.value for e in expr]) == "BOOST_PP_FILENAME_1":
-        debug = True
-
+    exprstr = "".join([e.value for e in expr])
+    #if exprstr == "BOOST_PP_FILENAME_1":
+    #    debug = True
+    which = "complex_expr_cache" if id(cache) == id(complex_expr_cache) else "simple_expr_cache"
+    import time
+    start = time.time()
     try:
         total += 1
         if expr in cache:
+            if debug: print("Length of cache {} for {} is {}".format(which, exprstr, len(cache[expr])))
             for depends in cache[expr]:
                 match = True
                 for macro, value in depends:
-                    if len(value) == 1 and next(iter(value)) == UndefinedMacro:
+                    if value is UndefinedMacro:
                         if macro in macros:
+                            if debug and cache == complex_expr_cache:
+                                print("No match in CEC")
+                                print(macro, "should be undefined but is not")
                             match = False
                             break
-                    elif not macro in macros or value != set(macros[macro]):
-                        if debug: print("No match because of ", macro, set(macros[macro]).difference(value))
+                    elif value is DefinedMacro:
+                        if macro not in macros:
+                            match = False
+                            break
+                    elif macro not in macros or value != set(macros[macro]):
+                        if debug and cache == complex_expr_cache:
+                            print("No match in CEC because of ", macro)
+                            print("In cache not in current", value.difference(set(macros[macro])))
+                            print("In current not in cache", set(macros[macro]).difference(value))
                         match = False
                         break
                 if match:
+                    if debug: print("HIT - ", cache[expr][depends])
                     hits += 1
                     return cache[expr][depends]
         misses += 1
+        if debug: print("No match for", exprstr, "in", which )
         return None
     finally:
+        if debug: print("searching for {} in {} took {}".format(exprstr, which, time.time() - start))
         if (total < 100) or (total < 1000 and not total % 100) or not total % 1000:
-            print("Total", total, "Cache hit", hits, "Cache misses", misses, "Cache size", size, "Hit ratio {:2}%".format(hits / total * 100))
+            print("Total", total, "Cache hit", hits, "Cache misses", misses, "Cache size", size, "Hit ratio {:2.4}%".format(hits / total * 100))
 
 def expand_tokens_with_cache(macros, expr, expanded_macros, start=True, depth=0, debug=False, fixed=None):
-    cache = complex_expr_cache if start else itermed_expr_cache
-    cached_result = find_expr_in_cache(macros, cache, tuple(expr))
+    cache = complex_expr_cache# if start else itermed_expr_cache
+    expanded_macro_names = set(name for name, fs in expanded_macros)
+    cached_result = find_expr_in_cache(macros, expanded_macro_names, cache, tuple(expr))
     if cached_result is not None:
         return cached_result
     result = expand_tokens(macros, expr, expanded_macros, start, depth, debug, fixed, expand_wrapper=expand_tokens_with_cache)
-    depends = itertools.chain(*(((name, fs) for name, fs in expanded_macro.expanded) for expanded_macro in result))
-    cache_expanded_macros(tuple(expr), cache, depends, result)
+    cache_expanded_macros(macros, expanded_macro_names, cache, tuple(expr), (name for expanded_macro in result for name, fs in expanded_macro.expanded), result)
     return result
 
 def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=False, fixed=None, expand_wrapper=None):
@@ -450,6 +463,11 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                 args, offset = None, 0
             
             # Once we select a macro value - stick with it while processing arguments and RHS
+            # E.g. given
+            #     #define X 5
+            #     #define X 6
+            #     #define Y X X
+            # we want Y to be either '5 5' or '6 6', not '5 6' and '6 5'
             if token.value in fixed:
                 macros_to_check = [fixed[token.value]]
             else:
@@ -464,7 +482,9 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                         expr_to_check = tuple(expr[i:i+1])
                     else:
                         expr_to_check = tuple(expr[i:i+offset+1])
-                    current_macro_values = find_expr_in_cache(macros, simple_expr_cache, expr_to_check)
+
+                    expanded_macro_names = set((name for name, fs in expanded_macros))
+                    current_macro_values = find_expr_in_cache(macros, expanded_macro_names, simple_expr_cache.setdefault(macro, {}), expr_to_check)
                     if current_macro_values:
                         if macro.params is not None:
                             new_offset += offset
@@ -473,19 +493,19 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                         if macro.params is None:
                             tokens = [[tok] for tok in macro.expr]
                             tokens = macro.process_catenate(tokens)
-                            current_macro_values.append((list(itertools.chain(*tokens)), frozenset()))
+                            current_macro_values.append(ExpandedMacro(tuple(itertools.chain(*tokens)), frozenset()))
                         else:
                             new_offset += offset
                             try:
-                                substitute = macro.subst(macros, copy.deepcopy(args), depth, new_fixed, expand_wrapper)
+                                substitute = macro.subst(macros, args, depth, new_fixed, expand_wrapper)
                             except InvalidNumberOfArguments:
                                 # Substitution failure - ignore this macro and continue.
                                 continue
                             for p in substitute:
-                                current_macro_values.append((list(itertools.chain(*p.value)), p.expanded))
+                                current_macro_values.append(ExpandedMacro(tuple(itertools.chain(*p.value)), p.expanded))
 
-                        depends = itertools.chain([(token.value, macro)], *(((name, fs) for name, fs in expanded_macro[1]) for expanded_macro in current_macro_values))
-                        cache_expanded_macros(expr_to_check, simple_expr_cache, depends, current_macro_values)
+                        depends = list(itertools.chain([token.value], *(name for current_macro in current_macro_values for name, fs in current_macro.expanded)))
+                        cache_expanded_macros(macros, expanded_macro_names, simple_expr_cache.setdefault(macro, {}), expr_to_check, depends, current_macro_values)
 
                     # current_macro_values now contains a list of 2-tuples.
                     # The first element is a (tokenized) macro value. The second
@@ -496,11 +516,13 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                         if tail_with_args is None:
                             tail_with_args = expand_wrapper(macros, expr[new_offset+1:], expanded_macros, False, depth, debug, new_fixed)
                         all_macro_values.update(
-                            (ExpandedMacro(tuple(prev_data + c) + exp_macro.value,
-                            frozenset(exp_macro.expanded | {(token.value, macro)}), e))
-                            for c, e in current_macro_values for exp_macro in tail_with_args)
+                            (ExpandedMacro(tuple(prev_data) + current_expanded.value + exp_macro.value,
+                            frozenset(exp_macro.expanded | {(token.value, macro)}), current_expanded.expanded))
+                            for current_expanded in current_macro_values for exp_macro in tail_with_args)
                     else:
-                        all_macro_values.update((ExpandedMacro(tuple(prev_data + c), frozenset({(token.value, macro)}), e)) for c, e in current_macro_values)
+                        all_macro_values.update((ExpandedMacro(tuple(prev_data) + current_expanded.value,
+                            frozenset({(token.value, macro)}), current_expanded.expanded))
+                            for current_expanded in current_macro_values)
                 else:
                     # Degenerate case - we cannot expand this macro yet as it
                     # expects arguments and we have none (yet).
@@ -530,7 +552,7 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                         for reexpanded_macro in reexpanded_macros:
                             tmp.add(ExpandedMacro(reexpanded_macro.value, expanded_macros | expanded_macro.expanded | reexpanded_macro.expanded | expanded_macro.dependent))
                     else:
-                        tmp.add(ExpandedMacro(expanded_macro.value, frozenset(expanded_macros | expanded_macro.dependent)))
+                        tmp.add(ExpandedMacro(expanded_macro.value, frozenset(expanded_macros | expanded_macro.expanded | expanded_macro.dependent)))
                 all_macro_values = tmp
             if debug:
                 for expanded_macro in all_macro_values:
@@ -539,20 +561,20 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
                     print(indent + "".join([e.value for e in expr]), "expanded to ", "".join([a.value for a in v]), e)
                     print(indent + "    It depends on:", e)
 
-            tmp = set()
-            seen = set()
+            joined = dict()
             for expanded_macro in all_macro_values:
                 if not expanded_macro.value: continue
+                # Optimization on the cost of correctnes.
                 # Remove duplicate values, even if they are reached via
-                # different macro expansions. Note that this is not
+                # different macro expansion paths. Note that this is not
                 # 100% correct. It is theoretically possible that we
                 # will miss some possible expansions, but I doubt that
-                # this case will be found in practice.
-                if expanded_macro.value in seen:
-                    continue
-                seen.add(expanded_macro.value)
-                tmp.add(expanded_macro)
-            return tmp
+                # this case will be ever found in practice.
+                joined.setdefault(expanded_macro.value, set()).update(expanded_macro.expanded)
+            all_macro_values = set()
+            for x in joined:
+                all_macro_values.add(ExpandedMacro(x, frozenset(joined[x])))
+            return all_macro_values
 
         if token.type == Identifier:
             prev_data.append(token)
@@ -569,11 +591,9 @@ def expand_tokens(macros, expr, expanded_macros, start=True, depth=0, debug=Fals
             prev_data.append(token)
         i += 1
     
-    key = set()
-    for a, b in prev_depends:
-        key.add((a, frozenset({b})))
+    key = frozenset(((a, frozenset({b})) for a, b in prev_depends))
     result = {ExpandedMacro(tuple(prev_data), frozenset(prev_depends))}
-    complex_expr_cache.setdefault(tuple(expr), dict())[frozenset(key)] = result
+    complex_expr_cache.setdefault(tuple(expr), dict())[key] = result
     return result
 
 def expand_simple(macros, expr, expand_worker=expand_tokens):

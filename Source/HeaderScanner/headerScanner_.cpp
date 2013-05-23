@@ -24,10 +24,16 @@ namespace
     class FileChangeCallback : public clang::PPCallbacks
     {
     public:
-        explicit FileChangeCallback( clang::SourceManager const & sourceManager, std::set<std::string> & headers )
+        explicit FileChangeCallback
+        (
+            clang::SourceManager const & sourceManager,
+            clang::Preprocessor & preprocessor,
+            PreprocessingContext::HeaderRefs & headers )
             :
             sourceManager_( sourceManager ),
-            headers_      ( headers       )
+            preprocessor_ ( preprocessor  ),
+            headers_      ( headers       ),
+            first_        ( true          )
         {
         }
 
@@ -43,83 +49,77 @@ namespace
             if ( fileEntry )
             {
                 char const * name( fileEntry->getName() );
-                headers_.insert( name );
+                clang::DirectoryLookup const * lookup( preprocessor_.GetCurDirLookup() );
+                assert( first_ == ( lookup == 0 ) );
+                if ( first_ )
+                {
+                    first_ = false;
+                    return;
+                }
+                char const * dir = lookup->getName();
+                std::size_t const dirLen = strlen( dir );
+                assert( strncmp( name, dir, dirLen ) == 0 );
+                headers_.insert( std::make_pair( name + dirLen + 1, name ) );
             }
         }
 
+    private:
         clang::SourceManager const & sourceManager_;
-        std::set<std::string> & headers_;
+        clang::Preprocessor & preprocessor_;
+        PreprocessingContext::HeaderRefs & headers_;
+        bool first_;
     };
 }  // anonymous namespace
 
 PreprocessingContext::PreprocessingContext( std::string const & filename )
 {
     // Create diagnostics.
-    m_compiler.createDiagnostics();
+    compiler_.createDiagnostics();
 
     // Create target info.
     // XXX make this configurable?
     clang::TargetOptions target_options;
     target_options.Triple = llvm::sys::getDefaultTargetTriple();
-    m_compiler.setTarget(clang::TargetInfo::CreateTargetInfo(
-        m_compiler.getDiagnostics(), &target_options));
+    compiler_.setTarget(clang::TargetInfo::CreateTargetInfo(
+        compiler_.getDiagnostics(), &target_options));
 
     clang::CompilerInvocation::setLangDefaults(
-        m_compiler.getLangOpts(), clang::IK_CXX);
+        compiler_.getLangOpts(), clang::IK_CXX);
 
     // Configure the include paths.
-    clang::HeaderSearchOptions &hsopts = m_compiler.getHeaderSearchOpts();
+    clang::HeaderSearchOptions &hsopts = compiler_.getHeaderSearchOpts();
     hsopts.UseBuiltinIncludes = false;
     hsopts.UseStandardSystemIncludes = false;
     hsopts.UseStandardCXXIncludes = false;
 
     // Create the rest.
-    m_compiler.createFileManager();
-    m_compiler.createSourceManager(m_compiler.getFileManager());
+    compiler_.createFileManager();
+    compiler_.createSourceManager( compiler_.getFileManager() );
 
-    clang::FileEntry const * mainFileEntry = m_compiler.getFileManager().getFile( filename );
-    m_compiler.getSourceManager().createMainFileID( mainFileEntry );
-
-    m_compiler.createPreprocessor();
+    clang::FileEntry const * mainFileEntry = compiler_.getFileManager().getFile( filename );
+    compiler_.getSourceManager().createMainFileID( mainFileEntry );
 }
 
 void PreprocessingContext::addIncludePath( std::string const & path, bool sysinclude )
 {
-    clang::Preprocessor & preprocessor = m_compiler.getPreprocessor();
-    clang::HeaderSearch & headers = m_compiler.getPreprocessor().getHeaderSearchInfo();
-        
-    clang::FileManager & filemgr = headers.getFileMgr();
-    const clang::DirectoryEntry *entry =
-        filemgr.getDirectory(llvm::StringRef(path.c_str(), path.size()));
-
-    // Take a copy of the existing search paths, and add the new one. If
-    // it's a system path, insert it in after "system_dir_end". If it's a
-    // user path, simply add it to the end of the vector.
-    std::vector<clang::DirectoryLookup> search_paths(
-        headers.search_dir_begin(), headers.search_dir_end());
-    // TODO make sure it's not already in the list.
-    const unsigned int n_quoted = std::distance(
-        headers.quoted_dir_begin(), headers.quoted_dir_end());
-    const unsigned int n_angled = std::distance(
-        headers.angled_dir_begin(), headers.angled_dir_end());
-    if (sysinclude)
-    {
-        clang::DirectoryLookup lookup(
-            entry, clang::SrcMgr::C_System, false);
-        search_paths.insert(
-            search_paths.begin() + (n_quoted + n_angled), lookup);
-    }
-    else
-    {
-        clang::DirectoryLookup lookup(
-            entry, clang::SrcMgr::C_User, false);
-        search_paths.push_back(lookup);
-    }
-    headers.SetSearchPaths( search_paths, n_quoted, n_quoted + n_angled, false);
+    searchPath_.push_back( std::make_pair( path, sysinclude ) );
 }
 
-std::set<std::string> PreprocessingContext::scanHeaders()
+PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
 {
+    // Setup new preprocessor instance.
+    compiler_.createPreprocessor();
+    clang::Preprocessor & preprocessor = compiler_.getPreprocessor();
+    clang::HeaderSearch & headers = preprocessor.getHeaderSearchInfo();
+    for ( std::vector<std::pair<std::string, bool> >::const_iterator iter( searchPath_.begin() ); iter != searchPath_.end(); ++iter )
+    {
+        std::string const & path = iter->first;
+        bool const sysinclude = iter->second;
+        clang::DirectoryEntry const * entry = compiler_.getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
+        clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
+        headers.AddSearchPath( lookup, true );
+    }
+
     struct DiagnosticsGuard
     {
         DiagnosticsGuard( clang::DiagnosticConsumer & client, clang::LangOptions const & opts, clang::Preprocessor & preprocessor )
@@ -135,11 +135,10 @@ std::set<std::string> PreprocessingContext::scanHeaders()
         }
 
         clang::DiagnosticConsumer & client_;
-    } const diagnosticsGuard( *m_compiler.getDiagnostics().getClient(), m_compiler.getLangOpts(), m_compiler.getPreprocessor() );
+    } const diagnosticsGuard( *compiler_.getDiagnostics().getClient(), compiler_.getLangOpts(), preprocessor );
 
-    std::set<std::string> headers;
-    clang::Preprocessor & preprocessor( m_compiler.getPreprocessor() );
-    preprocessor.addPPCallbacks( new FileChangeCallback( m_compiler.getSourceManager(), headers ) );
+    HeaderRefs result;
+    preprocessor.addPPCallbacks( new FileChangeCallback( compiler_.getSourceManager(), preprocessor, result ) );
 
     preprocessor.EnterMainSourceFile();
     while ( true )
@@ -149,7 +148,7 @@ std::set<std::string> PreprocessingContext::scanHeaders()
         if ( token.is( clang::tok::eof ) )
             break;
     }
-    return headers;
+    return result;
 }
 
 int main(void)

@@ -6,6 +6,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 class PreprocessingContext
 {
@@ -13,10 +14,16 @@ public:
     PreprocessingContext( std::string const & filename );
     void addIncludePath( std::string const & path, bool sysinclude );
 
-    std::set<std::string> scanHeaders();
+    typedef std::pair<std::string, std::string> HeaderRef;
+    typedef std::set<HeaderRef> HeaderRefs;
+    HeaderRefs scanHeaders();
     
 private:
-    clang::CompilerInstance m_compiler;
+    void addIncludePathWorker( std::string const & path, bool sysinclude );
+
+private:
+    clang::CompilerInstance compiler_;
+    std::vector<std::pair<std::string, bool> > searchPath_;
 };
 
 

@@ -48,7 +48,7 @@ PyObject * HeaderScanner_add_include_path( HeaderScanner * self, PyObject * args
         return NULL;
 
     self->ppContext->addIncludePath( path, PyObject_IsTrue( sysInclude ) );
-    return NULL;
+    Py_RETURN_NONE;
 }
 
 PyObject * HeaderScanner_scan_headers( HeaderScanner * self )
@@ -56,14 +56,19 @@ PyObject * HeaderScanner_scan_headers( HeaderScanner * self )
     if ( !self->ppContext )
         return NULL;
 
-    std::set<std::string> headers = self->ppContext->scanHeaders();
+    PreprocessingContext::HeaderRefs const headers = self->ppContext->scanHeaders();
     
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
-    for ( std::set<std::string>::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
+    for ( PreprocessingContext::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
-        PyObject * str = PyUnicode_FromStringAndSize( iter->data(), iter->size() );
-        PyTuple_SET_ITEM( result, index++, str );
+        PyObject * tuple = PyTuple_New( 2 );
+        PyObject * first = PyUnicode_FromStringAndSize( iter->first.data(), iter->first.size() );
+        PyObject * second = PyUnicode_FromStringAndSize( iter->second.data(), iter->second.size() );
+        PyTuple_SET_ITEM( tuple, 0, first );
+        PyTuple_SET_ITEM( tuple, 1, second );
+
+        PyTuple_SET_ITEM( result, index++, tuple );
     }
     return result;
 }
@@ -124,7 +129,7 @@ static PyModuleDef headerScannerModule = {
     NULL, NULL, NULL, NULL, NULL
 };
 
-PyMODINIT_FUNC PyInit_headerscanner(void)
+PyMODINIT_FUNC PyInit_header_scanner(void)
 {
     PyObject * m;
 

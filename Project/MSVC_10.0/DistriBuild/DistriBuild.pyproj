@@ -36,9 +36,13 @@
   <ItemGroup>
     <Folder Include="Documentation\" />
     <Folder Include="Source\" />
+    <Folder Include="Source\HeaderScanner\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />
+    <Content Include="Source\HeaderScanner\build-config.ini" />
+    <Content Include="Source\HeaderScanner\headerScanner_.cpp" />
+    <Content Include="Source\HeaderScanner\Jamroot.jam" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

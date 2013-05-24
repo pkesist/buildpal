@@ -33,7 +33,7 @@ class CompileTask:
 
     def manager_prepare(self, manager_ctx):
         if self.__algorithm == 'SCAN_HEADERS':
-            macros = self.__macros + self.__builtin_macros + ['__cplusplus']
+            macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
 
             start = time()
             tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros)

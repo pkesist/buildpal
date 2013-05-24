@@ -13,6 +13,7 @@ class PreprocessingContext
 public:
     PreprocessingContext( std::string const & filename );
     void addIncludePath( std::string const & path, bool sysinclude );
+    void addMacro( std::string const & name, std::string const & value );
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
@@ -24,6 +25,7 @@ private:
 private:
     clang::CompilerInstance compiler_;
     std::vector<std::pair<std::string, bool> > searchPath_;
+    std::vector<std::pair<std::string, std::string> > defines_;
 };
 
 

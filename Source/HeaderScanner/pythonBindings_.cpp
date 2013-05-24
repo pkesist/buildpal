@@ -41,7 +41,7 @@ PyObject * HeaderScanner_add_include_path( HeaderScanner * self, PyObject * args
     char const * path = 0;
     PyObject * sysInclude = Py_False;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s|O:bool", kwlist, &path, &sysInclude ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s|O", kwlist, &path, &sysInclude ) )
         return NULL;
 
     if ( !self->ppContext )
@@ -73,10 +73,28 @@ PyObject * HeaderScanner_scan_headers( HeaderScanner * self )
     return result;
 }
 
+PyObject * HeaderScanner_add_macro( HeaderScanner * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "macro_name", "macro_value", NULL };
+
+    char const * macroName = 0;
+    char const * macroValue = "";
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s|s", kwlist, &macroName, &macroValue ) )
+        return NULL;
+
+    if ( !self->ppContext )
+        return NULL;
+
+    self->ppContext->addMacro( macroName, macroValue );
+    Py_RETURN_NONE;
+}
+
 PyMethodDef HeaderScanner_methods[] =
 {
-    {"add_include_path", (PyCFunction)HeaderScanner_add_include_path, METH_VARARGS, "Add a search path."               },
-    {"scan_headers"    , (PyCFunction)HeaderScanner_scan_headers    , METH_NOARGS , "Retrieve a list of include files."},
+    {"add_include_path", (PyCFunction)HeaderScanner_add_include_path, METH_VARARGS | METH_KEYWORDS, "Add a search path."               },
+    {"add_macro", (PyCFunction)HeaderScanner_add_macro, METH_VARARGS | METH_KEYWORDS, "Add a macro."               },
+    {"scan_headers"    , (PyCFunction)HeaderScanner_scan_headers, METH_NOARGS, "Retrieve a list of include files."},
     {NULL}
 };
 

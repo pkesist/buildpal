@@ -3,6 +3,7 @@
 
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Basic/SourceManager.h"
@@ -48,25 +49,40 @@ namespace
             clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
             if ( fileEntry )
             {
-                char const * name( fileEntry->getName() );
-                clang::DirectoryLookup const * lookup( preprocessor_.GetCurDirLookup() );
-                assert( first_ == ( lookup == 0 ) );
                 if ( first_ )
                 {
                     first_ = false;
                     return;
                 }
-                char const * dir = lookup->getName();
-                std::size_t const dirLen = strlen( dir );
-                assert( strncmp( name, dir, dirLen ) == 0 );
-                headers_.insert( std::make_pair( name + dirLen + 1, name ) );
+                // Relative include.
+                headers_.insert( std::make_pair( lastRelativePath_, fileEntry->getName() ) );
             }
+        }
+
+
+        virtual void InclusionDirective(clang::SourceLocation HashLoc,
+                                        const clang::Token &IncludeTok,
+                                        clang::StringRef FileName,
+                                        bool IsAngled,
+                                        clang::CharSourceRange FilenameRange,
+                                        const clang::FileEntry *File,
+                                        clang::StringRef SearchPath,
+                                        clang::StringRef RelativePath,
+                                        const clang::Module *Imported)
+        {
+            lastRelativePath_ = RelativePath;
+        }
+
+        virtual void MacroDefined(const clang::Token &MacroNameTok,
+                                  const clang::MacroDirective *MD)
+        {
         }
 
     private:
         clang::SourceManager const & sourceManager_;
         clang::Preprocessor & preprocessor_;
         PreprocessingContext::HeaderRefs & headers_;
+        clang::StringRef lastRelativePath_;
         bool first_;
     };
 }  // anonymous namespace
@@ -75,6 +91,11 @@ PreprocessingContext::PreprocessingContext( std::string const & filename )
 {
     // Create diagnostics.
     compiler_.createDiagnostics();
+
+    clang::PreprocessorOptions & preprocessorOptions( compiler_.getInvocation().getPreprocessorOpts() );
+
+    // Do not use Clang predefines.
+    preprocessorOptions.UsePredefines = false;
 
     // Create target info.
     // XXX make this configurable?
@@ -105,12 +126,18 @@ void PreprocessingContext::addIncludePath( std::string const & path, bool sysinc
     searchPath_.push_back( std::make_pair( path, sysinclude ) );
 }
 
+void PreprocessingContext::addMacro( std::string const & name, std::string const & value )
+{
+    defines_.push_back( std::make_pair( name, value ) );
+}
+
 PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
 {
     // Setup new preprocessor instance.
     compiler_.createPreprocessor();
     clang::Preprocessor & preprocessor = compiler_.getPreprocessor();
     clang::HeaderSearch & headers = preprocessor.getHeaderSearchInfo();
+    // Setup search path.
     for ( std::vector<std::pair<std::string, bool> >::const_iterator iter( searchPath_.begin() ); iter != searchPath_.end(); ++iter )
     {
         std::string const & path = iter->first;
@@ -119,6 +146,14 @@ PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
         clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
         headers.AddSearchPath( lookup, true );
     }
+
+    // Setup predefines.
+    std::string predefines( preprocessor.getPredefines() );
+    llvm::raw_string_ostream predefinesStream( predefines );
+    clang::MacroBuilder macroBuilder( predefinesStream );
+    for ( std::vector<std::pair<std::string, std::string> >::const_iterator iter( defines_.begin() ); iter != defines_.end(); ++iter )
+        macroBuilder.defineMacro( iter->first, iter->second );
+    preprocessor.setPredefines( predefinesStream.str() );
 
     struct DiagnosticsGuard
     {

@@ -1,5 +1,3 @@
-from scan_headers import collect_headers
-
 import os
 import shutil
 import subprocess
@@ -36,6 +34,7 @@ class CompileTask:
             macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
 
             start = time()
+            from scan_headers import collect_headers
             tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros)
             if tempFile:
                 self.__tempfile = tempFile

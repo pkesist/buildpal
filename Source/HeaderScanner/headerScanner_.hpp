@@ -20,9 +20,6 @@ public:
     HeaderRefs scanHeaders();
     
 private:
-    void addIncludePathWorker( std::string const & path, bool sysinclude );
-
-private:
     clang::CompilerInstance compiler_;
     std::vector<std::pair<std::string, bool> > searchPath_;
     std::vector<std::pair<std::string, std::string> > defines_;

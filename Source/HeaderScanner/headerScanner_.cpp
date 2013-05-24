@@ -28,11 +28,9 @@ namespace
         explicit FileChangeCallback
         (
             clang::SourceManager const & sourceManager,
-            clang::Preprocessor & preprocessor,
             PreprocessingContext::HeaderRefs & headers )
             :
             sourceManager_( sourceManager ),
-            preprocessor_ ( preprocessor  ),
             headers_      ( headers       ),
             first_        ( true          )
         {
@@ -54,7 +52,6 @@ namespace
                     first_ = false;
                     return;
                 }
-                // Relative include.
                 headers_.insert( std::make_pair( lastRelativePath_, fileEntry->getName() ) );
             }
         }
@@ -73,14 +70,8 @@ namespace
             lastRelativePath_ = RelativePath;
         }
 
-        virtual void MacroDefined(const clang::Token &MacroNameTok,
-                                  const clang::MacroDirective *MD)
-        {
-        }
-
     private:
         clang::SourceManager const & sourceManager_;
-        clang::Preprocessor & preprocessor_;
         PreprocessingContext::HeaderRefs & headers_;
         clang::StringRef lastRelativePath_;
         bool first_;
@@ -98,7 +89,6 @@ PreprocessingContext::PreprocessingContext( std::string const & filename )
     preprocessorOptions.UsePredefines = false;
 
     // Create target info.
-    // XXX make this configurable?
     clang::TargetOptions target_options;
     target_options.Triple = llvm::sys::getDefaultTargetTriple();
     compiler_.setTarget(clang::TargetInfo::CreateTargetInfo(
@@ -148,7 +138,10 @@ PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
     }
 
     // Setup predefines.
-    std::string predefines( preprocessor.getPredefines() );
+    //   Clang always tries to define some macros, even if UsePredefines is off,
+    // so we cheat.
+    //std::string predefines( preprocessor.getPredefines() );
+    std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );
     clang::MacroBuilder macroBuilder( predefinesStream );
     for ( std::vector<std::pair<std::string, std::string> >::const_iterator iter( defines_.begin() ); iter != defines_.end(); ++iter )
@@ -173,7 +166,7 @@ PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
     } const diagnosticsGuard( *compiler_.getDiagnostics().getClient(), compiler_.getLangOpts(), preprocessor );
 
     HeaderRefs result;
-    preprocessor.addPPCallbacks( new FileChangeCallback( compiler_.getSourceManager(), preprocessor, result ) );
+    preprocessor.addPPCallbacks( new FileChangeCallback( compiler_.getSourceManager(), result ) );
 
     preprocessor.EnterMainSourceFile();
     while ( true )

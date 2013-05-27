@@ -151,7 +151,7 @@ class MSVCDistributer(CompilationDistributer):
                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
                         location = winreg.QueryValueEx(reg_key, "ProductDir")[0]
                         break
-                except:
+                except Exception:
                     pass
         if not location:
             return None

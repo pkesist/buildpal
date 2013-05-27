@@ -13,7 +13,7 @@ def work(server, conn):
         conn = conn[0](*conn[1])
         task = conn.recv()
         task.server_process(server, conn)
-    except:
+    except Exception:
         print("Failed to execute client task.")
         traceback.print_exc()
 

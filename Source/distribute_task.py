@@ -9,7 +9,6 @@ import zipfile
 import zlib
 
 from utils import TempFile, send_file, receive_file, receive_compressed_file
-from time import time
 from multiprocessing.connection import Client
 
 class CompileTask:
@@ -26,41 +25,25 @@ class CompileTask:
         self.__compiler_info = compiler_info
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
-        self.__tempfile = None
+        self.tempfile = None
 
-        self.__algorithm = 'SCAN_HEADERS'
-        #self.__algorithm = 'PREPROCESS_LOCALLY'
+        self.algorithm = 'SCAN_HEADERS'
+        #self.algorithm = 'PREPROCESS_LOCALLY'
 
-    def manager_prepare(self, manager_ctx):
-        if self.__algorithm == 'SCAN_HEADERS':
-            macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
-
-            start = time()
-            tempFile = collect_headers(self.__source, self.__cwd, self.__search_path, macros)
-            if tempFile:
-                self.__tempfile = tempFile
-            else:
-                raise RuntimeError("Failed to preprocess.")
-                #self.__algorithm = 'PREPROCESS_LOCALLY'
-
-        if self.__algorithm == 'PREPROCESS_LOCALLY':
-            # Signal the client to do preprocessing.
-            manager_ctx.client_conn.send('PREPROCESS')
-            # Wait for 'done'.
-            done = manager_ctx.client_conn.recv()
-            assert done == 'DONE'
-        return True
+    def manager_prepare(self):
+        macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
+        return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros)
 
     def manager_send(self, manager_ctx):
-        if self.__algorithm == 'SCAN_HEADERS':
+        if self.algorithm == 'SCAN_HEADERS':
             manager_ctx.server_conn.send('SCAN_HEADERS')
-            with open(self.__tempfile.filename(), 'rb') as file:
+            with open(self.tempfile, 'rb') as file:
                 send_file(manager_ctx.server_conn, file)
             manager_ctx.server_conn.send('SOURCE_FILE')
             with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
                 send_file(manager_ctx.server_conn, cpp)
 
-        if self.__algorithm == 'PREPROCESS_LOCALLY':
+        if self.algorithm == 'PREPROCESS_LOCALLY':
             manager_ctx.server_conn.send('PREPROCESS_LOCALLY')
             with open(self.__input, "rb") as file:
                 send_file(manager_ctx.server_conn, file)
@@ -68,11 +51,14 @@ class CompileTask:
     def manager_receive(self, manager_ctx):
         retcode, stdout, stderr = manager_ctx.server_conn.recv()
         if retcode == 0:
+            length = 0
             more = True
             with open(self.__output, "wb") as file:
                 while more:
                     more, data = manager_ctx.server_conn.recv()
                     file.write(data)
+                    length += len(data)
+            print("File length is {}.".format(length))
         manager_ctx.client_conn.send('COMPLETED')
         manager_ctx.client_conn.send((retcode, stdout, stderr))
         return True

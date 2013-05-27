@@ -45,7 +45,7 @@ class Preprocessor:
         self.__file.close()
         try:
             os.remove(self.__filename)
-        except:
+        except Exception:
             pass
 
 class CompilerInfo:
@@ -104,7 +104,7 @@ class CompilationDistributer(CmdLineOptions):
             try:
                 self.__manager = DistributeManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
                 self.__manager.connect()
-            except:
+            except Exception:
                 raise EnvironmentError("Failed to connect to build manager "
                     "'{}'.".format(self.__manager_id))
 

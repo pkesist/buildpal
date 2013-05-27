@@ -1,7 +1,7 @@
 #! python3
 from utils import TempFile
 
-import header_scanner
+import preprocessing
 
 import copy
 import itertools
@@ -12,24 +12,25 @@ import time
 import zipfile
 
 
-def collect_headers(cpp_file, rel_dir, search_path, defines):
+preprocessor = preprocessing.Preprocessor()
+
+def collect_headers(cpp_file, search_path, defines):
     try:
-        file = os.path.join(rel_dir, cpp_file)
-        scanner = header_scanner.HeaderScanner(file)
+        ppc = preprocessing.PreprocessingContext()
         for path in search_path:
-            scanner.add_include_path(path)
+            ppc.add_include_path(path)
         for define in defines:
             define = define.split('=')
             assert len(define) == 1 or len(define) == 2
             macro = define[0]
             value = define[1] if len(define) == 2 else ""
-            scanner.add_macro(macro, value)
+            ppc.add_macro(macro, value)
         zip_file = TempFile(suffix='.zip')
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in scanner.scan_headers():
+            for file, full in preprocessor.scan_headers(ppc, cpp_file):
                 zip.write(full, file)
-        return zip_file
-    except:
+        return zip_file.filename()
+    except Exception:
         import traceback
         traceback.print_exc()
 
@@ -42,8 +43,7 @@ def test(header, search_path):
     import subprocess
     import zipfile
 
-    path, file = os.path.split(header)
-    zip_file = collect_headers(file, path, search_path, [])
+    zip_file = collect_headers(header, search_path, [])
     include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
     with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
         zip.extractall(path=include_path)

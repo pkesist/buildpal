@@ -11,18 +11,43 @@
 class PreprocessingContext
 {
 public:
-    PreprocessingContext( std::string const & filename );
-    void addIncludePath( std::string const & path, bool sysinclude );
-    void addMacro( std::string const & name, std::string const & value );
+    void addIncludePath( std::string const & path, bool sysinclude )
+    {
+        searchPath_.push_back( std::make_pair( path, sysinclude ) );
+    }
+
+    void addMacro( std::string const & name, std::string const & value )
+    {
+        defines_.push_back( std::make_pair( name, value ) );
+    }
+
+    typedef std::vector<std::pair<std::string, bool> > SearchPath;
+    typedef std::vector<std::pair<std::string, std::string> > Defines;
+
+    SearchPath const & searchPath() const { return searchPath_; }
+    Defines const & defines() const { return defines_; }
+
+private:
+    SearchPath searchPath_;
+    Defines defines_;
+};
+
+
+class Preprocessor
+{
+public:
+    Preprocessor();
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders();
-    
+    HeaderRefs scanHeaders( PreprocessingContext &, std::string const & filename );
+
+private:
+    clang::CompilerInstance       & compiler()       { return compiler_; }
+    clang::CompilerInstance const & compiler() const { return compiler_; }
+
 private:
     clang::CompilerInstance compiler_;
-    std::vector<std::pair<std::string, bool> > searchPath_;
-    std::vector<std::pair<std::string, std::string> > defines_;
 };
 
 

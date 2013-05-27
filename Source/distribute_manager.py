@@ -1,6 +1,6 @@
 #! python3
 from queue import PriorityQueue, Empty
-from multiprocessing import Lock, Manager, Process, Queue, Value, RawValue
+from multiprocessing import Lock, Manager, Process, Pool, Queue, Value, RawValue
 from multiprocessing.connection import Client
 from multiprocessing.managers import BaseManager
 from time import sleep, time
@@ -39,18 +39,6 @@ class Worker(Process):
         return self.__ctx
 
     def process_task(self):
-        if hasattr(self.wrapped_task().task(), 'manager_prepare'):
-            with self.wrapped_task().lock():
-                if self.wrapped_task().is_prepared():
-                    return
-                if not self.wrapped_task().is_prepared():
-                    start = time()
-                    if self.wrapped_task().task().manager_prepare(self.context()):
-                        self.wrapped_task().mark_prepared()
-                    else:
-                        raise RuntimeError("Failed to prepare task.")
-                    self.context().add_time('prepare', time() - start)
-        
         start = time()
         self.wrapped_task().task().manager_send(self.context())
         sent = time()
@@ -74,12 +62,6 @@ class Worker(Process):
             self.wrapped_task().mark_completed()
             self.context().server_conn.send(True)
 
-        try:
-            os.remove(self.__input)
-        except:
-            pass
-
-        
         start = time()
         result = self.wrapped_task().task().manager_receive(self.context())
         self.context().add_time('receive', time() - start)
@@ -143,6 +125,9 @@ class WrapTask:
     def lock(self):
         return self.__lock
 
+def prepare_task(task):
+    return task.manager_prepare()
+
 class TaskProcessor(Process):
     def __init__(self, nodes, queue, global_dict, times):
         self.__queue = queue
@@ -156,10 +141,12 @@ class TaskProcessor(Process):
 
         self.__global_dict = global_dict
         self.__times = times
+        self.__prepared = 0
 
         super(TaskProcessor, self).__init__()
 
     def run(self):
+        self.__prepare_pool = Pool(processes=4)
         self.print_stats()
         while True:
             if self.join_dead_processes():
@@ -170,6 +157,27 @@ class TaskProcessor(Process):
         try:
             task, endpoint = self.__queue.get(timeout=0.2)
             client_conn = Client(r"\\.\pipe\{}".format(endpoint), b"")
+
+            if hasattr(task, 'manager_prepare'):
+                start = time()
+                if task.algorithm == 'SCAN_HEADERS':
+                    task.tempfile = self.__prepare_pool.apply(prepare_task, args=(task,))
+                    if not task.tempfile:
+                        raise RuntimeError("Failed to preprocess.")
+                        #task.algorithm = 'PREPROCESS_LOCALLY'
+
+                if task.algorithm == 'PREPROCESS_LOCALLY':
+                    # Signal the client to do preprocessing.
+                    client_conn.send('PREPROCESS')
+                    # Wait for 'done'.
+                    done = client_conn.recv()
+                    assert done == 'DONE'
+
+                #if not task.manager_prepare(client_conn):
+                #    raise RuntimeError("Failed to prepare task.")
+                self.__prepared += 1
+                self.__times['prepare'] = self.__times.get('prepare', 0) + (time() - start)
+
             self.__tasks[endpoint] = WrapTask(task, endpoint), client_conn
             self.__task_map[endpoint] = set()
             self.run_task(endpoint, True)
@@ -257,6 +265,8 @@ class TaskProcessor(Process):
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         times = self.__times._getvalue()
+        if self.__prepared:
+            print("Preprocessing #{}, average time {}s".format(self.__prepared, times.get('prepare', 0)/self.__prepared))
         for time in times:
             print('{} - {}'.format(time, times[time]))
 
@@ -301,7 +311,7 @@ class TaskProcessor(Process):
 
                 try:
                     conn = Client(address=node)
-                except:
+                except Exception:
                     import traceback
                     traceback.print_exc()
                     continue

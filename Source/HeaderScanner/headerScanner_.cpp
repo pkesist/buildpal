@@ -28,11 +28,13 @@ namespace
         explicit FileChangeCallback
         (
             clang::SourceManager const & sourceManager,
-            PreprocessingContext::HeaderRefs & headers )
+            clang::Preprocessor & preprocessor,
+            Preprocessor::HeaderRefs & headers
+        )
             :
             sourceManager_( sourceManager ),
-            headers_      ( headers       ),
-            first_        ( true          )
+            preprocessor_ ( preprocessor  ),
+            headers_      ( headers       )
         {
         }
 
@@ -44,95 +46,103 @@ namespace
             if ( Reason != EnterFile )
                 return;
             clang::FileID const fileId( sourceManager_.getFileID( Loc ) );
+            if ( fileId == sourceManager_.getMainFileID() )
+                return;
             clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
             if ( fileEntry )
             {
-                if ( first_ )
-                {
-                    first_ = false;
-                    return;
-                }
                 headers_.insert( std::make_pair( lastRelativePath_, fileEntry->getName() ) );
             }
         }
 
-
-        virtual void InclusionDirective(clang::SourceLocation HashLoc,
-                                        const clang::Token &IncludeTok,
-                                        clang::StringRef FileName,
-                                        bool IsAngled,
-                                        clang::CharSourceRange FilenameRange,
-                                        const clang::FileEntry *File,
-                                        clang::StringRef SearchPath,
-                                        clang::StringRef RelativePath,
-                                        const clang::Module *Imported)
+        virtual void InclusionDirective
+        (
+            clang::SourceLocation, clang::Token const &,
+            clang::StringRef fileName, bool IsAngled,
+            clang::CharSourceRange filenameRange, clang::FileEntry const * file,
+            clang::StringRef searchPath, clang::StringRef relativePath,
+            clang::Module const * imported
+        )
         {
-            lastRelativePath_ = RelativePath;
+            lastRelativePath_ = relativePath;
+        }
+
+        virtual void MacroExpands
+        (
+            clang::Token const & macroNameTok, clang::MacroDirective const *,
+            clang::SourceRange Range, MacroArgs const *
+        )
+        {
+            preprocessor_.CurPPLexer->ParsingFilename;
         }
 
     private:
         clang::SourceManager const & sourceManager_;
-        PreprocessingContext::HeaderRefs & headers_;
+        clang::Preprocessor & preprocessor_;
+        Preprocessor::HeaderRefs & headers_;
         clang::StringRef lastRelativePath_;
-        bool first_;
     };
 }  // anonymous namespace
 
-PreprocessingContext::PreprocessingContext( std::string const & filename )
+Preprocessor::Preprocessor()
 {
     // Create diagnostics.
-    compiler_.createDiagnostics();
+    compiler().createDiagnostics( new clang::IgnoringDiagConsumer() );
 
-    clang::PreprocessorOptions & preprocessorOptions( compiler_.getInvocation().getPreprocessorOpts() );
-
+#if 0
     // Do not use Clang predefines.
+    // TODO: This does not work well, Clang still defines some symbols.
+    // We remove these manually, see below (setPredefines).
+    clang::PreprocessorOptions & preprocessorOptions( compiler().getInvocation().getPreprocessorOpts() );
     preprocessorOptions.UsePredefines = false;
+#endif
 
     // Create target info.
     clang::TargetOptions target_options;
     target_options.Triple = llvm::sys::getDefaultTargetTriple();
-    compiler_.setTarget(clang::TargetInfo::CreateTargetInfo(
-        compiler_.getDiagnostics(), &target_options));
+    compiler().setTarget(clang::TargetInfo::CreateTargetInfo(
+        compiler().getDiagnostics(), &target_options));
 
     clang::CompilerInvocation::setLangDefaults(
-        compiler_.getLangOpts(), clang::IK_CXX);
+        compiler().getLangOpts(), clang::IK_CXX);
 
     // Configure the include paths.
-    clang::HeaderSearchOptions &hsopts = compiler_.getHeaderSearchOpts();
+    clang::HeaderSearchOptions &hsopts = compiler().getHeaderSearchOpts();
     hsopts.UseBuiltinIncludes = false;
     hsopts.UseStandardSystemIncludes = false;
     hsopts.UseStandardCXXIncludes = false;
 
-    // Create the rest.
-    compiler_.createFileManager();
-    compiler_.createSourceManager( compiler_.getFileManager() );
-
-    clang::FileEntry const * mainFileEntry = compiler_.getFileManager().getFile( filename );
-    compiler_.getSourceManager().createMainFileID( mainFileEntry );
+    // Create the file manager.
+    compiler().createFileManager();
 }
 
-void PreprocessingContext::addIncludePath( std::string const & path, bool sysinclude )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext & ppc, std::string const & filename )
 {
-    searchPath_.push_back( std::make_pair( path, sysinclude ) );
-}
+    // Setup source manager.
+    if ( !compiler().hasSourceManager() )
+    {
+        compiler().createSourceManager( compiler().getFileManager() );
+    }
+    else
+    {
+        compiler().getSourceManager().clearIDTables();
+    }
+    clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
+    compiler().getSourceManager().createMainFileID( mainFileEntry );
 
-void PreprocessingContext::addMacro( std::string const & name, std::string const & value )
-{
-    defines_.push_back( std::make_pair( name, value ) );
-}
-
-PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
-{
     // Setup new preprocessor instance.
-    compiler_.createPreprocessor();
-    clang::Preprocessor & preprocessor = compiler_.getPreprocessor();
+    compiler().createPreprocessor();
+    clang::Preprocessor & preprocessor = compiler().getPreprocessor();
     clang::HeaderSearch & headers = preprocessor.getHeaderSearchInfo();
+
+    preprocessor.SetSuppressIncludeNotFoundError( true );
+
     // Setup search path.
-    for ( std::vector<std::pair<std::string, bool> >::const_iterator iter( searchPath_.begin() ); iter != searchPath_.end(); ++iter )
+    for ( PreprocessingContext::SearchPath::const_iterator iter( ppc.searchPath().begin() ); iter != ppc.searchPath().end(); ++iter )
     {
         std::string const & path = iter->first;
         bool const sysinclude = iter->second;
-        clang::DirectoryEntry const * entry = compiler_.getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
+        clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
         clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
         headers.AddSearchPath( lookup, true );
     }
@@ -144,7 +154,7 @@ PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );
     clang::MacroBuilder macroBuilder( predefinesStream );
-    for ( std::vector<std::pair<std::string, std::string> >::const_iterator iter( defines_.begin() ); iter != defines_.end(); ++iter )
+    for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
     preprocessor.setPredefines( predefinesStream.str() );
 
@@ -163,28 +173,23 @@ PreprocessingContext::HeaderRefs PreprocessingContext::scanHeaders()
         }
 
         clang::DiagnosticConsumer & client_;
-    } const diagnosticsGuard( *compiler_.getDiagnostics().getClient(), compiler_.getLangOpts(), preprocessor );
+    } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), preprocessor );
 
     HeaderRefs result;
-    preprocessor.addPPCallbacks( new FileChangeCallback( compiler_.getSourceManager(), result ) );
+    preprocessor.addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), preprocessor, result ) );
 
     preprocessor.EnterMainSourceFile();
     while ( true )
     {
         clang::Token token;
-        preprocessor.Lex( token );
+        preprocessor.LexNonComment( token );
         if ( token.is( clang::tok::eof ) )
             break;
     }
     return result;
 }
 
-int main(void)
-{
-    PreprocessingContext pc( "D:\\Sandboxes\\PKE\\Libraries\\Boost\\boost_1_53_0\\boost\\phoenix.hpp" );
-    pc.addIncludePath( "D:\\Sandboxes\\PKE\\Libraries\\Boost\\boost_1_53_0", false );
-    pc.scanHeaders();
-}
+
 
 
 //------------------------------------------------------------------------------

@@ -35,7 +35,7 @@ class TempFile:
     def __exit__(self, exc_type, exc_value, traceback):
         try:
             os.remove(self.__filename)
-        except:
+        except Exception:
             pass
 
 
@@ -101,6 +101,6 @@ def receive_compressed_file(conn, *args, **kwargs):
     return tempfile
 
 def send_file(conn, file):
-    for data in iter(lambda : file.read(10 * 1024), b''):
+    for data in iter(lambda : file.read(100 * 1024), b''):
         conn.send((True, data))
     conn.send((False, b''))

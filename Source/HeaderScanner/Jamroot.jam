@@ -1,0 +1,73 @@
+using winlibs ;
+
+path-constant CLANG_LIB : "D:\\Sandboxes\\External\\Clang\\build\\lib" ;
+
+rule clang-lib ( lib-name )
+{
+    lib $(lib-name) : : <file>$(CLANG_LIB)/Debug/$(lib-name).lib <variant>debug <toolset>msvc ;
+    lib $(lib-name) : : <file>$(CLANG_LIB)/Release/$(lib-name).lib <toolset>msvc ;
+}
+
+clang-lib clangRewriteCore   ;
+clang-lib clangFrontend      ;
+clang-lib clangDriver        ;
+clang-lib clangEdit          ;
+clang-lib clangSerialization ;
+clang-lib clangParse         ;
+clang-lib clangSema          ;
+clang-lib clangAnalysis      ;
+clang-lib clangAST           ;
+clang-lib clangLex           ;
+clang-lib clangBasic         ;
+clang-lib LLVMMC             ;
+clang-lib LLVMSupport        ;
+clang-lib LLVMCore           ;
+clang-lib LLVMBitReader      ;
+clang-lib LLVMMCParser       ;
+
+
+alias clang
+:
+    clangRewriteCore  
+    clangFrontend     
+    clangDriver       
+    clangEdit         
+    clangSerialization
+    clangParse        
+    clangSema         
+    clangAnalysis     
+    clangAST          
+    clangLex          
+    clangBasic        
+    LLVMMC            
+    LLVMSupport       
+    LLVMCore          
+    LLVMBitReader     
+    LLVMMCParser     
+:
+:
+:
+    <include>D:\\Sandboxes\\External\\Clang\\llvm\\include
+    <include>D:\\Sandboxes\\External\\Clang\\llvm\\tools\\clang\\include
+    <include>D:\\Sandboxes\\External\\Clang\\build\\include
+    <include>D:\\Sandboxes\\External\\Clang\\build\\tools\\clang\\include
+;
+
+alias preprocessing_stuff
+:
+    headerScanner_.cpp
+    pythonBindings_.cpp
+    clang
+    /python_dev//pythonLib
+    /boost//headers
+    /winlibs//advapi32lib
+    /winlibs//shell32lib
+;
+
+pyd preprocessing : preprocessing_stuff ;
+pyd preprocessing_d : preprocessing_stuff : <variant>debug ;
+explicit preprocessing ;
+explicit preprocessing_d ;
+
+install ppinstall : preprocessing : <variant>profile <location>C:\\Python32\\DLLs ;
+install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.2.3\\Python\\PCbuild ;

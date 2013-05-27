@@ -42,7 +42,9 @@
     <Content Include="Documentation\doc.txt" />
     <Content Include="Source\HeaderScanner\build-config.ini" />
     <Content Include="Source\HeaderScanner\headerScanner_.cpp" />
+    <Content Include="Source\HeaderScanner\headerScanner_.hpp" />
     <Content Include="Source\HeaderScanner\Jamroot.jam" />
+    <Content Include="Source\HeaderScanner\pythonBindings_.cpp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

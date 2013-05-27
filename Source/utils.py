@@ -89,18 +89,15 @@ def receive_file(conn, *args, **kwargs):
             file.write(data)
     return tempfile
 
-def receive_compressed_file(conn, *args, **kwargs):
+def receive_compressed_file(conn, fileobj):
     more = True
-    tempfile = TempFile(*args, **kwargs)
     decompressor = zlib.decompressobj()
-    with tempfile.open('wb') as file:
-        while more:
-            more, data = conn.recv()
-            file.write(decompressor.decompress(data))
-        file.write(decompressor.flush())
-    return tempfile
+    while more:
+        more, data = conn.recv()
+        fileobj.write(decompressor.decompress(data))
+    fileobj.write(decompressor.flush())
 
 def send_file(conn, file):
-    for data in iter(lambda : file.read(100 * 1024), b''):
+    for data in iter(lambda : file.read(1024 * 1024), b''):
         conn.send((True, data))
     conn.send((False, b''))

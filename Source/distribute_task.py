@@ -54,11 +54,7 @@ class CompileTask:
             length = 0
             more = True
             with open(self.__output, "wb") as file:
-                while more:
-                    more, data = manager_ctx.server_conn.recv()
-                    file.write(data)
-                    length += len(data)
-            print("File length is {}.".format(length))
+                receive_compressed_file(manager_ctx.server_conn, file)
         manager_ctx.client_conn.send('COMPLETED')
         manager_ctx.client_conn.send((retcode, stdout, stderr))
         return True
@@ -92,12 +88,21 @@ class CompileTask:
                             return
                         conn.send((retcode, stdout, stderr))
                         if retcode == 0:
-                            with object_file.open('rb') as file:
-                                send_file(conn, file)
+                            compressor = zlib.compressobj(1)
+                            with object_file.open('rb') as obj:
+                                for data in iter(lambda : obj.read(1024 * 1024), b''):
+                                    compressed = compressor.compress(data)
+                                    conn.send((True, compressed))
+                                compressed = compressor.flush(zlib.Z_FINISH)
+                                conn.send((False, compressed))
                         shutil.rmtree(include_path, ignore_errors=True)
 
         if task == 'PREPROCESS_LOCALLY':
-            with receive_compressed_file(conn) as preprocessed_file:
+            tmp = utils.TempFile()
+            with tmp.open('wb') as temp:
+                receive_compressed_file(conn, temp)
+
+            with tmp as preprocessed_file:
                 with TempFile(suffix='.obj') as object_file:
                     noLink = self.__compile_switch
                     output = self.__output_switch.format(object_file.filename())

@@ -1,5 +1,3 @@
-from scan_headers import collect_headers
-
 import os
 import shutil
 import subprocess
@@ -32,6 +30,7 @@ class CompileTask:
 
     def manager_prepare(self):
         macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
+        from scan_headers import collect_headers
         return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros)
 
     def manager_send(self, manager_ctx):

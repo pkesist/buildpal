@@ -25,7 +25,7 @@ class Preprocessor:
         p = subprocess.Popen(self.__preprocess_call, stdout=subprocess.PIPE)
         with open(self.__filename, 'wb') as file:
             compressor = zlib.compressobj(1)
-            for data in iter(lambda : p.stdout.read(10 * 1024), b''):
+            for data in iter(lambda : p.stdout.read(100 * 1024), b''):
                 compressed = compressor.compress(data)
                 file.write(compressed)
             compressed = compressor.flush(zlib.Z_FINISH)

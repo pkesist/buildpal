@@ -33,29 +33,29 @@ class CompileTask:
         from scan_headers import collect_headers
         return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros)
 
-    def manager_send(self, manager_ctx):
+    def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':
-            manager_ctx.server_conn.send('SCAN_HEADERS')
+            server_conn.send('SCAN_HEADERS')
             with open(self.tempfile, 'rb') as file:
-                send_file(manager_ctx.server_conn, file)
-            manager_ctx.server_conn.send('SOURCE_FILE')
+                send_file(server_conn, file)
+            server_conn.send('SOURCE_FILE')
             with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
-                send_file(manager_ctx.server_conn, cpp)
+                send_file(server_conn, cpp)
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
-            manager_ctx.server_conn.send('PREPROCESS_LOCALLY')
+            server_conn.send('PREPROCESS_LOCALLY')
             with open(self.__input, "rb") as file:
-                send_file(manager_ctx.server_conn, file)
+                send_file(server_conn, file)
 
-    def manager_receive(self, manager_ctx):
-        retcode, stdout, stderr = manager_ctx.server_conn.recv()
+    def manager_receive(self, client_conn, server_conn):
+        retcode, stdout, stderr = server_conn.recv()
         if retcode == 0:
             length = 0
             more = True
             with open(self.__output, "wb") as file:
-                receive_compressed_file(manager_ctx.server_conn, file)
-        manager_ctx.client_conn.send('COMPLETED')
-        manager_ctx.client_conn.send((retcode, stdout, stderr))
+                receive_compressed_file(server_conn, file)
+        client_conn.send('COMPLETED')
+        client_conn.send((retcode, stdout, stderr))
         return True
 
     def server_process(self, server, conn):

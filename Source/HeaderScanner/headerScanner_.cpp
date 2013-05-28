@@ -67,15 +67,6 @@ namespace
             lastRelativePath_ = relativePath;
         }
 
-        virtual void MacroExpands
-        (
-            clang::Token const & macroNameTok, clang::MacroDirective const *,
-            clang::SourceRange Range, MacroArgs const *
-        )
-        {
-            preprocessor_.CurPPLexer->ParsingFilename;
-        }
-
     private:
         clang::SourceManager const & sourceManager_;
         clang::Preprocessor & preprocessor_;

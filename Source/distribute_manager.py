@@ -11,39 +11,47 @@ import sys
 import os
 import configparser
 
-class Context:
+class Timer:
+    class ScopedTimer:
+        def __init__(self, name, timer):
+            self.__timer = timer
+            self.__start = time()
+            self.__name = name
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.__timer.add_time(self.__name, time() - self.__start)
+
+    def __init__(self, times):
+        self.__times = times
+
     def add_time(self, type, value):
-        self.times[type] = self.get_time(type) + value
+        self.__times[type] = self.__times.get(type, 0) + value
 
-    def get_time(self, type):
-        return self.times.get(type, 0)
+    def timeit(self, name):
+        return Timer.ScopedTimer(name, self)
 
-class Worker(Process):
-    def __init__(self, wrapped_task, client_conn, times, task_map, nodes, node_info):
-        ctx = Context()
-        ctx.client_conn = client_conn
-        ctx.times       = times
+def prepare_task(task):
+    return task.manager_prepare()
 
-        self.__ctx = ctx
-
+class Worker:
+    def __init__(self, wrapped_task, client_conn, times, task_map, nodes, node_info, prepare_pool):
+        self.__timer = Timer(times)
+        self.__client_conn = client_conn
         self.__wrapped_task = wrapped_task
         self.__task_map = task_map
         self.__nodes = nodes
         self.__node_info = node_info
         self.__original = True
-
-        super(Worker, self).__init__()
+        self.__prepare_pool = prepare_pool
 
     def wrapped_task(self): return self.__wrapped_task
 
-    def context(self):
-        return self.__ctx
-
     def process_task(self, node_index):
-        start = time()
-        self.wrapped_task().task().manager_send(self.context())
-        sent = time()
-        self.context().add_time('send', sent - start)
+        with self.__timer.timeit('send'):
+            self.wrapped_task().task().manager_send(self.__client_conn, self.__server_conn)
 
         if self.__original:
             self.__node_info.add_new_task_sent(node_index)
@@ -51,75 +59,67 @@ class Worker(Process):
             self.__node_info.add_old_task_sent(node_index)
 
         # Just block
-        done = self.context().server_conn.recv()
-        serverdone = time()
-        assert done == "SERVER_DONE"
-        self.context().add_time('server_time', serverdone - sent)
+        with self.__timer.timeit('server_time'):
+            done = self.__server_conn.recv()
+            assert done == "SERVER_DONE"
 
-        with self.wrapped_task().lock():
-            if self.wrapped_task().is_completed():
-                self.context().server_conn.send(False)
-                return False
-            self.wrapped_task().mark_completed()
-            self.context().server_conn.send(True)
+        if not self.wrapped_task().try_mark_completed():
+            self.__server_conn.send(False)
+            return False
 
-        start = time()
-        result = self.wrapped_task().task().manager_receive(self.context())
-        self.context().add_time('receive', time() - start)
-        return result
+        self.__server_conn.send(True)
+        with self.__timer.timeit('receive'):
+            result = self.wrapped_task().task().manager_receive(self.__client_conn, self.__server_conn)
+            return result
 
     def __call__(self):
-        self.run()
-
-    def run(self):
-        if hasattr(self.wrapped_task().task(), 'manager_prepare'):
-            start = time()
-            if self.wrapped_task().task().algorithm == 'SCAN_HEADERS':
-                self.wrapped_task().task().tempfile = self.wrapped_task().task().manager_prepare()
-                if not self.wrapped_task().task().tempfile:
-                    raise RuntimeError("Failed to preprocess.")
-                    #task.algorithm = 'PREPROCESS_LOCALLY'
-
-            if self.wrapped_task().task().algorithm == 'PREPROCESS_LOCALLY':
-                # Signal the client to do preprocessing.
-                self.context().server_conn.send('PREPROCESS')
-                # Wait for 'done'.
-                done = client_conn.recv()
-                assert done == 'DONE'
-            self.context().add_time('prepare', time() - start)
-
         try:
-            fan = time()
-            find_node_result = self.find_available_node()
-            self.context().add_time('find_available_node', time() - start)
-            if find_node_result is None:
-                return
+            task = self.wrapped_task().task()
+            if hasattr(task, 'manager_prepare'):
+                with self.__timer.timeit('prepare'):
+                    start = time()
+                    if task.algorithm == 'SCAN_HEADERS':
+                        task.tempfile = self.__prepare_pool.run(prepare_task, (task,))
+                        if not task.tempfile:
+                            raise RuntimeError("Failed to preprocess.")
+                            #task.algorithm = 'PREPROCESS_LOCALLY'
 
+                    if task.algorithm == 'PREPROCESS_LOCALLY':
+                        # Signal the client to do preprocessing.
+                        self.__server_conn.send('PREPROCESS')
+                        # Wait for 'done'.
+                        done = client_conn.recv()
+                        assert done == 'DONE'
+
+            with self.__timer.timeit('find_available_node'):
+                find_node_result = self.find_available_node()
+                if find_node_result is None:
+                    return
             node_index, server_conn = find_node_result
-            self.context().server_conn = server_conn
+            self.__server_conn = server_conn
             self.__task_map.setdefault(self.wrapped_task().client_id(), set()).add(node_index)
 
-            start = time()
-            # Create and run worker.
-            result = self.process_task(node_index)
-            # Did not process it after all.
-            if result is None:
-                return
+            with self.__timer.timeit('run_task'):
+                # Create and run worker.
+                result = self.process_task(node_index)
+                # Did not process it after all.
+                if result is None:
+                    return
 
-            if result:
-                self.__node_info.add_tasks_completed(node_index)
-            else:
-                self.__node_info.add_tasks_failed(node_index)
-
-        finally:
-            self.context().add_time('run_task', time() - start)
+                if result:
+                    self.__node_info.add_tasks_completed(node_index)
+                else:
+                    self.__node_info.add_tasks_failed(node_index)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def find_available_node(self):
         nodes_processing_task = self.__task_map.get(self.__wrapped_task.client_id(), set())
         first = None
         accepted = False
         rejections = 0
-        # Crucial part of the algorithm - ordering of nodes by quality.
+
         def ordering_key(index):
             return self.__node_info.completion_ratio(index), self.__node_info.tasks_processing(index), self.__node_info.tasks_failed(index)
 
@@ -139,15 +139,6 @@ class Worker(Process):
                         return
                     else:
                         sleep(1)
-                # A 'better' node is already working on this task.
-                if node_index in nodes_processing_task:
-                    return
-
-                if nodes_processing_task:
-                    current_best = max([self.completion_ratio(node_index) for node_index in nodes_processing_task])
-                    if self.completion_ratio(node_index) <= current_best:
-                        # We already have a better node working
-                        return
 
                 try:
                     server_conn = Client(address=node)
@@ -155,30 +146,32 @@ class Worker(Process):
                     import traceback
                     traceback.print_exc()
                     continue
-                server_conn.send(self.__wrapped_task.task())
-                try:
-                    accepted, has_compiler = server_conn.recv()
-                    if not accepted:
-                        rejections += 1
-                        server_conn.close()
-                    else:
-                        return node_index, server_conn
-                except IOError:
-                    pass
+                with self.__timer.timeit('send_task_wait_accept'):
+                    server_conn.send(self.__wrapped_task.task())
+                    try:
+                        accepted, has_compiler = server_conn.recv()
+                        if not accepted:
+                            rejections += 1
+                            server_conn.close()
+                        else:
+                            return node_index, server_conn
+                    except IOError:
+                        pass
 
 class WrapTask:
-    def __init__(self, task, client_id):
+    def __init__(self, task, client_id, manager):
         self.__client_id = client_id
         self.__task = task
-        self.__lock = Lock()
-        self.__completed = Value(ctypes.c_bool, False, lock=False)
-        self.__nodes_processing = []
+        self.__completed = manager.Value('bool', False)
+        self.__nodes_processing = manager.list()
 
     def is_completed(self):
         return self.__completed.value
 
-    def mark_completed(self):
+    def try_mark_completed(self):
+        original = self.__completed.value
         self.__completed.value = True
+        return not original
 
     def task(self):
         return self.__task
@@ -189,48 +182,46 @@ class WrapTask:
     def nodes_processing(self):
         return self.__nodes_processing
 
-    def __lt__(self, other):
-        return len(self.__nodes_processing) < len(other.nodes_processing())
-
-    def lock(self):
-        return self.__lock
-
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue, manager):
+    def __init__(self, nodes, queue):
         self.__queue = queue
         self.__nodes = nodes
-
-        self.__node_info = manager.NodeInfoHolder(len(nodes))
-
         self.__tasks = {}
-        self.__task_map = manager.dict()
         self.__processes = []
-
-        self.__times = manager.dict()
 
         super(TaskProcessor, self).__init__()
 
     def run(self):
-        self.__prepare_pool = Pool(processes=8)
+        self.__compile_pool = Pool(processes=8)
+
+        self.__manager = BookKeepingManager()
+        self.__manager.start()
+
+        self.__node_info = self.__manager.NodeInfoHolder(len(self.__nodes))
+        self.__task_map = self.__manager.dict()
+        self.__times = self.__manager.dict()
+        self.__timer = Timer(self.__times)
+        print("Spawning process pool")
+        self.__prepare_pool = self.__manager.ProcessPool(4)
+
         self.print_stats()
+        count = 0
         while True:
-            if self.join_dead_processes():
+            count += 1
+            if self.run_one() or not count % 10:
                 self.print_stats()
-            self.run_one()
 
     def run_one(self):
         try:
             task, client_id = self.__queue.get(timeout=0.2)
-            wrapped_task = WrapTask(task, client_id)
+            wrapped_task = WrapTask(task, client_id, self.__manager) 
             client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
             self.__tasks[client_id] = wrapped_task, client_conn
-            start = time()
-            worker = Worker(wrapped_task, client_conn, self.__times, self.__task_map, self.__nodes, self.__node_info)
-            self.__processes.append(worker)
-            worker.start()
-            self.__times['spawn_worker'] = self.__times.get('spawn_worker', 0) + (time() - start)
+            worker = Worker(wrapped_task, client_conn, self.__times, self.__task_map, self.__nodes, self.__node_info, self.__prepare_pool)
+            self.__compile_pool.apply_async(worker)
+            return True
         except Empty:
-            pass
+            return False
 
     def join_dead_processes(self):
         dead=list(filter(lambda p : not p.is_alive(), self.__processes))
@@ -263,18 +254,15 @@ class TaskProcessor(Process):
 
 task_queue = Queue()
 
-
-
-class NodeInfo:
-    def __init__(self):
-        self._tasks_completed = 0
-        self._tasks_failed    = 0
-        self._new_tasks_sent  = 0
-        self._old_tasks_sent  = 0
-
 class NodeInfoHolder:
+    class NodeInfo:
+        def __init__(self):
+            self._tasks_completed = 0
+            self._tasks_failed    = 0
+            self._new_tasks_sent  = 0
+            self._old_tasks_sent  = 0
     def __init__(self, size):
-        self.__nodes = tuple((NodeInfo() for i in range(size)))
+        self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
 
     def new_tasks_sent(self, index): return self.__nodes[index]._new_tasks_sent
 
@@ -301,10 +289,18 @@ class NodeInfoHolder:
             return 1.0
         return self.tasks_completed(index) / self.tasks_sent(index)
 
+class ProcessPool:
+    def __init__(self, processes):
+        self.__prepare_pool = Pool(processes=processes)
+
+    def run(self, callable, args=(), kwds={}):
+        return self.__prepare_pool.apply(callable, args=args, kwds=kwds)
+
 class BookKeepingManager(SyncManager):
     pass
 
 BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
+BookKeepingManager.register('ProcessPool', ProcessPool)
 
 def queue_task(task, client_id):
     task_queue.put((task, client_id))
@@ -362,10 +358,7 @@ Usage:
    
     queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
 
-    bookKeepingManager = BookKeepingManager()
-    bookKeepingManager.start()
-
-    task_processor = TaskProcessor(nodes, task_queue, bookKeepingManager)
+    task_processor = TaskProcessor(nodes, task_queue)
     task_processor.start()
 
     server = queue_manager.get_server()

@@ -1,7 +1,7 @@
 #! python3
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
-from distribute_manager import DistributeManager
+from distribute_manager import QueueManager
 
 import os
 import random
@@ -102,7 +102,7 @@ class CompilationDistributer(CmdLineOptions):
             self.__manager_id = command[0]
 
             try:
-                self.__manager = DistributeManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
+                self.__manager = QueueManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
                 self.__manager.connect()
             except Exception:
                 raise EnvironmentError("Failed to connect to build manager "

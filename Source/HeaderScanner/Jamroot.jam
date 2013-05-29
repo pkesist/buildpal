@@ -70,4 +70,4 @@ explicit preprocessing ;
 explicit preprocessing_d ;
 
 install ppinstall : preprocessing : <variant>profile <location>C:\\Python33\\DLLs ;
-install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild ;
+install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild <variant>debug ;

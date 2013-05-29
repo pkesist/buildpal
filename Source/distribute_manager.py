@@ -1,4 +1,4 @@
-#! python3
+#! python3.3
 from queue import PriorityQueue, Empty
 from multiprocessing import Lock, Process, Pool, Queue, Value, RawValue
 from multiprocessing.connection import Client
@@ -201,7 +201,6 @@ class TaskProcessor(Process):
         self.__task_map = self.__manager.dict()
         self.__times = self.__manager.dict()
         self.__timer = Timer(self.__times)
-        print("Spawning process pool")
         self.__prepare_pool = self.__manager.ProcessPool(4)
 
         self.print_stats()

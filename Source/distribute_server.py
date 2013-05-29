@@ -1,7 +1,6 @@
-#! python3
+#! python3.3
 from multiprocessing.connection import Listener
 from multiprocessing import Manager, Pool
-from multiprocessing.reduction import reduce_connection
 import configparser
 import psutil
 import traceback
@@ -10,7 +9,6 @@ import os
 
 def work(server, conn):
     try:
-        conn = conn[0](*conn[1])
         task = conn.recv()
         task.server_process(server, conn)
     except Exception:
@@ -27,7 +25,7 @@ class ServerRunner:
         self.__listener = Listener(('localhost', port), 'AF_INET')
 
         self.__tasks = []
-        self.__compiler = ServerCompiler(global_data, cpu_usage_hwm)
+        self.__compiler = ServerCompiler(cpu_usage_hwm)
 
     def print_tasks(self):
         sys.stdout.write("Running {} tasks.\r".format(len(self.__tasks)))
@@ -39,33 +37,18 @@ class ServerRunner:
             self.print_tasks()
             conn = self.__listener.accept()
             self.__tasks.append(self.__pool.apply_async(func=work, args=(
-                self.__compiler, reduce_connection(conn),)))
+                self.__compiler, conn,)))
 
 
 class ServerCompiler:
-    def __init__(self, global_data, cpu_usage_hwm=None):
+    def __init__(self, cpu_usage_hwm=None):
         self.__hwm = cpu_usage_hwm
         self.__compiler_setup = {}
-        self.__global_data = global_data
-
-        self.__checksum = {}
-        self.__include = {}
 
     def accept(self):
         if not self.__hwm:
             return True
         return psutil.cpu_percent() < self.__hwm
-
-    def local_include_path(self, include_path, checksum):
-        if not include_path in self.__global_data:
-            return None
-        stored_checksum, local_path = self.__global_data[include_path]
-        if stored_checksum == checksum:
-            return local_path
-        return None
-
-    def store_includes(self, include_path, checksum, local_path):
-        self.__global_data[include_path] = (checksum, local_path)
 
     def setup_compiler(self, compiler_info):
         setup = self.__compiler_setup.get(compiler_info)
@@ -114,6 +97,4 @@ Usage:
     else:
         cpu_usage_hwm = None
     
-    manager = Manager()
-
-    ServerRunner(port, processes, manager.dict(), cpu_usage_hwm).run()
+    ServerRunner(port, processes, cpu_usage_hwm).run()

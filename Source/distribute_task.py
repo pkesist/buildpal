@@ -25,8 +25,8 @@ class CompileTask:
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
         self.tempfile = None
 
-        self.algorithm = 'SCAN_HEADERS'
-        #self.algorithm = 'PREPROCESS_LOCALLY'
+        #self.algorithm = 'SCAN_HEADERS'
+        self.algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self):
         macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
@@ -97,7 +97,7 @@ class CompileTask:
                         shutil.rmtree(include_path, ignore_errors=True)
 
         if task == 'PREPROCESS_LOCALLY':
-            tmp = utils.TempFile()
+            tmp = TempFile()
             with tmp.open('wb') as temp:
                 receive_compressed_file(conn, temp)
 
@@ -112,5 +112,10 @@ class CompileTask:
                         return
                     conn.send((retcode, stdout, stderr))
                     if retcode == 0:
-                        with object_file.open('rb') as file:
-                            send_file(conn, file)
+                        compressor = zlib.compressobj(1)
+                        with object_file.open('rb') as obj:
+                            for data in iter(lambda : obj.read(1024 * 1024), b''):
+                                compressed = compressor.compress(data)
+                                conn.send((True, compressed))
+                            compressed = compressor.flush(zlib.Z_FINISH)
+                            conn.send((False, compressed))

@@ -86,9 +86,9 @@ class Worker:
 
                     if task.algorithm == 'PREPROCESS_LOCALLY':
                         # Signal the client to do preprocessing.
-                        self.__server_conn.send('PREPROCESS')
+                        self.__client_conn.send('PREPROCESS')
                         # Wait for 'done'.
-                        done = client_conn.recv()
+                        done = self.__client_conn.recv()
                         assert done == 'DONE'
 
             with self.__timer.timeit('find_available_node'):

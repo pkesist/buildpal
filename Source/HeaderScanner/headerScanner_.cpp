@@ -15,6 +15,7 @@
 #include "clang/Lex/PreprocessorOptions.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <set>
 #include <string>
@@ -105,19 +106,22 @@ Preprocessor::Preprocessor()
 
     // Create the file manager.
     compiler().createFileManager();
+
+    compiler().getLangOpts().MicrosoftExt = 1;
+    compiler().getLangOpts().Exceptions = 1;
+    compiler().getLangOpts().POSIXThreads = 1;
+    compiler().getLangOpts().MicrosoftMode = 1;
+    compiler().getLangOpts().MSCVersion = 1500;
+    compiler().getLangOpts().CPlusPlus = 1;
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext & ppc, std::string const & filename )
+void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
 {
     // Setup source manager.
-    if ( !compiler().hasSourceManager() )
-    {
-        compiler().createSourceManager( compiler().getFileManager() );
-    }
-    else
-    {
+    if ( compiler().hasSourceManager() )
         compiler().getSourceManager().clearIDTables();
-    }
+    else
+        compiler().createSourceManager( compiler().getFileManager() );
     clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
     compiler().getSourceManager().createMainFileID( mainFileEntry );
 
@@ -125,8 +129,6 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext & ppc, 
     compiler().createPreprocessor();
     clang::Preprocessor & preprocessor = compiler().getPreprocessor();
     clang::HeaderSearch & headers = preprocessor.getHeaderSearchInfo();
-
-    preprocessor.SetSuppressIncludeNotFoundError( true );
 
     // Setup search path.
     for ( PreprocessingContext::SearchPath::const_iterator iter( ppc.searchPath().begin() ); iter != ppc.searchPath().end(); ++iter )
@@ -148,7 +150,11 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext & ppc, 
     for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
     preprocessor.setPredefines( predefinesStream.str() );
+}
 
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
+{
+    setupPreprocessor( ppc, filename );
     struct DiagnosticsGuard
     {
         DiagnosticsGuard( clang::DiagnosticConsumer & client, clang::LangOptions const & opts, clang::Preprocessor & preprocessor )
@@ -164,23 +170,22 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext & ppc, 
         }
 
         clang::DiagnosticConsumer & client_;
-    } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), preprocessor );
+    } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), compiler().getPreprocessor() );
 
     HeaderRefs result;
-    preprocessor.addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), preprocessor, result ) );
+    compiler().getPreprocessor().addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), compiler().getPreprocessor(), result ) );
+    compiler().getPreprocessor().SetMacroExpansionOnlyInDirectives();
 
-    preprocessor.EnterMainSourceFile();
+    compiler().getPreprocessor().EnterMainSourceFile();
     while ( true )
     {
         clang::Token token;
-        preprocessor.LexNonComment( token );
+        compiler().getPreprocessor().LexNonComment( token );
         if ( token.is( clang::tok::eof ) )
             break;
     }
     return result;
 }
-
-
 
 
 //------------------------------------------------------------------------------

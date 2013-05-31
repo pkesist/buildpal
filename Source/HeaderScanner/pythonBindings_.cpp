@@ -168,7 +168,7 @@ PyObject * PyPreprocessor_scan_headers( PyPreprocessor * self, PyObject * args, 
     if ( !self->pp )
         return NULL;
 
-    PyPreprocessingContext * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
+    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
     Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename );
 
     PyObject * result = PyTuple_New( headers.size() );

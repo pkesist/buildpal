@@ -25,11 +25,11 @@ class CompileTask:
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
         self.tempfile = None
 
-        #self.algorithm = 'SCAN_HEADERS'
-        self.algorithm = 'PREPROCESS_LOCALLY'
+        self.algorithm = 'SCAN_HEADERS'
+        #self.algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self):
-        macros = self.__macros + self.__builtin_macros + ['__cplusplus=200406']
+        macros = self.__macros + self.__builtin_macros
         from scan_headers import collect_headers
         return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros)
 

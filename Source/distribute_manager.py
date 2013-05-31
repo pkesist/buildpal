@@ -28,7 +28,8 @@ class Timer:
         self.__times = times
 
     def add_time(self, type, value):
-        self.__times[type] = self.__times.get(type, 0) + value
+        current = self.__times.get(type, (0, 0))
+        self.__times[type] = (current[0] + value, current[1] + 1)
 
     def timeit(self, name):
         return Timer.ScopedTimer(name, self)
@@ -249,7 +250,7 @@ class TaskProcessor(Process):
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         times = self.__times._getvalue()
         for time in times:
-            print('{} - {}'.format(time, times[time]))
+            print('{:-<30} Total {:10.2f} - Num {:<5} - Average {:10.2f}'.format(time, times[time][0], times[time][1], times[time][0] / times[time][1]))
 
 task_queue = Queue()
 

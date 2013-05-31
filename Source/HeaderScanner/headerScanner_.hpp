@@ -40,7 +40,10 @@ public:
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext &, std::string const & filename );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
+
+private:
+    void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );
 
 private:
     clang::CompilerInstance       & compiler()       { return compiler_; }

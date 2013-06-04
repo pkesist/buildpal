@@ -8,7 +8,8 @@
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/FileManager.h"
-#include "clang/Frontend/FrontendDiagnostic.h"
+#include "clang/Frontend/PreprocessorOutputOptions.h"
+#include "clang/Frontend/Utils.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/Preprocessor.h"
@@ -106,13 +107,6 @@ Preprocessor::Preprocessor()
 
     // Create the file manager.
     compiler().createFileManager();
-
-    compiler().getLangOpts().MicrosoftExt = 1;
-    compiler().getLangOpts().Exceptions = 1;
-    compiler().getLangOpts().POSIXThreads = 1;
-    compiler().getLangOpts().MicrosoftMode = 1;
-    compiler().getLangOpts().MSCVersion = 1500;
-    compiler().getLangOpts().CPlusPlus = 1;
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
@@ -127,8 +121,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
 
     // Setup new preprocessor instance.
     compiler().createPreprocessor();
-    clang::Preprocessor & preprocessor = compiler().getPreprocessor();
-    clang::HeaderSearch & headers = preprocessor.getHeaderSearchInfo();
+    clang::HeaderSearch & headers = preprocessor().getHeaderSearchInfo();
 
     // Setup search path.
     for ( PreprocessingContext::SearchPath::const_iterator iter( ppc.searchPath().begin() ); iter != ppc.searchPath().end(); ++iter )
@@ -143,13 +136,13 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     // Setup predefines.
     //   Clang always tries to define some macros, even if UsePredefines is off,
     // so we cheat.
-    //std::string predefines( preprocessor.getPredefines() );
+    //std::string predefines( preprocessor().getPredefines() );
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );
     clang::MacroBuilder macroBuilder( predefinesStream );
     for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
-    preprocessor.setPredefines( predefinesStream.str() );
+    preprocessor().setPredefines( predefinesStream.str() );
 }
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
@@ -170,21 +163,37 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
         }
 
         clang::DiagnosticConsumer & client_;
-    } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), compiler().getPreprocessor() );
+    } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), preprocessor() );
 
     HeaderRefs result;
-    compiler().getPreprocessor().addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), compiler().getPreprocessor(), result ) );
-    compiler().getPreprocessor().SetMacroExpansionOnlyInDirectives();
+    preprocessor().addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), preprocessor(), result ) );
+    preprocessor().SetMacroExpansionOnlyInDirectives();
 
-    compiler().getPreprocessor().EnterMainSourceFile();
+    preprocessor().EnterMainSourceFile();
     while ( true )
     {
         clang::Token token;
-        compiler().getPreprocessor().LexNonComment( token );
+        preprocessor().LexNonComment( token );
         if ( token.is( clang::tok::eof ) )
             break;
     }
     return result;
+}
+
+
+std::string & Preprocessor::preprocess( PreprocessingContext const & ppc, std::string const & filename, std::string & output )
+{
+    llvm::raw_string_ostream os( output );
+    setupPreprocessor( ppc, filename );
+    clang::PreprocessorOutputOptions & preprocessorOutputOptions( compiler().getPreprocessorOutputOpts() );
+    preprocessorOutputOptions.ShowCPP = 1;
+    preprocessorOutputOptions.ShowLineMarkers = 1;
+    preprocessorOutputOptions.ShowMacroComments = 1;
+    preprocessorOutputOptions.ShowMacros = 0;
+    preprocessorOutputOptions.RewriteIncludes = 0;
+
+    clang::DoPrintPreprocessedInput( preprocessor(), &os, preprocessorOutputOptions );
+    return os.str();
 }
 
 

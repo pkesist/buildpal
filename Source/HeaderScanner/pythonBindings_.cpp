@@ -152,7 +152,7 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
     return 0;
 }
 
-PyObject * PyPreprocessor_scan_headers( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "pp_ctx", "filename", NULL };
 
@@ -186,9 +186,125 @@ PyObject * PyPreprocessor_scan_headers( PyPreprocessor * self, PyObject * args, 
     return result;
 }
 
+PyObject * PyPreprocessor_preprocess( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "pp_ctx", "filename", NULL };
+
+    PyObject * pObject = 0;
+    char const * filename = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
+        return NULL;
+
+    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
+        return NULL;
+
+    if ( !self->pp )
+        return NULL;
+
+    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
+    std::string output;
+    output.reserve( 100 * 1024 );
+    self->pp->preprocess( *ppContext->ppContext, filename, output );
+
+    return PyBytes_FromStringAndSize( output.data(), output.size() );
+}
+
+PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    PyObject * pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setMicrosoftExt( PyObject_IsTrue( pVal ) );
+
+    Py_RETURN_NONE;
+}
+
+PyObject * PyPreprocessor_setExceptions( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    PyObject * pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setExceptions( PyObject_IsTrue( pVal ) );
+
+    Py_RETURN_NONE;
+}
+
+PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    PyObject * pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setMicrosoftMode( PyObject_IsTrue( pVal ) );
+
+    Py_RETURN_NONE;
+}
+
+PyObject * PyPreprocessor_setCPlusPlus( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    PyObject * pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setCPlusPlus( PyObject_IsTrue( pVal ) );
+
+    Py_RETURN_NONE;
+}
+
+PyObject * PyPreprocessor_setMSCVersion( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    int pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "i", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setMSCVersion( pVal );
+
+    Py_RETURN_NONE;
+}
+
+PyObject * PyPreprocessor_setThreads( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "value", NULL };
+
+    PyObject * pVal = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+        return NULL;
+
+    self->pp->setThreads( PyObject_IsTrue( pVal ) );
+
+    Py_RETURN_NONE;
+}
+
+
 PyMethodDef PyPreprocessor_methods[] =
 {
-    {"scan_headers", (PyCFunction)PyPreprocessor_scan_headers, METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"scanHeaders"    , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
+    {"setCPlusPlus"    , (PyCFunction)PyPreprocessor_setCPlusPlus    , METH_VARARGS | METH_KEYWORDS, "Set C++ mode."},
+    {"setExceptions"   , (PyCFunction)PyPreprocessor_setExceptions   , METH_VARARGS | METH_KEYWORDS, "Enable exceptions."},
+    {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
+    {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
+    {"setMSCVersion"   , (PyCFunction)PyPreprocessor_setMSCVersion   , METH_VARARGS | METH_KEYWORDS, "Set MSC version."},
+    {"setThreads"      , (PyCFunction)PyPreprocessor_setThreads      , METH_VARARGS | METH_KEYWORDS, "Set threads mode."},
     {NULL}
 };
 

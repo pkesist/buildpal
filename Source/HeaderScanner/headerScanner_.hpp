@@ -41,6 +41,14 @@ public:
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
+    std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
+
+    void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
+    void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
+    void setMSCVersion   ( int  value ) { compiler().getLangOpts().MSCVersion = value; }
+    void setExceptions   ( bool value ) { compiler().getLangOpts().Exceptions = 1; }
+    void setCPlusPlus    ( bool value ) { compiler().getLangOpts().CPlusPlus = value ? 1 : 0; }
+    void setThreads      ( bool value ) { compiler().getLangOpts().POSIXThreads = value ? 1 : 0; }
 
 private:
     void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );
@@ -48,6 +56,8 @@ private:
 private:
     clang::CompilerInstance       & compiler()       { return compiler_; }
     clang::CompilerInstance const & compiler() const { return compiler_; }
+    clang::Preprocessor       & preprocessor()       { return compiler_.getPreprocessor(); }
+    clang::Preprocessor const & preprocessor() const { return compiler_.getPreprocessor(); }
 
 private:
     clang::CompilerInstance compiler_;

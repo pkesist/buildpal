@@ -23,7 +23,7 @@ class ServerRunner:
         if cpu_usage_hwm:
             print("CPU usage hwm is {}%.".format(cpu_usage_hwm))
         self.__pool = Pool(processes = processes)
-        self.__listener = Listener(('localhost', port), 'AF_INET')
+        self.__listener = Listener(('0.0.0.0', port), 'AF_INET')
 
         self.__tasks = []
         self.__compiler = ServerCompiler(cpu_usage_hwm)

@@ -297,7 +297,7 @@ PyObject * PyPreprocessor_setThreads( PyPreprocessor * self, PyObject * args, Py
 
 PyMethodDef PyPreprocessor_methods[] =
 {
-    {"scanHeaders"    , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
     {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
     {"setCPlusPlus"    , (PyCFunction)PyPreprocessor_setCPlusPlus    , METH_VARARGS | METH_KEYWORDS, "Set C++ mode."},
     {"setExceptions"   , (PyCFunction)PyPreprocessor_setExceptions   , METH_VARARGS | METH_KEYWORDS, "Enable exceptions."},
@@ -310,43 +310,43 @@ PyMethodDef PyPreprocessor_methods[] =
 
 PyTypeObject PyPreprocessorType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "Preprocessor",                    /* tp_name */
-    sizeof(PyPreprocessor),            /* tp_basicsize */
-    0,                                 /* tp_itemsize */
+    "Preprocessor",                     /* tp_name */
+    sizeof(PyPreprocessor),             /* tp_basicsize */
+    0,                                  /* tp_itemsize */
     (destructor)PyPreprocessor_dealloc, /* tp_dealloc */
-    0,                                 /* tp_print */
-    0,                                 /* tp_getattr */
-    0,                                 /* tp_setattr */
-    0,                                 /* tp_reserved */
-    0,                                 /* tp_repr */
-    0,                                 /* tp_as_number */
-    0,                                 /* tp_as_sequence */
-    0,                                 /* tp_as_mapping */
-    0,                                 /* tp_hash  */
-    0,                                 /* tp_call */
-    0,                                 /* tp_str */
-    0,                                 /* tp_getattro */
-    0,                                 /* tp_setattro */
-    0,                                 /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT,                /* tp_flags */
-    "Preprocessor object",             /* tp_doc */
-    0,                                 /* tp_traverse */
-    0,                                 /* tp_clear */
-    0,                                 /* tp_richcompare */
-    0,                                 /* tp_weaklistoffset */
-    0,                                 /* tp_iter */
-    0,                                 /* tp_iternext */
-    PyPreprocessor_methods,            /* tp_methods */
-    0,                                 /* tp_members */
-    0,                                 /* tp_getset */
-    0,                                 /* tp_base */
-    0,                                 /* tp_dict */
-    0,                                 /* tp_descr_get */
-    0,                                 /* tp_descr_set */
-    0,                                 /* tp_dictoffset */
-    (initproc)PyPreprocessor_init,     /* tp_init */
-    0,                                 /* tp_alloc */
-    PyPreprocessor_new,                /* tp_new */
+    0,                                  /* tp_print */
+    0,                                  /* tp_getattr */
+    0,                                  /* tp_setattr */
+    0,                                  /* tp_reserved */
+    0,                                  /* tp_repr */
+    0,                                  /* tp_as_number */
+    0,                                  /* tp_as_sequence */
+    0,                                  /* tp_as_mapping */
+    0,                                  /* tp_hash  */
+    0,                                  /* tp_call */
+    0,                                  /* tp_str */
+    0,                                  /* tp_getattro */
+    0,                                  /* tp_setattro */
+    0,                                  /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,                 /* tp_flags */
+    "Preprocessor object",              /* tp_doc */
+    0,                                  /* tp_traverse */
+    0,                                  /* tp_clear */
+    0,                                  /* tp_richcompare */
+    0,                                  /* tp_weaklistoffset */
+    0,                                  /* tp_iter */
+    0,                                  /* tp_iternext */
+    PyPreprocessor_methods,             /* tp_methods */
+    0,                                  /* tp_members */
+    0,                                  /* tp_getset */
+    0,                                  /* tp_base */
+    0,                                  /* tp_dict */
+    0,                                  /* tp_descr_get */
+    0,                                  /* tp_descr_set */
+    0,                                  /* tp_dictoffset */
+    (initproc)PyPreprocessor_init,      /* tp_init */
+    0,                                  /* tp_alloc */
+    PyPreprocessor_new,                 /* tp_new */
 };
 
 

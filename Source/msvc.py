@@ -115,9 +115,9 @@ class MSVCDistributer(CompilationDistributer):
                 lines.append("#define STR_II(x) #x\n")
                 for symbol in macros:
                     lines.append('#ifndef {m}\n'.format(m=symbol))
-                    lines.append('#pragma message("_M_A_C_R_O_ /{m}/__NOT_DEFINED__/")\n'.format(m=symbol))
+                    lines.append('#pragma message("__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /{m}/__NOT_DEFINED__/")\n'.format(m=symbol))
                     lines.append('#else\n')
-                    lines.append('#pragma message("_M_A_C_R_O_ /{m}/" STR({m}) "/")\n'.format(m=symbol))
+                    lines.append('#pragma message("__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /{m}/" STR({m}) "/")\n'.format(m=symbol))
                     lines.append('#endif\n')
                 file.writelines(lines)
             proc = subprocess.Popen([abs, '-c', tempfile.filename()], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -125,7 +125,7 @@ class MSVCDistributer(CompilationDistributer):
             output = stdout.split(b'\r\n')
             macros = []
             for line in output:
-                m = re.match(b'^_M_A_C_R_O_ /(.*)/(.*)/$', line)
+                m = re.match(b'^__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /(.*)/(.*)/$', line)
                 if m:
                     if m.group(2) == b'__NOT_DEFINED__':
                         continue
@@ -138,7 +138,7 @@ class MSVCDistributer(CompilationDistributer):
             return CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version, macros)
 
     @classmethod
-    def setup_compiler(cls, compiler_info):
+    def get_compiler_environment(cls, compiler_info):
         compiler_id = compiler_info.id()
         info = cls.compiler_versions.get(compiler_id)
         if not info:
@@ -159,14 +159,20 @@ class MSVCDistributer(CompilationDistributer):
         script = os.path.join(location, 'vcvarsall.bat')
         if not os.path.exists(script):
             return None
-        to_add = get_batch_file_environment_side_effects(script, [info[1]])
-        def run_compiler(command, to_add):
+        return get_batch_file_environment_side_effects(script, [info[1]])
+
+    @classmethod
+    def setup_compiler(cls, compiler_info):
+        def run_compiler(command, compiler_environ):
             env = dict(os.environ)
-            env.update(to_add)
+            env.update(compiler_environ)
             with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
-        return lambda command : run_compiler(command, to_add)
+        compiler_env = MSVCDistributer.get_compiler_environment(compiler_info)
+        if compiler_env:
+            return lambda command : run_compiler(command, compiler_env)
+        return None
 
     def compiler_option_macros(self, tokens):
         result = []

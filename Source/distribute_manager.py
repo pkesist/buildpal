@@ -64,14 +64,15 @@ class Worker:
             done = self.__server_conn.recv()
             assert done == "SERVER_DONE"
 
-        if not self.wrapped_task().try_mark_completed():
-            self.__server_conn.send(False)
-            return False
+        with self.__server_conn:
+            if not self.wrapped_task().try_mark_completed():
+                self.__server_conn.send(False)
+                return False
 
-        self.__server_conn.send(True)
-        with self.__timer.timeit('receive'):
-            result = self.wrapped_task().task().manager_receive(self.__client_conn, self.__server_conn)
-            return result
+            self.__server_conn.send(True)
+            with self.__timer.timeit('receive'):
+                result = self.wrapped_task().task().manager_receive(self.__client_conn, self.__server_conn)
+                return result
 
     def __call__(self):
         try:
@@ -147,7 +148,7 @@ class Worker:
                     import traceback
                     traceback.print_exc()
                     continue
-                with self.__timer.timeit('send_task_wait_accept'):
+                with self.__timer.timeit('accept_time'):
                     server_conn.send(self.__wrapped_task.task())
                     try:
                         accepted, has_compiler = server_conn.recv()
@@ -193,7 +194,7 @@ class TaskProcessor(Process):
         super(TaskProcessor, self).__init__()
 
     def run(self):
-        self.__compile_pool = Pool(processes=8)
+        self.__compile_pool = Pool(processes=32)
 
         self.__manager = BookKeepingManager()
         self.__manager.start()

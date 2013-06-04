@@ -9,8 +9,9 @@ import os
 
 def work(server, conn):
     try:
-        task = conn.recv()
-        task.server_process(server, conn)
+        with conn:
+            task = conn.recv()
+            task.server_process(server, conn)
     except Exception:
         print("Failed to execute client task.")
         traceback.print_exc()

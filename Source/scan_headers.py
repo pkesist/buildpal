@@ -14,8 +14,18 @@ import zipfile
 
 preprocessor = preprocessing.Preprocessor()
 
-def collect_headers(cpp_file, search_path, defines):
+def collect_headers(cpp_file, search_path, defines, compiler_info):
     try:
+        # TODO: If some of these compiler options merely affects preprocessor
+        # macros then we do not need it. The macro is alredy in 'defines'
+        # variable.
+        # setMSCVersion is a likely suspect.
+        preprocessor.setMicrosoftMode(True) # If MSVC.
+        preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options. This is used quite a lot
+        preprocessor.setExceptions(True) # Should depend on /EH compiler option. Remove it entirely if its sole purpose is defining _CPPUNWIND.
+        preprocessor.setMSCVersion(1500) # Probably only to define _MSC_VER.
+        preprocessor.setCPlusPlus(True) # Probably only to define __cplusplus.
+        preprocessor.setThreads(True) # Probably only to define _MT
         ppc = preprocessing.PreprocessingContext()
         for path in search_path:
             ppc.add_include_path(path)
@@ -27,7 +37,7 @@ def collect_headers(cpp_file, search_path, defines):
             ppc.add_macro(macro, value)
         zip_file = TempFile(suffix='.zip')
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in preprocessor.scan_headers(ppc, cpp_file):
+            for file, full in preprocessor.scanHeaders(ppc, cpp_file):
                 zip.write(full, file)
         return zip_file.filename()
     except Exception:

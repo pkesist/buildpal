@@ -31,7 +31,7 @@ class CompileTask:
     def manager_prepare(self):
         macros = self.__macros + self.__builtin_macros
         from scan_headers import collect_headers
-        return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros)
+        return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros, self.__compiler_info)
 
     def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':
@@ -65,8 +65,8 @@ class CompileTask:
         if not accept or compiler is None:
             return
 
-        task = conn.recv()
-        if task == 'SCAN_HEADERS':
+        algorithm = conn.recv()
+        if algorithm == 'SCAN_HEADERS':
             with receive_file(conn) as zip_file:
                 include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
                 with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
@@ -96,7 +96,7 @@ class CompileTask:
                                 conn.send((False, compressed))
                         shutil.rmtree(include_path, ignore_errors=True)
 
-        if task == 'PREPROCESS_LOCALLY':
+        if algorithm == 'PREPROCESS_LOCALLY':
             tmp = TempFile()
             with tmp.open('wb') as temp:
                 receive_compressed_file(conn, temp)

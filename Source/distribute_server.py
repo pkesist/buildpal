@@ -17,7 +17,7 @@ def work(server, conn):
         traceback.print_exc()
 
 class ServerRunner:
-    def __init__(self, port, processes, global_data, cpu_usage_hwm=None):
+    def __init__(self, port, processes, cpu_usage_hwm=None):
         print("Starting server on port {} with {} worker processes.".format(
             port, processes))
         if cpu_usage_hwm:
@@ -93,8 +93,8 @@ Usage:
     processes = config.getint(server_section, 'processes')
     if config.has_option(server_section, 'cpu_usage_hwm'):
         cpu_usage_hwm = config.getint(server_section, 'cpu_usage_hwm')
-        if cpu_usage_hwm < 0 or cpu_usage_hwm > 100:
-            raise RuntimeError("cpu_usage_hwm should be in range 0-100.")
+        if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
+            raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
     else:
         cpu_usage_hwm = None
     

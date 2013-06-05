@@ -71,30 +71,35 @@ class CompileTask:
                 include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
                 with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
                     zip.extractall(path=include_path)
+                try:
+                    src_file = conn.recv()
+                    assert src_file == 'SOURCE_FILE'
+                    with receive_file(conn, suffix=self.__source_type) as source_file:
+                        with TempFile(suffix='.obj') as object_file:
+                            noLink = self.__compile_switch
+                            output = self.__output_switch.format(object_file.filename())
 
-                src_file = conn.recv()
-                assert src_file == 'SOURCE_FILE'
-                with receive_file(conn, suffix=self.__source_type) as source_file:
-                    with TempFile(suffix='.obj') as object_file:
-                        noLink = self.__compile_switch
-                        output = self.__output_switch.format(object_file.filename())
-
-                        defines = ['-D{}'.format(define) for define in self.__macros]
-                        retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
-                        conn.send('SERVER_DONE')
-                        needsResult = conn.recv()
-                        if not needsResult:
-                            return
-                        conn.send((retcode, stdout, stderr))
-                        if retcode == 0:
-                            compressor = zlib.compressobj(1)
-                            with object_file.open('rb') as obj:
-                                for data in iter(lambda : obj.read(1024 * 1024), b''):
-                                    compressed = compressor.compress(data)
-                                    conn.send((True, compressed))
-                                compressed = compressor.flush(zlib.Z_FINISH)
-                                conn.send((False, compressed))
-                        shutil.rmtree(include_path, ignore_errors=True)
+                            defines = ['-D{}'.format(define) for define in self.__macros]
+                            try:
+                                retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
+                            except Exception:
+                                conn.send('SERVER_FAILED')
+                                return
+                            conn.send('SERVER_DONE')
+                            needsResult = conn.recv()
+                            if not needsResult:
+                                return
+                            conn.send((retcode, stdout, stderr))
+                            if retcode == 0:
+                                compressor = zlib.compressobj(1)
+                                with object_file.open('rb') as obj:
+                                    for data in iter(lambda : obj.read(1024 * 1024), b''):
+                                        compressed = compressor.compress(data)
+                                        conn.send((True, compressed))
+                                    compressed = compressor.flush(zlib.Z_FINISH)
+                                    conn.send((False, compressed))
+                finally:
+                    shutil.rmtree(include_path, ignore_errors=True)
 
         if algorithm == 'PREPROCESS_LOCALLY':
             tmp = TempFile()
@@ -105,7 +110,11 @@ class CompileTask:
                 with TempFile(suffix='.obj') as object_file:
                     noLink = self.__compile_switch
                     output = self.__output_switch.format(object_file.filename())
-                    retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                    try:
+                        retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                    except Exception:
+                        conn.send('SERVER_FAILED')
+                        return
                     conn.send('SERVER_DONE')
                     needsResult = conn.recv()
                     if not needsResult:

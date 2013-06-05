@@ -1,9 +1,11 @@
 #! python3.3
 from queue import PriorityQueue, Empty
 from multiprocessing import Lock, Process, Pool, Queue, Value, RawValue
-from multiprocessing.connection import Client
+from multiprocessing.connection import Connection, Client
 from multiprocessing.managers import BaseManager, SyncManager
 from time import sleep, time
+
+import socket
 
 import ctypes
 import heapq
@@ -61,9 +63,11 @@ class Worker:
 
         # Just block
         with self.__timer.timeit('server_time'):
-            done = self.__server_conn.recv()
-            assert done == "SERVER_DONE"
+            server_status = self.__server_conn.recv()
+            if server_status == "SERVER_FAILED":
+                return None
 
+        assert server_status == "SERVER_DONE"
         with self.__server_conn:
             if not self.wrapped_task().try_mark_completed():
                 self.__server_conn.send(False)
@@ -92,29 +96,33 @@ class Worker:
                         # Wait for 'done'.
                         done = self.__client_conn.recv()
                         assert done == 'DONE'
-
-            with self.__timer.timeit('find_available_node'):
-                find_node_result = self.find_available_node()
-                if find_node_result is None:
-                    return
-            node_index, server_conn = find_node_result
-            self.__server_conn = server_conn
-            self.__task_map.setdefault(self.wrapped_task().client_id(), set()).add(node_index)
-
-            with self.__timer.timeit('run_task'):
-                # Create and run worker.
-                result = self.process_task(node_index)
-                # Did not process it after all.
-                if result is None:
-                    return
-
-                if result:
-                    self.__node_info.add_tasks_completed(node_index)
-                else:
-                    self.__node_info.add_tasks_failed(node_index)
         except Exception:
             import traceback
             traceback.print_exc()
+
+        task_done = False
+        while not task_done:
+            try:
+                with self.__timer.timeit('find_available_node'):
+                    find_node_result = self.find_available_node()
+                    if find_node_result is None:
+                        return
+                node_index, server_conn = find_node_result
+                self.__server_conn = server_conn
+                self.__task_map.setdefault(self.wrapped_task().client_id(), set()).add(node_index)
+
+                with self.__timer.timeit('run_task'):
+                    # Create and run worker.
+                    result = self.process_task(node_index)
+                    # Did not process it after all.
+                    if result is None:
+                        self.__node_info.add_tasks_failed(node_index)
+                    else:
+                        self.__node_info.add_tasks_completed(node_index)
+                        task_done = True
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
     def find_available_node(self):
         nodes_processing_task = self.__task_map.get(self.__wrapped_task.client_id(), set())
@@ -143,10 +151,13 @@ class Worker:
                         sleep(1)
 
                 try:
-                    server_conn = Client(address=node)
+                    with socket.socket(getattr(socket, 'AF_INET')) as s:
+                        s.settimeout(1)
+                        s.connect(node)
+                        s.settimeout(None)
+                        server_conn = Connection(s.detach())
                 except Exception:
-                    import traceback
-                    traceback.print_exc()
+                    print("Failed to connect to '{}'".format(node))
                     continue
                 with self.__timer.timeit('accept_time'):
                     server_conn.send(self.__wrapped_task.task())

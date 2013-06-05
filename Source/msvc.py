@@ -102,13 +102,13 @@ class MSVCDistributer(CompilationDistributer):
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '_HAS_ITERATOR_DEBUGGING',
-            '__cplusplus')
+            '_DEBUG', 'NDEBUG', '__cplusplus')
 
         with TempFile(suffix='.cpp') as tempfile:
             with tempfile.open("wt") as file:
                 lines = []
-                # Need a STL header to get _CPPLIB_VER
-                lines.append("#include <utility>\n")
+                # For _CPPLIB_VER and _HAS_ITERATOR_DEBUGGING
+                lines.append("#include <yvals.h>\n")
                 # Stolen from Boost.PP
                 lines.append("#define STR(x) STR_I((x))\n")
                 lines.append("#define STR_I(x) STR_II x\n")

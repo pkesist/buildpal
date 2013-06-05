@@ -14,7 +14,7 @@ import zipfile
 
 preprocessor = preprocessing.Preprocessor()
 
-def collect_headers(cpp_file, search_path, defines, compiler_info):
+def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info):
     try:
         # TODO: If some of these compiler options merely affects preprocessor
         # macros then we do not need it. The macro is alredy in 'defines'
@@ -27,8 +27,10 @@ def collect_headers(cpp_file, search_path, defines, compiler_info):
         preprocessor.setCPlusPlus(True) # Probably only to define __cplusplus.
         preprocessor.setThreads(True) # Probably only to define _MT
         ppc = preprocessing.PreprocessingContext()
-        for path in search_path:
+        for path in includes:
             ppc.add_include_path(path)
+        for path in sysincludes:
+            ppc.add_include_path(path, True)
         for define in defines:
             define = define.split('=')
             assert len(define) == 1 or len(define) == 2
@@ -53,7 +55,7 @@ def test(header, search_path):
     import subprocess
     import zipfile
 
-    zip_file = collect_headers(header, search_path, [])
+    zip_file = collect_headers(header, search_path, [], [])
     include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
     with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
         zip.extractall(path=include_path)

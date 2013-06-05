@@ -47,6 +47,8 @@ namespace
         {
             if ( Reason != EnterFile )
                 return;
+            if ( sourceManager_.getFileCharacteristic( Loc ) == clang::SrcMgr::C_System )
+                return;
             clang::FileID const fileId( sourceManager_.getFileID( Loc ) );
             if ( fileId == sourceManager_.getMainFileID() )
                 return;

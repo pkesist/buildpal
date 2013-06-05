@@ -10,12 +10,13 @@ from utils import TempFile, send_file, receive_file, receive_compressed_file
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, input, search_path, macros, builtin_macros, output, compiler_info, distributer):
+    def __init__(self, cwd, call, source, source_type, input, includes, sysincludes, macros, builtin_macros, output, compiler_info, distributer):
         self.__call = call
         self.__cwd = cwd
         self.__source = source
         self.__input = input
-        self.__search_path = search_path
+        self.__includes = includes
+        self.__sysincludes = sysincludes
         self.__macros = macros
         self.__builtin_macros = builtin_macros
         self.__source_type = source_type
@@ -31,7 +32,7 @@ class CompileTask:
     def manager_prepare(self):
         macros = self.__macros + self.__builtin_macros
         from scan_headers import collect_headers
-        return collect_headers(os.path.join(self.__cwd, self.__source), self.__search_path, macros, self.__compiler_info)
+        return collect_headers(os.path.join(self.__cwd, self.__source), self.__includes, self.__sysincludes, self.__compiler_info)
 
     def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':

@@ -99,12 +99,14 @@ class MSVCDistributer(CompilationDistributer):
         abs = find_on_path(executable)
         if not abs:
             raise RuntimeError("Cannot find compiler executable '{}'.".format(executable))
+        #   Here we should test only for macros which do not change depending on
+        # compiler options.
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
-            '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '_HAS_ITERATOR_DEBUGGING',
-            '_DEBUG', 'NDEBUG', '__cplusplus')
+            '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
 
         with TempFile(suffix='.cpp') as tempfile:
+            placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
             with tempfile.open("wt") as file:
                 lines = []
                 # For _CPPLIB_VER and _HAS_ITERATOR_DEBUGGING
@@ -115,9 +117,9 @@ class MSVCDistributer(CompilationDistributer):
                 lines.append("#define STR_II(x) #x\n")
                 for symbol in macros:
                     lines.append('#ifndef {m}\n'.format(m=symbol))
-                    lines.append('#pragma message("__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /{m}/__NOT_DEFINED__/")\n'.format(m=symbol))
+                    lines.append('#pragma message("{plh} /{m}/__NOT_DEFINED__/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#else\n')
-                    lines.append('#pragma message("__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /{m}/" STR({m}) "/")\n'.format(m=symbol))
+                    lines.append('#pragma message("{plh} /{m}/" STR({m}) "/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#endif\n')
                 file.writelines(lines)
             proc = subprocess.Popen([abs, '-c', tempfile.filename()], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -125,7 +127,7 @@ class MSVCDistributer(CompilationDistributer):
             output = stdout.split(b'\r\n')
             macros = []
             for line in output:
-                m = re.match(b'^__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6 /(.*)/(.*)/$', line)
+                m = re.match(('{plh} /(.*)/(.*)/'.format(plh=placeholder_string)).encode('ascii'), line)
                 if m:
                     if m.group(2) == b'__NOT_DEFINED__':
                         continue

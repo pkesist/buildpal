@@ -206,6 +206,7 @@ class CompilationDistributer(CmdLineOptions):
 
         sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
+        sysincludes = os.getenv('INCLUDE', '').split(';')
         macros = [token.val for token in ctx.filter_options(self.define_option())]
 
         compiler_info = self.compiler_info(ctx.executable())

@@ -89,6 +89,12 @@ def receive_file(conn, *args, **kwargs):
             file.write(data)
     return tempfile
 
+def send_compressed_file(conn, fileobj):
+    compressor = zlib.compressobj(1)
+    for data in iter(lambda : fileobj.read(100 * 1024), b''):
+        conn.send((True, compressor.compress(data)))
+    conn.send((False, compressor.flush(zlib.Z_FINISH)))
+
 def receive_compressed_file(conn, fileobj):
     more = True
     decompressor = zlib.decompressobj()
@@ -101,3 +107,9 @@ def send_file(conn, file):
     for data in iter(lambda : file.read(1024 * 1024), b''):
         conn.send((True, data))
     conn.send((False, b''))
+
+def relay_file(sender_conn, receiver_conn):
+    more = True
+    while more:
+        more, data = sender_conn.recv()
+        receiver_conn.send((more, data))

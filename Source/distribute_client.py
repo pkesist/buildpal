@@ -10,43 +10,10 @@ import string
 import sys
 import zlib
 
+from utils import send_compressed_file
 from tempfile import mkstemp
 from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
-
-class Preprocessor:
-    def __init__(self, preprocess_call):
-        self.__preprocessed = False
-        self.__preprocess_call = preprocess_call
-        file, self.__filename = mkstemp(text=True)
-        os.close(file)
-
-    def preprocess(self):
-        p = subprocess.Popen(self.__preprocess_call, stdout=subprocess.PIPE)
-        with open(self.__filename, 'wb') as file:
-            compressor = zlib.compressobj(1)
-            for data in iter(lambda : p.stdout.read(100 * 1024), b''):
-                compressed = compressor.compress(data)
-                file.write(compressed)
-            compressed = compressor.flush(zlib.Z_FINISH)
-            file.write(compressed)
-        self.__preprocessed = True
-
-    def filename(self):
-        return self.__filename
-
-    def __enter__(self):
-        if not self.__preprocessed:
-            self.preprocess()
-        self.__file = open(self.__filename, 'rb')
-        return self.__file
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.__file.close()
-        try:
-            os.remove(self.__filename)
-        except Exception:
-            pass
 
 class CompilerInfo:
     def __init__(self, toolset, executable, size, id, macros):
@@ -150,7 +117,7 @@ class CompilationDistributer(CmdLineOptions):
         ctx = self.create_context(command)
         if self.bailout(ctx):
             return
-        self.preprocess(ctx)
+        self.create_tasks(ctx)
         self.execute_remotely(ctx)
         self.postprocess(ctx)
 
@@ -185,7 +152,7 @@ class CompilationDistributer(CmdLineOptions):
     def requires_preprocessing(self, file):
         return False
 
-    def preprocess(self, ctx):
+    def create_tasks(self, ctx):
         # See if user specified an explicit name for the object file.
         output = list(ctx.filter_options(self.object_name_option()))
         if output:
@@ -206,20 +173,18 @@ class CompilationDistributer(CmdLineOptions):
 
         sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
-        sysincludes = os.getenv('INCLUDE', '').split(';')
         macros = [token.val for token in ctx.filter_options(self.define_option())]
+        sysincludes = os.getenv('INCLUDE', '').split(';')
 
         compiler_info = self.compiler_info(ctx.executable())
         builtin_macros = compiler_info.macros() + self.compiler_option_macros(ctx.options())
 
-        def make_task(source):
-            preprocessor = Preprocessor(preprocess_call + [source])
-            task = CompileTask(
+        def create_task(source):
+            return CompileTask(
                 call = compile_call,
                 cwd = os.getcwd(),
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                input = preprocessor.filename(),
                 includes = includes,
                 sysincludes = sysincludes,
                 macros = macros,
@@ -227,23 +192,22 @@ class CompilationDistributer(CmdLineOptions):
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = self.compiler_info(ctx.executable()),
                 distributer = self)
-            return preprocessor, task
 
-        ctx.tasks = [make_task(source) for source in sources]
+        ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]
 
     def execute_remotely(self, ctx):
         rnd = random.Random()
         rnd.seed()
         endpoint = "".join(rnd.choice(string.ascii_uppercase) for x in range(15))
         listener = Listener(r'\\.\pipe\{}'.format(endpoint), b"")
-        for preprocessor, compile_task in ctx.tasks:
+        for preprocess_call, compile_task in ctx.tasks:
             ctx.queue_task(compile_task, endpoint)
             conn = listener.accept()
             while True:
                 task = conn.recv()
                 if task == "PREPROCESS":
-                    preprocessor.preprocess()
-                    conn.send("DONE")
+                    p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
+                    send_compressed_file(conn, p.stdout)
                 if task == "COMPLETED":
                     retcode, stdout, stderr = conn.recv()
                     sys.stdout.write(stdout.decode())

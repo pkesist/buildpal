@@ -5,16 +5,16 @@ import sys
 import tempfile
 import zipfile
 import zlib
+import io
 
 from utils import TempFile, send_file, receive_file, receive_compressed_file
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, input, includes, sysincludes, macros, builtin_macros, output, compiler_info, distributer):
+    def __init__(self, cwd, call, source, source_type, includes, sysincludes, macros, builtin_macros, output, compiler_info, distributer):
         self.__call = call
         self.__cwd = cwd
         self.__source = source
-        self.__input = input
         self.__includes = includes
         self.__sysincludes = sysincludes
         self.__macros = macros
@@ -27,6 +27,7 @@ class CompileTask:
         self.tempfile = None
 
         self.algorithm = 'SCAN_HEADERS'
+        #self.algorithm = 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR'
         #self.algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self):
@@ -54,9 +55,17 @@ class CompileTask:
                 send_file(server_conn, cpp)
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
+            # Signal the client to do preprocessing.
+            client_conn.send('PREPROCESS')
             server_conn.send('PREPROCESS_LOCALLY')
-            with open(self.__input, "rb") as file:
-                send_file(server_conn, file)
+            relay_file(client_conn, server_conn)
+
+        if self.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
+            server_conn.send('PREPROCESS_LOCALLY')
+            from scan_headers import preprocess_file
+            macros = self.__macros + self.__builtin_macros
+            preprocessed_data = preprocess_file(os.path.join(self.__cwd, self.__source), self.__includes, self.__sysincludes, macros, self.__compiler_info)
+            send_compressed_file(server_conn, io.BytesIO(preprocessed_data))
 
     def manager_receive(self, client_conn, server_conn):
         retcode, stdout, stderr = server_conn.recv()
@@ -102,13 +111,8 @@ class CompileTask:
                                 return
                             conn.send((retcode, stdout, stderr))
                             if retcode == 0:
-                                compressor = zlib.compressobj(1)
                                 with object_file.open('rb') as obj:
-                                    for data in iter(lambda : obj.read(1024 * 1024), b''):
-                                        compressed = compressor.compress(data)
-                                        conn.send((True, compressed))
-                                    compressed = compressor.flush(zlib.Z_FINISH)
-                                    conn.send((False, compressed))
+                                    send_compressed_file(conn, obj)
                 finally:
                     shutil.rmtree(include_path, ignore_errors=True)
 
@@ -132,10 +136,5 @@ class CompileTask:
                         return
                     conn.send((retcode, stdout, stderr))
                     if retcode == 0:
-                        compressor = zlib.compressobj(1)
                         with object_file.open('rb') as obj:
-                            for data in iter(lambda : obj.read(1024 * 1024), b''):
-                                compressed = compressor.compress(data)
-                                conn.send((True, compressed))
-                            compressed = compressor.flush(zlib.Z_FINISH)
-                            conn.send((False, compressed))
+                            send_compressed_file(conn, obj)

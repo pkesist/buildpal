@@ -13,6 +13,8 @@ class PreprocessingContext
 public:
     void addIncludePath( std::string const & path, bool sysinclude )
     {
+        if ( path.empty() )
+            return;
         searchPath_.push_back( std::make_pair( path, sysinclude ) );
     }
 

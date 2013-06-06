@@ -32,7 +32,17 @@ class CompileTask:
     def manager_prepare(self):
         macros = self.__macros + self.__builtin_macros
         from scan_headers import collect_headers
-        return collect_headers(os.path.join(self.__cwd, self.__source), self.__includes, self.__sysincludes, self.__compiler_info)
+
+        # TODO: This does not belong here. Move this to msvc.py.
+        # We would like to avoid scanning system headers here if possible.
+        # If we do so, we lose any preprocessor side-effects. We try to
+        # hardcode this knowledge here.
+        if '_DEBUG' in macros:
+            if not any(('_SECURE_SCL' in x for x in macros)):
+                macros.append('_SECURE_SCL=1')
+            if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
+                macros.append('_HAS_ITERATOR_DEBUGGING=1')
+        return collect_headers(os.path.join(self.__cwd, self.__source), self.__includes, [], macros, self.__compiler_info)
 
     def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':

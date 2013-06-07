@@ -50,7 +50,7 @@ def preprocess_file(cpp_file, includes, sysincludes, defines, compiler_info):
     return None
 
 
-def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info):
+def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info=None):
     try:
         setup_preprocessor()
         ppc = preprocessing.PreprocessingContext()
@@ -65,9 +65,27 @@ def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info):
             value = define[1] if len(define) == 2 else ""
             ppc.add_macro(macro, value)
         zip_file = TempFile(suffix='.zip')
+        paths_to_include = []
+        relative_paths = {}
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
             for file, full in preprocessor.scanHeaders(ppc, cpp_file):
+                depth = 0
+                while file[0] == '.':
+                    if file[1] == '.' and file[2] == '/':
+                        depth += 1
+                        file = file[3:]
+                    elif file[1] == '/':
+                        file = file[2:]
+                if depth:
+                    file = '_rel_includes/' + file
+                    if not depth in relative_paths:
+                        # Add a dummy file which will create this structure.
+                        relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
+                        paths_to_include.append(relative_paths[depth])
+                        zip.writestr(relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
                 zip.write(full, file)
+            if paths_to_include:
+                zip.writestr('include_paths.txt', "\n".join(paths_to_include))
         return zip_file.filename()
     except Exception:
         import traceback
@@ -84,7 +102,7 @@ def test(header, search_path):
 
     zip_file = collect_headers(header, search_path, [], [])
     include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
-    with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
+    with zipfile.ZipFile(zip_file, 'r') as zip:
         zip.extractall(path=include_path)
     import subprocess
     subprocess.check_call(r'"C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\vcvarsall.bat" && cl -c -nologo /TP "{}" -I"{}"'.format(header, include_path), shell=True)
@@ -99,5 +117,6 @@ if __name__ == '__main__':
     if sys.argv[1] == '4': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\phoenix.hpp', boost_inc_path)
     if sys.argv[1] == '5': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\fusion\container\vector\vector10.hpp', boost_inc_path)
     if sys.argv[1] == '6': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\mpl\apply_wrap.hpp', boost_inc_path)
+    if sys.argv[1] == '7': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\locale\src\win32\collate.cpp', boost_inc_path)
     if sys.argv[1] == 'x': test(r'D:\Sandboxes\PKE\DistriBuild\Source\gaga.cpp', boost_inc_path)
 

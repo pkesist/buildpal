@@ -7,7 +7,7 @@ import zipfile
 import zlib
 import io
 
-from utils import TempFile, send_file, receive_file, receive_compressed_file
+from utils import TempFile, send_file, receive_file, receive_compressed_file, send_compressed_file
 from multiprocessing.connection import Client
 
 class CompileTask:
@@ -91,28 +91,35 @@ class CompileTask:
                 include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
                 with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
                     zip.extractall(path=include_path)
+                include_dirs = [include_path]
+
+                include_list = os.path.join(include_path, 'include_paths.txt')
+                if os.path.exists(include_list):
+                    for path in open(include_list, 'rt'):
+                        assert not os.path.isabs(path)
+                        include_dirs.append(os.path.normpath(os.path.join(include_path, path)))
                 try:
                     src_file = conn.recv()
                     assert src_file == 'SOURCE_FILE'
-                    with receive_file(conn, suffix=self.__source_type) as source_file:
-                        with TempFile(suffix='.obj') as object_file:
-                            noLink = self.__compile_switch
-                            output = self.__output_switch.format(object_file.filename())
+                    with receive_file(conn, suffix=self.__source_type) as source_file, TempFile(suffix='.obj') as object_file:
+                        noLink = self.__compile_switch
+                        output = self.__output_switch.format(object_file.filename())
 
-                            defines = ['-D{}'.format(define) for define in self.__macros]
-                            try:
-                                retcode, stdout, stderr = compiler(self.__call + defines + [noLink, output, '-I{}'.format(include_path), source_file.filename()])
-                            except Exception:
-                                conn.send('SERVER_FAILED')
-                                return
-                            conn.send('SERVER_DONE')
-                            needsResult = conn.recv()
-                            if not needsResult:
-                                return
-                            conn.send((retcode, stdout, stderr))
-                            if retcode == 0:
-                                with object_file.open('rb') as obj:
-                                    send_compressed_file(conn, obj)
+                        defines = ['-D{}'.format(define) for define in self.__macros]
+                        try:
+                            command = self.__call + defines + [noLink, output] + ['-I{}'.format(incpath) for incpath in include_dirs] + [source_file.filename()]
+                            retcode, stdout, stderr = compiler(command)
+                        except Exception:
+                            conn.send('SERVER_FAILED')
+                            return
+                        conn.send('SERVER_DONE')
+                        needsResult = conn.recv()
+                        if not needsResult:
+                            return
+                        conn.send((retcode, stdout, stderr))
+                        if retcode == 0:
+                            with object_file.open('rb') as obj:
+                                send_compressed_file(conn, obj)
                 finally:
                     shutil.rmtree(include_path, ignore_errors=True)
 
@@ -121,20 +128,19 @@ class CompileTask:
             with tmp.open('wb') as temp:
                 receive_compressed_file(conn, temp)
 
-            with tmp as preprocessed_file:
-                with TempFile(suffix='.obj') as object_file:
-                    noLink = self.__compile_switch
-                    output = self.__output_switch.format(object_file.filename())
-                    try:
-                        retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
-                    except Exception:
-                        conn.send('SERVER_FAILED')
-                        return
-                    conn.send('SERVER_DONE')
-                    needsResult = conn.recv()
-                    if not needsResult:
-                        return
-                    conn.send((retcode, stdout, stderr))
-                    if retcode == 0:
-                        with object_file.open('rb') as obj:
-                            send_compressed_file(conn, obj)
+            with tmp as preprocessed_file, TempFile(suffix='.obj') as object_file:
+                noLink = self.__compile_switch
+                output = self.__output_switch.format(object_file.filename())
+                try:
+                    retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                except Exception:
+                    conn.send('SERVER_FAILED')
+                    return
+                conn.send('SERVER_DONE')
+                needsResult = conn.recv()
+                if not needsResult:
+                    return
+                conn.send((retcode, stdout, stderr))
+                if retcode == 0:
+                    with object_file.open('rb') as obj:
+                        send_compressed_file(conn, obj)

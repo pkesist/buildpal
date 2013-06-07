@@ -70,20 +70,25 @@ def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info=None
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
             for file, full in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
-                while file[0] == '.':
-                    if file[1] == '.' and file[2] == '/':
+                path_elements = file.split('/')
+                # Handle '.' in include directive.
+                path_elements = [p for p in path_elements if p != '.']
+                # Handle '..' in include directive.
+                while '..' in path_elements:
+                    index = path_elements.index('..')
+                    if index == 0:
                         depth += 1
-                        file = file[3:]
-                    elif file[1] == '/':
-                        file = file[2:]
+                        del path_elements[index]
+                    else:
+                        del path_element[index - 1:index + 1]
                 if depth:
-                    file = '_rel_includes/' + file
+                    path_elements = ['_rel_includes'] + path_elements
                     if not depth in relative_paths:
                         # Add a dummy file which will create this structure.
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
                         zip.writestr(relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
-                zip.write(full, file)
+                zip.write(full, '/'.join(path_elements))
             if paths_to_include:
                 zip.writestr('include_paths.txt', "\n".join(paths_to_include))
         return zip_file.filename()

@@ -25,25 +25,22 @@ def find_on_path(executable):
             return location
 
 esc = ['/', '-']
-def simple(name, macros=None): 
+def simple(name, macros=[]): 
     result = CompilationDistributer.CompilerOption(name, esc, None, False)
-    if macros:
-        for macro in macros:
-            result.add_macro(macro)
+    for macro in macros:
+        result.add_macro(macro)
     return result
 
-def simple_w_minus(name, macros=None):
+def simple_w_minus(name, macros=[]):
     result = CompilationDistributer.CompilerOption(name, esc, '-', False)
-    if macros:
-        for macro in macros:
-            result.add_macro(macro)
+    for macro in macros:
+        result.add_macro(macro)
     return result
 
-def with_param(name, macros=None):
+def with_param(name, macros=[]):
     result = CompilationDistributer.CompilerOption(name, esc, None, True, False, False)
-    if macros:
-        for macro in macros:
-            result.add_macro(macro)
+    for macro in macros:
+        result.add_macro(macro)
     return result
 
 
@@ -94,6 +91,11 @@ class MSVCDistributer(CompilationDistributer):
         # Currently we expect there is no /TC, /TP,
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
+
+    def create_context(self, command):
+        ctx = super(MSVCDistributer, self).create_context(command)
+        ctx.set_executable('cl.exe')
+        return ctx
 
     def compiler_info(self, executable):
         abs = find_on_path(executable)

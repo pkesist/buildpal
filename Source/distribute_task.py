@@ -11,15 +11,12 @@ from utils import TempFile, send_file, receive_file, receive_compressed_file, se
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, includes, sysincludes, macros, builtin_macros, output, compiler_info, distributer):
-        self.__call = call
+    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, distributer):
         self.__cwd = cwd
+        self.__call = call
         self.__source = source
-        self.__includes = includes
-        self.__sysincludes = sysincludes
-        self.__macros = macros
-        self.__builtin_macros = builtin_macros
         self.__source_type = source_type
+        self.__preprocessor_info = preprocessor_info
         self.__output = output
         self.__compiler_info = compiler_info
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
@@ -31,7 +28,7 @@ class CompileTask:
         #self.algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self):
-        macros = self.__macros + self.__builtin_macros
+        macros = self.__preprocessor_info.macros + self.__preprocessor_info.builtin_macros
         from scan_headers import collect_headers
 
         # TODO: This does not belong here. Move this to msvc.py.
@@ -43,7 +40,9 @@ class CompileTask:
                 macros.append('_SECURE_SCL=1')
             if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
-        return collect_headers(os.path.join(self.__cwd, self.__source), self.__includes, [], macros, self.__compiler_info)
+        return collect_headers(os.path.join(self.__cwd, self.__source),
+            self.__preprocessor_info.includes, [], macros,
+            self.__compiler_info)
 
     def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':
@@ -63,8 +62,12 @@ class CompileTask:
         if self.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
             server_conn.send('PREPROCESS_LOCALLY')
             from scan_headers import preprocess_file
-            macros = self.__macros + self.__builtin_macros
-            preprocessed_data = preprocess_file(os.path.join(self.__cwd, self.__source), self.__includes, self.__sysincludes, macros, self.__compiler_info)
+            macros = self.__preprocessor_info.macros + self.__preprocessor_info.builtin_macros
+            preprocessed_data = preprocess_file(
+                os.path.join(self.__cwd, self.__source),
+                self.__preprocessor_info.includes,
+                self.__preprocessor_info.sysincludes,
+                macros, self.__compiler_info)
             send_compressed_file(server_conn, io.BytesIO(preprocessed_data))
 
     def manager_receive(self, client_conn, server_conn):
@@ -105,7 +108,7 @@ class CompileTask:
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 
-                        defines = ['-D{}'.format(define) for define in self.__macros]
+                        defines = ['-D{}'.format(define) for define in self.__preprocessor_info.macros]
                         try:
                             command = self.__call + defines + [noLink, output] + ['-I{}'.format(incpath) for incpath in include_dirs] + [source_file.filename()]
                             retcode, stdout, stderr = compiler(command)

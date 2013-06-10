@@ -11,7 +11,6 @@ import sys
 import zlib
 
 from utils import send_compressed_file
-from tempfile import mkstemp
 from multiprocessing.connection import Listener
 from multiprocessing.managers import BaseManager
 
@@ -28,6 +27,13 @@ class CompilerInfo:
     def size(self): return self.__size
     def id(self): return self.__id
     def macros(self): return self.__macros
+
+class PreprocessorInfo:
+    def __init__(self, macros, builtin_macros, includes, sysincludes):
+        self.macros = macros
+        self.includes = includes
+        self.sysincludes = sysincludes
+        self.builtin_macros = builtin_macros
 
 class CompilationDistributer(CmdLineOptions):
     class Category: pass
@@ -64,7 +70,6 @@ class CompilationDistributer(CmdLineOptions):
 
     class Context:
         def __init__(self, command, option_parser):
-            self.__executable = command[1]
             self.__options = list(option_parser.parse_options(command[2:]))
             self.__manager_id = command[0]
 
@@ -78,7 +83,13 @@ class CompilationDistributer(CmdLineOptions):
         def queue_task(self, task, endpoint):
             self.__manager.queue_task(task, endpoint)
 
-        def executable(self): return self.__executable
+        def executable(self):
+            if not self.__executable:
+                raise Exception("Internal error, compiler executable not set.")
+            return self.__executable
+
+        def set_executable(self, value):
+            self.__executable = value
 
         def options(self): return self.__options
 
@@ -98,7 +109,6 @@ class CompilationDistributer(CmdLineOptions):
         def input_files(self):
             return (input.make_str() for input in self.free_options())
         
-
     def create_context(self, command):
         return CompilationDistributer.Context(command, self)
 
@@ -185,12 +195,9 @@ class CompilationDistributer(CmdLineOptions):
                 cwd = os.getcwd(),
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                includes = includes,
-                sysincludes = sysincludes,
-                macros = macros,
-                builtin_macros = builtin_macros,
+                preprocessor_info = PreprocessorInfo(macros, builtin_macros, includes, sysincludes),
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
-                compiler_info = self.compiler_info(ctx.executable()),
+                compiler_info = compiler_info,
                 distributer = self)
 
         ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]

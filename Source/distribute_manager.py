@@ -13,19 +13,18 @@ import sys
 import os
 import configparser
 
+class ScopedTimer:
+    def __init__(self, callable):
+        self.__callable = callable
+        self.__start = time()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.__callable(time() - self.__start)
+
 class Timer:
-    class ScopedTimer:
-        def __init__(self, name, timer):
-            self.__timer = timer
-            self.__start = time()
-            self.__name = name
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            self.__timer.add_time(self.__name, time() - self.__start)
-
     def __init__(self, times):
         self.__times = times
 
@@ -34,7 +33,7 @@ class Timer:
         self.__times[type] = (current[0] + value, current[1] + 1)
 
     def timeit(self, name):
-        return Timer.ScopedTimer(name, self)
+        return ScopedTimer(lambda value : self.add_time(name, value))
 
 def prepare_task(task):
     return task.manager_prepare()
@@ -62,7 +61,7 @@ class Worker:
             self.__node_info.add_old_task_sent(node_index)
 
         # Just block
-        with self.__timer.timeit('server_time'):
+        with self.__timer.timeit('server_time'), ScopedTimer(lambda value : self.__node_info.add_total_time(node_index, value)):
             server_status = self.__server_conn.recv()
             if server_status == "SERVER_FAILED":
                 return None
@@ -85,7 +84,7 @@ class Worker:
                 with self.__timer.timeit('prepare'):
                     start = time()
                     if task.algorithm == 'SCAN_HEADERS':
-                        task.tempfile = self.__prepare_pool.run(prepare_task, (task,))
+                        task.tempfile = prepare_task(task)
                         if not task.tempfile:
                             raise RuntimeError("Failed to preprocess.")
                             #task.algorithm = 'PREPROCESS_LOCALLY'
@@ -104,9 +103,11 @@ class Worker:
         while not task_done:
             try:
                 with self.__timer.timeit('find_available_node'):
-                    find_node_result = self.find_available_node()
-                    if find_node_result is None:
-                        return
+                    find_node_result = None
+                    while not find_node_result:
+                        find_node_result = self.find_available_node()
+                        if not find_node_result:
+                            sleep(0.5)
                 node_index, server_conn = find_node_result
                 self.__server_conn = server_conn
                 self.__task_map.setdefault(self.wrapped_task().client_id(), set()).add(node_index)
@@ -128,48 +129,33 @@ class Worker:
         nodes_processing_task = self.__task_map.get(self.__wrapped_task.client_id(), set())
         first = None
         accepted = False
-        rejections = 0
-
+        
         def ordering_key(index):
-            return self.__node_info.completion_ratio(index), self.__node_info.tasks_processing(index), self.__node_info.tasks_failed(index)
+            return self.__node_info.tasks_processing(index) * self.__node_info.average_time(index)
 
-        best_nodes = list(((ordering_key(index), self.__nodes[index], index)
+        ordering_key, node, node_index = min(((ordering_key(index), self.__nodes[index], index)
                 for index in range(len(self.__nodes)) if not index in nodes_processing_task))
-        if not best_nodes:
-            return
-        best_nodes.sort(reverse=True)
-        while not accepted:
-            for entry in best_nodes:
-                ordering_key, node, node_index = entry
-                if not first:
-                    first = node
-                elif node == first:
-                    # If everyone rejected task.
-                    if nodes_processing_task:
-                        return
-                    else:
-                        sleep(1)
 
-                try:
-                    with socket.socket(getattr(socket, 'AF_INET')) as s:
-                        s.settimeout(1)
-                        s.connect(node)
-                        s.settimeout(None)
-                        server_conn = Connection(s.detach())
-                except Exception:
-                    print("Failed to connect to '{}'".format(node))
-                    continue
-                with self.__timer.timeit('accept_time'):
-                    server_conn.send(self.__wrapped_task.task())
-                    try:
-                        accepted, has_compiler = server_conn.recv()
-                        if not accepted:
-                            rejections += 1
-                            server_conn.close()
-                        else:
-                            return node_index, server_conn
-                    except IOError:
-                        pass
+        try:
+            with socket.socket(getattr(socket, 'AF_INET')) as s:
+                s.settimeout(1)
+                s.connect(node)
+                s.settimeout(None)
+                server_conn = Connection(s.detach())
+        except Exception:
+            print("Failed to connect to '{}'".format(node))
+            return None
+        with self.__timer.timeit('accept_time'):
+            server_conn.send(self.__wrapped_task.task())
+            try:
+                accepted, has_compiler = server_conn.recv()
+                if not accepted:
+                    server_conn.close()
+                    return None
+                else:
+                    return node_index, server_conn
+            except IOError:
+                pass
 
 class WrapTask:
     def __init__(self, task, client_id, manager):
@@ -214,7 +200,7 @@ class TaskProcessor(Process):
         self.__task_map = self.__manager.dict()
         self.__times = self.__manager.dict()
         self.__timer = Timer(self.__times)
-        self.__prepare_pool = self.__manager.ProcessPool(4)
+        self.__prepare_pool = self.__manager.ProcessPool(1)
 
         self.print_stats()
         count = 0
@@ -249,7 +235,7 @@ class TaskProcessor(Process):
         for index in range(len(self.__nodes)):
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - New sent {:<3} Old sent {:<3} '
-                'Completed {:<3} Failed {:<3} Running {:<3} Ratio {:<3}\n'.format(
+                'Completed {:<3} Failed {:<3} Running {:<3} Average Time {:<3} Ratio {:<3}\n'.format(
                 node[0],
                 node[1],
                 self.__node_info.new_tasks_sent  (index),
@@ -257,6 +243,7 @@ class TaskProcessor(Process):
                 self.__node_info.tasks_completed (index),
                 self.__node_info.tasks_failed    (index),
                 self.__node_info.tasks_processing(index),
+                self.__node_info.average_time    (index),
                 self.__node_info.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
@@ -273,6 +260,8 @@ class NodeInfoHolder:
             self._tasks_failed    = 0
             self._new_tasks_sent  = 0
             self._old_tasks_sent  = 0
+            self._total_time      = 0
+
     def __init__(self, size):
         self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
 
@@ -288,6 +277,12 @@ class NodeInfoHolder:
 
     def tasks_processing(self, index): return self.tasks_sent(index) - self.tasks_completed(index) - self.tasks_failed(index)
 
+    def total_time(self, index): return self.__nodes[index]._total_time
+
+    def average_time(self, index):
+        tasks_completed = self.tasks_completed(index)
+        return self.total_time(index) / tasks_completed if tasks_completed else 0
+
     def add_new_task_sent(self, index): self.__nodes[index]._new_tasks_sent += 1
 
     def add_old_task_sent(self, index): self.__nodes[index]._old_tasks_sent += 1
@@ -295,6 +290,8 @@ class NodeInfoHolder:
     def add_tasks_completed(self, index): self.__nodes[index]._tasks_completed += 1
 
     def add_tasks_failed(self, index): self.__nodes[index]._add_tasks_failed += 1
+
+    def add_total_time(self, index, value): self.__nodes[index]._total_time += value
 
     def completion_ratio(self, index):
         if not self.tasks_sent(index):

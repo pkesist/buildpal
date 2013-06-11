@@ -70,7 +70,7 @@ class CompilationDistributer(CmdLineOptions):
 
     class Context:
         def __init__(self, command, option_parser):
-            self.__options = list(option_parser.parse_options(command[2:]))
+            self.__options = list(option_parser.parse_options(command[1:]))
             self.__manager_id = command[0]
 
             try:
@@ -115,21 +115,28 @@ class CompilationDistributer(CmdLineOptions):
     def bailout(self, ctx):
         tokens = list(ctx.filter_options(CompilationDistributer.BailoutCategory))
         if not tokens:
-            return False
+            return False, None
 
         print("Command does not require distributed compilation. Running locally.")
         call = [ctx.executable()]
         call.extend(option.make_str() for option in ctx.options())
-        subprocess.check_call(call)
-        return True
+        retcode = subprocess.call(call)
+        return True, retcode
 
     def execute(self, command):
         ctx = self.create_context(command)
-        if self.bailout(ctx):
-            return
+        bailout, retcode = self.bailout(ctx)
+        if bailout:
+            return retcode
         self.create_tasks(ctx)
-        self.execute_remotely(ctx)
-        self.postprocess(ctx)
+        retcode = self.execute_remotely(ctx)
+        if retcode != 0:
+            return retcode
+        postprocessed, result = self.postprocess(ctx)
+        if postprocessed:
+            return result
+        return retcode
+
 
     def compiler_info(self, executable):
         raise NotImplementedError("Compiler identification not implemented.")
@@ -196,7 +203,7 @@ class CompilationDistributer(CmdLineOptions):
                 source = source,
                 source_type = os.path.splitext(source)[1],
                 preprocessor_info = PreprocessorInfo(macros, builtin_macros, includes, sysincludes),
-                output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
+                output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.oobj'),
                 compiler_info = compiler_info,
                 distributer = self)
 
@@ -223,15 +230,13 @@ class CompilationDistributer(CmdLineOptions):
                         sys.stderr.write(stderr.decode())
                         sys.stderr.write("----------------------------------------------------------------\n")
                     listener.close()
-                    sys.exit(retcode)
-                    break # Never reached
+                    return retcode
                 if task == "FAILED":
-                    sys.exit(-1)
-                    break # Never reached
+                    return -1
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):
-            return
+            return False, None
 
         print("Linking...")
         objects = {}
@@ -247,4 +252,4 @@ class CompilationDistributer(CmdLineOptions):
             else:
                 call.append(input)
         print("Calling '{}'.".format(call))
-        subprocess.check_call(call)
+        return True, subprocess.call(call)

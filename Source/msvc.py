@@ -45,6 +45,12 @@ def with_param(name, macros=[]):
 
 
 class MSVCDistributer(CompilationDistributer):
+    __preprocess_option = simple('E')
+    __object_name_option = with_param('Fo')
+    __compile_no_link_option = simple('c')
+    __include_file_option = with_param('I')
+    __define_option = with_param('D')
+
     def preprocess_option(self): return self.__preprocess_option
     def object_name_option(self): return self.__object_name_option
     def compile_no_link_option(self): return self.__compile_no_link_option
@@ -52,11 +58,6 @@ class MSVCDistributer(CompilationDistributer):
     def define_option(self): return self.__define_option
 
     def __init__(self):
-        self.__preprocess_option = simple('E')
-        self.__object_name_option = with_param('Fo')
-        self.__compile_no_link_option = simple('c')
-        self.__include_file_option = with_param('I')
-        self.__define_option = with_param('D')
         super(MSVCDistributer, self).__init__()
 
         # Bailout
@@ -107,7 +108,7 @@ class MSVCDistributer(CompilationDistributer):
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
 
-        with TempFile(suffix='.cpp') as tempfile:
+        with TempFile(suffix='.cpp') as tempfile, TempFile(suffix='.obj') as obj:
             placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
             with tempfile.open("wt") as file:
                 lines = []
@@ -124,7 +125,7 @@ class MSVCDistributer(CompilationDistributer):
                     lines.append('#pragma message("{plh} /{m}/" STR({m}) "/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#endif\n')
                 file.writelines(lines)
-            proc = subprocess.Popen([abs, '-c', tempfile.filename()], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen([abs, '/Fo{}'.format(obj.filename), '-c', tempfile.filename()], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = proc.communicate()
             output = stdout.split(b'\r\n')
             macros = []
@@ -270,4 +271,5 @@ class MSVCDistributer(CompilationDistributer):
 
 if __name__ == "__main__":
     distributer = MSVCDistributer()
-    distributer.execute(sys.argv[1:])
+    retcode = distributer.execute(sys.argv[1:])
+    sys.exit(retcode)

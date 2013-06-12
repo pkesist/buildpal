@@ -14,13 +14,13 @@ class CompileTask:
     def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, distributer):
         self.__cwd = cwd
         self.__call = call
-        self.__source = source
         self.__source_type = source_type
         self.__preprocessor_info = preprocessor_info
-        self.__output = output
         self.__compiler_info = compiler_info
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
+        self.output = output
+        self.source = source
         self.tempfile = None
 
         self.algorithm = 'SCAN_HEADERS'
@@ -40,7 +40,7 @@ class CompileTask:
                 macros.append('_SECURE_SCL=1')
             if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
-        return collect_headers(os.path.join(self.__cwd, self.__source),
+        return collect_headers(os.path.join(self.__cwd, self.source),
             self.__preprocessor_info.includes, [], macros,
             self.__compiler_info)
 
@@ -50,7 +50,7 @@ class CompileTask:
             with open(self.tempfile, 'rb') as file:
                 send_file(server_conn, file)
             server_conn.send('SOURCE_FILE')
-            with open(os.path.join(self.__cwd, self.__source), 'rb') as cpp:
+            with open(os.path.join(self.__cwd, self.source), 'rb') as cpp:
                 send_file(server_conn, cpp)
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
@@ -64,7 +64,7 @@ class CompileTask:
             from scan_headers import preprocess_file
             macros = self.__preprocessor_info.macros + self.__preprocessor_info.builtin_macros
             preprocessed_data = preprocess_file(
-                os.path.join(self.__cwd, self.__source),
+                os.path.join(self.__cwd, self.source),
                 self.__preprocessor_info.includes,
                 self.__preprocessor_info.sysincludes,
                 macros, self.__compiler_info)
@@ -75,7 +75,7 @@ class CompileTask:
         if retcode == 0:
             length = 0
             more = True
-            with open(self.__output, "wb") as file:
+            with open(self.output, "wb") as file:
                 receive_compressed_file(server_conn, file)
         client_conn.send('COMPLETED')
         client_conn.send((retcode, stdout, stderr))

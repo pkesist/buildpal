@@ -169,6 +169,9 @@ class CompilationDistributer(CmdLineOptions):
     def requires_preprocessing(self, file):
         return False
 
+    def compile_cpp(self, manager, source, obj, includes):
+        raise NotImplementedError()
+
     def create_tasks(self, ctx):
         # See if user specified an explicit name for the object file.
         output = list(ctx.filter_options(self.object_name_option()))
@@ -203,7 +206,7 @@ class CompilationDistributer(CmdLineOptions):
                 source = source,
                 source_type = os.path.splitext(source)[1],
                 preprocessor_info = PreprocessorInfo(macros, builtin_macros, includes, sysincludes),
-                output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.oobj'),
+                output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = compiler_info,
                 distributer = self)
 
@@ -240,8 +243,8 @@ class CompilationDistributer(CmdLineOptions):
 
         print("Linking...")
         objects = {}
-        for task in ctx.tasks:
-            objects[task.source] = task.object
+        for preprocess_call, task in ctx.tasks:
+            objects[task.source] = task.output
 
         call = [ctx.executable()]
         call.extend(o.make_str() for o in

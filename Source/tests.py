@@ -33,12 +33,16 @@ def dummy_program(complexity):
     }}
     """.format(complexity=complexity)
 
-def run_task(command):
-    distributer = MSVCDistributer()
-    retcode = distributer.execute(command)
-    if retcode != 0:
-        print("Retcode is {}".format(retcode))
-
+def compile_cpp(manager, source, object, includes):
+    try:
+        distributer = MSVCDistributer()
+        retcode = distributer.compile_cpp(manager, source, object, includes)
+        if retcode != 0:
+            print("Retcode is {}".format(retcode))
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise
 
 if __name__ == "__main__":
     manager = sys.argv[1]
@@ -58,8 +62,7 @@ if __name__ == "__main__":
         for i in range(tasks):
             output = "task{}.obj".format(i)
             objs_to_remove.add(output)
-            command = [manager, "/Fo{}".format(output), "/EHsc", "-nologo", "-c", "/I{}".format(boost), input]
-            pool.apply_async(run_task, args=(command,))
+            pool.apply_async(compile_cpp, args=(manager, input, output, [boost]))
         pool.close()
         print("Waiting for tasks...")
         pool.join()

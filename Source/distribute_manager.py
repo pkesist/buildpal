@@ -3,16 +3,16 @@ from functools import cmp_to_key
 from queue import PriorityQueue, Empty
 from multiprocessing import Lock, Process, Pool, Queue, Value, RawValue
 from multiprocessing.connection import Connection, Client
-from multiprocessing.managers import BaseManager, SyncManager
+from multiprocessing.managers import BaseManager, SyncManager, BaseProxy
 from time import sleep, time
 
-import socket
-
+import configparser
 import ctypes
 import heapq
-import sys
+import operator
 import os
-import configparser
+import socket
+import sys
 
 class ScopedTimer:
     def __init__(self, callable):
@@ -26,12 +26,23 @@ class ScopedTimer:
         self.__callable(time() - self.__start)
 
 class Timer:
-    def __init__(self, times):
-        self.__times = times
+    def __init__(self):
+        self.__times = {}
 
     def add_time(self, type, value):
         current = self.__times.get(type, (0, 0))
         self.__times[type] = (current[0] + value, current[1] + 1)
+
+    def as_dict(self):
+        return self.__times
+
+class TimerProxy(BaseProxy):
+    _exposed_ = ('add_time', 'as_dict', 'timeit')
+    def add_time(self, type, value):
+        return self._callmethod('add_time', (type, value))
+
+    def as_dict(self):
+        return self._callmethod('as_dict')
 
     def timeit(self, name):
         return ScopedTimer(lambda value : self.add_time(name, value))
@@ -40,8 +51,8 @@ def prepare_task(task):
     return task.manager_prepare()
 
 class Worker:
-    def __init__(self, wrapped_task, client_conn, times, task_map, nodes, node_info, lock, prepare_pool):
-        self.__timer = Timer(times)
+    def __init__(self, wrapped_task, client_conn, timer, task_map, nodes, node_info, lock, prepare_pool):
+        self.__timer = timer
         self.__client_conn = client_conn
         self.__wrapped_task = wrapped_task
         self.__task_map = task_map
@@ -210,8 +221,7 @@ class TaskProcessor(Process):
         self.__node_info = self.__manager.NodeInfoHolder(len(self.__nodes))
         self.__node_info_lock = self.__manager.Lock()
         self.__task_map = self.__manager.dict()
-        self.__times = self.__manager.dict()
-        self.__timer = Timer(self.__times)
+        self.__timer = self.__manager.Timer()
         self.__prepare_pool = self.__manager.ProcessPool(1)
 
         self.print_stats()
@@ -227,7 +237,7 @@ class TaskProcessor(Process):
             wrapped_task = WrapTask(task, client_id, self.__manager) 
             client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
             self.__tasks[client_id] = wrapped_task, client_conn
-            worker = Worker(wrapped_task, client_conn, self.__times, self.__task_map, self.__nodes, self.__node_info, self.__node_info_lock, self.__prepare_pool)
+            worker = Worker(wrapped_task, client_conn, self.__timer, self.__task_map, self.__nodes, self.__node_info, self.__node_info_lock, self.__prepare_pool)
             self.__compile_pool.apply_async(worker)
             return True
         except Empty:
@@ -258,9 +268,11 @@ class TaskProcessor(Process):
                 self.__node_info.completion_ratio(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
-        times = self.__times._getvalue()
-        for time in times:
-            print('{:-<30} Total {:10.2f} - Num {:<5} - Average {:10.2f}'.format(time, times[time][0], times[time][1], times[time][0] / times[time][1]))
+        times = self.__timer.as_dict()
+        sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
+        sorted_times.sort(key=operator.itemgetter(3), reverse=True)
+        for name, time, count, average in sorted_times:
+            print('{:-<30} Total {:10.2f} - Num {:<5} - Average {:10.2f}'.format(name, time, count, average))
 
 task_queue = Queue()
 
@@ -316,6 +328,7 @@ class BookKeepingManager(SyncManager):
 
 BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
 BookKeepingManager.register('ProcessPool', ProcessPool)
+BookKeepingManager.register('Timer', Timer, TimerProxy)
 
 def queue_task(task, client_id):
     task_queue.put((task, client_id))

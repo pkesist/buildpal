@@ -104,7 +104,6 @@ class MSVCDistributer(CompilationDistributer):
             self.compile_no_link_option().make_value().make_str()]
         command.extend((self.include_file_option().make_value(include).make_str() for include in includes))
         command.extend(['-nologo', '/EHsc', source])
-        print(command)
         return self.execute(command)
 
     def compiler_info(self, executable):

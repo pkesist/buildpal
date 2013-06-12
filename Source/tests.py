@@ -50,6 +50,10 @@ if __name__ == "__main__":
     tasks = int(sys.argv[3])
     complexity = int(sys.argv[4])
 
+    print("Spawning tasks for manager '{}'".format(manager))
+    print("#{} total tasks, #{} paralell".format(tasks, paralell))
+    print("Task complexity is {}".format(complexity))
+
     pool = Pool(processes = paralell)
     boost = r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"
     

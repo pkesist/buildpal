@@ -51,14 +51,13 @@ def prepare_task(task):
     return task.manager_prepare()
 
 class Worker:
-    def __init__(self, wrapped_task, client_conn, timer, task_map, nodes, node_info, lock, prepare_pool):
+    def __init__(self, wrapped_task, client_conn, timer, task_map, nodes, node_info, prepare_pool):
         self.__timer = timer
         self.__client_conn = client_conn
         self.__wrapped_task = wrapped_task
         self.__task_map = task_map
         self.__nodes = nodes
         self.__node_info = node_info
-        self.__lock = lock
         self.__prepare_pool = prepare_pool
 
     def wrapped_task(self): return self.__wrapped_task
@@ -106,8 +105,7 @@ class Worker:
             import traceback
             traceback.print_exc()
 
-        task_done = False
-        while not task_done:
+        while True:
             try:
                 with self.__timer.timeit('find_available_node'):
                     find_node_result = None
@@ -120,16 +118,14 @@ class Worker:
                 self.__server_conn = server_conn
                 self.__task_map.setdefault(self.wrapped_task().client_id(), set()).add(node_index)
 
-                with self.__timer.timeit('run_task'):
-                    # Create and run worker.
-                    result = self.process_task(node_index)
-                    # Did not process it after all.
-                    with self.__lock:
-                        if result is None:
-                            self.__node_info.add_tasks_failed(node_index)
-                        else:
-                            self.__node_info.add_tasks_completed(node_index)
-                            task_done = True
+                # Create and run worker.
+                result = self.process_task(node_index)
+                # Did not process it after all.
+                if result is None:
+                    self.__node_info.add_tasks_failed(node_index)
+                else:
+                    self.__node_info.add_tasks_completed(node_index)
+                    break
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -150,11 +146,10 @@ class Worker:
                 return -1 if lhs_average_time < rhs_average_time else 1
             return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
         
-        with self.__lock:
-            nodes = list((index for index in range(len(self.__nodes)) if not index in nodes_processing_task))
-            node_index = min(nodes, key=cmp_to_key(cmp))
-            self.__node_info.add_tasks_sent(node_index)
-            node = self.__nodes[node_index]
+        nodes = list((index for index in range(len(self.__nodes)) if not index in nodes_processing_task))
+        node_index = min(nodes, key=cmp_to_key(cmp))
+        self.__node_info.add_tasks_sent(node_index)
+        node = self.__nodes[node_index]
 
         try:
             with socket.socket(getattr(socket, 'AF_INET')) as s:
@@ -170,8 +165,7 @@ class Worker:
             try:
                 accepted, has_compiler = server_conn.recv()
                 if not accepted:
-                    with self.__lock:
-                        self.__node_info.dec_tasks_sent(node_index)
+                    self.__node_info.dec_tasks_sent(node_index)
                     server_conn.close()
                     return None
                 else:
@@ -219,7 +213,6 @@ class TaskProcessor(Process):
         self.__manager.start()
 
         self.__node_info = self.__manager.NodeInfoHolder(len(self.__nodes))
-        self.__node_info_lock = self.__manager.Lock()
         self.__task_map = self.__manager.dict()
         self.__timer = self.__manager.Timer()
         self.__prepare_pool = self.__manager.ProcessPool(1)
@@ -237,7 +230,7 @@ class TaskProcessor(Process):
             wrapped_task = WrapTask(task, client_id, self.__manager) 
             client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
             self.__tasks[client_id] = wrapped_task, client_conn
-            worker = Worker(wrapped_task, client_conn, self.__timer, self.__task_map, self.__nodes, self.__node_info, self.__node_info_lock, self.__prepare_pool)
+            worker = Worker(wrapped_task, client_conn, self.__timer, self.__task_map, self.__nodes, self.__node_info, self.__prepare_pool)
             self.__compile_pool.apply_async(worker)
             return True
         except Empty:
@@ -272,7 +265,7 @@ class TaskProcessor(Process):
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
         sorted_times.sort(key=operator.itemgetter(3), reverse=True)
         for name, time, count, average in sorted_times:
-            print('{:-<30} Total {:10.2f} - Num {:<5} - Average {:10.2f}'.format(name, time, count, average))
+            print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, time, count, average))
 
 task_queue = Queue()
 

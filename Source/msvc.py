@@ -98,13 +98,13 @@ class MSVCDistributer(CompilationDistributer):
         ctx.set_executable('cl.exe')
         return ctx
 
-    def compile_cpp(self, manager, source, obj, includes):
+    def compile_cpp(self, manager, source, obj, includes, locally=False):
         command = [manager,
             self.object_name_option().make_value(obj).make_str(),
             self.compile_no_link_option().make_value().make_str()]
         command.extend((self.include_file_option().make_value(include).make_str() for include in includes))
         command.extend(['-nologo', '/EHsc', source])
-        return self.execute(command)
+        return self.execute(command, locally)
 
     def compiler_info(self, executable):
         abs = find_on_path(executable)

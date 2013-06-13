@@ -91,11 +91,11 @@ Usage:
     server_section = 'Server'
     port = config.getint(server_section, 'port')
     processes = config.getint(server_section, 'processes')
-    if config.has_option(server_section, 'cpu_usage_hwm'):
-        cpu_usage_hwm = config.getint(server_section, 'cpu_usage_hwm')
+
+    cpu_usage_hwm = config.getint(server_section, 'cpu_usage_hwm', fallback=None)
+    if cpu_usage_hwm is not None:
+        assert isinstance(cpu_usage_hwm, int)
         if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
             raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
-    else:
-        cpu_usage_hwm = None
     
     ServerRunner(port, processes, cpu_usage_hwm).run()

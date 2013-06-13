@@ -112,22 +112,23 @@ class CompilationDistributer(CmdLineOptions):
     def create_context(self, command):
         return CompilationDistributer.Context(command, self)
 
+    def __run_locally(self, ctx):
+        call = [ctx.executable()]
+        call.extend(option.make_str() for option in ctx.options())
+        return subprocess.call(call)
+
     def bailout(self, ctx):
         tokens = list(ctx.filter_options(CompilationDistributer.BailoutCategory))
         if not tokens:
-            return False, None
+            return False
 
-        print("Command does not require distributed compilation. Running locally.")
-        call = [ctx.executable()]
-        call.extend(option.make_str() for option in ctx.options())
-        retcode = subprocess.call(call)
-        return True, retcode
+        print("Command does not require distributed compilation, running locally.")
+        return True
 
-    def execute(self, command):
+    def execute(self, command, force_local=False):
         ctx = self.create_context(command)
-        bailout, retcode = self.bailout(ctx)
-        if bailout:
-            return retcode
+        if self.bailout(ctx) or force_local:
+            return self.__run_locally(ctx)
         self.create_tasks(ctx)
         retcode = self.execute_remotely(ctx)
         if retcode != 0:
@@ -169,7 +170,7 @@ class CompilationDistributer(CmdLineOptions):
     def requires_preprocessing(self, file):
         return False
 
-    def compile_cpp(self, manager, source, obj, includes):
+    def compile_cpp(self, manager, source, obj, includes, locally=False):
         raise NotImplementedError()
 
     def create_tasks(self, ctx):

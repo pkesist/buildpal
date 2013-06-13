@@ -198,16 +198,17 @@ class WrapTask:
         return self.__nodes_processing
 
 class TaskProcessor(Process):
-    def __init__(self, nodes, queue):
+    def __init__(self, nodes, queue, max_processes):
         self.__queue = queue
         self.__nodes = nodes
+        self.__max_processes = max_processes
         self.__tasks = {}
         self.__processes = []
 
         super(TaskProcessor, self).__init__()
 
     def run(self):
-        self.__compile_pool = Pool(processes=32)
+        self.__compile_pool = Pool(processes=self.__max_processes)
 
         self.__manager = BookKeepingManager()
         self.__manager.start()
@@ -235,13 +236,6 @@ class TaskProcessor(Process):
             return True
         except Empty:
             return False
-
-    def join_dead_processes(self):
-        dead=list(filter(lambda p : not p.is_alive(), self.__processes))
-        self.__processes=[p for p in self.__processes if p not in dead]
-        for p in self.__processes:
-            p.join(0)
-        return bool(dead)
 
     def print_stats(self):
         sys.stdout.write("================\n")
@@ -354,8 +348,9 @@ Usage:
 
     manager_section = 'Manager'
     nodes_section = 'Build Nodes'
-        
+
     id = config.get(manager_section, 'id')
+    max_processes = config.getint(manager_section, 'max_processes', fallback=None)
 
     if not nodes_section in config:
         raise "ERROR: No '{}' section in '{}'.".format(nodes_section, iniFile)
@@ -376,11 +371,13 @@ Usage:
             done = True
     if not nodes:
         raise RuntimeErrors("No build nodes configured.")
-   
-    queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
 
-    task_processor = TaskProcessor(nodes, task_queue)
+    if max_processes is None:
+        max_processes = 4 * len(nodes)
+   
+    task_processor = TaskProcessor(nodes, task_queue, max_processes=max_processes)
     task_processor.start()
 
+    queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
     server = queue_manager.get_server()
     server.serve_forever()

@@ -1,55 +1,80 @@
 #! python3.3
-from multiprocessing.connection import Listener
-from multiprocessing import Manager, Pool
+from multiprocessing.connection import Listener, Client
+from multiprocessing import Manager, Pool, Lock, Process, Event
+from multiprocessing.managers import SyncManager
+from time import sleep
+
 import configparser
 import psutil
+import tempfile
 import traceback
 import sys
 import os
 
-def work(server, conn):
+def work(server, conn, remote_endpoint, counter):
     try:
+        counter.inc()
         with conn:
             task = conn.recv()
-            task.server_process(server, conn)
+            task.server_process(server, conn, remote_endpoint)
     except Exception:
         print("Failed to execute client task.")
         traceback.print_exc()
+    finally:
+        counter.dec()
 
-class ServerRunner:
-    def __init__(self, port, processes, cpu_usage_hwm=None):
-        print("Starting server on port {} with {} worker processes.".format(
-            port, processes))
-        if cpu_usage_hwm:
-            print("CPU usage hwm is {}%.".format(cpu_usage_hwm))
-        self.__pool = Pool(processes = processes)
-        self.__listener = Listener(('0.0.0.0', port), 'AF_INET')
+class ServerManager(SyncManager):
+    pass
 
-        self.__tasks = []
-        self.__compiler = ServerCompiler(cpu_usage_hwm)
+class FileRepository:
+    def __init__(self):
+        self.__dir = tempfile.mkdtemp()
+        self.__files = {}
 
-    def print_tasks(self):
-        sys.stdout.write("Running {} tasks.\r".format(len(self.__tasks)))
+    def register_file(self, filename, size, last_modified):
+        if filename in self.__files:
+            size, path, local = self.__files[filename]
+            os.remove(local)
+        ext = os.path.splitext(filename)[1]
+        handle, local_filename = tempfile.mkstemp(dir=self.__dir, suffix=ext)
+        self.__files[filename] = size, last_modified, local_filename
+        os.close(handle)
+        return local_filename
 
-    def run(self):
-        while True:
-            self.__tasks = list(filter(lambda task : not task.ready(),
-                self.__tasks))
-            self.print_tasks()
-            conn = self.__listener.accept()
-            self.__tasks.append(self.__pool.apply_async(func=work, args=(
-                self.__compiler, conn,)))
+    def check_file(self, remote_filename, size, last_modified):
+        if not remote_filename in self.__files:
+            return None
+        l_size, l_last_modified, l_path = self.__files[remote_filename]
+        if l_size != size or l_last_modified != last_modified:
+            del self.__files[remote_filename]
+
+        return l_path
+
+class Counter:
+    def __init__(self):
+        self.__count = 0
+
+    def inc(self): self.__count += 1
+    def dec(self): self.__count -= 1
+    def get(self): return self.__count
+
+ServerManager.register('FileRepository', FileRepository)
+ServerManager.register('Counter', Counter)
 
 
 class ServerCompiler:
-    def __init__(self, cpu_usage_hwm=None):
+    def __init__(self, file_repository, cpu_usage_hwm=None):
         self.__hwm = cpu_usage_hwm
         self.__compiler_setup = {}
+        self.__file_repository = file_repository
 
     def accept(self):
         if not self.__hwm:
             return True
         return psutil.cpu_percent() < self.__hwm
+
+    def file_repository(self):
+        return self.__file_repository
 
     def setup_compiler(self, compiler_info):
         setup = self.__compiler_setup.get(compiler_info)
@@ -65,7 +90,32 @@ class ServerCompiler:
         else:
             raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
 
-    
+class ServerRunner(Process):
+    def __init__(self, port, processes, shutdown_event, task_counter, file_repository, cpu_usage_hwm=None):
+        super(ServerRunner, self).__init__()
+        print("Starting server on port {} with {} worker processes.".format(
+            port, processes))
+        if cpu_usage_hwm:
+            print("CPU usage hwm is {}%.".format(cpu_usage_hwm))
+        self.__port = port
+        self.__processes = processes
+        self.__shutdown_event = shutdown_event
+
+        self.__compiler = ServerCompiler(file_repository, cpu_usage_hwm)
+        self.__tasks = task_counter
+
+    def run(self):
+        with Listener(('', self.__port), 'AF_INET') as listener, Pool(processes=self.__processes) as pool:
+            while True:
+                try:
+                    conn = listener.accept()
+                    if self.__shutdown_event.is_set():
+                        break
+                    pool.apply_async(func=work, args=(self.__compiler,
+                        conn, listener.last_accepted, self.__tasks))
+                except Exception:
+                    pass
+   
 default_script = 'distribute_server.ini'
 
 if __name__ == "__main__":
@@ -98,4 +148,31 @@ Usage:
         if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
             raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
     
-    ServerRunner(port, processes, cpu_usage_hwm).run()
+    with ServerManager() as manager:
+        task_counter = manager.Counter()
+        file_repository = manager.FileRepository()
+    
+        shutdown_event = Event()
+        server_runner = ServerRunner(port, processes, shutdown_event, task_counter, file_repository, cpu_usage_hwm)
+        server_runner.start()
+
+        try:
+            while True:
+                sys.stdout.write("Running {} tasks.\r".format(task_counter.get()))
+                sleep(1)
+        except KeyboardInterrupt:
+            pass
+            #import traceback
+            #traceback.print_exc()
+
+        shutdown_event.set()
+        # Wake up listener accept
+        Client(('127.0.0.1', port), 'AF_INET')
+        server_runner.join()
+
+
+
+
+
+    
+

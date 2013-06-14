@@ -11,7 +11,7 @@ from utils import TempFile, send_file, receive_file, receive_compressed_file, se
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, distributer):
+    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, distributer):
         self.__cwd = cwd
         self.__call = call
         self.__source_type = source_type
@@ -19,6 +19,7 @@ class CompileTask:
         self.__compiler_info = compiler_info
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
+        self.__pch_file = pch_file
         self.output = output
         self.source = source
         self.tempfile = None
@@ -47,16 +48,24 @@ class CompileTask:
     def manager_send(self, client_conn, server_conn):
         if self.algorithm == 'SCAN_HEADERS':
             server_conn.send('SCAN_HEADERS')
+            server_conn.send('ZIP_FILE')
             with open(self.tempfile, 'rb') as file:
                 send_file(server_conn, file)
             server_conn.send('SOURCE_FILE')
             with open(os.path.join(self.__cwd, self.source), 'rb') as cpp:
                 send_file(server_conn, cpp)
+            if self.__pch_file:
+                server_conn.send('NEED_PCH_FILE')
+                response = server_conn.recv()
+                if response:
+                    with open(os.path.join(os.getcwd(), self.__pch_file[0]), 'rb') as pch_file:
+                        send_compressed_file(server_conn, pch_file)
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
+            server_conn.send('PREPROCESS_LOCALLY')
             # Signal the client to do preprocessing.
             client_conn.send('PREPROCESS')
-            server_conn.send('PREPROCESS_LOCALLY')
+            server_conn.send('PREPROCESSED_FILE')
             relay_file(client_conn, server_conn)
 
         if self.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
@@ -81,7 +90,7 @@ class CompileTask:
         client_conn.send((retcode, stdout, stderr))
         return True
 
-    def server_process(self, server, conn):
+    def server_process(self, server, conn, remote_endpoint):
         accept = server.accept()
         compiler = server.setup_compiler(self.__compiler_info)
         conn.send((accept, compiler is not None))
@@ -90,6 +99,8 @@ class CompileTask:
 
         algorithm = conn.recv()
         if algorithm == 'SCAN_HEADERS':
+            text = conn.recv()
+            assert text == 'ZIP_FILE'
             with receive_file(conn) as zip_file:
                 include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
                 with zipfile.ZipFile(zip_file.filename(), 'r') as zip:
@@ -102,15 +113,36 @@ class CompileTask:
                         assert not os.path.isabs(path)
                         include_dirs.append(os.path.normpath(os.path.join(include_path, path)))
                 try:
-                    src_file = conn.recv()
-                    assert src_file == 'SOURCE_FILE'
+                    task = conn.recv()
+                    assert task == 'SOURCE_FILE'
                     with receive_file(conn, suffix=self.__source_type) as source_file, TempFile(suffix='.obj') as object_file:
+                        if self.__pch_file:
+                            task = conn.recv()
+                            assert task == 'NEED_PCH_FILE'
+                            local_file = server.file_repository().check_file(*self.__pch_file)
+                            if local_file is None:
+                                conn.send(True)
+                                local_file = server.file_repository().register_file(*self.__pch_file)
+                                with open(local_file, 'wb') as pch_file:
+                                    receive_compressed_file(conn, pch_file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+                            else:
+                                conn.send(False)
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 
+                        # FIXME - remove hardcoded switches, use compiler_info
                         defines = ['-D{}'.format(define) for define in self.__preprocessor_info.macros]
+                        pch_switch = []
+                        if self.__pch_file:
+                            assert local_file is not None
+                            assert os.path.exists(local_file)
+                            pch_switch.append('-Fp{}'.format(local_file))
+
                         try:
-                            command = self.__call + defines + [noLink, output] + ['-I{}'.format(incpath) for incpath in include_dirs] + [source_file.filename()]
+                            command = (self.__call + defines + pch_switch +
+                                [noLink, output] +
+                                ['-I{}'.format(incpath) for incpath in include_dirs] +
+                                [source_file.filename()])
                             retcode, stdout, stderr = compiler(command)
                         except Exception:
                             conn.send('SERVER_FAILED')
@@ -128,6 +160,8 @@ class CompileTask:
 
         if algorithm == 'PREPROCESS_LOCALLY':
             tmp = TempFile()
+            text = conn.recv()
+            assert text == 'PREPROCESSED_FILE'
             with tmp.open('wb') as temp:
                 receive_compressed_file(conn, temp)
 

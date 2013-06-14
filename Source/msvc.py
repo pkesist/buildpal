@@ -50,34 +50,44 @@ class MSVCDistributer(CompilationDistributer):
     __compile_no_link_option = simple('c')
     __include_file_option = with_param('I')
     __define_option = with_param('D')
+    __use_pch_option = with_param('Yu')
+    __pch_file_option = with_param('Fp')
 
     def preprocess_option(self): return self.__preprocess_option
     def object_name_option(self): return self.__object_name_option
     def compile_no_link_option(self): return self.__compile_no_link_option
     def include_file_option(self): return self.__include_file_option
     def define_option(self): return self.__define_option
+    def use_pch_option(self): return self.__use_pch_option
+    def pch_file_option(self): return self.__pch_file_option
 
     def __init__(self):
         super(MSVCDistributer, self).__init__()
 
-        # Bailout
-        for option in self.bailout_options:
-            option.add_category(MSVCDistributer.BailoutCategory)
+        # Build Local
+        for option in self.build_local_options:
+            option.add_category(MSVCDistributer.BuildLocalCategory)
             self.add_option(option)
         # Preprocessing
         for option in self.preprocessing_options:
             option.add_category(MSVCDistributer.PreprocessingCategory)
             self.add_option(option)
-        # Compilation
-        for option in self.compilation_options:
-            option.add_category(MSVCDistributer.CompilationCategory)
+        # PCH options which require local build.        
+        for option in self.pch_build_local_options:
+            option.add_category(MSVCDistributer.BuildLocalCategory)
+            option.add_category(MSVCDistributer.PCHCategory)
             self.add_option(option)
-        # PCH options. Recognized, but ignored.
+        # PCH options.
         for option in self.pch_options:
+            option.add_category(MSVCDistributer.PCHCategory)
             self.add_option(option)
         # Both preprocessing and compilation.
         for option in self.preprocess_and_compile:
             option.add_category(MSVCDistributer.PreprocessingCategory)
+            option.add_category(MSVCDistributer.CompilationCategory)
+            self.add_option(option)
+        # Compilation
+        for option in self.compilation_options:
             option.add_category(MSVCDistributer.CompilationCategory)
             self.add_option(option)
         # Always.
@@ -205,8 +215,6 @@ class MSVCDistributer(CompilationDistributer):
             result.append('_MSC_EXTENSIONS=1')
         return result
 
-
-
     compiler_versions = {
         (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
         (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
@@ -216,7 +224,7 @@ class MSVCDistributer(CompilationDistributer):
         (b'17.00.50727.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
     }
 
-    bailout_options = [
+    build_local_options = [
         # If we run into these just run the damn thing locally
         simple('E' ), simple('EP'), simple('P' ),
         simple('Zg'), simple('Zs')]
@@ -226,9 +234,12 @@ class MSVCDistributer(CompilationDistributer):
         with_param('U' ), with_param('I' ), simple    ('C' ), simple    ('Fx'),
         simple    ('u' ), simple    ('X' )]
 
+    pch_build_local_options = [
+        # If we are creating PCH file compile it locally. For now.
+        with_param('Yc')]
+
     pch_options = [
-        with_param('Fp'), with_param('Yc'), with_param('Yl'), with_param('Yu'),
-        simple    ('Y-')]
+        with_param('Fp'), with_param('Yl'), simple('Y-')]
 
     preprocess_and_compile = [
         # These affect preprocessor.

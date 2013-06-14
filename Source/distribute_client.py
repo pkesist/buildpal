@@ -37,7 +37,8 @@ class PreprocessorInfo:
 
 class CompilationDistributer(CmdLineOptions):
     class Category: pass
-    class BailoutCategory(Category): pass
+    class BuildLocalCategory(Category): pass
+    class PCHCategory(Category): pass
     class PreprocessingCategory(Category): pass
     class CompilationCategory(Category): pass
     class LinkingCategory(Category): pass
@@ -117,17 +118,17 @@ class CompilationDistributer(CmdLineOptions):
         call.extend(option.make_str() for option in ctx.options())
         return subprocess.call(call)
 
-    def bailout(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.BailoutCategory))
+    def build_local(self, ctx):
+        tokens = list(ctx.filter_options(CompilationDistributer.BuildLocalCategory))
         if not tokens:
             return False
 
-        print("Command does not require distributed compilation, running locally.")
+        print("Command requires local compilation.")
         return True
 
     def execute(self, command, force_local=False):
         ctx = self.create_context(command)
-        if self.bailout(ctx) or force_local:
+        if self.build_local(ctx) or force_local:
             return self.__run_locally(ctx)
         self.create_tasks(ctx)
         retcode = self.execute_remotely(ctx)
@@ -145,6 +146,8 @@ class CompilationDistributer(CmdLineOptions):
     def preprocess_option(self): raise NotImplementedError()
     def object_name_option(self): raise NotImplementedError()
     def compile_no_link_option(self): raise NotImplementedError()
+    def use_pch_option(self): raise NotImplementedError()
+    def pch_file_option(self): raise NotImplementedError()
 
     def compiler_option_macros(self, tokens):
         result = []
@@ -158,11 +161,15 @@ class CompilationDistributer(CmdLineOptions):
         return result
 
     def __init__(self):
+        self.use_pch_option().add_category(CompilationDistributer.CompilationCategory)
+        self.pch_file_option().add_category(CompilationDistributer.PCHCategory)
         self.compile_no_link_option().add_category(CompilationDistributer.CompilationCategory)
         self.include_file_option().add_category(CompilationDistributer.PreprocessingCategory)
         self.define_option().add_category(CompilationDistributer.PreprocessingCategory)
         self.add_option(self.compile_no_link_option())
         self.add_option(self.object_name_option())
+        self.add_option(self.use_pch_option())
+        self.add_option(self.pch_file_option())
 
     def should_invoke_linker(self, ctx):
         return self.compile_no_link_option() not in [token.option for token in ctx.options()]
@@ -200,6 +207,25 @@ class CompilationDistributer(CmdLineOptions):
         compiler_info = self.compiler_info(ctx.executable())
         builtin_macros = compiler_info.macros() + self.compiler_option_macros(ctx.options())
 
+        pch_header = list(ctx.filter_options(self.use_pch_option()))
+        if pch_header:
+            assert len(pch_header) == 1
+            pch_header = pch_header[0]
+            pch_file = list(ctx.filter_options(self.pch_file_option()))
+            assert len(pch_file) <= 1
+            if pch_file:
+                pch_file = pch_file[0].val
+                print(pch_file)
+            else:
+                pch_file = os.path.splitext(pch_header)[0] + '.pch'
+            if not os.path.exists(pch_file):
+                raise Exception("PCH file '{}' does not exist.".format(pch_file))
+            pch_file = os.path.join(os.getcwd(), pch_file)
+            pch_file_stat = os.stat(pch_file)
+            pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
+        else:
+            pch_file = None
+
         def create_task(source):
             return CompileTask(
                 call = compile_call,
@@ -209,6 +235,7 @@ class CompilationDistributer(CmdLineOptions):
                 preprocessor_info = PreprocessorInfo(macros, builtin_macros, includes, sysincludes),
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = compiler_info,
+                pch_file = pch_file,
                 distributer = self)
 
         ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]

@@ -215,7 +215,6 @@ class CompilationDistributer(CmdLineOptions):
             assert len(pch_file) <= 1
             if pch_file:
                 pch_file = pch_file[0].val
-                print(pch_file)
             else:
                 pch_file = os.path.splitext(pch_header)[0] + '.pch'
             if not os.path.exists(pch_file):

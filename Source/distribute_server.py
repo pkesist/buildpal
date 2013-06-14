@@ -3,6 +3,7 @@ from multiprocessing.connection import Listener, Client
 from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
 from time import sleep
+from threading import Lock as ThreadLock
 
 import configparser
 import psutil
@@ -29,7 +30,14 @@ class ServerManager(SyncManager):
 class FileRepository:
     def __init__(self):
         self.__dir = tempfile.mkdtemp()
+        self.__lock = ThreadLock()
         self.__files = {}
+
+    def acquire(self):
+        self.__lock.acquire()
+
+    def release(self):
+        self.__lock.release()
 
     def register_file(self, filename, size, last_modified):
         if filename in self.__files:

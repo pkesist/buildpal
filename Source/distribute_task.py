@@ -119,14 +119,19 @@ class CompileTask:
                         if self.__pch_file:
                             task = conn.recv()
                             assert task == 'NEED_PCH_FILE'
-                            local_file = server.file_repository().check_file(*self.__pch_file)
-                            if local_file is None:
-                                conn.send(True)
-                                local_file = server.file_repository().register_file(*self.__pch_file)
-                                with open(local_file, 'wb') as pch_file:
-                                    receive_compressed_file(conn, pch_file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
-                            else:
-                                conn.send(False)
+                            
+                            try:
+                                server.file_repository().acquire()
+                                local_file = server.file_repository().check_file(*self.__pch_file)
+                                if local_file is None:
+                                    conn.send(True)
+                                    local_file = server.file_repository().register_file(*self.__pch_file)
+                                    with open(local_file, 'wb') as pch_file:
+                                        receive_compressed_file(conn, pch_file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+                                else:
+                                    conn.send(False)
+                            finally:
+                                server.file_repository().release()
                         noLink = self.__compile_switch
                         output = self.__output_switch.format(object_file.filename())
 

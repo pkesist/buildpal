@@ -11,7 +11,7 @@ from utils import TempFile, send_file, receive_file, receive_compressed_file, se
 from multiprocessing.connection import Client
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, distributer):
+    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, pch_header, distributer):
         self.__cwd = cwd
         self.__call = call
         self.__source_type = source_type
@@ -20,6 +20,7 @@ class CompileTask:
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
         self.__pch_file = pch_file
+        self.__pch_header = pch_header
         self.output = output
         self.source = source
         self.tempfile = None
@@ -43,6 +44,7 @@ class CompileTask:
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
         return collect_headers(os.path.join(self.__cwd, self.source),
             self.__preprocessor_info.includes, [], macros,
+            [self.__pch_header] if self.__pch_header else [],
             self.__compiler_info)
 
     def manager_send(self, client_conn, server_conn):

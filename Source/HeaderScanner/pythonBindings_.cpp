@@ -154,22 +154,46 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", NULL };
 
     PyObject * pObject = 0;
     char const * filename = 0;
+    PyObject * headersToSkipList = 0;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
+    assert( self->pp );
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|O", kwlist, &pObject, &filename, &headersToSkipList ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid preprocessing context parameter." );
         return NULL;
+    }
 
-    if ( !self->pp )
-        return NULL;
+    Preprocessor::HeaderList headersToSkip;
+    if ( headersToSkipList )
+    {
+        if ( !PyList_Check( headersToSkipList ) )
+        {
+            PyErr_SetString( PyExc_Exception, "headers_to_skip parameter must be a list of strings." );
+            return NULL;
+        }
+        Py_ssize_t const size( PyList_Size( headersToSkipList ) );
+        for ( Py_ssize_t iter( 0 ); iter < size; ++iter )
+        {
+            PyObject * entry( PyList_GET_ITEM( headersToSkipList, iter ) );
+            if ( !PyUnicode_Check( entry ) )
+            {
+                PyErr_SetString( PyExc_Exception, "headers_to_skip parameter must be a list of strings." );
+                return NULL;
+            }
+            headersToSkip.insert( PyUnicode_AsUTF8( entry ) );
+        }
+    }
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip );
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
@@ -193,14 +217,19 @@ PyObject * PyPreprocessor_preprocess( PyPreprocessor * self, PyObject * args, Py
     PyObject * pObject = 0;
     char const * filename = 0;
 
+
+    assert( self->pp );
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid preprocessor object." );
         return NULL;
-
-    if ( !self->pp )
-        return NULL;
+    }
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
     std::string output;
@@ -217,7 +246,10 @@ PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * arg
     PyObject * pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setMicrosoftExt( PyObject_IsTrue( pVal ) );
 
@@ -231,7 +263,10 @@ PyObject * PyPreprocessor_setExceptions( PyPreprocessor * self, PyObject * args,
     PyObject * pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setExceptions( PyObject_IsTrue( pVal ) );
 
@@ -245,7 +280,10 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
     PyObject * pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setMicrosoftMode( PyObject_IsTrue( pVal ) );
 
@@ -259,7 +297,10 @@ PyObject * PyPreprocessor_setCPlusPlus( PyPreprocessor * self, PyObject * args, 
     PyObject * pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setCPlusPlus( PyObject_IsTrue( pVal ) );
 
@@ -273,7 +314,10 @@ PyObject * PyPreprocessor_setMSCVersion( PyPreprocessor * self, PyObject * args,
     int pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "i", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setMSCVersion( pVal );
 
@@ -287,7 +331,10 @@ PyObject * PyPreprocessor_setThreads( PyPreprocessor * self, PyObject * args, Py
     PyObject * pVal = 0;
 
     if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
+    }
 
     self->pp->setThreads( PyObject_IsTrue( pVal ) );
 

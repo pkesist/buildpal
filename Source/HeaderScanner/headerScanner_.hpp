@@ -40,9 +40,10 @@ class Preprocessor
 public:
     Preprocessor();
 
+    typedef std::set<std::string> HeaderList;
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, HeaderList const & headersToSkip );
     std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }

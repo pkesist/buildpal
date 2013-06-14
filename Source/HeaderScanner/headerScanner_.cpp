@@ -31,12 +31,14 @@ namespace
         (
             clang::SourceManager const & sourceManager,
             clang::Preprocessor & preprocessor,
-            Preprocessor::HeaderRefs & headers
+            Preprocessor::HeaderRefs & includedHeaders,
+            Preprocessor::HeaderList const & headersToIgnore
         )
             :
-            sourceManager_( sourceManager ),
-            preprocessor_ ( preprocessor  ),
-            headers_      ( headers       )
+            sourceManager_  ( sourceManager   ),
+            preprocessor_   ( preprocessor    ),
+            headers_        ( includedHeaders ),
+            headersToIgnore_( headersToIgnore )
         {
         }
 
@@ -45,17 +47,55 @@ namespace
         virtual void FileChanged(clang::SourceLocation Loc, FileChangeReason Reason,
             clang::SrcMgr::CharacteristicKind FileType, clang::FileID PrevFID = clang::FileID())
         {
-            if ( Reason != EnterFile )
-                return;
-            if ( sourceManager_.getFileCharacteristic( Loc ) == clang::SrcMgr::C_System )
-                return;
-            clang::FileID const fileId( sourceManager_.getFileID( Loc ) );
-            if ( fileId == sourceManager_.getMainFileID() )
-                return;
-            clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
-            if ( fileEntry )
+            if ( Reason == EnterFile )
             {
-                headers_.insert( std::make_pair( lastRelativePath_, fileEntry->getName() ) );
+                if ( sourceManager_.getFileCharacteristic( Loc ) == clang::SrcMgr::C_System )
+                    return;
+                clang::FileID const fileId( sourceManager_.getFileID( Loc ) );
+                if ( headersToIgnore_.find( includeFilename_ ) != headersToIgnore_.end() )
+                {
+                    ignoringFID_ = fileId;
+                    return;
+                }
+                if ( fileId == sourceManager_.getMainFileID() )
+                    return;
+                clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
+                if ( fileEntry )
+                {
+                    if ( ignoring() )
+                    {
+                        ignoredHeaders_.insert( std::make_pair( includeFilename_, fileEntry->getName() ) );
+                    }
+                    else
+                    {
+                        headers_.insert( std::make_pair( includeFilename_, fileEntry->getName() ) );
+                    }
+                }
+            }
+            else if ( Reason == ExitFile )
+            {
+                if ( !ignoring() )
+                    return;
+                clang::FileID const fileId( sourceManager_.getFileID( Loc ) );
+                if ( ignoringFID_ == fileId )
+                    ignoringFID_ = clang::FileID();
+            }
+        }
+
+        virtual void FileSkipped
+        (
+            clang::FileEntry const & parentFile,
+		    clang::Token const & filenameTok,
+		    clang::SrcMgr::CharacteristicKind fileType
+        )
+        {
+            if ( ignoring() )
+                return;
+            IgnoredHeaders::iterator const iter( ignoredHeaders_.find( includeFilename_ ) );
+            if ( iter != ignoredHeaders_.end() )
+            {
+                headers_.insert( *iter );
+                ignoredHeaders_.erase( iter );
             }
         }
 
@@ -68,14 +108,23 @@ namespace
             clang::Module const * imported
         )
         {
-            lastRelativePath_ = relativePath;
+            includeFilename_ = relativePath;
         }
+
+    private:
+        bool ignoring() const { return !ignoringFID_.isInvalid(); }
+
+    private:
+        typedef std::map<std::string, std::string> IgnoredHeaders;
 
     private:
         clang::SourceManager const & sourceManager_;
         clang::Preprocessor & preprocessor_;
         Preprocessor::HeaderRefs & headers_;
-        clang::StringRef lastRelativePath_;
+        Preprocessor::HeaderList const & headersToIgnore_;
+        IgnoredHeaders ignoredHeaders_;
+        clang::FileID ignoringFID_;
+        clang::StringRef includeFilename_;
     };
 }  // anonymous namespace
 
@@ -147,7 +196,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().setPredefines( predefinesStream.str() );
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, HeaderList const & headersToSkip )
 {
     setupPreprocessor( ppc, filename );
     struct DiagnosticsGuard
@@ -168,7 +217,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     } const diagnosticsGuard( *compiler().getDiagnostics().getClient(), compiler().getLangOpts(), preprocessor() );
 
     HeaderRefs result;
-    preprocessor().addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), preprocessor(), result ) );
+    preprocessor().addPPCallbacks( new FileChangeCallback( compiler().getSourceManager(), preprocessor(), result, headersToSkip ) );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     preprocessor().EnterMainSourceFile();

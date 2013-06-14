@@ -50,7 +50,7 @@ def preprocess_file(cpp_file, includes, sysincludes, defines, compiler_info):
     return None
 
 
-def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info=None):
+def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip=[], compiler_info=None):
     try:
         setup_preprocessor()
         ppc = preprocessing.PreprocessingContext()
@@ -68,7 +68,7 @@ def collect_headers(cpp_file, includes, sysincludes, defines, compiler_info=None
         paths_to_include = []
         relative_paths = {}
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in preprocessor.scanHeaders(ppc, cpp_file):
+            for file, full in preprocessor.scanHeaders(ppc, cpp_file, headers_to_skip):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.

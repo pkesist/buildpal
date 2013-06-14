@@ -210,7 +210,7 @@ class CompilationDistributer(CmdLineOptions):
         pch_header = list(ctx.filter_options(self.use_pch_option()))
         if pch_header:
             assert len(pch_header) == 1
-            pch_header = pch_header[0]
+            pch_header = pch_header[0].val
             pch_file = list(ctx.filter_options(self.pch_file_option()))
             assert len(pch_file) <= 1
             if pch_file:
@@ -223,6 +223,7 @@ class CompilationDistributer(CmdLineOptions):
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
         else:
+            pch_header = None
             pch_file = None
 
         def create_task(source):
@@ -235,6 +236,7 @@ class CompilationDistributer(CmdLineOptions):
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 compiler_info = compiler_info,
                 pch_file = pch_file,
+                pch_header = pch_header,
                 distributer = self)
 
         ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]

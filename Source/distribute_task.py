@@ -47,22 +47,23 @@ class CompileTask:
             [self.__pch_header] if self.__pch_header else [],
             self.__compiler_info)
 
-    def manager_send(self, client_conn, server_conn, prepare_pool):
+    def manager_send(self, client_conn, server_conn, prepare_pool, timer):
         if self.algorithm == 'SCAN_HEADERS':
             server_conn.send('SCAN_HEADERS')
             server_conn.send('ZIP_FILE')
-            tempfile = prepare_pool.get_result(self.tempfile)
+            with timer.timeit('prepare_result'):
+                tempfile = prepare_pool.get_result(self.tempfile)
             assert tempfile
-            with open(tempfile, 'rb') as file:
+            with timer.timeit('send.zip'), open(tempfile, 'rb') as file:
                 send_file(server_conn, file)
             server_conn.send('SOURCE_FILE')
-            with open(os.path.join(self.__cwd, self.source), 'rb') as cpp:
+            with timer.timeit('send.source'), open(os.path.join(self.__cwd, self.source), 'rb') as cpp:
                 send_file(server_conn, cpp)
             if self.__pch_file:
                 server_conn.send('NEED_PCH_FILE')
                 response = server_conn.recv()
                 if response:
-                    with open(os.path.join(os.getcwd(), self.__pch_file[0]), 'rb') as pch_file:
+                    with timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.__pch_file[0]), 'rb') as pch_file:
                         send_compressed_file(server_conn, pch_file)
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
@@ -95,11 +96,9 @@ class CompileTask:
         return True
 
     def server_process(self, server, conn, remote_endpoint):
-        accept = server.accept()
         compiler = server.setup_compiler(self.__compiler_info)
-        conn.send((accept, compiler is not None))
-        if not accept or compiler is None:
-            return
+        if compiler is None:
+            raise Exception("Failed to setup compiler.")
 
         algorithm = conn.recv()
         if algorithm == 'SCAN_HEADERS':

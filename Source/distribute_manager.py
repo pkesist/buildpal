@@ -64,7 +64,7 @@ class Worker:
 
     def process_task(self, node_index):
         with self.__timer.timeit('send'):
-            self.wrapped_task().task().manager_send(self.__client_conn, self.__server_conn)
+            self.wrapped_task().task().manager_send(self.__client_conn, self.__server_conn, self.__prepare_pool)
 
         # Just block
         with self.__timer.timeit('server_time'), ScopedTimer(lambda value : self.__node_info.add_total_time(node_index, value)):
@@ -90,10 +90,7 @@ class Worker:
                 with self.__timer.timeit('prepare'):
                     start = time()
                     if task.algorithm == 'SCAN_HEADERS':
-                        task.tempfile = prepare_task(task)
-                        if not task.tempfile:
-                            raise RuntimeError("Failed to preprocess.")
-                            #task.algorithm = 'PREPROCESS_LOCALLY'
+                        task.tempfile = self.__prepare_pool.async_run(prepare_task, task)
 
                     if task.algorithm == 'PREPROCESS_LOCALLY':
                         # Signal the client to do preprocessing.
@@ -216,7 +213,7 @@ class TaskProcessor(Process):
         self.__node_info = self.__manager.NodeInfoHolder(len(self.__nodes))
         self.__task_map = self.__manager.dict()
         self.__timer = self.__manager.Timer()
-        self.__prepare_pool = self.__manager.ProcessPool(1)
+        self.__prepare_pool = self.__manager.ProcessPool(4)
 
         self.print_stats()
         count = 0
@@ -306,9 +303,19 @@ class NodeInfoHolder:
 class ProcessPool:
     def __init__(self, processes):
         self.__prepare_pool = Pool(processes=processes)
+        self.__async_tasks = {}
+        self.__counter = 0
 
-    def run(self, callable, args=(), kwds={}):
-        return self.__prepare_pool.apply(callable, args=args, kwds=kwds)
+    def async_run(self, callable, *args, **kwds):
+        id = self.__counter
+        self.__counter += 1
+        self.__async_tasks[id] = self.__prepare_pool.apply_async(callable, args=args, kwds=kwds)
+        return id
+
+    def get_result(self, id):
+        result = self.__async_tasks[id].get()
+        del self.__async_tasks[id]
+        return result
 
 class BookKeepingManager(SyncManager):
     pass

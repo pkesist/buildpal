@@ -47,11 +47,13 @@ class CompileTask:
             [self.__pch_header] if self.__pch_header else [],
             self.__compiler_info)
 
-    def manager_send(self, client_conn, server_conn):
+    def manager_send(self, client_conn, server_conn, prepare_pool):
         if self.algorithm == 'SCAN_HEADERS':
             server_conn.send('SCAN_HEADERS')
             server_conn.send('ZIP_FILE')
-            with open(self.tempfile, 'rb') as file:
+            tempfile = prepare_pool.get_result(self.tempfile)
+            assert tempfile
+            with open(tempfile, 'rb') as file:
                 send_file(server_conn, file)
             server_conn.send('SOURCE_FILE')
             with open(os.path.join(self.__cwd, self.source), 'rb') as cpp:

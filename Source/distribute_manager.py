@@ -65,15 +65,8 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool):
                     assert done == 'DONE'
 
         with timer.timeit('find_available_node'):
-            node_queue, recycle_queue = get_node_queues()
-            try:
-                while True:
-                    node_index, server_conn = recycle_queue.get_nowait()
-                    accept = server_conn.recv()
-                    if accept == "ACCEPT":
-                        break
-            except Empty:
-                node_index, server_conn = node_queue.get()
+            get_node_queue, return_node_queue = get_node_queues()
+            node_index, server_conn = get_node_queue.get()
 
         node_info.add_tasks_sent(node_index)
         with timer.timeit('send'):
@@ -91,7 +84,7 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool):
             task.manager_receive(client_conn, server_conn, timer)
             node_info.add_tasks_completed(node_index)
         with timer.timeit('recycle'):
-            recycle_queue.put((node_index, server_conn))
+            return_node_queue.put((node_index, server_conn))
     except Exception:
         import traceback
         traceback.print_exc()
@@ -106,14 +99,14 @@ class TaskProcessor(Process):
 
     def run(self):
         try:
-            recycle_queue = MultiprocessQueue()
-            node_queue = MultiprocessQueue(2)
+            return_node_queue = MultiprocessQueue()
+            get_node_queue = MultiprocessQueue(2)
             with BookKeepingManager() as book_keeper, \
-                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(node_queue, recycle_queue)) as compile_pool:
+                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue, return_node_queue)) as compile_pool:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
-                node_finders = [NodeFinder(self.__nodes, node_info, node_queue, timer) for node in range(1)]
+                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, return_node_queue, timer) for node in range(1)]
                 for node_finder in node_finders:
                     node_finder.start()
                 while True:
@@ -152,17 +145,17 @@ class TaskProcessor(Process):
 
 task_queue = MultiprocessQueue()
 
-new_queue = None
-recycle_queue = None
+get_node_queue = None
+return_node_queue = None
 
-def set_node_queues(new_queue_p, recycle_queue_p):
-    global new_queue, recycle_queue
-    recycle_queue = recycle_queue_p
-    new_queue = new_queue_p
+def set_node_queues(get, ret):
+    global get_node_queue, return_node_queue
+    get_node_queue = get
+    return_node_queue = ret
 
 def get_node_queues():
-    global new_queue, recycle_queue
-    return new_queue, recycle_queue
+    global get_node_queue, return_node_queue
+    return get_node_queue, return_node_queue
 
 class NodeInfoHolder:
     class NodeInfo:
@@ -205,18 +198,28 @@ class NodeInfoHolder:
         return self.tasks_completed(index) / self.tasks_sent(index)
 
 class NodeFinder(Process):
-    def __init__(self, nodes, node_info, queue, timer):
+    def __init__(self, nodes, node_info, outgoing_queue, incoming_queue, timer):
         super(NodeFinder, self).__init__()
         self.__nodes = nodes
         self.__node_info = node_info
-        self.__queue = queue
+        self.__recycled_nodes = {}
+        self.__incoming_queue = incoming_queue
+        self.__outgoing_queue = outgoing_queue
         self.__timer = timer
+
+    def process_incoming(self):
+        try:
+            node_index, conn = self.__incoming_queue.get_nowait()
+            self.__recycled_nodes.setdefault(node_index, []).append(conn)
+        except Empty:
+            pass
 
     def run(self):
         while True:
+            self.process_incoming()
             node = self.get_node()
             if node:
-                self.__queue.put(node)
+                self.__outgoing_queue.put(node)
             else:
                 sleep(1)
 
@@ -233,17 +236,21 @@ class NodeFinder(Process):
             return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
         
         node_index = min(range(len(self.__nodes)), key=cmp_to_key(cmp))
-        node = self.__nodes[node_index]
-
-        try:
-            with socket.socket(getattr(socket, 'AF_INET')) as s:
-                s.settimeout(1)
-                s.connect(node)
-                s.settimeout(None)
-                server_conn = Connection(s.detach())
-        except Exception:
-            print("Failed to connect to '{}'".format(node))
-            return None
+        recycled = self.__recycled_nodes.setdefault(node_index, [])
+        if recycled:
+            server_conn = recycled[0]
+            del recycled[0]
+        else:
+            node = self.__nodes[node_index]
+            try:
+                with socket.socket(getattr(socket, 'AF_INET')) as s:
+                    s.settimeout(1)
+                    s.connect(node)
+                    s.settimeout(None)
+                    server_conn = Connection(s.detach())
+            except Exception:
+                print("Failed to connect to '{}'".format(node))
+                return None
         accept = server_conn.recv()
         if accept == "ACCEPT":
             return node_index, server_conn

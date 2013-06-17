@@ -64,32 +64,34 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool):
                     done = client_conn.recv()
                     assert done == 'DONE'
 
-        while True:
-            with timer.timeit('find_available_node'):
-                node_queue = get_node_queue()
+        with timer.timeit('find_available_node'):
+            node_queue, recycle_queue = get_node_queues()
+            try:
+                while True:
+                    node_index, server_conn = recycle_queue.get_nowait()
+                    accept = server_conn.recv()
+                    if accept == "ACCEPT":
+                        break
+            except Empty:
                 node_index, server_conn = node_queue.get()
 
-            with server_conn:
-                with timer.timeit('send'):
-                    server_conn.send(task)
-                task.manager_send(client_conn, server_conn, prepare_pool, timer)
+        node_info.add_tasks_sent(node_index)
+        with timer.timeit('send'):
+            server_conn.send(task)
+        task.manager_send(client_conn, server_conn, prepare_pool, timer)
 
-                # Just block
-                with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
-                    server_status = server_conn.recv()
-                    if server_status == "SERVER_FAILED":
-                        return None
+        # Just block
+        with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
+            server_status = server_conn.recv()
+            if server_status == "SERVER_FAILED":
+                return None
 
-                assert server_status == "SERVER_DONE"
-                server_conn.send(True)
-                with timer.timeit('receive'):
-                    result = task.manager_receive(client_conn, server_conn)
-                # Did not process it after all.
-                if result is None:
-                    node_info.add_tasks_failed(node_index)
-                else:
-                    node_info.add_tasks_completed(node_index)
-                    break
+        assert server_status == "SERVER_DONE"
+        with timer.timeit('receive'):
+            task.manager_receive(client_conn, server_conn, timer)
+            node_info.add_tasks_completed(node_index)
+        with timer.timeit('recycle'):
+            recycle_queue.put((node_index, server_conn))
     except Exception:
         import traceback
         traceback.print_exc()
@@ -104,14 +106,16 @@ class TaskProcessor(Process):
 
     def run(self):
         try:
-            node_queue = MultiprocessQueue(4)
+            recycle_queue = MultiprocessQueue()
+            node_queue = MultiprocessQueue(2)
             with BookKeepingManager() as book_keeper, \
-                Pool(processes=self.__max_processes, initializer=set_node_queue, initargs=(node_queue,)) as compile_pool:
+                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(node_queue, recycle_queue)) as compile_pool:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
-                node_finder = NodeFinder(self.__nodes, node_info, node_queue, timer)
-                node_finder.start()
+                node_finders = [NodeFinder(self.__nodes, node_info, node_queue, timer) for node in range(1)]
+                for node_finder in node_finders:
+                    node_finder.start()
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     try:
@@ -120,7 +124,8 @@ class TaskProcessor(Process):
                     except Empty:
                         pass
         finally:
-            node_finder.terminate()
+            for node_finders in node_finders:
+                node_finders.terminate()
 
     def print_stats(self, node_info, times):
         sys.stdout.write("================\n")
@@ -147,17 +152,17 @@ class TaskProcessor(Process):
 
 task_queue = MultiprocessQueue()
 
-node_queue = None
+new_queue = None
+recycle_queue = None
 
-def set_node_queue(queue):
-    global node_queue
-    assert queue is not None
-    node_queue = queue
+def set_node_queues(new_queue_p, recycle_queue_p):
+    global new_queue, recycle_queue
+    recycle_queue = recycle_queue_p
+    new_queue = new_queue_p
 
-def get_node_queue():
-    global node_queue
-    assert node_queue is not None
-    return node_queue
+def get_node_queues():
+    global new_queue, recycle_queue
+    return new_queue, recycle_queue
 
 class NodeInfoHolder:
     class NodeInfo:
@@ -209,8 +214,7 @@ class NodeFinder(Process):
 
     def run(self):
         while True:
-            with self.__timer.timeit('get_node'):
-                node = self.get_node()
+            node = self.get_node()
             if node:
                 self.__queue.put(node)
             else:
@@ -241,10 +245,10 @@ class NodeFinder(Process):
             print("Failed to connect to '{}'".format(node))
             return None
         accept = server_conn.recv()
-        if accept:
-            self.__node_info.add_tasks_sent(node_index)
+        if accept == "ACCEPT":
             return node_index, server_conn
         else:
+            assert accept == "REJECT"
             return None
 
 class ProcessPool:

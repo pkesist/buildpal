@@ -62,9 +62,11 @@ class CompileTask:
             if self.__pch_file:
                 server_conn.send('NEED_PCH_FILE')
                 response = server_conn.recv()
-                if response:
+                if response == "YES":
                     with timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.__pch_file[0]), 'rb') as pch_file:
                         send_compressed_file(server_conn, pch_file)
+                else:
+                    assert response == "NO"
 
         if self.algorithm == 'PREPROCESS_LOCALLY':
             server_conn.send('PREPROCESS_LOCALLY')
@@ -84,16 +86,17 @@ class CompileTask:
                 macros, self.__compiler_info)
             send_compressed_file(server_conn, io.BytesIO(preprocessed_data))
 
-    def manager_receive(self, client_conn, server_conn):
-        retcode, stdout, stderr = server_conn.recv()
+    def manager_receive(self, client_conn, server_conn, timer):
+        with timer.timeit("receive.server"):
+            retcode, stdout, stderr = server_conn.recv()
         if retcode == 0:
             length = 0
             more = True
-            with open(self.output, "wb") as file:
+            with timer.timeit("receive.object"), open(self.output, "wb") as file:
                 receive_compressed_file(server_conn, file)
-        client_conn.send('COMPLETED')
-        client_conn.send((retcode, stdout, stderr))
-        return True
+        with timer.timeit("receive.client"):
+            client_conn.send('COMPLETED')
+            client_conn.send((retcode, stdout, stderr))
 
     def server_process(self, server, conn, remote_endpoint):
         compiler = server.setup_compiler(self.__compiler_info)
@@ -127,12 +130,12 @@ class CompileTask:
                                 server.file_repository().acquire()
                                 local_file = server.file_repository().check_file(*self.__pch_file)
                                 if local_file is None:
-                                    conn.send(True)
+                                    conn.send("YES")
                                     local_file = server.file_repository().register_file(*self.__pch_file)
                                     with open(local_file, 'wb') as pch_file:
                                         receive_compressed_file(conn, pch_file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
                                 else:
-                                    conn.send(False)
+                                    conn.send("NO")
                             finally:
                                 server.file_repository().release()
                         noLink = self.__compile_switch
@@ -156,9 +159,6 @@ class CompileTask:
                             conn.send('SERVER_FAILED')
                             return
                         conn.send('SERVER_DONE')
-                        needsResult = conn.recv()
-                        if not needsResult:
-                            return
                         conn.send((retcode, stdout, stderr))
                         if retcode == 0:
                             with object_file.open('rb') as obj:
@@ -182,9 +182,6 @@ class CompileTask:
                     conn.send('SERVER_FAILED')
                     return
                 conn.send('SERVER_DONE')
-                needsResult = conn.recv()
-                if not needsResult:
-                    return
                 conn.send((retcode, stdout, stderr))
                 if retcode == 0:
                     with object_file.open('rb') as obj:

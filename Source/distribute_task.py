@@ -12,15 +12,15 @@ from multiprocessing.connection import Client
 
 class CompileTask:
     def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, pch_header, distributer):
-        self.__cwd = cwd
         self.__call = call
         self.__source_type = source_type
-        self.__preprocessor_info = preprocessor_info
         self.__compiler_info = compiler_info
         self.__output_switch = distributer.object_name_option().make_value('{}').make_str()
         self.__compile_switch = distributer.compile_no_link_option().make_value().make_str()
-        self.__pch_file = pch_file
-        self.__pch_header = pch_header
+        self.cwd = cwd
+        self.preprocessor_info = preprocessor_info
+        self.pch_file = pch_file
+        self.pch_header = pch_header
         self.output = output
         self.source = source
         self.tempfile = None
@@ -29,23 +29,24 @@ class CompileTask:
         #self.algorithm = 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR'
         #self.algorithm = 'PREPROCESS_LOCALLY'
 
-    def manager_prepare(self):
-        macros = self.__preprocessor_info.macros + self.__preprocessor_info.builtin_macros
+    def manager_prepare(self, pth_file):
         from scan_headers import collect_headers
 
         # TODO: This does not belong here. Move this to msvc.py.
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
         # hardcode this knowledge here.
+        macros = self.preprocessor_info.all_macros
         if '_DEBUG' in macros:
             if not any(('_SECURE_SCL' in x for x in macros)):
                 macros.append('_SECURE_SCL=1')
             if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
-        return collect_headers(os.path.join(self.__cwd, self.source),
-            self.__preprocessor_info.includes, [], macros,
-            [self.__pch_header] if self.__pch_header else [],
-            self.__compiler_info)
+        # Create/Use PTH if we have precompiled header.
+        return collect_headers(os.path.join(self.cwd, self.source),
+            self.preprocessor_info.includes, [], macros,
+            [self.pch_header] if self.pch_header else [],
+            pth_file if pth_file else "")
 
     def manager_send(self, client_conn, server_conn, prepare_pool, timer):
         if self.algorithm == 'SCAN_HEADERS':
@@ -57,13 +58,13 @@ class CompileTask:
             with timer.timeit('send.zip'), open(tempfile, 'rb') as file:
                 send_file(server_conn, file)
             server_conn.send('SOURCE_FILE')
-            with timer.timeit('send.source'), open(os.path.join(self.__cwd, self.source), 'rb') as cpp:
+            with timer.timeit('send.source'), open(os.path.join(self.cwd, self.source), 'rb') as cpp:
                 send_file(server_conn, cpp)
-            if self.__pch_file:
+            if self.pch_file:
                 server_conn.send('NEED_PCH_FILE')
                 response = server_conn.recv()
                 if response == "YES":
-                    with timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.__pch_file[0]), 'rb') as pch_file:
+                    with timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.pch_file[0]), 'rb') as pch_file:
                         send_compressed_file(server_conn, pch_file)
                 else:
                     assert response == "NO"
@@ -78,11 +79,11 @@ class CompileTask:
         if self.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
             server_conn.send('PREPROCESS_LOCALLY')
             from scan_headers import preprocess_file
-            macros = self.__preprocessor_info.macros + self.__preprocessor_info.builtin_macros
+            macros = self.preprocessor_info.macros + self.preprocessor_info.builtin_macros
             preprocessed_data = preprocess_file(
-                os.path.join(self.__cwd, self.source),
-                self.__preprocessor_info.includes,
-                self.__preprocessor_info.sysincludes,
+                os.path.join(self.cwd, self.source),
+                self.preprocessor_info.includes,
+                self.preprocessor_info.sysincludes,
                 macros, self.__compiler_info)
             send_compressed_file(server_conn, io.BytesIO(preprocessed_data))
 
@@ -122,16 +123,16 @@ class CompileTask:
                     task = conn.recv()
                     assert task == 'SOURCE_FILE'
                     with receive_file(conn, suffix=self.__source_type) as source_file, TempFile(suffix='.obj') as object_file:
-                        if self.__pch_file:
+                        if self.pch_file:
                             task = conn.recv()
                             assert task == 'NEED_PCH_FILE'
                             
                             try:
                                 server.file_repository().acquire()
-                                local_file = server.file_repository().check_file(*self.__pch_file)
+                                local_file = server.file_repository().check_file(*self.pch_file)
                                 if local_file is None:
                                     conn.send("YES")
-                                    local_file = server.file_repository().register_file(*self.__pch_file)
+                                    local_file = server.file_repository().register_file(*self.pch_file)
                                     with open(local_file, 'wb') as pch_file:
                                         receive_compressed_file(conn, pch_file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
                                 else:
@@ -142,9 +143,9 @@ class CompileTask:
                         output = self.__output_switch.format(object_file.filename())
 
                         # FIXME - remove hardcoded switches, use compiler_info
-                        defines = ['-D{}'.format(define) for define in self.__preprocessor_info.macros]
+                        defines = ['-D{}'.format(define) for define in self.preprocessor_info.macros]
                         pch_switch = []
-                        if self.__pch_file:
+                        if self.pch_file:
                             assert local_file is not None
                             assert os.path.exists(local_file)
                             pch_switch.append('-Fp{}'.format(local_file))

@@ -35,6 +35,10 @@ class PreprocessorInfo:
         self.sysincludes = sysincludes
         self.builtin_macros = builtin_macros
 
+    @property
+    def all_macros(self):
+        return self.macros + self.builtin_macros
+
 class CompilationDistributer(CmdLineOptions):
     class Category: pass
     class BuildLocalCategory(Category): pass
@@ -199,7 +203,6 @@ class CompilationDistributer(CmdLineOptions):
         compile_call.extend(option.make_str() for option in
             ctx.filter_options(CompilationDistributer.CompilationCategory))
 
-        sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
         macros = [token.val for token in ctx.filter_options(self.define_option())]
         sysincludes = os.getenv('INCLUDE', '').split(';')

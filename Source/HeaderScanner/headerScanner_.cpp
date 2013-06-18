@@ -168,6 +168,8 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     else
         compiler().createSourceManager( compiler().getFileManager() );
     clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
+    if ( !mainFileEntry )
+        throw std::runtime_error( "Could not find source file." );
     compiler().getSourceManager().createMainFileID( mainFileEntry );
 
     // Setup new preprocessor instance.
@@ -196,8 +198,10 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().setPredefines( predefinesStream.str() );
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, HeaderList const & headersToSkip )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, HeaderList const & headersToSkip, std::string const & tokenCache )
 {
+    clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
+    ppOpts.TokenCache = tokenCache;
     setupPreprocessor( ppc, filename );
     struct DiagnosticsGuard
     {
@@ -247,5 +251,14 @@ std::string & Preprocessor::preprocess( PreprocessingContext const & ppc, std::s
     return os.str();
 }
 
+void Preprocessor::emitPTH( PreprocessingContext const & ppc, std::string const & filename, std::string const & outputFile )
+{
+    setupPreprocessor( ppc, filename );
+    std::string error;
+    llvm::raw_fd_ostream output( outputFile.c_str(), error, llvm::raw_fd_ostream::F_Binary );
+    if ( !error.empty() )
+        throw std::runtime_error( error );
+    clang::CacheTokens( preprocessor(), &output );
+}
 
 //------------------------------------------------------------------------------

@@ -14,24 +14,33 @@ import zipfile
 
 preprocessor = preprocessing.Preprocessor()
 
-def setup_preprocessor():
+def setup_preprocessor(includes, sysincludes, defines):
     preprocessor.setMicrosoftMode(True) # If MSVC.
     preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
+    ppc = preprocessing.PreprocessingContext()
+    for path in includes:
+        ppc.add_include_path(path)
+    for path in sysincludes:
+        ppc.add_include_path(path, True)
+    for define in defines:
+        define = define.split('=')
+        assert len(define) == 1 or len(define) == 2
+        macro = define[0]
+        value = define[1] if len(define) == 2 else ""
+        ppc.add_macro(macro, value)
+    return ppc
 
-def preprocess_file(cpp_file, includes, sysincludes, defines, compiler_info):
+def create_pth(hpp_file, pth_file, includes, sysincludes, defines):
+    ppc = setup_preprocessor(includes, sysincludes, defines)
+    with TempFile(suffix='.cpp') as cpp:
+        with cpp.open('wt') as cpp_file:
+            cpp_file.write('#include "{}"\n'.format(hpp_file))
+        preprocessor.emitPTH(ppc, cpp.filename(), pth_file)
+    return pth_file
+
+def preprocess_file(cpp_file, includes, sysincludes, defines):
     try:
-        setup_preprocessor()
-        ppc = preprocessing.PreprocessingContext()
-        for path in includes:
-            ppc.add_include_path(path)
-        for path in sysincludes:
-            ppc.add_include_path(path, True)
-        for define in defines:
-            define = define.split('=')
-            assert len(define) == 1 or len(define) == 2
-            macro = define[0]
-            value = define[1] if len(define) == 2 else ""
-            ppc.add_macro(macro, value)
+        ppc = setup_preprocessor(includes, sysincludes, defines)
         return preprocessor.preprocess(ppc, cpp_file)
     except Exception:
         import traceback
@@ -40,21 +49,9 @@ def preprocess_file(cpp_file, includes, sysincludes, defines, compiler_info):
     # We failed to collect headers.
     return None
 
-
-def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip=[], compiler_info=None):
+def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip, pth_file):
     try:
-        setup_preprocessor()
-        ppc = preprocessing.PreprocessingContext()
-        for path in includes:
-            ppc.add_include_path(path)
-        for path in sysincludes:
-            ppc.add_include_path(path, True)
-        for define in defines:
-            define = define.split('=')
-            assert len(define) == 1 or len(define) == 2
-            macro = define[0]
-            value = define[1] if len(define) == 2 else ""
-            ppc.add_macro(macro, value)
+        ppc = setup_preprocessor(includes, sysincludes, defines)
         zip_file = TempFile(suffix='.zip')
         paths_to_include = []
         relative_paths = {}

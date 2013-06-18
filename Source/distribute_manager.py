@@ -4,6 +4,7 @@ from queue import Queue as IntraprocessQueue, Empty
 from multiprocessing import Lock, Process, Pool, Queue as MultiprocessQueue
 from multiprocessing.connection import Connection, Client
 from multiprocessing.managers import BaseManager, SyncManager, BaseProxy
+from threading import Lock as ThreadLock
 from time import sleep, time
 
 import configparser
@@ -45,24 +46,58 @@ class TimerProxy(BaseProxy):
     def timeit(self, name):
         return ScopedTimer(lambda value : self.add_time(name, value))
 
-def prepare_task(task):
-    return task.manager_prepare()
+def prepare_task(task, pth_file):
+    return task.manager_prepare(pth_file)
 
-def compile_worker(task, client_id, timer, node_info, prepare_pool):
+class PTHFileRepository:
+    def __init__(self):
+        self.__lock = ThreadLock()
+        self.__files = set()
+
+    def acquire(self):
+        self.__lock.acquire()
+
+    def release(self):
+        self.__lock.release()
+
+    def registered(self, file):
+        return file in self.__files
+
+    def register(self, file):
+        self.__files.add(file)
+
+def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_repository):
     try:
         client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
-        if hasattr(task, 'manager_prepare'):
-            with timer.timeit('prepare'):
-                start = time()
-                if task.algorithm == 'SCAN_HEADERS':
-                    task.tempfile = prepare_pool.async_run(prepare_task, task)
+        if task.pch_header:
+            pth_file = os.path.splitext(task.pch_file[0])[0] + '.pth'
+            pth_file_repository.acquire()
+            try:
+                if not pth_file_repository.registered(pth_file):
+                    with timer.timeit('create_pth'):
+                        from scan_headers import create_pth
+                        create_pth(task.pch_header,
+                            pth_file,
+                            task.preprocessor_info.includes,
+                            task.preprocessor_info.sysincludes,
+                            task.preprocessor_info.all_macros)
+                        pth_file_repository.register(pth_file)
+            finally:
+                pth_file_repository.release()
+        else:
+            pth_file = None
 
-                if task.algorithm == 'PREPROCESS_LOCALLY':
-                    # Signal the client to do preprocessing.
-                    client_conn.send('PREPROCESS')
-                    # Wait for 'done'.
-                    done = client_conn.recv()
-                    assert done == 'DONE'
+        with timer.timeit('prepare'):
+            start = time()
+            if task.algorithm == 'SCAN_HEADERS':
+                task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
+
+            if task.algorithm == 'PREPROCESS_LOCALLY':
+                # Signal the client to do preprocessing.
+                client_conn.send('PREPROCESS')
+                # Wait for 'done'.
+                done = client_conn.recv()
+                assert done == 'DONE'
 
         with timer.timeit('find_available_node'):
             get_node_queue, return_node_queue = get_node_queues()
@@ -103,6 +138,7 @@ class TaskProcessor(Process):
             get_node_queue = MultiprocessQueue(2)
             with BookKeepingManager() as book_keeper, \
                 Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue, return_node_queue)) as compile_pool:
+                pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
@@ -113,7 +149,7 @@ class TaskProcessor(Process):
                     self.print_stats(node_info, timer.as_dict())
                     try:
                         task, client_id = self.__task_queue.get(timeout=2)
-                        compile_pool.apply_async(compile_worker, args=(task, client_id, timer, node_info, prepare_pool))
+                        compile_pool.apply_async(compile_worker, args=(task, client_id, timer, node_info, prepare_pool, pth_files))
                     except Empty:
                         pass
         finally:
@@ -281,6 +317,7 @@ class BookKeepingManager(SyncManager):
 BookKeepingManager.register('ProcessPool', ProcessPool)
 BookKeepingManager.register('Timer', Timer, TimerProxy)
 BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
+BookKeepingManager.register('PTHFileRepository', PTHFileRepository)
 
 def queue_task(task, client_id):
     task_queue.put((task, client_id))

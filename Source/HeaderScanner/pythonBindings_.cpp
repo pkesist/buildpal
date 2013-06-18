@@ -154,15 +154,16 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", "token_cache", NULL };
 
     PyObject * pObject = 0;
-    char const * filename = 0;
+    char const * filename = "";
     PyObject * headersToSkipList = 0;
+    char const * tokenCache = "";
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|O", kwlist, &pObject, &filename, &headersToSkipList ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|Os", kwlist, &pObject, &filename, &headersToSkipList, &tokenCache ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -191,9 +192,9 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
             headersToSkip.insert( PyUnicode_AsUTF8( entry ) );
         }
     }
-
+    
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip, tokenCache );
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
@@ -273,10 +274,36 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
     Py_RETURN_NONE;
 }
 
+PyObject * PyPreprocessor_emitPTH( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "pp_ctx", "pch_src", "output", NULL };
+
+    PyObject * pObject = 0;
+    char const * pch_src = 0;
+    char const * output = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Oss", kwlist, &pObject, &pch_src, &output ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
+        return NULL;
+    }
+
+    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid preprocessing context parameter." );
+        return NULL;
+    }
+
+    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
+    self->pp->emitPTH( *ppContext->ppContext, pch_src, output );
+    Py_RETURN_NONE;
+}
+
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
     {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
+    {"emitPTH"         , (PyCFunction)PyPreprocessor_emitPTH         , METH_VARARGS | METH_KEYWORDS, "Create a pre-tokenized header file."},
     {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}

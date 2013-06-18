@@ -27,13 +27,12 @@ public:
     typedef std::vector<std::pair<std::string, std::string> > Defines;
 
     SearchPath const & searchPath() const { return searchPath_; }
-    Defines const & defines() const { return defines_; }
+    Defines    const & defines   () const { return defines_; }
 
 private:
     SearchPath searchPath_;
     Defines defines_;
 };
-
 
 class Preprocessor
 {
@@ -43,11 +42,13 @@ public:
     typedef std::set<std::string> HeaderList;
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, HeaderList const & headersToSkip );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, HeaderList const & headersToSkip, std::string const & tokenCache );
     std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
+
+    void emitPTH( PreprocessingContext const & ppc, std::string const & src, std::string const & output );
 
 private:
     void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );

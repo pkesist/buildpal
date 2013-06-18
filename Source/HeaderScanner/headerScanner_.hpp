@@ -48,10 +48,6 @@ public:
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
-    void setMSCVersion   ( int  value ) { compiler().getLangOpts().MSCVersion = value; }
-    void setExceptions   ( bool value ) { compiler().getLangOpts().Exceptions = 1; }
-    void setCPlusPlus    ( bool value ) { compiler().getLangOpts().CPlusPlus = value ? 1 : 0; }
-    void setThreads      ( bool value ) { compiler().getLangOpts().POSIXThreads = value ? 1 : 0; }
 
 private:
     void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );

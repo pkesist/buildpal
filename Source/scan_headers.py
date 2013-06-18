@@ -15,17 +15,8 @@ import zipfile
 preprocessor = preprocessing.Preprocessor()
 
 def setup_preprocessor():
-    # TODO: If some of these compiler options merely affects preprocessor
-    # macros then we do not need it. The macro is alredy in 'defines'
-    # variable.
-    # setMSCVersion is a likely suspect.
     preprocessor.setMicrosoftMode(True) # If MSVC.
-    preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options. This is used quite a lot
-    preprocessor.setExceptions(True) # Should depend on /EH compiler option. Remove it entirely if its sole purpose is defining _CPPUNWIND.
-    preprocessor.setMSCVersion(1500) # Probably only to define _MSC_VER.
-    preprocessor.setCPlusPlus(True) # Probably only to define __cplusplus.
-    preprocessor.setThreads(True) # Probably only to define _MT
-
+    preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
 
 def preprocess_file(cpp_file, includes, sysincludes, defines, compiler_info):
     try:

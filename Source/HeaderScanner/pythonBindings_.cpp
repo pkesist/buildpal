@@ -256,23 +256,6 @@ PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * arg
     Py_RETURN_NONE;
 }
 
-PyObject * PyPreprocessor_setExceptions( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "value", NULL };
-
-    PyObject * pVal = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    self->pp->setExceptions( PyObject_IsTrue( pVal ) );
-
-    Py_RETURN_NONE;
-}
-
 PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "value", NULL };
@@ -290,68 +273,12 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
     Py_RETURN_NONE;
 }
 
-PyObject * PyPreprocessor_setCPlusPlus( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "value", NULL };
-
-    PyObject * pVal = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    self->pp->setCPlusPlus( PyObject_IsTrue( pVal ) );
-
-    Py_RETURN_NONE;
-}
-
-PyObject * PyPreprocessor_setMSCVersion( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "value", NULL };
-
-    int pVal = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "i", kwlist, &pVal ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    self->pp->setMSCVersion( pVal );
-
-    Py_RETURN_NONE;
-}
-
-PyObject * PyPreprocessor_setThreads( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "value", NULL };
-
-    PyObject * pVal = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    self->pp->setThreads( PyObject_IsTrue( pVal ) );
-
-    Py_RETURN_NONE;
-}
-
-
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
     {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
-    {"setCPlusPlus"    , (PyCFunction)PyPreprocessor_setCPlusPlus    , METH_VARARGS | METH_KEYWORDS, "Set C++ mode."},
-    {"setExceptions"   , (PyCFunction)PyPreprocessor_setExceptions   , METH_VARARGS | METH_KEYWORDS, "Enable exceptions."},
     {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
-    {"setMSCVersion"   , (PyCFunction)PyPreprocessor_setMSCVersion   , METH_VARARGS | METH_KEYWORDS, "Set MSC version."},
-    {"setThreads"      , (PyCFunction)PyPreprocessor_setThreads      , METH_VARARGS | METH_KEYWORDS, "Set threads mode."},
     {NULL}
 };
 

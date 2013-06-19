@@ -16,12 +16,13 @@ def work(server, conn, remote_endpoint, counter):
     while True:
         try:
             accept = server.accept()
-            conn.send("ACCEPT" if accept else "REJECT")
-            if not accept:
-                continue
-            counter.inc()
-            task = conn.recv()
-            task.server_process(server, conn, remote_endpoint)
+            with conn:
+                conn.send("ACCEPT" if accept else "REJECT")
+                if not accept:
+                    continue
+                counter.inc()
+                task = conn.recv()
+                task.server_process(server, conn, remote_endpoint)
         except:
             import traceback
             traceback.print_exc()

@@ -154,16 +154,16 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", "token_cache", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", "pth_file", NULL };
 
     PyObject * pObject = 0;
     char const * filename = "";
     PyObject * headersToSkipList = 0;
-    char const * tokenCache = "";
+    char const * pth = "";
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|Os", kwlist, &pObject, &filename, &headersToSkipList, &tokenCache ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|Os", kwlist, &pObject, &filename, &headersToSkipList, &pth ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -194,7 +194,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
     
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip, tokenCache );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip, pth );
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );

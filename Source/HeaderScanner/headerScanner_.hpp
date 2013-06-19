@@ -42,7 +42,7 @@ public:
     typedef std::set<std::string> HeaderList;
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, HeaderList const & headersToSkip, std::string const & tokenCache );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, HeaderList const & headersToSkip, std::string const & pth );
     std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }

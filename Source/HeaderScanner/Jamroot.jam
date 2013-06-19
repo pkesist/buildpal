@@ -5,6 +5,7 @@ path-constant CLANG_LIB : "D:\\Sandboxes\\External\\Clang\\build\\lib" ;
 rule clang-lib ( lib-name )
 {
     lib $(lib-name) : : <file>$(CLANG_LIB)/Debug/$(lib-name).lib <variant>debug <toolset>msvc ;
+    lib $(lib-name) : : <file>$(CLANG_LIB)/RelWithDebInfo/$(lib-name).lib <variant>profile <toolset>msvc ;
     lib $(lib-name) : : <file>$(CLANG_LIB)/Release/$(lib-name).lib <toolset>msvc ;
 }
 

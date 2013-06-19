@@ -56,7 +56,7 @@ def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip, p
         paths_to_include = []
         relative_paths = {}
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in preprocessor.scanHeaders(ppc, cpp_file, headers_to_skip):
+            for file, full in preprocessor.scanHeaders(ppc, cpp_file, headers_to_skip, pth_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.

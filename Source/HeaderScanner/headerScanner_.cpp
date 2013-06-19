@@ -9,6 +9,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Frontend/PreprocessorOutputOptions.h"
+#include "clang/Frontend/FrontendActions.h"
 #include "clang/Frontend/Utils.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
@@ -22,6 +23,8 @@
 #include <string>
 #include <iostream>
 
+#include <windows.h>
+#undef SearchPath
 namespace
 {
     class FileChangeCallback : public clang::PPCallbacks
@@ -142,10 +145,11 @@ Preprocessor::Preprocessor()
 #endif
 
     // Create target info.
-    clang::TargetOptions target_options;
-    target_options.Triple = llvm::sys::getDefaultTargetTriple();
+    clang::CompilerInvocation * invocation = new clang::CompilerInvocation();
+    invocation->getTargetOpts().Triple = llvm::sys::getDefaultTargetTriple();
+    compiler().setInvocation( invocation );
     compiler().setTarget(clang::TargetInfo::CreateTargetInfo(
-        compiler().getDiagnostics(), &target_options));
+        compiler().getDiagnostics(), &compiler().getTargetOpts()));
 
     clang::CompilerInvocation::setLangDefaults(
         compiler().getLangOpts(), clang::IK_CXX);
@@ -198,10 +202,22 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().setPredefines( predefinesStream.str() );
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, HeaderList const & headersToSkip, std::string const & tokenCache )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, HeaderList const & headersToSkip, std::string const & pth )
 {
     clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
-    ppOpts.TokenCache = tokenCache;
+    struct TokenCacheSetter
+    {
+        TokenCacheSetter( std::string & tc, std::string const & pth ) : tc_( tc )
+        {
+            tc_ = pth;
+        }
+        ~TokenCacheSetter()
+        {
+            tc_.clear();
+        }
+        std::string & tc_;
+    } tokenCacheSetter( ppOpts.TokenCache, pth );
+
     setupPreprocessor( ppc, filename );
     struct DiagnosticsGuard
     {
@@ -232,6 +248,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
         if ( token.is( clang::tok::eof ) )
             break;
     }
+    compiler().getFileManager().clearStatCaches();
     return result;
 }
 
@@ -260,5 +277,6 @@ void Preprocessor::emitPTH( PreprocessingContext const & ppc, std::string const 
         throw std::runtime_error( error );
     clang::CacheTokens( preprocessor(), &output );
 }
+
 
 //------------------------------------------------------------------------------

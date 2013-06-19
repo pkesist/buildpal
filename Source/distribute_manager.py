@@ -52,7 +52,7 @@ def prepare_task(task, pth_file):
 class PTHFileRepository:
     def __init__(self):
         self.__lock = ThreadLock()
-        self.__files = set()
+        self.__files = {}
 
     def acquire(self):
         self.__lock.acquire()
@@ -60,20 +60,26 @@ class PTHFileRepository:
     def release(self):
         self.__lock.release()
 
-    def registered(self, file):
-        return file in self.__files
+    def registered(self, file, timestamp):
+        return file in self.__files and self.__files[file] >= timestamp
 
     def register(self, file):
-        self.__files.add(file)
+        self.__files[file] = os.stat(file).st_mtime
 
 def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_repository):
     try:
         client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
         if task.pch_header:
-            pth_file = os.path.splitext(task.pch_file[0])[0] + '.pth'
+            for include_path in task.preprocessor_info.includes:
+                pch_header = os.path.join(include_path, task.pch_header)
+                if os.path.exists(pch_header):
+                    found = True
+                    break
+            assert found or not "Could not locate precompiled header '{}'".format(task.pch_header)
+            pth_file = os.path.splitext(task.pch_file[0])[0] + '.clang.pth'
             pth_file_repository.acquire()
             try:
-                if not pth_file_repository.registered(pth_file):
+                if not pth_file_repository.registered(pth_file, os.stat(pch_header).st_mtime):
                     with timer.timeit('create_pth'):
                         from scan_headers import create_pth
                         create_pth(task.pch_header,
@@ -100,7 +106,7 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
                 assert done == 'DONE'
 
         with timer.timeit('find_available_node'):
-            get_node_queue, return_node_queue = get_node_queues()
+            get_node_queue = get_node_queues()
             node_index, server_conn = get_node_queue.get()
 
         node_info.add_tasks_sent(node_index)
@@ -118,8 +124,6 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
         with timer.timeit('receive'):
             task.manager_receive(client_conn, server_conn, timer)
             node_info.add_tasks_completed(node_index)
-        with timer.timeit('recycle'):
-            return_node_queue.put((node_index, server_conn))
     except Exception:
         import traceback
         traceback.print_exc()
@@ -134,15 +138,14 @@ class TaskProcessor(Process):
 
     def run(self):
         try:
-            return_node_queue = MultiprocessQueue()
-            get_node_queue = MultiprocessQueue(2)
+            get_node_queue = MultiprocessQueue(16)
             with BookKeepingManager() as book_keeper, \
-                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue, return_node_queue)) as compile_pool:
+                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue,)) as compile_pool:
                 pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
-                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, return_node_queue, timer) for node in range(1)]
+                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(1)]
                 for node_finder in node_finders:
                     node_finder.start()
                 while True:
@@ -182,16 +185,14 @@ class TaskProcessor(Process):
 task_queue = MultiprocessQueue()
 
 get_node_queue = None
-return_node_queue = None
 
-def set_node_queues(get, ret):
-    global get_node_queue, return_node_queue
+def set_node_queues(get):
+    global get_node_queue
     get_node_queue = get
-    return_node_queue = ret
 
 def get_node_queues():
-    global get_node_queue, return_node_queue
-    return get_node_queue, return_node_queue
+    global get_node_queue
+    return get_node_queue
 
 class NodeInfoHolder:
     class NodeInfo:
@@ -234,25 +235,15 @@ class NodeInfoHolder:
         return self.tasks_completed(index) / self.tasks_sent(index)
 
 class NodeFinder(Process):
-    def __init__(self, nodes, node_info, outgoing_queue, incoming_queue, timer):
+    def __init__(self, nodes, node_info, outgoing_queue, timer):
         super(NodeFinder, self).__init__()
         self.__nodes = nodes
         self.__node_info = node_info
-        self.__recycled_nodes = {}
-        self.__incoming_queue = incoming_queue
         self.__outgoing_queue = outgoing_queue
         self.__timer = timer
 
-    def process_incoming(self):
-        try:
-            node_index, conn = self.__incoming_queue.get_nowait()
-            self.__recycled_nodes.setdefault(node_index, []).append(conn)
-        except Empty:
-            pass
-
     def run(self):
         while True:
-            self.process_incoming()
             node = self.get_node()
             if node:
                 self.__outgoing_queue.put(node)
@@ -272,21 +263,16 @@ class NodeFinder(Process):
             return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
         
         node_index = min(range(len(self.__nodes)), key=cmp_to_key(cmp))
-        recycled = self.__recycled_nodes.setdefault(node_index, [])
-        if recycled:
-            server_conn = recycled[0]
-            del recycled[0]
-        else:
-            node = self.__nodes[node_index]
-            try:
-                with socket.socket(getattr(socket, 'AF_INET')) as s:
-                    s.settimeout(1)
-                    s.connect(node)
-                    s.settimeout(None)
-                    server_conn = Connection(s.detach())
-            except Exception:
-                print("Failed to connect to '{}'".format(node))
-                return None
+        node = self.__nodes[node_index]
+        try:
+            with socket.socket(getattr(socket, 'AF_INET')) as s:
+                s.settimeout(1)
+                s.connect(node)
+                s.settimeout(None)
+                server_conn = Connection(s.detach())
+        except Exception:
+            print("Failed to connect to '{}'".format(node))
+            return None
         accept = server_conn.recv()
         if accept == "ACCEPT":
             return node_index, server_conn

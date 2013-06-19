@@ -1,7 +1,7 @@
 #! python3.3
 from functools import cmp_to_key
-from queue import Queue as IntraprocessQueue, Empty
-from multiprocessing import Lock, Process, Pool, Queue as MultiprocessQueue
+from queue import Empty
+from multiprocessing import Lock, Process, Pool, Queue
 from multiprocessing.connection import Connection, Client
 from multiprocessing.managers import BaseManager, SyncManager, BaseProxy
 from threading import Lock as ThreadLock
@@ -138,14 +138,14 @@ class TaskProcessor(Process):
 
     def run(self):
         try:
-            get_node_queue = MultiprocessQueue(16)
+            get_node_queue = Queue(32)
             with BookKeepingManager() as book_keeper, \
                 Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue,)) as compile_pool:
                 pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
-                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(1)]
+                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(8)]
                 for node_finder in node_finders:
                     node_finder.start()
                 while True:
@@ -182,7 +182,7 @@ class TaskProcessor(Process):
         for name, time, count, average in sorted_times:
             print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, time, count, average))
 
-task_queue = MultiprocessQueue()
+task_queue = Queue()
 
 get_node_queue = None
 

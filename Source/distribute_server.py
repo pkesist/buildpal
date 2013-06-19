@@ -13,22 +13,20 @@ import sys
 import os
 
 def work(server, conn, remote_endpoint, counter):
-    while True:
-        try:
-            accept = server.accept()
-            with conn:
-                conn.send("ACCEPT" if accept else "REJECT")
-                if not accept:
-                    continue
+    try:
+        accept = server.accept()
+        with conn:
+            conn.send("ACCEPT" if accept else "REJECT")
+            if not accept:
+                return
+            try:
                 counter.inc()
                 task = conn.recv()
                 task.server_process(server, conn, remote_endpoint)
-        except:
-            import traceback
-            traceback.print_exc()
-            break
-        finally:
-            counter.dec()
+            finally:
+                counter.dec()
+    except:
+        pass
 
 class ServerManager(SyncManager):
     pass

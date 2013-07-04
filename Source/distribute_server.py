@@ -26,7 +26,8 @@ def work(server, conn, remote_endpoint, counter):
             finally:
                 counter.dec()
     except:
-        pass
+        import traceback
+        traceback.print_exc()
 
 class ServerManager(SyncManager):
     pass

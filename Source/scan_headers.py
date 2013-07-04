@@ -2,6 +2,7 @@
 from utils import TempFile
 
 import preprocessing
+from msvc import MSVCDistributer
 
 import copy
 import itertools
@@ -11,10 +12,12 @@ import types
 import time
 import zipfile
 
+from tempfile import mkdtemp
+from shutil import rmtree
 
 preprocessor = preprocessing.Preprocessor()
 
-def setup_preprocessor(includes, sysincludes, defines):
+def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
     preprocessor.setMicrosoftMode(True) # If MSVC.
     preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
@@ -28,6 +31,8 @@ def setup_preprocessor(includes, sysincludes, defines):
         macro = define[0]
         value = define[1] if len(define) == 2 else ""
         ppc.add_macro(macro, value)
+    for ignored_header in ignored_headers:
+        ppc.add_ignored_header(ignored_header)
     return ppc
 
 def create_pth(hpp_file, pth_file, includes, sysincludes, defines):
@@ -49,14 +54,19 @@ def preprocess_file(cpp_file, includes, sysincludes, defines):
     # We failed to collect headers.
     return None
 
-def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip, pth_file):
+def all_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
+    ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
+    return preprocessor.scanHeaders(ppc, cpp_file, pth_file)
+
+
+def collect_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
     try:
-        ppc = setup_preprocessor(includes, sysincludes, defines)
+        ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
         zip_file = TempFile(suffix='.zip')
         paths_to_include = []
         relative_paths = {}
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in preprocessor.scanHeaders(ppc, cpp_file, headers_to_skip, pth_file):
+            for file, full in preprocessor.scanHeaders(ppc, cpp_file, pth_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.
@@ -87,29 +97,126 @@ def collect_headers(cpp_file, includes, sysincludes, defines, headers_to_skip, p
     # We failed to collect headers.
     return None
 
-def test(header, search_path):
-    import tempfile
-    import shutil
-    import subprocess
-    import zipfile
+def rewrite_includes(cpp_file, includes, sysincludes, defines, pth_file):
+    try:
+        includes = list(a.replace('\\', '/') for a in includes)
+        sysincludes = list(a.replace('\\', '/') for a in sysincludes)
+        ppc = setup_preprocessor(includes, sysincludes, defines)
+        return preprocessor.rewriteIncludes(ppc, cpp_file)
+    except:
+        import traceback
+        traceback.print_exc()
 
-    zip_file = collect_headers(header, search_path, [], [])
-    include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
-    with zipfile.ZipFile(zip_file, 'r') as zip:
-        zip.extractall(path=include_path)
-    import subprocess
-    subprocess.check_call(r'"C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\vcvarsall.bat" && cl -c -nologo /TP "{}" -I"{}"'.format(header, include_path), shell=True)
-    shutil.rmtree(include_path)
+    # We failed to rewrite includes.
+    return None
+
+
+def test1():
+    include = mkdtemp()
+    with TempFile(dir=include, suffix='.cpp') as f1, \
+        TempFile(dir=include, suffix='.hpp') as f2:
+        f2rel = os.path.split(f2.filename())[1]
+        with f1.open('wt') as file1:
+            file1.write("""\
+#ifndef FILE1
+#define FILE1 aaa
+#include <{}>
+#endif
+""".format(f2rel))
+        with f2.open('wt') as file2:
+            file2.write("""\
+#define XXX 5
+""")
+        result = all_headers(f1.filename(), [include], [], [], "")
+        rmtree(include)
+        assert len(result) == 1
+        assert (f2rel, f2.filename()) in result
+
+def test2():
+    include = mkdtemp()
+    with TempFile(dir=include, suffix='.cpp') as f1, \
+        TempFile(dir=include, suffix='.hpp') as f2, \
+        TempFile(dir=include, suffix='.hpp') as f3:
+        f2rel = os.path.split(f2.filename())[1]
+        f3rel = os.path.split(f3.filename())[1]
+        with f1.open('wt') as file1:
+            file1.write("""\
+#ifndef FILE1
+#define FILE1
+#include <{0}>
+#include <{0}>
+#endif
+""".format(f2rel))
+        with f2.open('wt') as file2:
+            file2.write("""\
+#ifndef XXX
+#define XXX
+#else
+#include <{}>
+#endif
+""".format(f3rel))
+        with f3.open('wt') as file3:
+            file3.write("""\
+#define ZZZ
+""")
+        result = all_headers(f1.filename(), [include], [], [], "")
+        assert len(result) == 2
+        assert (f2rel, f2.filename()) in result
+        assert (f3rel, f3.filename()) in result
+        result = all_headers(f1.filename(), [include], [], [], "")
+        assert len(result) == 2
+        assert (f2rel, f2.filename()) in result
+        assert (f3rel, f3.filename()) in result
+        rmtree(include)
+
+
+def test_boost_header(header, boostdir):
+    from time import time
+    start = time()    
+    all_headers(header, [boostdir], [], [], "")
+    first_done = time()
+    all_headers(header, [boostdir], [], [], "")
+    second_done = time()
+    all_headers(header, [boostdir], [], [], "")
+    third_done = time()
+    print("First time took {:.2f}s, second time took {:.2f}s, third time took {:.2f}s."
+          .format(first_done - start, second_done - first_done, third_done - second_done))
+
+def test_files(files, includes, macros):
+    for file in files:
+        print("FILE ", file)
+        start = time.time()
+        for x in all_headers(file, includes, [], macros, ""):
+            print(x[0])
+        print("It took {:.2f}s.".format(time.time() - start))
 
 if __name__ == '__main__':
-    import sys
-    boost_inc_path = [r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0']
-    if sys.argv[1] == '1': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\mpl\or.hpp', boost_inc_path)
-    if sys.argv[1] == '2': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\type_traits\detail\is_function_ptr_helper.hpp', boost_inc_path)
-    if sys.argv[1] == '3': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\utility\result_of.hpp', boost_inc_path)
-    if sys.argv[1] == '4': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\phoenix.hpp', boost_inc_path)
-    if sys.argv[1] == '5': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\fusion\container\vector\vector10.hpp', boost_inc_path)
-    if sys.argv[1] == '6': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\mpl\apply_wrap.hpp', boost_inc_path)
-    if sys.argv[1] == '7': test(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\locale\src\win32\collate.cpp', boost_inc_path)
-    if sys.argv[1] == 'x': test(r'D:\Sandboxes\PKE\DistriBuild\Source\gaga.cpp', boost_inc_path)
-
+    #test_boost_header(
+    #    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\phoenix\phoenix.hpp",
+    ##    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\math\src\tr1\assoc_laguerre.cpp",
+    #    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0")
+    #test_boost_header(
+    ##    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\boost\phoenix\phoenix.hpp",
+    #    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\math\src\tr1\assoc_laguerre.cpp",
+    #    r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0")
+    #print(all_headers(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\thread.cpp',
+    #            [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"], [], [], ""))
+    test_files([
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\system\src\error_code.cpp",
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\codecvt_error_category.cpp",
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\operations.cpp",
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\windows_file_codecvt.cpp",],
+        [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"],
+        ['_MSC_VER=1500',
+        '_MSC_FULL_VER=150030729',
+        '_CPPLIB_VER=505',
+        '_HAS_TR1=1',
+        '_WIN32=1',
+        '_M_IX86=600',
+        '_INTEGRAL_MAX_BITS=64',
+        '__cplusplus=199711L',
+        '_CPPUNWIND=1'])
+    print("We are done!")
+    input()
+    #test1()
+    #test2()

@@ -254,7 +254,7 @@ class CompilationDistributer(CmdLineOptions):
             conn = listener.accept()
             while True:
                 task = conn.recv()
-                if task == "PREPROCESS":
+                if task == 'PREPROCESS':
                     p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
                     send_compressed_file(conn, p.stdout)
                 if task == "COMPLETED":

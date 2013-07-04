@@ -7,7 +7,7 @@ import zipfile
 import zlib
 import io
 
-from utils import TempFile, send_file, receive_file, receive_compressed_file, send_compressed_file
+from utils import TempFile, send_file, receive_file, receive_compressed_file, send_compressed_file, relay_file
 from multiprocessing.connection import Client
 
 class CompileTask:
@@ -27,11 +27,10 @@ class CompileTask:
 
         self.algorithm = 'SCAN_HEADERS'
         #self.algorithm = 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR'
+        #self.algorithm = 'REWRITE_INCLUDES'
         #self.algorithm = 'PREPROCESS_LOCALLY'
 
     def manager_prepare(self, pth_file):
-        from scan_headers import collect_headers
-
         # TODO: This does not belong here. Move this to msvc.py.
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
@@ -42,11 +41,21 @@ class CompileTask:
                 macros.append('_SECURE_SCL=1')
             if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
-        # Create/Use PTH if we have precompiled header.
-        return collect_headers(os.path.join(self.cwd, self.source),
-            self.preprocessor_info.includes, [], macros,
-            [self.pch_header] if self.pch_header else [],
-            pth_file if pth_file else "")
+
+        if self.algorithm == 'SCAN_HEADERS':
+            from scan_headers import collect_headers
+            # Create/Use PTH if we have precompiled header.
+            return collect_headers(os.path.join(self.cwd, self.source),
+                self.preprocessor_info.includes, [], macros,
+                pth_file if pth_file else "",
+                [self.pch_header] if self.pch_header else [])
+
+        if self.algorithm == 'REWRITE_INCLUDES':
+            from scan_headers import rewrite_includes
+            return rewrite_includes(os.path.join(self.cwd, self.source),
+                self.preprocessor_info.includes, self.preprocessor_info.sysincludes, macros,
+                pth_file if pth_file else "")
+
 
     def manager_send(self, client_conn, server_conn, prepare_pool, timer):
         if self.algorithm == 'SCAN_HEADERS':
@@ -75,6 +84,13 @@ class CompileTask:
             client_conn.send('PREPROCESS')
             server_conn.send('PREPROCESSED_FILE')
             relay_file(client_conn, server_conn)
+
+        if self.algorithm == 'REWRITE_INCLUDES':
+            server_conn.send('PREPROCESS_LOCALLY')
+            with timer.timeit('prepare_result'):
+                tempfile = prepare_pool.get_result(self.tempfile)
+            server_conn.send('PREPROCESSED_FILE')
+            send_compressed_file(server_conn, io.BytesIO(tempfile))
 
         if self.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
             server_conn.send('PREPROCESS_LOCALLY')
@@ -178,7 +194,7 @@ class CompileTask:
                 noLink = self.__compile_switch
                 output = self.__output_switch.format(object_file.filename())
                 try:
-                    retcode, stdout, stderr = compiler(self.__call + [noLink, output, preprocessed_file.filename()])
+                    retcode, stdout, stderr = compiler(self.__call +  [noLink, output, preprocessed_file.filename()])
                 except Exception:
                     conn.send('SERVER_FAILED')
                     return

@@ -98,12 +98,9 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
             if task.algorithm == 'SCAN_HEADERS':
                 task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
 
-            if task.algorithm == 'PREPROCESS_LOCALLY':
-                # Signal the client to do preprocessing.
-                client_conn.send('PREPROCESS')
-                # Wait for 'done'.
-                done = client_conn.recv()
-                assert done == 'DONE'
+            if task.algorithm == 'REWRITE_INCLUDES':
+                task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
+                print("PREPARED FOR REWRITE", task.tempfile)
 
         with timer.timeit('find_available_node'):
             get_node_queue = get_node_queues()
@@ -144,7 +141,7 @@ class TaskProcessor(Process):
                 pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
-                prepare_pool = book_keeper.ProcessPool(4)
+                prepare_pool = book_keeper.ProcessPool(1)
                 node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(8)]
                 for node_finder in node_finders:
                     node_finder.start()

@@ -53,6 +53,22 @@ PyObject * PyPreprocessingContext_add_include_path( PyPreprocessingContext * sel
     Py_RETURN_NONE;
 }
 
+PyObject * PyPreprocessingContext_add_ignored_header( PyPreprocessingContext * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "name", NULL };
+
+    char const * name = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s", kwlist, &name ) )
+        return NULL;
+
+    if ( !self->ppContext )
+        return NULL;
+
+    self->ppContext->addIgnoredHeader( name );
+    Py_RETURN_NONE;
+}
+
 PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "macro_name", "macro_value", NULL };
@@ -72,7 +88,8 @@ PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyOb
 
 PyMethodDef PyPreprocessingContext_methods[] =
 {
-    { "add_include_path", (PyCFunction)PyPreprocessingContext_add_include_path, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
+    { "add_ignored_header", (PyCFunction)PyPreprocessingContext_add_ignored_header, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
+    { "add_include_path"  , (PyCFunction)PyPreprocessingContext_add_include_path, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
     { "add_macro", (PyCFunction)PyPreprocessingContext_add_macro, METH_VARARGS | METH_KEYWORDS, "Add a macro." },
     {NULL}
 };
@@ -154,16 +171,15 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", "headers_to_skip", "pth_file", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", "pth_file", NULL };
 
     PyObject * pObject = 0;
     char const * filename = "";
-    PyObject * headersToSkipList = 0;
     char const * pth = "";
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|Os", kwlist, &pObject, &filename, &headersToSkipList, &pth ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|s", kwlist, &pObject, &filename, &pth ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -172,29 +188,8 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         return NULL;
     }
 
-    Preprocessor::HeaderList headersToSkip;
-    if ( headersToSkipList )
-    {
-        if ( !PyList_Check( headersToSkipList ) )
-        {
-            PyErr_SetString( PyExc_Exception, "headers_to_skip parameter must be a list of strings." );
-            return NULL;
-        }
-        Py_ssize_t const size( PyList_Size( headersToSkipList ) );
-        for ( Py_ssize_t iter( 0 ); iter < size; ++iter )
-        {
-            PyObject * entry( PyList_GET_ITEM( headersToSkipList, iter ) );
-            if ( !PyUnicode_Check( entry ) )
-            {
-                PyErr_SetString( PyExc_Exception, "headers_to_skip parameter must be a list of strings." );
-                return NULL;
-            }
-            headersToSkip.insert( PyUnicode_AsUTF8( entry ) );
-        }
-    }
-    
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, headersToSkip, pth );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, pth );
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
@@ -236,6 +231,35 @@ PyObject * PyPreprocessor_preprocess( PyPreprocessor * self, PyObject * args, Py
     std::string output;
     output.reserve( 100 * 1024 );
     self->pp->preprocess( *ppContext->ppContext, filename, output );
+
+    return PyBytes_FromStringAndSize( output.data(), output.size() );
+}
+
+PyObject * PyPreprocessor_rewriteIncludes( PyPreprocessor * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "pp_ctx", "filename", NULL };
+
+    PyObject * pObject = 0;
+    char const * filename = 0;
+
+
+    assert( self->pp );
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
+        return NULL;
+    }
+
+    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid preprocessor object." );
+        return NULL;
+    }
+
+    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
+    std::string output;
+    output.reserve( 100 * 1024 );
+    self->pp->rewriteIncludes( *ppContext->ppContext, filename, output );
 
     return PyBytes_FromStringAndSize( output.data(), output.size() );
 }
@@ -303,6 +327,7 @@ PyMethodDef PyPreprocessor_methods[] =
 {
     {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
     {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
+    {"rewriteIncludes" , (PyCFunction)PyPreprocessor_rewriteIncludes , METH_VARARGS | METH_KEYWORDS, "Rewrite #include directives."},
     {"emitPTH"         , (PyCFunction)PyPreprocessor_emitPTH         , METH_VARARGS | METH_KEYWORDS, "Create a pre-tokenized header file."},
     {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},

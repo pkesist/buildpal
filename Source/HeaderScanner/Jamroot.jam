@@ -1,62 +1,56 @@
 using winlibs ;
 
-path-constant CLANG_LIB : "D:\\Sandboxes\\External\\Clang\\build\\lib" ;
+path-constant CLANG_DIR : "D:\\Sandboxes\\External\\Clang" ;
 
-rule clang-lib ( lib-name )
+project HeaderScanner : requirements <warnings>off ;
+
+rule define-clang ( clang-dir : libs * )
 {
-    lib $(lib-name) : : <file>$(CLANG_LIB)/Debug/$(lib-name).lib <variant>debug <toolset>msvc ;
-    lib $(lib-name) : : <file>$(CLANG_LIB)/RelWithDebInfo/$(lib-name).lib <variant>profile <toolset>msvc ;
-    lib $(lib-name) : : <file>$(CLANG_LIB)/Release/$(lib-name).lib <toolset>msvc ;
+    local rule clang-lib ( lib-name )
+    {
+        lib $(lib-name) : : <file>$(clang-dir)/build/lib/Debug/$(lib-name).lib <variant>debug <toolset>msvc ;
+        lib $(lib-name) : : <file>$(clang-dir)/build/lib/RelWithDebInfo/$(lib-name).lib <variant>profile <toolset>msvc ;
+        lib $(lib-name) : : <file>$(clang-dir)/build/lib/Release/$(lib-name).lib <toolset>msvc ;
+    }
+
+    for lib in $(libs)
+    {
+        clang-lib $(lib) ;
+    }
+
+    alias clang : $(libs) : : :
+        <include>$(clang-dir)\\llvm\\include
+        <include>$(clang-dir)\\llvm\\tools\\clang\\include
+        <include>$(clang-dir)\\build\\include
+        <include>$(clang-dir)\\build\\tools\\clang\\include
+    ;
 }
 
-clang-lib clangRewriteCore   ;
-clang-lib clangFrontend      ;
-clang-lib clangDriver        ;
-clang-lib clangEdit          ;
-clang-lib clangSerialization ;
-clang-lib clangParse         ;
-clang-lib clangSema          ;
-clang-lib clangAnalysis      ;
-clang-lib clangAST           ;
-clang-lib clangLex           ;
-clang-lib clangBasic         ;
-clang-lib LLVMMC             ;
-clang-lib LLVMSupport        ;
-clang-lib LLVMCore           ;
-clang-lib LLVMBitReader      ;
-clang-lib LLVMMCParser       ;
-
-
-alias clang
-:
-    clangRewriteCore  
-    clangFrontend     
-    clangDriver       
-    clangEdit         
-    clangSerialization
-    clangParse        
-    clangSema         
-    clangAnalysis     
-    clangAST          
-    clangLex          
-    clangBasic        
-    LLVMMC            
-    LLVMSupport       
-    LLVMCore          
-    LLVMBitReader     
-    LLVMMCParser     
-:
-:
-:
-    <include>D:\\Sandboxes\\External\\Clang\\llvm\\include
-    <include>D:\\Sandboxes\\External\\Clang\\llvm\\tools\\clang\\include
-    <include>D:\\Sandboxes\\External\\Clang\\build\\include
-    <include>D:\\Sandboxes\\External\\Clang\\build\\tools\\clang\\include
+define-clang $(CLANG_DIR) :
+    clangRewriteCore    
+    clangRewriteFrontend
+    clangFrontend       
+    clangDriver         
+    clangEdit           
+    clangSerialization  
+    clangParse          
+    clangSema           
+    clangAnalysis       
+    clangAST            
+    clangLex            
+    clangBasic          
+    LLVMMC              
+    LLVMOption          
+    LLVMSupport         
+    LLVMCore            
+    LLVMBitReader       
+    LLVMMCParser        
 ;
 
 alias preprocessing_stuff
 :
     headerScanner_.cpp
+    headerTracker_.cpp
     pythonBindings_.cpp
     clang
     /python_dev//pythonLib

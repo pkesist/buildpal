@@ -202,10 +202,22 @@ if __name__ == '__main__':
     #print(all_headers(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\thread.cpp',
     #            [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"], [], [], ""))
     test_files([
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\system\src\error_code.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\codecvt_error_category.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\operations.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\windows_file_codecvt.cpp",],
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\system\src\error_code.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\codecvt_error_category.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\operations.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\path.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\path_traits.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\portability.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\unique_path.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\utf8_codecvt_facet.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\windows_file_codecvt.cpp",
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\thread.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\tss_dll.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\tss_pe.cpp",
+        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\future.cpp",
+
+        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\date_time\src\gregorian\greg_month.cpp"
+        ],
         [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"],
         ['_MSC_VER=1500',
         '_MSC_FULL_VER=150030729',

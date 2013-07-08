@@ -11,6 +11,12 @@
 #include <string>
 #include <vector>
 
+namespace clang
+{
+    class HeaderSearch;
+}
+
+
 class HeaderTracker;
 
 class PreprocessingContext
@@ -57,6 +63,7 @@ public:
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, std::string const & pth );
     std::string & rewriteIncludes( PreprocessingContext const &, std::string const & filename, std::string & output );
     std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
+    clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }

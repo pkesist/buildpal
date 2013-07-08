@@ -38,48 +38,61 @@ namespace
             Preprocessor::HeaderRefs & includedHeaders
         )
             :
-            headerTracker_ ( headerTracker   ),
-            sourceManager_ ( sourceManager   ),
-            preprocessor_  ( preprocessor    ),
-            fileManager_   ( fileManager     ),
-            headers_       ( includedHeaders ),
-            ignoredHeaders_( ignoredHeaders  ),
-            skippingFile_  ( false           )
+            headerTracker_            ( headerTracker   ),
+            sourceManager_            ( sourceManager   ),
+            preprocessor_             ( preprocessor    ),
+            fileManager_              ( fileManager     ),
+            headers_                  ( includedHeaders ),
+            ignoredHeaders_           ( ignoredHeaders  ),
+            foundViaFileStillNotFound_( false           )
         {
         }
 
         virtual ~HeaderScanner() {}
+
+        virtual void FileStillNotFound(clang::SourceLocation FilenameLoc,
+            llvm::StringRef filename, bool isAngled,
+            clang::DirectoryLookup const * fromDir,
+            clang::DirectoryLookup const * & curDir,
+            clang::ModuleMap::KnownHeader *suggestedModule,
+            clang::FileEntry const * & file)
+        {
+            headerTracker_.findFile( filename, isAngled, file );
+            if ( file )
+            {
+                includeFilename_ = filename;
+                foundViaFileStillNotFound_ = true;
+            }
+        }
 
         virtual void FileChanged( clang::SourceLocation loc, FileChangeReason reason,
             clang::SrcMgr::CharacteristicKind, clang::FileID exitedFID )
         {
             if ( reason == EnterFile )
             {
-                assert( !skippingFile_ );
+                foundViaFileStillNotFound_ = false;
                 clang::FileID const fileId( sourceManager_.getFileID( loc ) );
                 clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
-                headerTracker_.enterHeader( includeFilename_, fileEntry->getName() );
+                if ( fileId == sourceManager_.getMainFileID() )
+                    headerTracker_.enterSourceFile( fileEntry );
+                else
+                    headerTracker_.enterHeader( includeFilename_ );
             }
             else if ( reason == ExitFile )
             {
-                clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( exitedFID ) );
+                clang::FileID const fileId( exitedFID );
+                clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
-                assert( headerTracker_.inOverriddenFile() == sourceManager_.isFileOverridden( fileEntry ) );
-                if ( headerTracker_.inOverriddenFile() )
-                    sourceManager_.disableFileContentsOverride( fileEntry );
-                Preprocessor::HeaderRefs result( headerTracker_.leaveHeader( ignoredHeaders_ ) );
-                // If we are not in a main file result must be empty.
-                assert( result.empty() );
+                headerTracker_.leaveHeader( ignoredHeaders_ );
             }
         }
 
         virtual void EndOfMainFile()
         {
-            Preprocessor::HeaderRefs result( headerTracker_.leaveHeader( ignoredHeaders_ ) );
-            headers_ = result;
+            headers_ = headerTracker_.exitSourceFile();
         }
 
         virtual void FileSkipped
@@ -89,9 +102,8 @@ namespace
 		    clang::SrcMgr::CharacteristicKind
         )
         {
-            assert( skippingFile_ );
-            headerTracker_.headerSkipped( includeFilename_, fileEntry.getName() );
-            skippingFile_ = false;
+            foundViaFileStillNotFound_ = false;
+            headerTracker_.headerSkipped( includeFilename_ );
         }
 
         virtual void InclusionDirective
@@ -103,32 +115,7 @@ namespace
             clang::Module const * imported
         )
         {
-            includeFilename_ = relativePath;
-            if ( !fileEntry )
-                return;
-            
-            if ( !preprocessor_.getHeaderSearchInfo().ShouldEnterIncludeFile( fileEntry, false ) )
-            {
-                skippingFile_ = true;
-                return;
-            }
-
-            std::string * data( 0 );
-
-            //if ( ignoredHeaders_.find( includeFilename_ ) == ignoredHeaders_.end() )
-            //    return;
-
-            if ( headerTracker_.inclusionDirective( includeFilename_, fileEntry, data ) )
-            {
-                static unsigned counter = 0;
-                std::cout << "Override success " << ++counter << " for file '" << includeFilename_.str() << "'\n";
-                assert( data );
-                data->push_back( '\0' );
-                // Cache hit. Override contents.
-                assert( !sourceManager_.isFileOverridden( fileEntry ) );
-                sourceManager_.overrideFileContents( fileEntry,
-                    llvm::MemoryBuffer::getMemBuffer( *data, "", true ) );
-            }
+            assert( !fileEntry || foundViaFileStillNotFound_ );
         }
 
         virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * )
@@ -170,7 +157,7 @@ namespace
         Preprocessor::HeaderRefs & headers_;
         PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
         clang::StringRef includeFilename_;
-        bool skippingFile_;
+        bool foundViaFileStillNotFound_;
     };
 }  // anonymous namespace
 
@@ -223,16 +210,9 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     // Setup new preprocessor instance.
     compiler().createPreprocessor();
     clang::HeaderSearch & headers = preprocessor().getHeaderSearchInfo();
-
-    // Setup search path.
-    for ( PreprocessingContext::SearchPath::const_iterator iter( ppc.searchPath().begin() ); iter != ppc.searchPath().end(); ++iter )
-    {
-        std::string const & path = iter->first;
-        bool const sysinclude = iter->second;
-        clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
-        clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
-        headers.AddSearchPath( lookup, true );
-    }
+    
+    std::vector<clang::DirectoryLookup> dirs;
+    headers.SetSearchPaths(dirs, 0, 0, true);
 
     // Setup predefines.
     //   Clang always tries to define some macros, even if UsePredefines is off,
@@ -244,6 +224,28 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
     preprocessor().setPredefines( predefinesStream.str() );
+}
+
+clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
+{
+    clang::HeaderSearch * headerSearch( new clang::HeaderSearch(
+        &compiler().getHeaderSearchOpts(),
+        compiler().getFileManager(),
+        compiler().getDiagnostics(),
+        compiler().getLangOpts(),
+        &compiler().getTarget()));
+
+    // Setup search path.
+    for ( PreprocessingContext::SearchPath::const_iterator iter( searchPath.begin() ); iter != searchPath.end(); ++iter )
+    {
+        std::string const & path = iter->first;
+        bool const sysinclude = iter->second;
+        clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
+        clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
+        headerSearch->AddSearchPath( lookup, true );
+    }
+
+    return headerSearch;
 }
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, std::string const & pth )
@@ -281,6 +283,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
 
     HeaderRefs result;
     headerTracker().setPreprocessor( &preprocessor() );
+    headerTracker().setHeaderSearch( getHeaderSearch( ppc.searchPath() ) );
 
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker(),
         sourceManager(), preprocessor(), compiler().getFileManager(),

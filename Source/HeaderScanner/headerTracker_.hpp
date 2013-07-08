@@ -6,6 +6,8 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#include "boost/optional.hpp"
+
 #include <string>
 #include <map>
 #include <list>
@@ -19,6 +21,7 @@ namespace clang
     class SourceManager;
     class FileEntry;
     class MacroDirective;
+    class HeaderSearch;
 }
 
 
@@ -29,16 +32,19 @@ public:
     typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    typedef std::string MacroDef;
+    typedef boost::optional<std::string> MacroDef;
 
     explicit HeaderTracker( clang::SourceManager & sm )
-        : sourceManager_( sm ), preprocessor_( 0 ), shortCircuit_( 0 ),
-        session_( 0 ) {}
+        : sourceManager_( sm ), preprocessor_( 0 ), cacheHit_( 0 )
+    {}
 
-    bool inclusionDirective( std::string const & relative, clang::FileEntry const * fileEntry, std::string * & );
-    void headerSkipped( std::string const & relative, std::string const & filename );
-    void enterHeader( std::string const & relative, std::string const & filename );
-    Headers leaveHeader( IgnoredHeaders const & );
+    void enterSourceFile( clang::FileEntry const * );
+    Headers exitSourceFile();
+
+    void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
+    void headerSkipped( std::string const & relative );
+    void enterHeader( std::string const & relative );
+    void leaveHeader( IgnoredHeaders const & );
 
     void macroUsed( std::string const & name, clang::MacroDirective const * def );
     void macroDefined( std::string const & name, clang::MacroDirective const * def );
@@ -49,33 +55,40 @@ public:
         preprocessor_ = preprocessor;
     }
 
+    void setHeaderSearch( clang::HeaderSearch * headerSearch )
+    {
+        headerSearch_.reset( headerSearch );
+    }
+
     bool inOverriddenFile() const
     {
-        return shortCircuit_ != 0;
+        return cacheHit_ != 0;
     }
 
 private:
     typedef std::pair<std::string, MacroDef> Macro;
-    typedef std::set<Macro> MacroSet;
-    typedef std::vector<Macro> MacroList;
     struct MacroUsage { enum Enum { macroUsed, macroDefined, macroUndefined }; };
-    typedef std::list<std::pair<MacroUsage::Enum, Macro> > MacroUsages;
+    typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
+    typedef std::list<MacroWithUsage> MacroUsages;
+    typedef std::set<Macro> MacroSet;
 
     struct ShortCircuitEntry
     {
-        ShortCircuitEntry( unsigned sessionp, MacroUsages const & macroUsagesp, Headers const & headersp )
-            : session( sessionp ), macroUsages( macroUsagesp ), headers( headersp )
+        ShortCircuitEntry( clang::FileEntry const * fileEntryp,
+            MacroUsages const & macroUsagesp,
+            Headers const & headersp )
+            : fileEntry( fileEntryp ),
+            macroUsages( macroUsagesp ),
+            headers( headersp )
         {}
 
-        unsigned session;
+        clang::FileEntry const * fileEntry;
         MacroUsages macroUsages;
         Headers headers;
     };
-    
+
     struct HeaderShortCircuit : public std::map<MacroSet, ShortCircuitEntry> {};
-    struct HeaderCacheSt : public std::map<Header, HeaderShortCircuit> {};
-    struct MacroDefMap : public std::map<std::string, MacroDef> {};
-    struct OverriddenHeaderContents : public std::map<std::pair<std::string, MacroSet>, std::string> {};
+    struct HeaderCacheSt : public std::map<clang::FileEntry const *, HeaderShortCircuit> {};
 
     struct HeaderCtx
     {
@@ -92,7 +105,7 @@ private:
             {
                 std::copy( macroUsages->begin(), macroUsages->end(),
                     std::back_inserter( macroUsages_ ) );
-                normalize();
+                //normalize();
             }
 
             if ( headers )
@@ -119,7 +132,6 @@ private:
             return result;
         }
 
-
         void normalize();
 
     private:
@@ -141,15 +153,13 @@ private:
     MacroDef macroDefFromSourceLocation( clang::MacroDirective const * def );
 
 private:
+    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     clang::SourceManager & sourceManager_;
     clang::Preprocessor * preprocessor_;
     HeaderCtxStack headerCtxStack_;
-    HeaderShortCircuit::value_type * shortCircuit_;
+    HeaderShortCircuit::value_type * cacheHit_;
     HeaderCacheSt cache_;
-    MacroDefMap currentFakeMacros_;
-    OverriddenHeaderContents fakeMacroBuffers_;
-    std::set<clang::FileEntry const *> mustNotOverride_;
-    unsigned session_;
+    std::vector<clang::FileEntry const *> fileStack_;
 };
 
 

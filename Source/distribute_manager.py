@@ -100,7 +100,6 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
 
             if task.algorithm == 'REWRITE_INCLUDES':
                 task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
-                print("PREPARED FOR REWRITE", task.tempfile)
 
         with timer.timeit('find_available_node'):
             get_node_queue = get_node_queues()

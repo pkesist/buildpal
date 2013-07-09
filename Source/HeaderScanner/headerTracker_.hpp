@@ -10,7 +10,6 @@
 
 #include <string>
 #include <map>
-#include <list>
 #include <set>
 #include <vector>
 //------------------------------------------------------------------------------
@@ -69,7 +68,7 @@ private:
     typedef std::pair<std::string, MacroDef> Macro;
     struct MacroUsage { enum Enum { macroUsed, macroDefined, macroUndefined }; };
     typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
-    typedef std::list<MacroWithUsage> MacroUsages;
+    typedef std::vector<MacroWithUsage> MacroUsages;
     typedef std::set<Macro> MacroSet;
 
     struct ShortCircuitEntry

@@ -105,7 +105,6 @@ private:
             {
                 std::copy( macroUsages->begin(), macroUsages->end(),
                     std::back_inserter( macroUsages_ ) );
-                //normalize();
             }
 
             if ( headers )
@@ -131,8 +130,6 @@ private:
             }
             return result;
         }
-
-        void normalize();
 
     private:
         Header header_;

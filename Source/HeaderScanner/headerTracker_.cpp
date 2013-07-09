@@ -136,49 +136,6 @@ void HeaderTracker::HeaderCtx::addHeader( Header const & header )
     includedHeaders_.insert( header );
 }
 
-void HeaderTracker::HeaderCtx::normalize()
-{
-    // Search for all undefines.
-    typedef std::set<std::size_t> Positions;
-    typedef std::map<std::string, Positions> MacroPositions;
-    MacroPositions definedMacros;
-    MacroPositions undefinedMacros;
-    MacroPositions usedMacros;
-    std::size_t pos( 0 );
-    for ( MacroUsages::const_iterator iter( macroUsages_.begin() ); iter != macroUsages_.end(); ++iter, ++pos )
-    {
-        if ( iter->first == MacroUsage::macroDefined   )
-            definedMacros  [ iter->second.first ].insert( pos );
-        if ( iter->first == MacroUsage::macroUndefined )
-            undefinedMacros[ iter->second.first ].insert( pos );
-        usedMacros[ iter->second.first ].insert( pos );
-    }
-
-    Positions positionsToRemove;
-    for ( MacroPositions::iterator undefIter( undefinedMacros.begin() ); undefIter != undefinedMacros.end(); ++undefIter )
-    {
-        MacroPositions::iterator const defIter( definedMacros.find( undefIter->first ) );
-        if ( defIter == definedMacros.end() )
-            continue;
-
-        // We can remove everything, from the first define to the last undefine,
-        // including any usages in between.
-        std::size_t const start( *defIter->second.begin() );
-        std::size_t const stop( *undefIter->second.rbegin() );
-        Positions const & positions( usedMacros[ defIter->first ] );
-        for ( Positions::const_iterator posIter( positions.begin() ); posIter != positions.end(); ++posIter )
-            if ( *posIter >= start && *posIter <= stop )
-                positionsToRemove.insert( *posIter );
-    }
-
-    for ( Positions::const_reverse_iterator posIter( positionsToRemove.rbegin() ); posIter != positionsToRemove.rend(); ++posIter )
-    {
-        MacroUsages::iterator iter( macroUsages_.begin() );
-        std::advance( iter, *posIter );
-        macroUsages_.erase( iter );
-    }
-}
-
 void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ignoredHeaders )
 {
     assert( headerCtxStack().size() > 1 );

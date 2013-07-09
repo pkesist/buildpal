@@ -121,6 +121,7 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
         with timer.timeit('receive'):
             task.manager_receive(client_conn, server_conn, timer)
             node_info.add_tasks_completed(node_index)
+            node_info.connection_closed(node_index)
     except Exception:
         import traceback
         traceback.print_exc()
@@ -141,7 +142,7 @@ class TaskProcessor(Process):
                 pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
-                prepare_pool = book_keeper.ProcessPool(1)
+                prepare_pool = book_keeper.ProcessPool(4)
                 node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(8)]
                 for node_finder in node_finders:
                     node_finder.start()
@@ -163,10 +164,12 @@ class TaskProcessor(Process):
         for index in range(len(self.__nodes)):
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
-                'Completed {:<3} Failed {:<3} Running {:<3} Average Time {:<3} Ratio {:<3}\n'.format(
+                'Open Connections {:<3} Completed {:<3} Failed '
+                '{:<3} Running {:<3} Average Time {:<3.2f} Ratio {:<3.2f}\n'.format(
                 node[0],
                 node[1],
                 node_info.tasks_sent      (index),
+                node_info.connections     (index),
                 node_info.tasks_completed (index),
                 node_info.tasks_failed    (index),
                 node_info.tasks_processing(index),
@@ -194,13 +197,20 @@ def get_node_queues():
 class NodeInfoHolder:
     class NodeInfo:
         def __init__(self):
-            self._tasks_completed = 0
-            self._tasks_failed    = 0
-            self._tasks_sent      = 0
-            self._total_time      = 0
+            self._tasks_completed  = 0
+            self._tasks_failed     = 0
+            self._tasks_sent       = 0
+            self._total_time       = 0
+            self._open_connections = 0
 
     def __init__(self, size):
         self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
+
+    def connection_open(self, index): self.__nodes[index]._open_connections += 1
+
+    def connection_closed(self, index): self.__nodes[index]._open_connections -= 1
+
+    def connections(self, index): return self.__nodes[index]._open_connections
 
     def tasks_sent(self, index): return self.__nodes[index]._tasks_sent
 
@@ -249,8 +259,10 @@ class NodeFinder(Process):
 
     def get_node(self):
         def cmp(lhs, rhs):
-            lhs_tasks_processing = self.__node_info.tasks_processing(lhs)
-            rhs_tasks_processing = self.__node_info.tasks_processing(rhs)
+            #lhs_tasks_processing = self.__node_info.tasks_processing(lhs)
+            #rhs_tasks_processing = self.__node_info.tasks_processing(rhs)
+            lhs_tasks_processing = self.__node_info.connections(lhs)
+            rhs_tasks_processing = self.__node_info.connections(rhs)
             lhs_average_time = self.__node_info.average_time(lhs)
             rhs_average_time = self.__node_info.average_time(rhs)
             if lhs_average_time == 0 and rhs_average_time == 0:
@@ -272,6 +284,7 @@ class NodeFinder(Process):
             return None
         accept = server_conn.recv()
         if accept == "ACCEPT":
+            self.__node_info.connection_open(node_index)
             return node_index, server_conn
         else:
             assert accept == "REJECT"

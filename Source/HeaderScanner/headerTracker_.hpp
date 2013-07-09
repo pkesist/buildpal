@@ -96,8 +96,15 @@ private:
         explicit HeaderCtx( Header const & header )
             : header_( header ) {}
 
-        void addMacro( MacroUsage::Enum, Macro const & macro );
-        void addHeader( Header const & header );
+        void addMacro( MacroUsage::Enum const usage, Macro const & macro )
+        {
+            macroUsages_.push_back( std::make_pair( usage, macro ) );
+        }
+
+        void addHeader( Header const & header )
+        {
+            includedHeaders_.insert( header );
+        }
 
         void addStuff( MacroUsages const * macroUsages, Headers const * headers )
         {
@@ -117,19 +124,8 @@ private:
         MacroUsages const & macroUsages() const { return macroUsages_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         Header const & header() { return header_; }
-        MacroSet const usedMacros() const
-        {
-            std::set<std::string> defined;
-            MacroSet result;
-            for ( MacroUsages::const_iterator iter( macroUsages_.begin() ); iter != macroUsages_.end(); ++iter )
-            {
-                if ( iter->first == MacroUsage::macroDefined )
-                    defined.insert( iter->second.first );
-                if ( ( iter->first == MacroUsage::macroUsed ) && ( defined.find( iter->second.first ) == defined.end() ) )
-                    result.insert( iter->second );
-            }
-            return result;
-        }
+
+        HeaderShortCircuit::value_type makeCacheEntry( clang::SourceManager & ) const;
 
     private:
         Header header_;

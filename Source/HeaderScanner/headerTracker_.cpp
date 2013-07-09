@@ -126,16 +126,6 @@ void HeaderTracker::enterHeader( std::string const & relative )
     }
 }
 
-void HeaderTracker::HeaderCtx::addMacro( MacroUsage::Enum usage, Macro const & macro )
-{
-    macroUsages_.push_back( std::make_pair( usage, macro ) );
-}
-
-void HeaderTracker::HeaderCtx::addHeader( Header const & header )
-{
-    includedHeaders_.insert( header );
-}
-
 void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ignoredHeaders )
 {
     assert( headerCtxStack().size() > 1 );
@@ -170,49 +160,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
         headers = &headerCtxStack().back().includedHeaders();
         macroUsages = &headerCtxStack().back().macroUsages();
 
-        // Cache the result.
-        std::string buffer;
-        llvm::raw_string_ostream defineStream( buffer );
-        for ( MacroUsages::const_iterator iter( macroUsages->begin() ); iter != macroUsages->end(); ++iter )
-        {
-            MacroUsage::Enum const macroUsage( iter->first );
-            std::string const & macroName( iter->second.first );
-            MacroDef const & macroDef( iter->second.second );
-            if ( macroUsage == MacroUsage::macroUndefined )
-            {
-                assert( !macroDef );
-                defineStream << "#undef " << macroName << '\n';
-            }
-            if ( macroUsage == MacroUsage::macroDefined )
-            {
-                assert( macroDef );
-                defineStream << "#define " << *macroDef << '\n';
-            }
-        }
-        defineStream << '\0';
-
-        std::string const & content( defineStream.str() );
-        static unsigned counter( 0 );
-        std::stringstream filename;
-        filename << "_file" << counter++;
-        clang::FileEntry const * fileEntry( sourceManager_.getFileManager().getVirtualFile( filename.str(), filename.str().size(), 0 ) );
-        llvm::MemoryBuffer * const memoryBuffer(
-            llvm::MemoryBuffer::getMemBufferCopy( content, "" ) );
-        sourceManager_.overrideFileContents( fileEntry, memoryBuffer, true );
-
-        cache()[ file ].insert
-        (
-            std::make_pair
-            (
-                headerCtxStack().back().usedMacros(),
-                ShortCircuitEntry
-                (
-                    fileEntry,
-                    *macroUsages,
-                    *headers
-                )
-            )
-        );
+        cache()[ file ].insert( headerCtxStack().back().makeCacheEntry( sourceManager() ) );
     }
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
@@ -221,6 +169,58 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     headerCtxStack()[ stackSize - 2 ].addStuff( macroUsages, ignoreHeaders ? 0 : headers );
 }
 
+HeaderTracker::HeaderShortCircuit::value_type HeaderTracker::HeaderCtx::makeCacheEntry( clang::SourceManager & sourceManager ) const
+{
+    std::set<std::string> defined;
+    MacroSet cacheKey;
+
+    // Cache the result.
+    std::string buffer;
+    llvm::raw_string_ostream defineStream( buffer );
+    for ( MacroUsages::const_iterator iter( macroUsages_.begin() ); iter != macroUsages_.end(); ++iter )
+    {
+        MacroUsage::Enum const macroUsage( iter->first );
+        std::string const & macroName( iter->second.first );
+        MacroDef const & macroDef( iter->second.second );
+        if ( macroUsage == MacroUsage::macroUndefined )
+        {
+            assert( !macroDef );
+            defineStream << "#undef " << macroName << '\n';
+        }
+        if ( macroUsage == MacroUsage::macroDefined )
+        {
+            defined.insert( macroName );
+            assert( macroDef );
+            defineStream << "#define " << *macroDef << '\n';
+        }
+
+        if ( ( macroUsage == MacroUsage::macroUsed ) && ( defined.find( iter->second.first ) == defined.end() ) )
+        {
+            cacheKey.insert( iter->second );
+        }
+    }
+    defineStream << '\0';
+
+    std::string const & content( defineStream.str() );
+    static unsigned counter( 0 );
+    std::stringstream filename;
+    filename << "_file" << counter++;
+    clang::FileEntry const * fileEntry( sourceManager.getFileManager().getVirtualFile( filename.str(), filename.str().size(), 0 ) );
+    llvm::MemoryBuffer * const memoryBuffer(
+        llvm::MemoryBuffer::getMemBufferCopy( content, "" ) );
+    sourceManager.overrideFileContents( fileEntry, memoryBuffer, true );
+
+    return std::make_pair
+    (
+        cacheKey,
+        ShortCircuitEntry
+        (
+            fileEntry,
+            macroUsages(),
+            includedHeaders()
+        )
+    );
+}
 
 HeaderTracker::Headers HeaderTracker::exitSourceFile()
 {

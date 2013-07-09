@@ -6,8 +6,6 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
-#include "boost/optional.hpp"
-
 #include <string>
 #include <map>
 #include <set>
@@ -31,7 +29,7 @@ public:
     typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    typedef boost::optional<std::string> MacroDef;
+    typedef llvm::StringRef MacroDef;
 
     explicit HeaderTracker( clang::SourceManager & sm )
         : sourceManager_( sm ), preprocessor_( 0 ), cacheHit_( 0 )

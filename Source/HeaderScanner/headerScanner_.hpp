@@ -3,7 +3,6 @@
 #define headerScanner_HPP__343F36C2_0715_4B15_865A_D86ABF67EF5B
 //------------------------------------------------------------------------------
 #include "clang/Frontend/CompilerInstance.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/OwningPtr.h"
 
 #include <map>

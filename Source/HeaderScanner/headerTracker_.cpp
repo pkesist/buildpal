@@ -184,14 +184,14 @@ HeaderTracker::HeaderShortCircuit::value_type HeaderTracker::HeaderCtx::makeCach
         MacroDef const & macroDef( iter->second.second );
         if ( macroUsage == MacroUsage::macroUndefined )
         {
-            assert( !macroDef );
+            assert( !macroDef.data() );
             defineStream << "#undef " << macroName << '\n';
         }
         if ( macroUsage == MacroUsage::macroDefined )
         {
             defined.insert( macroName );
-            assert( macroDef );
-            defineStream << "#define " << *macroDef << '\n';
+            assert( macroDef.data() );
+            defineStream << "#define " << macroDef << '\n';
         }
 
         if ( ( macroUsage == MacroUsage::macroUsed ) && ( defined.find( iter->second.first ) == defined.end() ) )
@@ -239,10 +239,10 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
 HeaderTracker::MacroDef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective const * def )
 {
     if ( !def )
-        return boost::none;
+        return MacroDef();
     clang::SourceLocation loc( def->getLocation() );
     if ( !loc.isValid() )
-        return boost::none;
+        return MacroDef();
     std::pair<clang::FileID, unsigned> spellingLoc( sourceManager().getDecomposedSpellingLoc( loc ) );
     if ( spellingLoc.first.isInvalid() )
         throw std::runtime_error( "Invalid FileID." );
@@ -264,7 +264,7 @@ HeaderTracker::MacroDef HeaderTracker::macroDefFromSourceLocation( clang::MacroD
     std::size_t size( endSpellingLoc.second - spellingLoc.second );
     while ( defLoc[ size - 1 ] == ' ' || defLoc[ size - 1 ] == '\t' )
         size--;
-    return std::string( defLoc, size );
+    return MacroDef( defLoc, size );
 }
 
 void HeaderTracker::macroUsed( std::string const & name, clang::MacroDirective const * def )
@@ -282,5 +282,5 @@ void HeaderTracker::macroDefined( std::string const & name, clang::MacroDirectiv
 void HeaderTracker::macroUndefined( std::string const & name, clang::MacroDirective const * def )
 {
     if ( !headerCtxStack().empty() )
-        headerCtxStack().back().addMacro( MacroUsage::macroUndefined, std::make_pair( name, boost::none ) );
+        headerCtxStack().back().addMacro( MacroUsage::macroUndefined, std::make_pair( name, MacroDef() ) );
 }

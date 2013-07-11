@@ -29,6 +29,10 @@
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
     <Compile Include="Source\distribute_task.py" />
+    <Compile Include="Source\Messaging\client.py" />
+    <Compile Include="Source\Messaging\matchmaker.py" />
+    <Compile Include="Source\Messaging\server.py" />
+    <Compile Include="Source\Messaging\test.py" />
     <Compile Include="Source\msvc.py" />
     <Compile Include="Source\scan_headers.py" />
     <Compile Include="Source\utils.py" />
@@ -37,6 +41,7 @@
     <Folder Include="Documentation\" />
     <Folder Include="Source\" />
     <Folder Include="Source\HeaderScanner\" />
+    <Folder Include="Source\Messaging\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />

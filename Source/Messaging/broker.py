@@ -19,16 +19,13 @@ class Broker:
         self.workers = collections.deque()
 
     def run(self):
-        print("BROKER: starting")
         while True:
             socks = dict((self.poll_all if self.workers else self.poll_servers).poll())
 
             if socks.get(self.servers) == zmq.POLLIN:
                 msg = self.servers.recv_multipart()
-                print("BROKER: '{}' on server socket".format(msg))
                 name = msg[0]
                 if len(msg) == 2 and msg[1] == b'READY':
-                    print("BROKER: SERVER {} REGISTERED!!!".format(name))
                     if name in self.workers:
                         self.servers.send_multipart([name, b'ONCE IS FINE'])
                     else:
@@ -39,7 +36,6 @@ class Broker:
             
             if socks.get(self.clients) == zmq.POLLIN:
                 msg = self.clients.recv_multipart()
-                print("BROKER: '{}' on client socket".format(msg))
                 name = msg[0]
                 
                 if len(msg) == 2 and msg[1] == b'GIMME':
@@ -50,7 +46,6 @@ class Broker:
                 else:
                     assert len(msg) > 2
                     payload = [msg[1], msg[0]] + msg[2:]
-                    print("BROKER: Sending '{}' to server socket.".format(payload))
                     self.servers.send_multipart(payload)
 
     

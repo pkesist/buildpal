@@ -6,8 +6,7 @@ from multiprocessing import Process
 from client import Client
 
 class EchoSession(ServerSession):
-    def __init__(self, *args, **kwargs):
-        ServerSession.__init__(self, *args, **kwargs)
+    def __init__(self):
         self.counter = 0
 
     def process_msg(self):

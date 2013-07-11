@@ -2,7 +2,7 @@ import zmq
 import pickle
 import random
 
-class MatchMakerClient:
+class Client:
     def __init__(self, zmq_ctx, address):
         self.socket = zmq_ctx.socket(zmq.DEALER)
         identity = "{:x}-{:x}".format(

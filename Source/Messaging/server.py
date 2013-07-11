@@ -2,7 +2,7 @@ import zmq
 import pickle
 import random
 
-class Session:
+class ServerSession:
     def __init__(self, recv, send):
         self.__recv = recv
         self.__send = send
@@ -22,9 +22,9 @@ class Session:
     def recv_pyobj(self):
         return pickle.loads(self.recv()[0])
 
-class MatchMakerWorker:
+class ServerWorker:
     def __init__(self, zmq_ctx, address, session_class):
-        assert issubclass(session_class, Session)
+        assert issubclass(session_class, ServerSession)
         self.zmq_ctx = zmq_ctx
         self.broker = self.zmq_ctx.socket(zmq.DEALER)
         self.address = address

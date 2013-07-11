@@ -2,7 +2,7 @@
 import zmq
 import collections
 
-class MatchMaker:
+class Broker:
     def __init__(self, zmq_ctx, client_address, server_address):
         self.clients = zmq_ctx.socket(zmq.ROUTER)
         self.servers = zmq_ctx.socket(zmq.ROUTER)

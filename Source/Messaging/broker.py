@@ -3,7 +3,7 @@ import zmq
 import collections
 
 class Broker:
-    def __init__(self, zmq_ctx, client_address, server_address):
+    def __init__(self, zmq_ctx, client_address, server_address, control_address=None):
         self.clients = zmq_ctx.socket(zmq.ROUTER)
         self.servers = zmq_ctx.socket(zmq.ROUTER)
         self.clients.bind(client_address)
@@ -17,6 +17,15 @@ class Broker:
         self.poll_all.register(self.servers, zmq.POLLIN)
 
         self.workers = collections.deque()
+
+        if control_address:
+            self.control = zmq_ctx.socket(zmq.SUB)
+            self.control.connect(control_address)
+            self.control.setsockopt(zmq.SUBSCRIBE, b'')
+            self.poll_servers.register(self.control, zmq.POLLIN)
+            self.poll_all.register(self.control, zmq.POLLIN)
+        else:
+            self.control = None
 
     def run(self):
         while True:
@@ -47,5 +56,10 @@ class Broker:
                     assert len(msg) > 2
                     payload = [msg[1], msg[0]] + msg[2:]
                     self.servers.send_multipart(payload)
+
+            if socks.get(self.control) == zmq.POLLIN:
+                msg = self.control.recv_multipart()
+                if msg[0] == b'SHUTDOWN':
+                    return
 
     

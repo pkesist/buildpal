@@ -21,31 +21,38 @@ class EchoSession(ServerSession):
         return True
 
 class EchoWorker(Process):
-    def __init__(self, address):
+    def __init__(self, address, control_address):
         Process.__init__(self)
         self.__address = address
+        self.__control_address = control_address
 
     def run(self):
-        ServerWorker(zmq.Context(), self.__address, EchoSession).run()
+        ServerWorker(zmq.Context(), self.__address, EchoSession,
+            self.__control_address).run()
 
-class BrokerProcess(Process):
-    def __init__(self, client_address, server_address):
+class BrokerProcess(Broker, Process):
+    def __init__(self, client_address, server_address, control_address):
         Process.__init__(self)
         self.__client_address = client_address
         self.__server_address = server_address
+        self.__control_address = control_address
 
     def run(self):
-        Broker(zmq.Context(), self.__client_address, self.__server_address).run()
+        Broker(zmq.Context(), self.__client_address, self.__server_address,
+            self.__control_address).run()
 
 if __name__ == '__main__':
-    broker = BrokerProcess('tcp://*:5555', 'tcp://*:5556')
-    worker = EchoWorker('tcp://localhost:5556')
+    zmq_ctx = zmq.Context()
+    control = zmq_ctx.socket(zmq.PUB)
+    control.bind('tcp://*:5557')
+
+    broker = BrokerProcess('tcp://*:5555', 'tcp://*:5556', 'tcp://localhost:5557')
+    worker = EchoWorker('tcp://localhost:5556', 'tcp://localhost:5557')
     
     broker.start()
     worker.start()
     
     try:
-        zmq_ctx = zmq.Context()
         client = Client(zmq_ctx, 'tcp://localhost:5555')
         client2 = Client(zmq_ctx, 'tcp://localhost:5555')
         client.send_pyobj('EINE KLEINE NACHTMUSIK')
@@ -63,5 +70,6 @@ if __name__ == '__main__':
         assert first_reply2 == "I REMEMBERED!"
         assert second_reply2 == 'ZARZALO'
     finally:
-        broker.terminate()
-        worker.terminate()
+        control.send(b'SHUTDOWN')
+        broker.join()
+        worker.join()

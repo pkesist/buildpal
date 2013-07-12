@@ -27,10 +27,12 @@ class EchoWorker(Process):
         self.__control_address = control_address
 
     def run(self):
-        ServerWorker(zmq.Context(), self.__address, EchoSession,
-            self.__control_address).run()
+        worker = ServerWorker(zmq.Context(), EchoSession)
+        worker.connect_broker(self.__address)
+        worker.connect_control(self.__control_address)
+        worker.run()
 
-class BrokerProcess(Broker, Process):
+class BrokerProcess(Process):
     def __init__(self, client_address, server_address, control_address):
         Process.__init__(self)
         self.__client_address = client_address
@@ -38,8 +40,11 @@ class BrokerProcess(Broker, Process):
         self.__control_address = control_address
 
     def run(self):
-        Broker(zmq.Context(), self.__client_address, self.__server_address,
-            self.__control_address).run()
+        broker = Broker(zmq.Context())
+        broker.bind_clients(self.__client_address)
+        broker.bind_servers(self.__server_address)
+        broker.connect_control(self.__control_address)
+        broker.run()
 
 if __name__ == '__main__':
     zmq_ctx = zmq.Context()

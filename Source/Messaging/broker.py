@@ -3,11 +3,9 @@ import zmq
 import collections
 
 class Broker:
-    def __init__(self, zmq_ctx, client_address, server_address, control_address=None):
+    def __init__(self, zmq_ctx):
         self.clients = zmq_ctx.socket(zmq.ROUTER)
         self.servers = zmq_ctx.socket(zmq.ROUTER)
-        self.clients.bind(client_address)
-        self.servers.bind(server_address)
 
         self.poll_servers = zmq.Poller()
         self.poll_servers.register(self.servers, zmq.POLLIN)
@@ -18,14 +16,25 @@ class Broker:
 
         self.workers = collections.deque()
 
-        if control_address:
-            self.control = zmq_ctx.socket(zmq.SUB)
-            self.control.connect(control_address)
-            self.control.setsockopt(zmq.SUBSCRIBE, b'')
-            self.poll_servers.register(self.control, zmq.POLLIN)
-            self.poll_all.register(self.control, zmq.POLLIN)
-        else:
-            self.control = None
+        self.control = zmq_ctx.socket(zmq.SUB)
+        self.control.setsockopt(zmq.SUBSCRIBE, b'')
+        self.poll_servers.register(self.control, zmq.POLLIN)
+        self.poll_all.register(self.control, zmq.POLLIN)
+
+    def bind_clients(self, address):
+        self.clients.bind(address)
+
+    def bind_servers(self, address):
+        self.servers.bind(address)
+
+    def connect_servers(self, address):
+        self.servers.connect(address)
+
+    def connect_control(self, address):
+        self.control.connect(address)
+
+    def bind_control(self, address):
+        self.control.bind(address)
 
     def run(self):
         while True:

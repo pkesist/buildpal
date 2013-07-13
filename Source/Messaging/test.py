@@ -9,6 +9,9 @@ class EchoSession(ServerSession):
     def __init__(self):
         self.counter = 0
 
+    def created(self):
+        return True
+
     def process_msg(self):
         if self.counter == 0:
             self.message = self.recv()

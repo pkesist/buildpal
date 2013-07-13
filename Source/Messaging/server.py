@@ -3,6 +3,9 @@ import pickle
 import random
 
 class ServerSession:
+    def created(self):
+        return True
+
     def process_msg(self):
         raise NotImplementedError()
     
@@ -83,8 +86,10 @@ class ServerWorker:
         assert issubclass(type(session), ServerSession)
         session.setup_communication(recv, send)
 
-        self.client_id_to_session[client_id] = session
-        return session
+        if session.created():
+            self.client_id_to_session[client_id] = session
+            return session
+        return None
 
     def __get_session(self, client_id):
         return self.client_id_to_session.get(client_id)

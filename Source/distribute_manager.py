@@ -12,6 +12,9 @@ import operator
 import os
 import socket
 import sys
+import zmq
+
+from Messaging import Client as MsgClient
 
 class ScopedTimer:
     def __init__(self, callable):
@@ -66,7 +69,48 @@ class PTHFileRepository:
     def register(self, file):
         self.__files[file] = os.stat(file).st_mtime
 
-def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_repository):
+def get_node(zmq_ctx, nodes, node_info):
+    def cmp(lhs, rhs):
+        #lhs_tasks_processing = node_info.tasks_processing(lhs)
+        #rhs_tasks_processing = node_info.tasks_processing(rhs)
+        lhs_tasks_processing = snode_info.connections(lhs)
+        rhs_tasks_processing = snode_info.connections(rhs)
+        lhs_average_time = node_info.average_time(lhs)
+        rhs_average_time = node_info.average_time(rhs)
+        if lhs_average_time == 0 and rhs_average_time == 0:
+            return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
+        if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
+            return -1 if lhs_average_time < rhs_average_time else 1
+        return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
+        
+    node_index = min(range(len(nodes)), key=cmp_to_key(cmp))
+    node = nodes[node_index]
+    try:
+        client = MsgClient(zmq_ctx)
+        client.connect('tcp://{}:{}'.format(node[0], node[1]))
+    except Exception:
+        print("Failed to connect to '{}'".format(node))
+        print(node)
+        import traceback
+        traceback.print_exc()
+        return None
+    accept = client.recv_pyobj()
+    if accept == "ACCEPT":
+        node_info.connection_open(node_index)
+        return node_index, client
+    else:
+        assert accept == "REJECT"
+        return None
+
+def set_zmq_ctx():
+    global zmq_ctx
+    zmq_ctx = zmq.Context()
+
+def get_zmq_ctx():
+    global zmq_ctx
+    return zmq_ctx
+
+def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_file_repository):
     try:
         client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
         if task.pch_header:
@@ -102,17 +146,21 @@ def compile_worker(task, client_id, timer, node_info, prepare_pool, pth_file_rep
                 task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
 
         with timer.timeit('find_available_node'):
-            get_node_queue = get_node_queues()
-            node_index, server_conn = get_node_queue.get()
+            get_result = None
+            while not get_result:
+                get_result = get_node(get_zmq_ctx(), nodes, node_info)
+            node_index, server_conn = get_result
 
         node_info.add_tasks_sent(node_index)
         with timer.timeit('send'):
-            server_conn.send(task)
+            server_conn.send_pyobj(task)
+        task_ok = server_conn.recv_pyobj()
+        assert task_ok == 'OK'
         task.manager_send(client_conn, server_conn, prepare_pool, timer)
 
         # Just block
         with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
-            server_status = server_conn.recv()
+            server_status = server_conn.recv_pyobj()
             if server_status == "SERVER_FAILED":
                 return None
 
@@ -135,21 +183,17 @@ class TaskProcessor(Process):
 
     def run(self):
         try:
-            get_node_queue = Queue(32)
             with BookKeepingManager() as book_keeper, \
-                Pool(processes=self.__max_processes, initializer=set_node_queues, initargs=(get_node_queue,)) as compile_pool:
+                Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
                 pth_files = book_keeper.PTHFileRepository()
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
                 prepare_pool = book_keeper.ProcessPool(4)
-                node_finders = [NodeFinder(self.__nodes, node_info, get_node_queue, timer) for node in range(8)]
-                for node_finder in node_finders:
-                    node_finder.start()
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     try:
                         task, client_id = self.__task_queue.get(timeout=2)
-                        compile_pool.apply_async(compile_worker, args=(task, client_id, timer, node_info, prepare_pool, pth_files))
+                        compile_pool.apply_async(compile_worker, args=(task, client_id, timer, self.__nodes, node_info, prepare_pool, pth_files))
                     except Empty:
                         pass
         finally:
@@ -182,16 +226,6 @@ class TaskProcessor(Process):
             print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, time, count, average))
 
 task_queue = Queue()
-
-get_node_queue = None
-
-def set_node_queues(get):
-    global get_node_queue
-    get_node_queue = get
-
-def get_node_queues():
-    global get_node_queue
-    return get_node_queue
 
 class NodeInfoHolder:
     class NodeInfo:
@@ -239,55 +273,6 @@ class NodeInfoHolder:
         if not self.tasks_sent(index):
             return 1.0
         return self.tasks_completed(index) / self.tasks_sent(index)
-
-class NodeFinder(Process):
-    def __init__(self, nodes, node_info, outgoing_queue, timer):
-        super(NodeFinder, self).__init__()
-        self.__nodes = nodes
-        self.__node_info = node_info
-        self.__outgoing_queue = outgoing_queue
-        self.__timer = timer
-
-    def run(self):
-        while True:
-            node = self.get_node()
-            if node:
-                self.__outgoing_queue.put(node)
-            else:
-                sleep(1)
-
-    def get_node(self):
-        def cmp(lhs, rhs):
-            #lhs_tasks_processing = self.__node_info.tasks_processing(lhs)
-            #rhs_tasks_processing = self.__node_info.tasks_processing(rhs)
-            lhs_tasks_processing = self.__node_info.connections(lhs)
-            rhs_tasks_processing = self.__node_info.connections(rhs)
-            lhs_average_time = self.__node_info.average_time(lhs)
-            rhs_average_time = self.__node_info.average_time(rhs)
-            if lhs_average_time == 0 and rhs_average_time == 0:
-                return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
-            if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
-                return -1 if lhs_average_time < rhs_average_time else 1
-            return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
-        
-        node_index = min(range(len(self.__nodes)), key=cmp_to_key(cmp))
-        node = self.__nodes[node_index]
-        try:
-            with socket.socket(getattr(socket, 'AF_INET')) as s:
-                s.settimeout(1)
-                s.connect(node)
-                s.settimeout(None)
-                server_conn = Connection(s.detach())
-        except Exception:
-            print("Failed to connect to '{}'".format(node))
-            return None
-        accept = server_conn.recv()
-        if accept == "ACCEPT":
-            self.__node_info.connection_open(node_index)
-            return node_index, server_conn
-        else:
-            assert accept == "REJECT"
-            return None
 
 class ProcessPool:
     def __init__(self, processes):

@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>Source\msvc.py</StartupFile>
+    <StartupFile>Source\Messaging\test.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -34,6 +34,7 @@
     <Compile Include="Source\Messaging\broker.py" />
     <Compile Include="Source\Messaging\server.py" />
     <Compile Include="Source\Messaging\test.py" />
+    <Compile Include="Source\Messaging\__init__.py" />
     <Compile Include="Source\msvc.py" />
     <Compile Include="Source\scan_headers.py" />
     <Compile Include="Source\utils.py" />

@@ -78,38 +78,33 @@ echo {delimiter}
                 to_add[a[:eq].upper()] = a[eq+1:]
         return to_add
 
+def receive_file(receiver, fileobj):
+    more = True
+    while more:
+        more, data = receiver()
+        fileobj.write(data)
 
-
-def receive_file(conn, *args, **kwargs):
-    tempfile = TempFile(*args, **kwargs)
-    with tempfile.open('wb') as file:
-        more = True
-        while more:
-            more, data = conn.recv()
-            file.write(data)
-    return tempfile
-
-def send_compressed_file(conn, fileobj):
+def send_compressed_file(sender, fileobj):
     compressor = zlib.compressobj(1)
     for data in iter(lambda : fileobj.read(100 * 1024), b''):
-        conn.send((True, compressor.compress(data)))
-    conn.send((False, compressor.flush(zlib.Z_FINISH)))
+        sender((True, compressor.compress(data)))
+    sender((False, compressor.flush(zlib.Z_FINISH)))
 
-def receive_compressed_file(conn, fileobj):
+def receive_compressed_file(receiver, fileobj):
     more = True
     decompressor = zlib.decompressobj()
     while more:
-        more, data = conn.recv()
+        more, data = receiver()
         fileobj.write(decompressor.decompress(data))
     fileobj.write(decompressor.flush())
 
-def send_file(conn, file):
+def send_file(sender, file):
     for data in iter(lambda : file.read(1024 * 1024), b''):
-        conn.send((True, data))
-    conn.send((False, b''))
+        sender((True, data))
+    sender((False, b''))
 
-def relay_file(sender_conn, receiver_conn):
+def relay_file(source_read, target_send):
     more = True
     while more:
-        more, data = sender_conn.recv()
-        receiver_conn.send((more, data))
+        more, data = source_read()
+        target_send((more, data))

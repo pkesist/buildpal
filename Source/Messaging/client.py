@@ -3,12 +3,14 @@ import pickle
 import random
 
 class Client:
-    def __init__(self, zmq_ctx, address):
+    def __init__(self, zmq_ctx):
         self.socket = zmq_ctx.socket(zmq.DEALER)
         identity = "{:x}-{:x}".format(
             random.randrange(0, 0x10000),
             random.randrange(0, 0x10000)).encode()
         self.socket.setsockopt(zmq.IDENTITY, identity)
+
+    def connect(self, address):
         self.socket.connect(address)
         self.socket.send(b'GIMME')
         self.server_id = self.socket.recv()

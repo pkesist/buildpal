@@ -61,8 +61,10 @@ if __name__ == '__main__':
     worker.start()
     
     try:
-        client = Client(zmq_ctx, 'tcp://localhost:5555')
-        client2 = Client(zmq_ctx, 'tcp://localhost:5555')
+        client = Client(zmq_ctx)
+        client.connect('tcp://localhost:5555')
+        client2 = Client(zmq_ctx)
+        client2.connect('tcp://localhost:5555')
         client.send_pyobj('EINE KLEINE NACHTMUSIK')
         client2.send_pyobj('ZARZALO')
         client.send_pyobj('WHATEVER')

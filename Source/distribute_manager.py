@@ -96,7 +96,6 @@ def get_node(zmq_ctx, nodes, node_info):
         return None
     accept = client.recv_pyobj()
     if accept == "ACCEPT":
-        node_info.connection_open(node_index)
         return node_index, client
     else:
         assert accept == "REJECT"
@@ -147,28 +146,34 @@ def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_f
 
         with timer.timeit('find_available_node'):
             get_result = None
-            while not get_result:
+            while True:
                 get_result = get_node(get_zmq_ctx(), nodes, node_info)
+                if get_result:
+                    break
+                sleep(1)
             node_index, server_conn = get_result
 
-        node_info.add_tasks_sent(node_index)
-        with timer.timeit('send'):
-            server_conn.send_pyobj(task)
-        task_ok = server_conn.recv_pyobj()
-        assert task_ok == 'OK'
-        task.manager_send(client_conn, server_conn, prepare_pool, timer)
+        try:
+            node_info.connection_open(node_index)
+            node_info.add_tasks_sent(node_index)
+            with timer.timeit('send'):
+                server_conn.send_pyobj(task)
+            task_ok = server_conn.recv_pyobj()
+            assert task_ok == 'OK'
+            task.manager_send(client_conn, server_conn, prepare_pool, timer)
 
-        # Just block
-        with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
-            server_status = server_conn.recv_pyobj()
-            if server_status == "SERVER_FAILED":
-                return None
+            # Just block
+            with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
+                server_status = server_conn.recv_pyobj()
+                if server_status == "SERVER_FAILED":
+                    return None
 
-        assert server_status == "SERVER_DONE"
-        with timer.timeit('receive'):
-            task.manager_receive(client_conn, server_conn, timer)
-            node_info.add_tasks_completed(node_index)
-            node_info.connection_closed(node_index)
+            assert server_status == "SERVER_DONE"
+            with timer.timeit('receive'):
+                task.manager_receive(client_conn, server_conn, timer)
+                node_info.add_tasks_completed(node_index)
+        finally:
+                node_info.connection_closed(node_index)
     except Exception:
         import traceback
         traceback.print_exc()

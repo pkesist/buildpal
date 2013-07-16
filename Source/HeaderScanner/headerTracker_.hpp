@@ -21,8 +21,7 @@ namespace clang
     class HeaderSearch;
 }
 
-typedef llvm::StringRef MacroDef;
-typedef std::pair<llvm::StringRef, MacroDef> Macro;
+typedef std::pair<llvm::StringRef, llvm::StringRef> Macro;
 typedef std::set<Macro> MacroSet;
 struct MacroUsage { enum Enum { macroUsed, macroDefined, macroUndefined }; };
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
@@ -62,6 +61,7 @@ public:
         Headers headers;
     };
     struct HeaderInfo : public std::map<MacroSet, CacheEntry> {};
+    typedef HeaderInfo::value_type CacheHit;
 
     template <typename HeadersList>
     void addEntry
@@ -73,6 +73,7 @@ public:
         HeadersList const & headers
     )
     {
+        // Clone all stringrefs to this cache's flyweight.
         headersInfo()[ file ].insert(
             std::make_pair( cloneMacros( macros ), CacheEntry( cloneMacros( definedMacros ), cloneMacros( undefinedMacros ), cloneHeaders( headers ) ) ) );
     }
@@ -264,9 +265,7 @@ private:
         MacroSet usedMacros_;
         MacroMap definedMacros_;
         MacroMap undefinedMacros_;
-        MacroUsages macroUsages_;
         Headers includedHeaders_;
-        std::set<llvm::StringRef> alreadyKnown_;
     };
     typedef std::vector<HeaderCtx> HeaderCtxStack;
 
@@ -279,7 +278,7 @@ private:
     clang::Preprocessor & preprocessor() const { assert( preprocessor_ ); return *preprocessor_; }
     clang::SourceManager & sourceManager() const { return sourceManager_; }
 
-    MacroDef macroDefFromSourceLocation( clang::MacroDirective const * def );
+    llvm::StringRef macroDefFromSourceLocation( clang::MacroDirective const * def );
 
 private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
@@ -287,7 +286,7 @@ private:
     clang::Preprocessor * preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache cache_;
-    Cache::HeaderInfo::value_type * cacheHit_;
+    Cache::CacheHit * cacheHit_;
     std::vector<clang::FileEntry const *> fileStack_;
 };
 

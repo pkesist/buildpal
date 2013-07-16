@@ -12,14 +12,14 @@
 
 namespace
 {
-    MacroDef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
+    llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
     {
         clang::SourceManager const & sourceManager( preprocessor.getSourceManager() );
         if ( !def )
-            return MacroDef();
+            return llvm::StringRef();
         clang::SourceLocation loc( def->getLocation() );
         if ( !loc.isValid() )
-            return MacroDef();
+            return llvm::StringRef();
         std::pair<clang::FileID, unsigned> spellingLoc( sourceManager.getDecomposedSpellingLoc( loc ) );
         if ( spellingLoc.first.isInvalid() )
             throw std::runtime_error( "Invalid FileID." );
@@ -41,13 +41,13 @@ namespace
         std::size_t size( endSpellingLoc.second - spellingLoc.second );
         while ( defLoc[ size - 1 ] == ' ' || defLoc[ size - 1 ] == '\t' )
             size--;
-        return MacroDef( defLoc, size );
+        return llvm::StringRef( defLoc, size );
     }
 
     bool isMacroCurrent( Macro const & macro, clang::Preprocessor const & preprocessor )
     {
-        std::string const & macroName( macro.first );
-        MacroDef const & macroDef( macro.second );
+        llvm::StringRef const macroName( macro.first );
+        llvm::StringRef const macroDef( macro.second );
 
         clang::IdentifierInfo * const identifier( preprocessor.getIdentifierInfo( macroName ) );
         assert( identifier );
@@ -101,7 +101,7 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
     sourceManager.disableFileContentsOverride( fileEntry_ );
 }
 
-Cache::HeaderInfo::value_type * Cache::findEntry( clang::FileEntry const * file, clang::Preprocessor const & preprocessor )
+Cache::CacheHit * Cache::findEntry( clang::FileEntry const * file, clang::Preprocessor const & preprocessor )
 {
     HeadersInfo::iterator const iter( headersInfo().find( file ) );
     if ( iter == headersInfo().end() )
@@ -147,7 +147,8 @@ Cache::HeaderInfo::value_type * Cache::findEntry( clang::FileEntry const * file,
 
 void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
-    // If cacheHit_ then we should be processing empty, fake, injected header.
+    // If cacheHit_ then we are in a fake header which does not include
+    // anything.
     assert( cacheHit_ == 0 );
 
     // Find the actual file being used.
@@ -168,7 +169,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     fileStack_.push_back( entry );
     std::string const & filename( entry->getName() );
 
-    Cache::HeaderInfo::value_type * const cacheHit( cache().findEntry( entry, preprocessor() ) );
+    Cache::CacheHit * const cacheHit( cache().findEntry( entry, preprocessor() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
@@ -242,18 +243,21 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     assert( file );
     struct Cleanup
     {
-        clang::SourceManager & sm_;
         HeaderCtxStack & stack_;
-        Cache::HeaderInfo::value_type * & cacheHit_;
-        Cleanup( clang::SourceManager & sm, HeaderCtxStack & stack, Cache::HeaderInfo::value_type * & cacheHit )
-            : sm_( sm ), stack_( stack ), cacheHit_( cacheHit )
+        Cache::CacheHit * & cacheHit_;
+
+        Cleanup( HeaderCtxStack & stack, Cache::CacheHit * & cacheHit )
+            :
+            stack_( stack ),
+            cacheHit_( cacheHit )
         {}
+
         ~Cleanup()
         {
             stack_.pop_back();
             cacheHit_ = 0;
         }
-    } const cleanup( sourceManager(), headerCtxStack(), cacheHit_ );
+    } const cleanup( headerCtxStack(), cacheHit_ );
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
     // Propagate the results to the file which included us.
@@ -300,7 +304,7 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
     return headerCtxStack().back().includedHeaders();
 }
 
-MacroDef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective const * def )
+llvm::StringRef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective const * def )
 {
     return ::macroDefFromSourceLocation( preprocessor(), def );
 }
@@ -320,5 +324,5 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
     if ( !headerCtxStack().empty() )
-        headerCtxStack().back().macroUndefined( std::make_pair( name, MacroDef() ) );
+        headerCtxStack().back().macroUndefined( std::make_pair( name, llvm::StringRef() ) );
 }

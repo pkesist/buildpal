@@ -4,47 +4,26 @@ path-constant CLANG_DIR : "D:\\Sandboxes\\External\\Clang" ;
 
 project HeaderScanner : requirements <warnings>off ;
 
-rule define-clang ( clang-dir : libs * )
-{
-    local rule clang-lib ( lib-name )
-    {
-        lib $(lib-name) : : <file>$(clang-dir)/build/lib/Debug/$(lib-name).lib <variant>debug <toolset>msvc ;
-        lib $(lib-name) : : <file>$(clang-dir)/build/lib/RelWithDebInfo/$(lib-name).lib <variant>profile <toolset>msvc ;
-        lib $(lib-name) : : <file>$(clang-dir)/build/lib/Release/$(lib-name).lib <toolset>msvc ;
-    }
 
-    for lib in $(libs)
-    {
-        clang-lib $(lib) ;
-    }
-
-    alias clang : $(libs) : : :
-        <include>$(clang-dir)\\llvm\\include
-        <include>$(clang-dir)\\llvm\\tools\\clang\\include
-        <include>$(clang-dir)\\build\\include
-        <include>$(clang-dir)\\build\\tools\\clang\\include
-    ;
-}
-
-define-clang $(CLANG_DIR) :
-    clangRewriteCore    
-    clangRewriteFrontend
-    clangFrontend       
-    clangDriver         
-    clangEdit           
-    clangSerialization  
-    clangParse          
-    clangSema           
-    clangAnalysis       
-    clangAST            
-    clangLex            
-    clangBasic          
-    LLVMMC              
-    LLVMOption          
-    LLVMSupport         
-    LLVMCore            
-    LLVMBitReader       
-    LLVMMCParser        
+alias clangLibs :
+    /clang//clangRewriteCore    
+    /clang//clangRewriteFrontend
+    /clang//clangFrontend       
+    /clang//clangDriver         
+    /clang//clangEdit           
+    /clang//clangSerialization  
+    /clang//clangParse          
+    /clang//clangSema           
+    /clang//clangAnalysis       
+    /clang//clangAST            
+    /clang//clangLex            
+    /clang//clangBasic          
+    /clang//LLVMMC              
+    /clang//LLVMOption          
+    /clang//LLVMSupport         
+    /clang//LLVMCore            
+    /clang//LLVMBitReader       
+    /clang//LLVMMCParser        
 ;
 
 alias preprocessing_stuff
@@ -52,7 +31,7 @@ alias preprocessing_stuff
     headerScanner_.cpp
     headerTracker_.cpp
     pythonBindings_.cpp
-    clang
+    clangLibs
     /python_dev//pythonLib
     /boost//headers
     /winlibs//advapi32lib
@@ -65,4 +44,6 @@ explicit preprocessing ;
 explicit preprocessing_d ;
 
 install ppinstall : preprocessing : <variant>profile <location>C:\\Python33\\DLLs ;
+install ppinstall2 : preprocessing : <variant>profile <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\Lib\\site-packages ;
+
 install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild <variant>debug ;

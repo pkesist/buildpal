@@ -97,8 +97,8 @@ namespace
         virtual void FileSkipped
         (
             clang::FileEntry const & fileEntry,
-		    clang::Token const &,
-		    clang::SrcMgr::CharacteristicKind
+            clang::Token const &,
+            clang::SrcMgr::CharacteristicKind
         )
         {
             foundViaFileStillNotFound_ = false;

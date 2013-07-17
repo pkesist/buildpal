@@ -1,7 +1,5 @@
 using winlibs ;
 
-path-constant CLANG_DIR : "D:\\Sandboxes\\External\\Clang" ;
-
 project HeaderScanner : requirements <warnings>off ;
 
 

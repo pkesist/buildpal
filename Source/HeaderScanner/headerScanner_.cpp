@@ -132,22 +132,6 @@ namespace
             headerTracker_.macroUndefined( macroNameTok.getIdentifierInfo()->getName(), md );
         }
 
-        virtual void Defined( clang::Token const & macroNameTok, clang::MacroDirective const * md )
-        {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
-        }
-
-        virtual void Ifdef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md )
-        {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
-        }
-
-        virtual void Ifndef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md )
-        {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
-        }
-
-
     private:
         HeaderTracker & headerTracker_;
         clang::SourceManager & sourceManager_;

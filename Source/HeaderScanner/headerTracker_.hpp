@@ -21,14 +21,13 @@ namespace clang
     class HeaderSearch;
 }
 
-typedef std::pair<llvm::StringRef, llvm::StringRef> Macro;
-typedef std::set<Macro> MacroSet;
-struct MacroUsage { enum Enum { macroUsed, macroDefined, macroUndefined }; };
+typedef std::pair<llvm::StringRef, llvm::StringRef> StringPair;
+typedef StringPair Macro;
+typedef StringPair Header;
+typedef std::set<StringPair> StringPairSet;
+typedef StringPairSet Headers;
+typedef StringPairSet Macros;
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
-typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
-typedef std::vector<MacroWithUsage> MacroUsages;
-typedef std::pair<llvm::StringRef, llvm::StringRef> Header;
-typedef std::set<Header> Headers;
 
 class Cache
 {
@@ -60,14 +59,14 @@ public:
         MacroMap undefinedMacros;
         Headers headers;
     };
-    struct HeaderInfo : public std::map<MacroSet, CacheEntry> {};
+    struct HeaderInfo : public std::map<Macros, CacheEntry> {};
     typedef HeaderInfo::value_type CacheHit;
 
     template <typename HeadersList>
     void addEntry
     (
         clang::FileEntry const * file,
-        MacroSet const & macros,
+        Macros const & macros,
         MacroMap const & definedMacros,
         MacroMap const & undefinedMacros,
         HeadersList const & headers
@@ -75,7 +74,7 @@ public:
     {
         // Clone all stringrefs to this cache's flyweight.
         headersInfo()[ file ].insert(
-            std::make_pair( cloneMacros( macros ), CacheEntry( cloneMacros( definedMacros ), cloneMacros( undefinedMacros ), cloneHeaders( headers ) ) ) );
+            std::make_pair( clone<Macros>( macros ), CacheEntry( clone<MacroMap>( definedMacros ), clone<MacroMap>( undefinedMacros ), clone<Headers>( headers ) ) ) );
     }
 
     HeaderInfo::value_type * findEntry
@@ -92,27 +91,12 @@ private:
         return llvm::StringRef( insertResult.first->data(), insertResult.first->size() );
     }
 
-    template <typename MacroList>
-    MacroList cloneMacros( MacroList const & macros )
+    template <typename Result, typename StringPairContainer>
+    Result clone( StringPairContainer const & cont )
     {
-        MacroList result;
-        for ( MacroList::const_iterator iter( macros.begin() ); iter != macros.end(); ++iter )
-        {
-            Macro const macro( cloneStr( iter->first ), cloneStr( iter->second ) );
-            result.insert( macro );
-        }
-        return result;
-    }
-
-    template <typename HeadersList>
-    Headers cloneHeaders( HeadersList const & headers )
-    {
-        Headers result;
-        for ( HeadersList::const_iterator iter( headers.begin() ); iter != headers.end(); ++iter )
-        {
-            Header const header( cloneStr( iter->first ), cloneStr( iter->second ) );
-            result.insert( header );
-        }
+        Result result;
+        for ( StringPairContainer::const_iterator iter( cont.begin() ); iter != cont.end(); ++iter )
+            result.insert( std::make_pair( cloneStr( iter->first ), cloneStr( iter->second ) ) );
         return result;
     }
 
@@ -204,7 +188,7 @@ private:
         }
 
         template <typename Headers>
-        void addStuff( MacroSet const & used, MacroMap const & defined, MacroMap const & undefined, Headers const * headers )
+        void addStuff( Macros const & used, MacroMap const & defined, MacroMap const & undefined, Headers const * headers )
         {
             struct MacroUsed
             {
@@ -249,7 +233,7 @@ private:
             }
         }
 
-        MacroSet const & usedMacros() const { return usedMacros_; }
+        Macros const & usedMacros() const { return usedMacros_; }
         MacroMap const & definedMacros() const { return definedMacros_; }
         MacroMap const & undefinedMacros() const { return undefinedMacros_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
@@ -262,7 +246,7 @@ private:
         
         typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
 
-        MacroSet usedMacros_;
+        Macros usedMacros_;
         MacroMap definedMacros_;
         MacroMap undefinedMacros_;
         Headers includedHeaders_;

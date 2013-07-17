@@ -54,7 +54,6 @@ namespace
             llvm::StringRef filename, bool isAngled,
             clang::DirectoryLookup const * fromDir,
             clang::DirectoryLookup const * & curDir,
-            clang::ModuleMap::KnownHeader *suggestedModule,
             clang::FileEntry const * & file)
         {
             headerTracker_.findFile( filename, isAngled, file );

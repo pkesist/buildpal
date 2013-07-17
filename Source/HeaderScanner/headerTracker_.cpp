@@ -114,7 +114,7 @@ Cache::CacheHit * Cache::findEntry( clang::FileEntry const * file, clang::Prepro
         ++headerInfoIter
     )
     {
-        MacroSet const & inputMacros( headerInfoIter->first );
+        Macros const & inputMacros( headerInfoIter->first );
         bool isMatch( true );
 
         struct MacroIsNotCurrent

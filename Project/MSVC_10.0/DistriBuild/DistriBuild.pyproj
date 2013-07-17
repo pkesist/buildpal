@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>Source\Messaging\test.py</StartupFile>
+    <StartupFile>Source\scan_headers.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>

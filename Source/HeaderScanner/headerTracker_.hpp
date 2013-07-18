@@ -6,6 +6,9 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
+
 #include <string>
 #include <map>
 #include <set>
@@ -59,8 +62,21 @@ public:
         MacroMap undefinedMacros;
         Headers headers;
     };
-    struct HeaderInfo : public std::map<Macros, CacheEntry> {};
-    typedef HeaderInfo::value_type CacheHit;
+
+    struct HeaderInfo : public std::map<Macros, CacheEntry>
+    {
+        typedef std::map<Macros, CacheEntry> Base;
+        typedef value_type CacheHit;
+
+        HeaderInfo() : disable_( false ) {}
+
+        CacheHit * find( clang::Preprocessor const & preprocessor );
+        void insert( Macros const & key, CacheEntry const & value );
+
+    private:
+        bool disable_;
+    };
+    typedef HeaderInfo::CacheHit CacheHit;
 
     template <typename HeadersList>
     void addEntry
@@ -73,8 +89,15 @@ public:
     )
     {
         // Clone all stringrefs to this cache's flyweight.
-        headersInfo()[ file ].insert(
-            std::make_pair( clone<Macros>( macros ), CacheEntry( clone<MacroMap>( definedMacros ), clone<MacroMap>( undefinedMacros ), clone<Headers>( headers ) ) ) );
+        headersInfo()[ file ].insert
+        (
+            clone<Macros>( macros ),
+            CacheEntry(
+                clone<MacroMap>( definedMacros ),
+                clone<MacroMap>( undefinedMacros ),
+                clone<Headers>( headers )
+            )
+        );
     }
 
     HeaderInfo::value_type * findEntry
@@ -87,7 +110,7 @@ private:
     // Poor man's flyweight.
     llvm::StringRef cloneStr( llvm::StringRef x )
     {
-        std::pair<std::set<std::string>::iterator, bool> insertResult( flyweight_.insert( x ) );
+        std::pair<FlyWeight::iterator, bool> insertResult( flyweight_.insert( x ) );
         return llvm::StringRef( insertResult.first->data(), insertResult.first->size() );
     }
 
@@ -101,14 +124,16 @@ private:
     }
 
 private:
-    struct HeadersInfo : public std::map<clang::FileEntry const *, HeaderInfo> {};
+    struct HeadersInfo : public boost::unordered_map<clang::FileEntry const *, HeaderInfo> {};
 
     HeadersInfo const & headersInfo() const { return headersInfo_; }
     HeadersInfo       & headersInfo()       { return headersInfo_; }
 
+    typedef boost::unordered_set<std::string> FlyWeight;
+
 private:
     HeadersInfo headersInfo_;
-    std::set<std::string> flyweight_;
+    FlyWeight flyweight_;
 };
 
 class HeaderTracker
@@ -170,16 +195,7 @@ private:
 
         void macroUndefined( Macro const & macro )
         {
-            MacroMap::iterator const iter( definedMacros_.find( macro.first ) );
-            if ( iter != definedMacros_.end() )
-            {
-                usedMacros_.erase( *iter );
-                definedMacros_.erase( iter );
-            }
-            else
-            {
-                undefinedMacros_.insert( macro );
-            }
+            undefinedMacros_.insert( macro );
         }
 
         void addHeader( Header const & header )
@@ -271,7 +287,9 @@ private:
     HeaderCtxStack headerCtxStack_;
     Cache cache_;
     Cache::CacheHit * cacheHit_;
+    std::set<Cache::CacheHit *> cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
+
 };
 
 

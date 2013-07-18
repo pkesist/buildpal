@@ -187,7 +187,8 @@ def test_files(files, includes, macros):
         print("FILE ", file)
         start = time.time()
         for x in all_headers(file, includes, [], macros, ""):
-            print(x[0])
+            pass
+            #print(x[0])
         print("It took {:.2f}s.".format(time.time() - start))
 
 if __name__ == '__main__':

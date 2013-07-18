@@ -9,7 +9,6 @@
 #include <iostream>
 #include <sstream>
 
-
 namespace
 {
     llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
@@ -53,7 +52,9 @@ namespace
         assert( identifier );
         clang::MacroDirective const * const currentMacroDir( preprocessor.getMacroDirective( identifier ) );
 
-        return macroDef == macroDefFromSourceLocation( preprocessor, currentMacroDir );
+        llvm::StringRef const currentMacroDef( macroDefFromSourceLocation( preprocessor, currentMacroDir ) );
+
+        return macroDef == currentMacroDef;
     }
 }
 
@@ -79,7 +80,7 @@ clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager &
     for ( MacroMap::const_iterator iter( undefinedMacros.begin() ); iter != undefinedMacros.end(); ++iter )
     {
         assert( !iter->second.data() );
-        defineStream << "#undef" << iter->first << '\n';
+        defineStream << "#undef " << iter->first << '\n';
     }
     defineStream << '\0';
 
@@ -104,13 +105,20 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 Cache::CacheHit * Cache::findEntry( clang::FileEntry const * file, clang::Preprocessor const & preprocessor )
 {
     HeadersInfo::iterator const iter( headersInfo().find( file ) );
-    if ( iter == headersInfo().end() )
+    if ( iter != headersInfo().end() )
+        return iter->second.find( preprocessor );
+    return 0;
+}
+
+Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
+{
+    if ( disable_ )
         return 0;
 
     for
     (
-        HeaderInfo::iterator headerInfoIter( iter->second.begin() );
-        headerInfoIter != iter->second.end();
+        Base::iterator headerInfoIter( Base::begin() );
+        headerInfoIter != Base::end();
         ++headerInfoIter
     )
     {
@@ -144,6 +152,11 @@ Cache::CacheHit * Cache::findEntry( clang::FileEntry const * file, clang::Prepro
     return 0;
 }
 
+void Cache::HeaderInfo::insert( Macros const & key, CacheEntry const & value )
+{
+    Base::insert( std::make_pair( key, value ) );
+}
+
 
 void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
@@ -175,8 +188,8 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         fileEntry = entry;
         return;
     }
-
     cacheHit_ = cacheHit;
+    cacheEntriesUsed_.insert( cacheHit );
     fileEntry = cacheHit->second.getFileEntry( preprocessor().getSourceManager() );
 }
 
@@ -301,6 +314,10 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
         Cleanup( HeaderCtxStack & stack ) : stack_( stack ) {}
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
+
+    for ( std::set<Cache::CacheHit *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
+        (*iter)->second.releaseFileEntry( sourceManager() );
+    cacheEntriesUsed_.clear();
     return headerCtxStack().back().includedHeaders();
 }
 
@@ -311,18 +328,21 @@ llvm::StringRef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective
 
 void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( !headerCtxStack().empty() )
-        headerCtxStack().back().macroUsed( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
+    if ( cacheHit_ || headerCtxStack().empty() )
+        return;
+    headerCtxStack().back().macroUsed( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( !headerCtxStack().empty() )
-        headerCtxStack().back().macroDefined( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
+    if ( cacheHit_ || headerCtxStack().empty() )
+        return;
+    headerCtxStack().back().macroDefined( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
 }
 
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( !headerCtxStack().empty() )
-        headerCtxStack().back().macroUndefined( std::make_pair( name, llvm::StringRef() ) );
+    if ( cacheHit_ || headerCtxStack().empty() )
+        return;
+    headerCtxStack().back().macroUndefined( std::make_pair( name, llvm::StringRef() ) );
 }

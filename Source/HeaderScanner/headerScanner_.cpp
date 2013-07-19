@@ -159,7 +159,7 @@ namespace
     };
 }  // anonymous namespace
 
-Preprocessor::Preprocessor()
+Preprocessor::Preprocessor( Cache & cache )
 {
     // Create diagnostics.
     compiler().createDiagnostics( new clang::IgnoringDiagConsumer() );
@@ -186,7 +186,7 @@ Preprocessor::Preprocessor()
     // Create the source manager.
     sourceManager_.reset( new clang::SourceManager( compiler().getDiagnostics(), compiler().getFileManager(), false ) );
     compiler().setSourceManager( &sourceManager() );
-    headerTracker_.reset( new HeaderTracker( sourceManager() ) );
+    headerTracker_.reset( new HeaderTracker( sourceManager(), cache ) );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
@@ -274,6 +274,9 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     HeaderRefs result;
     headerTracker().setPreprocessor( &preprocessor() );
     headerTracker().setHeaderSearch( getHeaderSearch( ppc.searchPath() ) );
+
+    // Do not let #pragma once interfere with cache.
+    preprocessor().setPragmasEnabled( false );
 
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker(),
         sourceManager(), preprocessor(), compiler().getFileManager(),

@@ -1,162 +1,13 @@
 #include "headerTracker_.hpp"
 
+#include "utility_.hpp"
+
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/HeaderSearch.h"
-
-#include "boost/lambda/bind.hpp"
 
 #include <algorithm>
 #include <iostream>
 #include <sstream>
-
-namespace
-{
-    llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
-    {
-        clang::SourceManager const & sourceManager( preprocessor.getSourceManager() );
-        if ( !def )
-            return llvm::StringRef();
-        clang::SourceLocation loc( def->getLocation() );
-        if ( !loc.isValid() )
-            return llvm::StringRef();
-        std::pair<clang::FileID, unsigned> spellingLoc( sourceManager.getDecomposedSpellingLoc( loc ) );
-        if ( spellingLoc.first.isInvalid() )
-            throw std::runtime_error( "Invalid FileID." );
-        clang::FileEntry const * fileEntry( sourceManager.getFileEntryForID( spellingLoc.first ) );
-        bool invalid;
-        llvm::MemoryBuffer const * buffer( sourceManager.getBuffer( spellingLoc.first, loc, &invalid ) );
-        assert( !invalid );
-        // Find beginning of directive.
-        char const * defLoc( buffer->getBufferStart() + spellingLoc.second );
-        // Find end of directive.
-        clang::Lexer rawLex( loc, preprocessor.getLangOpts(),
-            defLoc, defLoc, buffer->getBufferEnd() );
-        rawLex.setParsingPreprocessorDirective( true );
-        clang::Token rawToken;
-        do { rawLex.LexFromRawLexer( rawToken ); } while ( rawToken.isNot( clang::tok::eod ) );
-        std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( rawToken.getLocation() ) );
-        assert( spellingLoc.first == endSpellingLoc.first );
-        assert( spellingLoc.second < endSpellingLoc.second );
-        std::size_t size( endSpellingLoc.second - spellingLoc.second );
-        while ( defLoc[ size - 1 ] == ' ' || defLoc[ size - 1 ] == '\t' )
-            size--;
-        return llvm::StringRef( defLoc, size );
-    }
-
-    bool isMacroCurrent( Macro const & macro, clang::Preprocessor const & preprocessor )
-    {
-        llvm::StringRef const macroName( macro.first );
-        llvm::StringRef const macroDef( macro.second );
-
-        clang::IdentifierInfo * const identifier( preprocessor.getIdentifierInfo( macroName ) );
-        assert( identifier );
-        clang::MacroDirective const * const currentMacroDir( preprocessor.getMacroDirective( identifier ) );
-
-        llvm::StringRef const currentMacroDef( macroDefFromSourceLocation( preprocessor, currentMacroDir ) );
-
-        return macroDef == currentMacroDef;
-    }
-}
-
-clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
-{
-    assert( !overridden_ );
-    if ( !fileEntry_ )
-    {
-        static unsigned counter( 0 );
-        std::stringstream filename;
-        filename << "_file" << counter++;
-        fileEntry_ = sourceManager.getFileManager().getVirtualFile( filename.str(), filename.str().size(), 0 );
-    }
-
-    // Cache the result.
-    std::string buffer;
-    llvm::raw_string_ostream defineStream( buffer );
-    for ( MacroMap::const_iterator iter( definedMacros.begin() ); iter != definedMacros.end(); ++iter )
-    {
-        assert( iter->second.data() );
-        defineStream << "#define " << iter->second << '\n';
-    }
-    for ( MacroMap::const_iterator iter( undefinedMacros.begin() ); iter != undefinedMacros.end(); ++iter )
-    {
-        assert( !iter->second.data() );
-        defineStream << "#undef " << iter->first << '\n';
-    }
-    defineStream << '\0';
-
-    std::string const & content( defineStream.str() );
-    static unsigned counter( 0 );
-    std::stringstream filename;
-    filename << "_file" << counter++;
-    llvm::MemoryBuffer * const memoryBuffer(
-        llvm::MemoryBuffer::getMemBufferCopy( content, "" ) );
-    sourceManager.overrideFileContents( fileEntry_, memoryBuffer, true );
-    overridden_ = true;
-    return fileEntry_;
-}
-
-void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
-{
-    assert( fileEntry_ );
-    assert( overridden_ );
-    sourceManager.disableFileContentsOverride( fileEntry_ );
-}
-
-Cache::CacheHit * Cache::findEntry( clang::FileEntry const * file, clang::Preprocessor const & preprocessor )
-{
-    HeadersInfo::iterator const iter( headersInfo().find( file ) );
-    if ( iter != headersInfo().end() )
-        return iter->second.find( preprocessor );
-    return 0;
-}
-
-Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
-{
-    if ( disable_ )
-        return 0;
-
-    for
-    (
-        Base::iterator headerInfoIter( Base::begin() );
-        headerInfoIter != Base::end();
-        ++headerInfoIter
-    )
-    {
-        Macros const & inputMacros( headerInfoIter->first );
-        bool isMatch( true );
-
-        struct MacroIsNotCurrent
-        {
-            clang::Preprocessor const & pp_;
-            
-            explicit MacroIsNotCurrent( clang::Preprocessor const & pp ) : pp_( pp ) {}
-
-            bool operator()( Macro const & macro )
-            {
-                return !isMacroCurrent( macro, pp_ );
-            }
-        } macroIsNotCurrent( preprocessor );
-        
-        if
-        (
-            std::find_if
-            (
-                inputMacros.begin(), inputMacros.end(),
-                macroIsNotCurrent
-            ) != inputMacros.end()
-        )
-            continue;
-
-        return &*headerInfoIter;
-    }
-    return 0;
-}
-
-void Cache::HeaderInfo::insert( Macros const & key, CacheEntry const & value )
-{
-    Base::insert( std::make_pair( key, value ) );
-}
-
 
 void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
@@ -180,9 +31,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     }
 
     fileStack_.push_back( entry );
-    std::string const & filename( entry->getName() );
-
-    Cache::CacheHit * const cacheHit( cache().findEntry( entry, preprocessor() ) );
+    Cache::CacheHit * const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
@@ -281,9 +130,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     {
         includer.addStuff
         (
-            cacheHit_->first,
-            cacheHit_->second.definedMacros,
-            cacheHit_->second.undefinedMacros,
+            cacheHit_->second.macroUsages,
             ignoreHeaders ? 0 : &cacheHit_->second.headers
         );
     }
@@ -291,9 +138,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     {
         includer.addStuff
         (
-            headerCtxStack().back().usedMacros(),
-            headerCtxStack().back().definedMacros(),
-            headerCtxStack().back().undefinedMacros(),
+            headerCtxStack().back().macroUsages(),
             ignoreHeaders ? 0 : &headerCtxStack().back().includedHeaders()
         );
 
@@ -303,7 +148,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 
 void HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
-    cache.addEntry( file, usedMacros(), definedMacros(), undefinedMacros(), includedHeaders() );
+    cache.addEntry( file, usedMacros(), macroUsages(), includedHeaders() );
 }
 
 HeaderTracker::Headers HeaderTracker::exitSourceFile()
@@ -315,8 +160,8 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
 
-    for ( std::set<Cache::CacheHit *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
-        (*iter)->second.releaseFileEntry( sourceManager() );
+    //for ( std::set<Cache::CacheHit *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
+    //    (*iter)->second.releaseFileEntry( sourceManager() );
     cacheEntriesUsed_.clear();
     return headerCtxStack().back().includedHeaders();
 }

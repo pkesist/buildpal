@@ -4,6 +4,7 @@ from queue import Empty
 from multiprocessing import Lock, Process, Pool, Queue
 from multiprocessing.connection import Connection, Client
 from multiprocessing.managers import BaseManager, SyncManager, BaseProxy
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock as ThreadLock
 from time import sleep, time
 
@@ -187,23 +188,19 @@ class TaskProcessor(Process):
         super(TaskProcessor, self).__init__()
 
     def run(self):
-        try:
-            with BookKeepingManager() as book_keeper, \
-                Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
-                pth_files = book_keeper.PTHFileRepository()
-                node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
-                timer = book_keeper.Timer()
-                prepare_pool = book_keeper.ProcessPool(4)
-                while True:
-                    self.print_stats(node_info, timer.as_dict())
-                    try:
-                        task, client_id = self.__task_queue.get(timeout=2)
-                        compile_pool.apply_async(compile_worker, args=(task, client_id, timer, self.__nodes, node_info, prepare_pool, pth_files))
-                    except Empty:
-                        pass
-        finally:
-            for node_finders in node_finders:
-                node_finders.terminate()
+        with BookKeepingManager() as book_keeper, \
+            Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
+            pth_files = book_keeper.PTHFileRepository()
+            node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
+            timer = book_keeper.Timer()
+            prepare_pool = book_keeper.ThreadPool(4)
+            while True:
+                self.print_stats(node_info, timer.as_dict())
+                try:
+                    task, client_id = self.__task_queue.get(timeout=2)
+                    compile_pool.apply_async(compile_worker, args=(task, client_id, timer, self.__nodes, node_info, prepare_pool, pth_files))
+                except Empty:
+                    pass
 
     def print_stats(self, node_info, times):
         sys.stdout.write("================\n")
@@ -279,27 +276,27 @@ class NodeInfoHolder:
             return 1.0
         return self.tasks_completed(index) / self.tasks_sent(index)
 
-class ProcessPool:
-    def __init__(self, processes):
-        self.__prepare_pool = Pool(processes=processes)
+class ThreadPool:
+    def __init__(self, workers):
+        self.__executor = ThreadPoolExecutor(max_workers=workers)
         self.__async_tasks = {}
         self.__counter = 0
 
-    def async_run(self, callable, *args, **kwds):
+    def async_run(self, callable, *args):
         id = self.__counter
         self.__counter += 1
-        self.__async_tasks[id] = self.__prepare_pool.apply_async(callable, args=args, kwds=kwds)
+        self.__async_tasks[id] = self.__executor.submit(callable, *args)
         return id
 
     def get_result(self, id):
-        result = self.__async_tasks[id].get()
+        result = self.__async_tasks[id].result()
         del self.__async_tasks[id]
         return result
 
 class BookKeepingManager(SyncManager):
     pass
 
-BookKeepingManager.register('ProcessPool', ProcessPool)
+BookKeepingManager.register('ThreadPool', ThreadPool)
 BookKeepingManager.register('Timer', Timer, TimerProxy)
 BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
 BookKeepingManager.register('PTHFileRepository', PTHFileRepository)

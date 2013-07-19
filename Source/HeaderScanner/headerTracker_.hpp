@@ -6,8 +6,9 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
-#include <boost/unordered_map.hpp>
-#include <boost/unordered_set.hpp>
+#include "headerCache_.hpp"
+
+#include "boost/bind.hpp"
 
 #include <string>
 #include <map>
@@ -24,118 +25,6 @@ namespace clang
     class HeaderSearch;
 }
 
-typedef std::pair<llvm::StringRef, llvm::StringRef> StringPair;
-typedef StringPair Macro;
-typedef StringPair Header;
-typedef std::set<StringPair> StringPairSet;
-typedef StringPairSet Headers;
-typedef StringPairSet Macros;
-typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
-
-class Cache
-{
-public:
-    struct CacheEntry
-    {
-        CacheEntry
-        (
-            MacroMap const & definedMacrosp,
-            MacroMap const & undefinedMacrosp,
-            Headers const & headersp
-        ) : 
-            fileEntry_( 0 ),
-            overridden_( false ),
-            definedMacros( definedMacrosp ),
-            undefinedMacros( undefinedMacrosp ),
-            headers( headersp )
-        {}
-
-        clang::FileEntry const * getFileEntry( clang::SourceManager & );
-        void releaseFileEntry( clang::SourceManager & );
-
-    private:
-        clang::FileEntry const * fileEntry_;
-        bool overridden_;
-
-    public:
-        MacroMap definedMacros;
-        MacroMap undefinedMacros;
-        Headers headers;
-    };
-
-    struct HeaderInfo : public std::map<Macros, CacheEntry>
-    {
-        typedef std::map<Macros, CacheEntry> Base;
-        typedef value_type CacheHit;
-
-        HeaderInfo() : disable_( false ) {}
-
-        CacheHit * find( clang::Preprocessor const & preprocessor );
-        void insert( Macros const & key, CacheEntry const & value );
-
-    private:
-        bool disable_;
-    };
-    typedef HeaderInfo::CacheHit CacheHit;
-
-    template <typename HeadersList>
-    void addEntry
-    (
-        clang::FileEntry const * file,
-        Macros const & macros,
-        MacroMap const & definedMacros,
-        MacroMap const & undefinedMacros,
-        HeadersList const & headers
-    )
-    {
-        // Clone all stringrefs to this cache's flyweight.
-        headersInfo()[ file ].insert
-        (
-            clone<Macros>( macros ),
-            CacheEntry(
-                clone<MacroMap>( definedMacros ),
-                clone<MacroMap>( undefinedMacros ),
-                clone<Headers>( headers )
-            )
-        );
-    }
-
-    HeaderInfo::value_type * findEntry
-    ( 
-        clang::FileEntry const * file,
-        clang::Preprocessor const & preprocessor
-    );
-
-private:
-    // Poor man's flyweight.
-    llvm::StringRef cloneStr( llvm::StringRef x )
-    {
-        std::pair<FlyWeight::iterator, bool> insertResult( flyweight_.insert( x ) );
-        return llvm::StringRef( insertResult.first->data(), insertResult.first->size() );
-    }
-
-    template <typename Result, typename StringPairContainer>
-    Result clone( StringPairContainer const & cont )
-    {
-        Result result;
-        for ( StringPairContainer::const_iterator iter( cont.begin() ); iter != cont.end(); ++iter )
-            result.insert( std::make_pair( cloneStr( iter->first ), cloneStr( iter->second ) ) );
-        return result;
-    }
-
-private:
-    struct HeadersInfo : public boost::unordered_map<clang::FileEntry const *, HeaderInfo> {};
-
-    HeadersInfo const & headersInfo() const { return headersInfo_; }
-    HeadersInfo       & headersInfo()       { return headersInfo_; }
-
-    typedef boost::unordered_set<std::string> FlyWeight;
-
-private:
-    HeadersInfo headersInfo_;
-    FlyWeight flyweight_;
-};
-
 class HeaderTracker
 {
 public:
@@ -143,8 +32,8 @@ public:
     typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::SourceManager & sm )
-        : sourceManager_( sm ), preprocessor_( 0 ), cacheHit_( 0 )
+    explicit HeaderTracker( clang::SourceManager & sm, Cache & cache )
+        : sourceManager_( sm ), cache_( cache ), preprocessor_( 0 ), cacheHit_( 0 )
     {}
 
     void enterSourceFile( clang::FileEntry const * );
@@ -183,19 +72,20 @@ private:
 
         void macroUsed( Macro const & macro )
         {
-            MacroMap::iterator const iter( definedMacros_.find( macro.first ) );
-            if ( iter == definedMacros_.end() )
+            macroUsages_.push_back( std::make_pair( MacroUsage::used, macro ) );
+            if ( definedMacros_.find( macro.first ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
         }
 
         void macroDefined( Macro const & macro )
         {
-            definedMacros_.insert( macro );
+            macroUsages_.push_back( std::make_pair( MacroUsage::defined, macro ) );
+            definedMacros_.insert( macro.first );
         }
 
         void macroUndefined( Macro const & macro )
         {
-            undefinedMacros_.insert( macro );
+            macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
         void addHeader( Header const & header )
@@ -203,44 +93,22 @@ private:
             includedHeaders_.insert( header );
         }
 
-        template <typename Headers>
-        void addStuff( Macros const & used, MacroMap const & defined, MacroMap const & undefined, Headers const * headers )
+        void addMacroUsage( MacroWithUsage const & macroWithUsage )
         {
-            struct MacroUsed
+            switch ( macroWithUsage.first )
             {
-                HeaderCtx & ctx_;
+                case MacroUsage::used: macroUsed( macroWithUsage.second ); break;
+                case MacroUsage::defined: macroDefined( macroWithUsage.second ); break;
+                case MacroUsage::undefined: macroUndefined( macroWithUsage.second ); break;
+                default: assert( !"Invalid macro usage." );
+            }
+        }
 
-                MacroUsed( HeaderCtx & ctx ) : ctx_( ctx ) {}
-                void operator()( Macro const & macro )
-                {
-                    ctx_.macroUsed( macro );
-                }
-            } macroUsed( *this );
-            std::for_each( used.begin(), used.end(), macroUsed );
-
-            struct MacroDefined
-            {
-                HeaderCtx & ctx_;
-
-                MacroDefined( HeaderCtx & ctx ) : ctx_( ctx ) {}
-                void operator()( Macro const & macro )
-                {
-                    ctx_.macroDefined( macro );
-                }
-            } macroDefined( *this );
-            std::for_each( defined.begin(), defined.end(), macroDefined );
-
-            struct MacroUndefined
-            {
-                HeaderCtx & ctx_;
-
-                MacroUndefined( HeaderCtx & ctx ) : ctx_( ctx ) {}
-                void operator()( Macro const & macro )
-                {
-                    ctx_.macroUndefined( macro );
-                }
-            } macroUndefined( *this );
-            std::for_each( undefined.begin(), undefined.end(), macroUndefined );
+        template <typename Headers>
+        void addStuff( MacroUsages const & macroUsages, Headers const * headers )
+        {
+            std::for_each( macroUsages.begin(), macroUsages.end(),
+                    boost::bind( &HeaderTracker::HeaderCtx::addMacroUsage, this, _1 ) );
 
             if ( headers )
             {
@@ -250,8 +118,7 @@ private:
         }
 
         Macros const & usedMacros() const { return usedMacros_; }
-        MacroMap const & definedMacros() const { return definedMacros_; }
-        MacroMap const & undefinedMacros() const { return undefinedMacros_; }
+        MacroUsages const & macroUsages() const { return macroUsages_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         Header const & header() { return header_; }
 
@@ -263,8 +130,8 @@ private:
         typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
 
         Macros usedMacros_;
-        MacroMap definedMacros_;
-        MacroMap undefinedMacros_;
+        std::set<llvm::StringRef> definedMacros_;
+        MacroUsages macroUsages_;
         Headers includedHeaders_;
     };
     typedef std::vector<HeaderCtx> HeaderCtxStack;
@@ -285,11 +152,10 @@ private:
     clang::SourceManager & sourceManager_;
     clang::Preprocessor * preprocessor_;
     HeaderCtxStack headerCtxStack_;
-    Cache cache_;
+    Cache & cache_;
     Cache::CacheHit * cacheHit_;
     std::set<Cache::CacheHit *> cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
-
 };
 
 

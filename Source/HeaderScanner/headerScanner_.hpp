@@ -15,7 +15,7 @@ namespace clang
     class HeaderSearch;
 }
 
-
+class Cache;
 class HeaderTracker;
 
 class PreprocessingContext
@@ -55,7 +55,7 @@ private:
 class Preprocessor
 {
 public:
-    Preprocessor();
+    Preprocessor( Cache & cache );
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;

@@ -2,7 +2,6 @@
 from utils import TempFile
 
 import preprocessing
-from msvc import MSVCDistributer
 
 import copy
 import itertools
@@ -11,13 +10,18 @@ import sys
 import types
 import time
 import zipfile
+import threading
 
 from tempfile import mkdtemp
 from shutil import rmtree
 
-preprocessor = preprocessing.Preprocessor()
+cache = preprocessing.Cache()
+thread_local = threading.local()
 
 def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
+    if not hasattr(thread_local, 'preprocessor'):
+        thread_local.preprocessor = preprocessing.Preprocessor(cache)
+    preprocessor = thread_local.preprocessor
     preprocessor.setMicrosoftMode(True) # If MSVC.
     preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
@@ -33,10 +37,10 @@ def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
         ppc.add_macro(macro, value)
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)
-    return ppc
+    return preprocessor, ppc
 
 def create_pth(hpp_file, pth_file, includes, sysincludes, defines):
-    ppc = setup_preprocessor(includes, sysincludes, defines)
+    preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines)
     with TempFile(suffix='.cpp') as cpp:
         with cpp.open('wt') as cpp_file:
             cpp_file.write('#include "{}"\n'.format(hpp_file))
@@ -45,7 +49,7 @@ def create_pth(hpp_file, pth_file, includes, sysincludes, defines):
 
 def preprocess_file(cpp_file, includes, sysincludes, defines):
     try:
-        ppc = setup_preprocessor(includes, sysincludes, defines)
+        preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines)
         return preprocessor.preprocess(ppc, cpp_file)
     except Exception:
         import traceback
@@ -55,13 +59,13 @@ def preprocess_file(cpp_file, includes, sysincludes, defines):
     return None
 
 def all_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
-    ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
+    preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
     return preprocessor.scanHeaders(ppc, cpp_file, pth_file)
 
 
 def collect_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
     try:
-        ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
+        preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
         zip_file = TempFile(suffix='.zip')
         paths_to_include = []
         relative_paths = {}
@@ -187,8 +191,8 @@ def test_files(files, includes, macros):
         print("FILE ", file)
         start = time.time()
         for x in all_headers(file, includes, [], macros, ""):
-            pass
-            #print(x[0])
+            if 'boost/function' in x[0]:
+                print(x[0])
         print("It took {:.2f}s.".format(time.time() - start))
 
 if __name__ == '__main__':
@@ -203,21 +207,7 @@ if __name__ == '__main__':
     #print(all_headers(r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\thread.cpp',
     #            [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"], [], [], ""))
     test_files([
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\system\src\error_code.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\codecvt_error_category.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\operations.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\path.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\path_traits.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\portability.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\unique_path.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\utf8_codecvt_facet.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\filesystem\src\windows_file_codecvt.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\python\src\list.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\python\src\list.cpp",
-        r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\python\src\list.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\tss_dll.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\tss_pe.cpp",
-        #r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\future.cpp",
+        r'D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0\libs\thread\src\win32\thread.cpp'
         ],
         [r"D:\Sandboxes\PKE\Libraries\Boost\boost_1_53_0"],
         ['_MSC_VER=1500',

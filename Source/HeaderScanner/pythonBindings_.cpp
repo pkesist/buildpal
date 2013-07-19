@@ -1,8 +1,38 @@
 #include "headerScanner_.hpp"
+#include "headerCache_.hpp"
 
 #include <Python.h>
 
 
+struct AllowPythonThreads
+{
+    AllowPythonThreads()
+        :
+        released_( false )
+    {
+        save_ = PyEval_SaveThread();
+    }
+
+    void release()
+    {
+        if ( !released_ )
+        {
+            PyEval_RestoreThread( save_ );
+            released_ = true;
+        }
+    }
+
+    ~AllowPythonThreads()
+    {
+        release();
+    }
+
+private:
+    PyThreadState * save_;
+    bool released_;
+};
+
+    
 ////////////////////////////////////////////////////////////////////////////////
 //
 // ----------------------
@@ -138,6 +168,82 @@ PyTypeObject PyPreprocessingContextType = {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+// -------
+// PyCache
+// -------
+//
+////////////////////////////////////////////////////////////////////////////////
+
+typedef struct {
+    PyObject_HEAD
+    Cache * cache;
+} PyCache;
+
+void PyCache_dealloc( PyCache * self )
+{
+    delete self->cache;
+    Py_TYPE(self)->tp_free( (PyObject *)self );
+}
+
+PyObject * PyCache_new( PyTypeObject * type, PyObject * args, PyObject * kwds )
+{
+    PyCache * self;
+    self = (PyCache *)type->tp_alloc( type, 0 );
+    return (PyObject *)self;
+}
+
+int PyCache_init( PyCache * self, PyObject * args, PyObject * kwds )
+{
+    delete self->cache;
+    self->cache = new Cache();
+    return 0;
+}
+
+
+PyTypeObject PyCacheType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "Preprocessor",             /* tp_name */
+    sizeof(PyCache),            /* tp_basicsize */
+    0,                          /* tp_itemsize */
+    (destructor)PyCache_dealloc,/* tp_dealloc */
+    0,                          /* tp_print */
+    0,                          /* tp_getattr */
+    0,                          /* tp_setattr */
+    0,                          /* tp_reserved */
+    0,                          /* tp_repr */
+    0,                          /* tp_as_number */
+    0,                          /* tp_as_sequence */
+    0,                          /* tp_as_mapping */
+    0,                          /* tp_hash  */
+    0,                          /* tp_call */
+    0,                          /* tp_str */
+    0,                          /* tp_getattro */
+    0,                          /* tp_setattro */
+    0,                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,         /* tp_flags */
+    "Cache object",             /* tp_doc */
+    0,                          /* tp_traverse */
+    0,                          /* tp_clear */
+    0,                          /* tp_richcompare */
+    0,                          /* tp_weaklistoffset */
+    0,                          /* tp_iter */
+    0,                          /* tp_iternext */
+    0,                          /* tp_methods */
+    0,                          /* tp_members */
+    0,                          /* tp_getset */
+    0,                          /* tp_base */
+    0,                          /* tp_dict */
+    0,                          /* tp_descr_get */
+    0,                          /* tp_descr_set */
+    0,                          /* tp_dictoffset */
+    (initproc)PyCache_init,     /* tp_init */
+    0,                          /* tp_alloc */
+    PyCache_new,                /* tp_new */
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//
 // --------------
 // PyPreprocessor
 // --------------
@@ -165,7 +271,25 @@ PyObject * PyPreprocessor_new( PyTypeObject * type, PyObject * args, PyObject * 
 int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     delete self->pp;
-    self->pp = new Preprocessor();
+    static char * kwlist[] = { "cache", NULL };
+    PyObject * pCache = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O", kwlist, &pCache ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid cache parameter." );
+        return -1;
+    }
+
+    if ( !pCache || ( (PyTypeObject *)PyObject_Type( pCache ) != &PyCacheType ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid cache parameter." );
+        return -1;
+    }
+
+    PyCache const * pyCache( reinterpret_cast<PyCache *>( pCache ) );
+    assert( pyCache->cache );
+
+    self->pp = new Preprocessor( *pyCache->cache );
     return 0;
 }
 
@@ -189,7 +313,11 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
+
+
+    AllowPythonThreads threads;
     Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, pth );
+    threads.release();
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
@@ -390,6 +518,8 @@ PyMODINIT_FUNC PyInit_preprocessing(void)
 
     if ( PyType_Ready( &PyPreprocessingContextType ) < 0 )
         return NULL;
+    if ( PyType_Ready( &PyCacheType ) < 0 )
+        return NULL;
     if ( PyType_Ready( &PyPreprocessorType ) < 0 )
         return NULL;
     m = PyModule_Create( &preprocessingModule );
@@ -398,6 +528,8 @@ PyMODINIT_FUNC PyInit_preprocessing(void)
 
     Py_INCREF( &PyPreprocessingContextType );
     PyModule_AddObject( m, "PreprocessingContext", (PyObject *)&PyPreprocessingContextType );
+    Py_INCREF( &PyCacheType );
+    PyModule_AddObject( m, "Cache", (PyObject *)&PyCacheType );
     Py_INCREF( &PyPreprocessorType );
     PyModule_AddObject( m, "Preprocessor", (PyObject *)&PyPreprocessorType );
     return m;

@@ -31,33 +31,6 @@ class CompileTask:
         #self.algorithm = 'REWRITE_INCLUDES'
         #self.algorithm = 'PREPROCESS_LOCALLY'
 
-    def manager_prepare(self, pth_file):
-        # TODO: This does not belong here. Move this to msvc.py.
-        # We would like to avoid scanning system headers here if possible.
-        # If we do so, we lose any preprocessor side-effects. We try to
-        # hardcode this knowledge here.
-        macros = self.preprocessor_info.all_macros
-        if '_DEBUG' in macros:
-            if not any(('_SECURE_SCL' in x for x in macros)):
-                macros.append('_SECURE_SCL=1')
-            if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
-                macros.append('_HAS_ITERATOR_DEBUGGING=1')
-
-        if self.algorithm == 'SCAN_HEADERS':
-            from scan_headers import collect_headers
-            # Create/Use PTH if we have precompiled header.
-            return collect_headers(os.path.join(self.cwd, self.source),
-                self.preprocessor_info.includes, [], macros,
-                pth_file if pth_file else "",
-                [self.pch_header] if self.pch_header else [])
-
-        if self.algorithm == 'REWRITE_INCLUDES':
-            from scan_headers import rewrite_includes
-            return rewrite_includes(os.path.join(self.cwd, self.source),
-                self.preprocessor_info.includes, self.preprocessor_info.sysincludes, macros,
-                pth_file if pth_file else "")
-
-
     def manager_send(self, client_conn, server_conn, prepare_pool, timer):
         if self.algorithm == 'SCAN_HEADERS':
             server_conn.send_pyobj('SCAN_HEADERS')

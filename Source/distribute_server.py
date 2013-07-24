@@ -374,16 +374,18 @@ Usage:
         assert isinstance(cpu_usage_hwm, int)
         if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
             raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
-    
     with ServerManager() as manager:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
-    
+
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)
         control_port = control.bind_to_random_port('tcp://*')
         server_runner = ServerRunner(port, control_port, processes, file_repository, cpu_usage_hwm)
         server_runner.start()
+
+        import signal
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
         try:
             while True:
@@ -394,10 +396,4 @@ Usage:
 
         control.send(b'SHUTDOWN')
         server_runner.join()
-
-
-
-
-
-    
 

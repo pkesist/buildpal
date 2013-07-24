@@ -11,7 +11,7 @@
 #include <boost/ptr_container/ptr_map.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
-#include <boost/thread/shared_mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 
 #include <string>
 #include <map>
@@ -89,18 +89,20 @@ public:
         Headers headers;
     };
 
-    struct HeaderInfo : public std::map<Macros, CacheEntry>
+    struct HeaderInfo
     {
-        typedef std::map<Macros, CacheEntry> Base;
-        typedef value_type CacheHit;
+        typedef std::list<std::pair<Macros, CacheEntry> > CacheList;
 
-        HeaderInfo() : disable_( false ) {}
+        typedef CacheList::value_type CacheHit;
+
+        HeaderInfo( std::size_t const size ) : size_( size ) {}
 
         CacheHit * find( clang::Preprocessor const & );
         void insert( Macros const & key, CacheEntry const & );
 
     private:
-        bool disable_;
+        CacheList cacheList_;
+        std::size_t size_;
     };
     typedef HeaderInfo::CacheHit CacheHit;
 
@@ -114,9 +116,24 @@ public:
     )
     {
         // Exclusive ownership.
-        boost::unique_lock<boost::shared_mutex> const lock( sharedMutex_ );
+        boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
 
-        headersInfo()[ file->getName() ].insert
+        HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );
+        if ( iter == headersInfo().end() )
+        {
+            while ( headersInfoList_.size() > 1024 * 4 )
+            {
+                HeadersInfoList::value_type const & val( headersInfoList_.back() );
+                headersInfo_.erase( val.first );
+                headersInfoList_.pop_back();
+            }
+            headersInfoList_.push_front( std::make_pair( file->getName(), HeaderInfo( 50 ) ) );
+            std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
+            assert( insertResult.second );
+            iter = insertResult.first;
+        }
+
+        iter->second->second.insert
         (
             clone<Macros>( macros ),
             CacheEntry(
@@ -127,7 +144,7 @@ public:
         );
     }
 
-    HeaderInfo::value_type * findEntry
+    CacheHit * findEntry
     ( 
         llvm::StringRef fileName,
         clang::Preprocessor const &
@@ -167,7 +184,8 @@ private:
     }
 
 private:
-    struct HeadersInfo : public std::map<std::string, HeaderInfo> {};
+    struct HeadersInfoList : public std::list<std::pair<std::string, HeaderInfo> > {};
+    struct HeadersInfo : public boost::unordered_map<std::string, HeadersInfoList::iterator> {};
 
     HeadersInfo const & headersInfo() const { return headersInfo_; }
     HeadersInfo       & headersInfo()       { return headersInfo_; }
@@ -175,10 +193,11 @@ private:
     typedef boost::unordered_set<std::string> FlyWeight;
 
 private:
+    HeadersInfoList headersInfoList_;
     HeadersInfo headersInfo_;
     FlyWeight flyweight_;
     unsigned counter_;
-    boost::shared_mutex sharedMutex_;
+    boost::recursive_mutex mutex_;
 };
 
 

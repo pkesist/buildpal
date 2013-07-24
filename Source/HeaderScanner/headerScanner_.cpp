@@ -11,6 +11,7 @@
 #include "clang/Basic/FileManager.h"
 #include "clang/Frontend/PreprocessorOutputOptions.h"
 #include "clang/Frontend/FrontendActions.h"
+#include "clang/Frontend/TextDiagnosticBuffer.h"
 #include "clang/Frontend/Utils.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
@@ -31,17 +32,13 @@ namespace
         explicit HeaderScanner
         (
             HeaderTracker & headerTracker,
-            clang::SourceManager & sourceManager,
             clang::Preprocessor & preprocessor,
-            clang::FileManager & fileManager,
             PreprocessingContext::IgnoredHeaders const & ignoredHeaders,
             Preprocessor::HeaderRefs & includedHeaders
         )
             :
             headerTracker_            ( headerTracker   ),
-            sourceManager_            ( sourceManager   ),
             preprocessor_             ( preprocessor    ),
-            fileManager_              ( fileManager     ),
             headers_                  ( includedHeaders ),
             ignoredHeaders_           ( ignoredHeaders  ),
             foundViaFileStillNotFound_( false           )
@@ -70,11 +67,11 @@ namespace
             if ( reason == EnterFile )
             {
                 foundViaFileStillNotFound_ = false;
-                clang::FileID const fileId( sourceManager_.getFileID( loc ) );
-                clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
+                clang::FileID const fileId( preprocessor_.getSourceManager().getFileID( loc ) );
+                clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
-                if ( fileId == sourceManager_.getMainFileID() )
+                if ( fileId == preprocessor_.getSourceManager().getMainFileID() )
                     headerTracker_.enterSourceFile( fileEntry );
                 else
                     headerTracker_.enterHeader( includeFilename_ );
@@ -82,7 +79,7 @@ namespace
             else if ( reason == ExitFile )
             {
                 clang::FileID const fileId( exitedFID );
-                clang::FileEntry const * const fileEntry( sourceManager_.getFileEntryForID( fileId ) );
+                clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
                 headerTracker_.leaveHeader( ignoredHeaders_ );
@@ -149,20 +146,29 @@ namespace
 
     private:
         HeaderTracker & headerTracker_;
-        clang::SourceManager & sourceManager_;
         clang::Preprocessor & preprocessor_;
-        clang::FileManager & fileManager_;
         Preprocessor::HeaderRefs & headers_;
         PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
         clang::StringRef includeFilename_;
         bool foundViaFileStillNotFound_;
     };
+
+    class DiagnosticConsumer : public clang::TextDiagnosticBuffer
+    {
+        virtual void HandleDiagnostic(
+            clang::DiagnosticsEngine::Level level,
+            clang::Diagnostic const & info) 
+        {
+            clang::TextDiagnosticBuffer::HandleDiagnostic( level, info );
+        }
+    };
 }  // anonymous namespace
 
 Preprocessor::Preprocessor( Cache & cache )
+    : cache_( cache )
 {
     // Create diagnostics.
-    compiler().createDiagnostics( new clang::IgnoringDiagConsumer() );
+    compiler().createDiagnostics( new DiagnosticConsumer() );
 
     // Create target info.
     clang::CompilerInvocation * invocation = new clang::CompilerInvocation();
@@ -179,19 +185,12 @@ Preprocessor::Preprocessor( Cache & cache )
     hsopts.UseBuiltinIncludes = false;
     hsopts.UseStandardSystemIncludes = false;
     hsopts.UseStandardCXXIncludes = false;
-
-    // Create the file manager.
-    compiler().createFileManager();
-
-    // Create the source manager.
-    sourceManager_.reset( new clang::SourceManager( compiler().getDiagnostics(), compiler().getFileManager(), false ) );
-    compiler().setSourceManager( &sourceManager() );
-    headerTracker_.reset( new HeaderTracker( sourceManager(), cache ) );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
 {
-    sourceManager().clearIDTables();
+    compiler().createFileManager();
+    compiler().createSourceManager( compiler().getFileManager() );
     clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
     if ( !mainFileEntry )
         throw std::runtime_error( "Could not find source file." );
@@ -272,15 +271,15 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     );
 
     HeaderRefs result;
-    headerTracker().setPreprocessor( &preprocessor() );
-    headerTracker().setHeaderSearch( getHeaderSearch( ppc.searchPath() ) );
 
     // Do not let #pragma once interfere with cache.
     preprocessor().setPragmasEnabled( false );
 
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker(),
-        sourceManager(), preprocessor(), compiler().getFileManager(),
-        ppc.ignoredHeaders(), result ) );
+    HeaderTracker headerTracker( sourceManager(), cache_ );
+    headerTracker.setPreprocessor( &preprocessor() );
+    headerTracker.setHeaderSearch( getHeaderSearch( ppc.searchPath() ) );
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
+        preprocessor(), ppc.ignoredHeaders(), result ) );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     preprocessor().EnterMainSourceFile();
@@ -293,7 +292,6 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     }
     preprocessor().EndSourceFile();
     compiler().getFileManager().clearStatCaches();
-    headerTracker().setPreprocessor( 0 );
 
     return result;
 }

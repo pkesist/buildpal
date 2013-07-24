@@ -26,7 +26,7 @@ def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
     preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
     for path in includes:
-        ppc.add_include_path(path)
+        ppc.add_include_path(path, False)
     for path in sysincludes:
         ppc.add_include_path(path, True)
     for define in defines:

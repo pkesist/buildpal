@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock as ThreadLock
 from time import sleep, time
 
+from scan_headers import rewrite_includes, collect_headers, create_pth
+
 import configparser
 import operator
 import os
@@ -50,8 +52,32 @@ class TimerProxy(BaseProxy):
     def timeit(self, name):
         return ScopedTimer(lambda value : self.add_time(name, value))
 
-def prepare_task(task, pth_file):
-    return task.manager_prepare(pth_file)
+def prepare_task(algorithm, cwd, source, preprocessor_info, pch_header, pth_file):
+    # TODO: This does not belong here. Move this to msvc.py.
+    # We would like to avoid scanning system headers here if possible.
+    # If we do so, we lose any preprocessor side-effects. We try to
+    # hardcode this knowledge here.
+    macros = preprocessor_info.all_macros
+    if '_DEBUG' in macros:
+        if not any(('_SECURE_SCL' in x for x in macros)):
+            macros.append('_SECURE_SCL=1')
+        if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
+            macros.append('_HAS_ITERATOR_DEBUGGING=1')
+
+    if algorithm == 'SCAN_HEADERS':
+        # Create/Use PTH if we have precompiled header.
+        return collect_headers(os.path.join(cwd, source),
+            preprocessor_info.includes, [], macros,
+            pth_file if pth_file else "",
+            [pch_header] if pch_header else [])
+
+    elif algorithm == 'REWRITE_INCLUDES':
+        return rewrite_includes(os.path.join(cwd, source),
+            preprocessor_info.includes, preprocessor_info.sysincludes,
+            macros, pth_file if pth_file else "")
+    else:
+        raise Exception("Invalid algorithm.")
+
 
 class PTHFileRepository:
     def __init__(self):
@@ -74,8 +100,8 @@ def get_node(zmq_ctx, nodes, node_info):
     def cmp(lhs, rhs):
         #lhs_tasks_processing = node_info.tasks_processing(lhs)
         #rhs_tasks_processing = node_info.tasks_processing(rhs)
-        lhs_tasks_processing = snode_info.connections(lhs)
-        rhs_tasks_processing = snode_info.connections(rhs)
+        lhs_tasks_processing = node_info.connections(lhs)
+        rhs_tasks_processing = node_info.connections(rhs)
         lhs_average_time = node_info.average_time(lhs)
         rhs_average_time = node_info.average_time(rhs)
         if lhs_average_time == 0 and rhs_average_time == 0:
@@ -125,7 +151,6 @@ def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_f
             try:
                 if not pth_file_repository.registered(pth_file, os.stat(pch_header).st_mtime):
                     with timer.timeit('create_pth'):
-                        from scan_headers import create_pth
                         create_pth(task.pch_header,
                             pth_file,
                             task.preprocessor_info.includes,
@@ -139,11 +164,10 @@ def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_f
 
         with timer.timeit('prepare'):
             start = time()
-            if task.algorithm == 'SCAN_HEADERS':
-                task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
-
-            if task.algorithm == 'REWRITE_INCLUDES':
-                task.tempfile = prepare_pool.async_run(prepare_task, task, pth_file)
+            if task.algorithm in ['SCAN_HEADERS', 'REWRITE_INCLUDES']:
+                task.tempfile = prepare_pool.async_run(prepare_task, (
+                    task.algorithm, task.cwd, task.source,
+                    task.preprocessor_info, task.pch_header, pth_file))
 
         with timer.timeit('find_available_node'):
             get_result = None
@@ -173,8 +197,11 @@ def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_f
             with timer.timeit('receive'):
                 task.manager_receive(client_conn, server_conn, timer)
                 node_info.add_tasks_completed(node_index)
+        except:
+            import traceback
+            traceback.print_exc()
         finally:
-                node_info.connection_closed(node_index)
+            node_info.connection_closed(node_index)
     except Exception:
         import traceback
         traceback.print_exc()
@@ -189,11 +216,12 @@ class TaskProcessor(Process):
 
     def run(self):
         with BookKeepingManager() as book_keeper, \
+            BookKeepingManager() as preparer, \
             Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
             pth_files = book_keeper.PTHFileRepository()
             node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
             timer = book_keeper.Timer()
-            prepare_pool = book_keeper.ThreadPool(4)
+            prepare_pool = preparer.ThreadPool(4)
             while True:
                 self.print_stats(node_info, timer.as_dict())
                 try:
@@ -282,7 +310,7 @@ class ThreadPool:
         self.__async_tasks = {}
         self.__counter = 0
 
-    def async_run(self, callable, *args):
+    def async_run(self, callable, args):
         id = self.__counter
         self.__counter += 1
         self.__async_tasks[id] = self.__executor.submit(callable, *args)
@@ -360,9 +388,15 @@ Usage:
     if max_processes is None:
         max_processes = 4 * len(nodes)
    
-    task_processor = TaskProcessor(nodes, task_queue, max_processes=max_processes)
-    task_processor.start()
+    import signal
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
-    queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
-    server = queue_manager.get_server()
-    server.serve_forever()
+    try:
+        taskProcessor = TaskProcessor(nodes, task_queue, max_processes=max_processes)
+        taskProcessor.start()
+        queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
+        server = queue_manager.get_server()
+        server.serve_forever()
+    finally:
+        print("Shutting down.")
+        taskProcessor.terminate()

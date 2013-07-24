@@ -15,5 +15,6 @@ namespace clang
 
 llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def );
 
+
 //------------------------------------------------------------------------------
 #endif

@@ -75,17 +75,14 @@ private:
 private:
     clang::CompilerInstance       & compiler     ()       { return compiler_; }
     clang::CompilerInstance const & compiler     () const { return compiler_; }
-    clang::SourceManager          & sourceManager()       { return *sourceManager_; }
-    clang::SourceManager    const & sourceManager() const { return *sourceManager_; }
+    clang::SourceManager          & sourceManager()       { return compiler_.getSourceManager(); }
+    clang::SourceManager    const & sourceManager() const { return compiler_.getSourceManager(); }
     clang::Preprocessor           & preprocessor ()       { return compiler_.getPreprocessor(); }
     clang::Preprocessor     const & preprocessor () const { return compiler_.getPreprocessor(); }
-    HeaderTracker                 & headerTracker()       { return *headerTracker_; }
-    HeaderTracker           const & headerTracker() const { return *headerTracker_; }
 
 private:
     clang::CompilerInstance compiler_;
-    llvm::OwningPtr<clang::SourceManager> sourceManager_;
-    llvm::OwningPtr<HeaderTracker> headerTracker_;
+    Cache & cache_;
 };
 
 

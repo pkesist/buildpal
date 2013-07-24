@@ -3,6 +3,7 @@
 
 #include <Python.h>
 
+#include <windows.h>
 
 struct AllowPythonThreads
 {
@@ -71,9 +72,9 @@ PyObject * PyPreprocessingContext_add_include_path( PyPreprocessingContext * sel
     static char * kwlist[] = { "path", "sysinclude", NULL };
 
     char const * path = 0;
-    PyObject * sysInclude = Py_False;
+    PyObject * sysInclude;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s|O", kwlist, &path, &sysInclude ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "sO", kwlist, &path, &sysInclude ) )
         return NULL;
 
     if ( !self->ppContext )
@@ -104,9 +105,9 @@ PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyOb
     static char * kwlist[] = { "macro_name", "macro_value", NULL };
 
     char const * macroName = 0;
-    char const * macroValue = "";
+    char const * macroValue = 0;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s|s", kwlist, &macroName, &macroValue ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "ss", kwlist, &macroName, &macroValue ) )
         return NULL;
 
     if ( !self->ppContext )
@@ -253,10 +254,12 @@ PyTypeObject PyCacheType = {
 typedef struct {
     PyObject_HEAD
     Preprocessor * pp;
+    PyObject * cache;
 } PyPreprocessor;
 
 void PyPreprocessor_dealloc( PyPreprocessor * self )
 {
+    Py_XDECREF( self->cache );
     delete self->pp;
     Py_TYPE(self)->tp_free( (PyObject *)self );
 }
@@ -270,7 +273,6 @@ PyObject * PyPreprocessor_new( PyTypeObject * type, PyObject * args, PyObject * 
 
 int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    delete self->pp;
     static char * kwlist[] = { "cache", NULL };
     PyObject * pCache = 0;
 
@@ -289,6 +291,8 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
     PyCache const * pyCache( reinterpret_cast<PyCache *>( pCache ) );
     assert( pyCache->cache );
 
+    self->cache = pCache;
+    Py_XINCREF( self->cache );
     self->pp = new Preprocessor( *pyCache->cache );
     return 0;
 }
@@ -298,12 +302,12 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     static char * kwlist[] = { "pp_ctx", "filename", "pth_file", NULL };
 
     PyObject * pObject = 0;
-    char const * filename = "";
-    char const * pth = "";
+    PyObject * filename = 0;
+    PyObject * pth = 0;
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os|s", kwlist, &pObject, &filename, &pth ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OOO", kwlist, &pObject, &filename, &pth ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -314,9 +318,20 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
 
+    if ( filename && !PyUnicode_Check( filename ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Expected a string as 'filename' parameter." );
+        return NULL;
+    }
+
+    if ( pth && !PyUnicode_Check( pth ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Expected a string as 'pth' parameter." );
+        return NULL;
+    }
 
     AllowPythonThreads threads;
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, filename, pth );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), PyUnicode_AsUTF8( pth ) );
     threads.release();
 
     PyObject * result = PyTuple_New( headers.size() );
@@ -398,7 +413,7 @@ PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * arg
 
     PyObject * pVal = 0;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O", kwlist, &pVal ) )
     {
         PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;
@@ -415,7 +430,7 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
 
     PyObject * pVal = 0;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O:bool", kwlist, &pVal ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O", kwlist, &pVal ) )
     {
         PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
         return NULL;

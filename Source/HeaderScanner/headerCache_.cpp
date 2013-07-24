@@ -36,7 +36,7 @@ clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager &
             buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( defineStream.str(), "" ) );
         }
 
-        sourceManager.overrideFileContents( result, buffer_.get(), false );
+        sourceManager.overrideFileContents( result, buffer_.get(), true );
     }
     return result;
 }
@@ -59,22 +59,22 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 Cache::CacheHit * Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
 {
     // Shared ownership.
-    boost::shared_lock<boost::shared_mutex> const lock( sharedMutex_ );
+    boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
-    if ( iter != headersInfo().end() )
-        return iter->second.find( preprocessor );
-    return 0;
+    if ( iter == headersInfo().end() )
+        return 0;
+    Cache::CacheHit * const result( iter->second->second.find( preprocessor ) );
+    if ( result )
+        headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
+    return result;
 }
 
 Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
 {
-    if ( disable_ )
-        return 0;
-
     for
     (
-        Base::iterator headerInfoIter( Base::begin() );
-        headerInfoIter != Base::end();
+        CacheList::iterator headerInfoIter( cacheList_.begin() );
+        headerInfoIter != cacheList_.end();
         ++headerInfoIter
     )
     {
@@ -104,6 +104,7 @@ Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preproces
         )
             continue;
 
+        cacheList_.splice( cacheList_.begin(), cacheList_, headerInfoIter );
         return &*headerInfoIter;
     }
     return 0;
@@ -111,7 +112,9 @@ Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preproces
 
 void Cache::HeaderInfo::insert( Macros const & key, CacheEntry const & value )
 {
-    Base::insert( std::make_pair( key, value ) );
+    while ( cacheList_.size() >= size_ )
+        cacheList_.pop_back();
+    cacheList_.push_front( std::make_pair( key, value ) );
 }
 
 

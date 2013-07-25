@@ -9,6 +9,7 @@ from threading import Lock as ThreadLock
 from time import sleep, time
 
 from scan_headers import rewrite_includes, collect_headers, create_pth
+from utils import send_file, receive_compressed_file, send_compressed_file, relay_file
 
 import configparser
 import operator
@@ -136,75 +137,137 @@ def get_zmq_ctx():
     global zmq_ctx
     return zmq_ctx
 
-def compile_worker(task, client_id, timer, nodes, node_info, prepare_pool, pth_file_repository):
-    try:
-        client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
-        if task.pch_header:
-            for include_path in task.preprocessor_info.includes:
-                pch_header = os.path.join(include_path, task.pch_header)
-                if os.path.exists(pch_header):
-                    found = True
-                    break
-            assert found or not "Could not locate precompiled header '{}'".format(task.pch_header)
-            pth_file = os.path.splitext(task.pch_file[0])[0] + '.clang.pth'
-            pth_file_repository.acquire()
-            try:
-                if not pth_file_repository.registered(pth_file, os.stat(pch_header).st_mtime):
-                    with timer.timeit('create_pth'):
-                        create_pth(task.pch_header,
-                            pth_file,
-                            task.preprocessor_info.includes,
-                            task.preprocessor_info.sysincludes,
-                            task.preprocessor_info.all_macros)
-                        pth_file_repository.register(pth_file)
-            finally:
-                pth_file_repository.release()
-        else:
-            pth_file = None
+class CompileWorker:
+    def __init__(self, task):
+        self.task = task
 
-        with timer.timeit('prepare'):
-            start = time()
-            if task.algorithm in ['SCAN_HEADERS', 'REWRITE_INCLUDES']:
-                task.tempfile = prepare_pool.async_run(prepare_task, (
-                    task.algorithm, task.cwd, task.source,
-                    task.preprocessor_info, task.pch_header, pth_file))
-
-        with timer.timeit('find_available_node'):
-            get_result = None
-            while True:
-                get_result = get_node(get_zmq_ctx(), nodes, node_info)
-                if get_result:
-                    break
-                sleep(1)
-            node_index, server_conn = get_result
-
+    def __call__(self, client_id, timer, nodes, node_info, prepare_pool, pth_file_repository):
         try:
-            node_info.connection_open(node_index)
-            node_info.add_tasks_sent(node_index)
-            with timer.timeit('send'):
-                server_conn.send_pyobj(task)
-            task_ok = server_conn.recv_pyobj()
-            assert task_ok == 'OK'
-            task.manager_send(client_conn, server_conn, prepare_pool, timer)
+            client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
+            if self.task.pch_header:
+                for include_path in self.task.preprocessor_info.includes:
+                    pch_header = os.path.join(include_path, self.task.pch_header)
+                    if os.path.exists(pch_header):
+                        found = True
+                        break
+                assert found or not "Could not locate precompiled header '{}'".format(self.task.pch_header)
+                pth_file = os.path.splitext(self.task.pch_file[0])[0] + '.clang.pth'
+                pth_file_repository.acquire()
+                try:
+                    if not pth_file_repository.registered(pth_file, os.stat(pch_header).st_mtime):
+                        with timer.timeit('create_pth'):
+                            create_pth(self.task.pch_header,
+                                pth_file,
+                                self.task.preprocessor_info.includes,
+                                self.task.preprocessor_info.sysincludes,
+                                self.task.preprocessor_info.all_macros)
+                            pth_file_repository.register(pth_file)
+                finally:
+                    pth_file_repository.release()
+            else:
+                pth_file = None
 
-            # Just block
-            with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
-                server_status = server_conn.recv_pyobj()
-                if server_status == "SERVER_FAILED":
-                    return None
+            with timer.timeit('prepare'):
+                start = time()
+                if self.task.algorithm in ['SCAN_HEADERS', 'REWRITE_INCLUDES']:
+                    self.task.tempfile = prepare_pool.async_run(prepare_task, (
+                        self.task.algorithm, self.task.cwd, self.task.source,
+                        self.task.preprocessor_info, self.task.pch_header, pth_file))
 
-            assert server_status == "SERVER_DONE"
-            with timer.timeit('receive'):
-                task.manager_receive(client_conn, server_conn, timer)
-                node_info.add_tasks_completed(node_index)
-        except:
+            with timer.timeit('find_available_node'):
+                get_result = None
+                while True:
+                    get_result = get_node(get_zmq_ctx(), nodes, node_info)
+                    if get_result:
+                        break
+                    sleep(1)
+                node_index, server_conn = get_result
+
+            try:
+                node_info.connection_open(node_index)
+                node_info.add_tasks_sent(node_index)
+                with timer.timeit('send'):
+                    server_conn.send_pyobj(self.task)
+                task_ok = server_conn.recv_pyobj()
+                assert task_ok == 'OK'
+                self.__send(client_conn, server_conn, prepare_pool, timer)
+
+                # Just block
+                with timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
+                    server_status = server_conn.recv_pyobj()
+                    if server_status == "SERVER_FAILED":
+                        return None
+
+                assert server_status == "SERVER_DONE"
+                with timer.timeit('receive'):
+                    self.__recv(client_conn, server_conn, timer)
+                    node_info.add_tasks_completed(node_index)
+            except:
+                import traceback
+                traceback.print_exc()
+            finally:
+                node_info.connection_closed(node_index)
+        except Exception:
             import traceback
             traceback.print_exc()
-        finally:
-            node_info.connection_closed(node_index)
-    except Exception:
-        import traceback
-        traceback.print_exc()
+
+    def __send(self, client_conn, server_conn, prepare_pool, timer):
+        if self.task.algorithm == 'SCAN_HEADERS':
+            server_conn.send_pyobj('SCAN_HEADERS')
+            server_conn.send_pyobj('ZIP_FILE')
+            with timer.timeit('prepare_result'):
+                tempfile = prepare_pool.get_result(self.task.tempfile)
+            assert tempfile
+            with timer.timeit('send.zip'), open(tempfile, 'rb') as file:
+                send_file(server_conn.send_pyobj, file)
+            server_conn.send_pyobj('SOURCE_FILE')
+            with timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
+                send_compressed_file(server_conn.send_pyobj, cpp)
+            if self.task.pch_file:
+                server_conn.send_pyobj('NEED_PCH_FILE')
+                response = server_conn.recv_pyobj()
+                if response == "YES":
+                    with timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
+                        send_compressed_file(server_conn.send_pyobj, pch_file)
+                else:
+                    assert response == "NO"
+
+        if self.task.algorithm == 'PREPROCESS_LOCALLY':
+            server_conn.send('PREPROCESS_LOCALLY')
+            # Signal the client to do preprocessing.
+            client_conn.send('PREPROCESS')
+            server_conn.send('PREPROCESSED_FILE')
+            relay_file(client_conn.recv, server_conn.send_pyobj)
+
+        if self.task.algorithm == 'REWRITE_INCLUDES':
+            server_conn.send_pyobj('PREPROCESS_LOCALLY')
+            with timer.timeit('prepare_result'):
+                tempfile = prepare_pool.get_result(self.task.tempfile)
+            server_conn.send_pyobj('PREPROCESSED_FILE')
+            send_compressed_file(server_conn.send_pyobj, io.BytesIO(tempfile))
+
+        if self.task.algorithm == 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR':
+            server_conn.send_pyobj('PREPROCESS_LOCALLY')
+            from scan_headers import preprocess_file
+            macros = self.task.preprocessor_info.macros + self.task.preprocessor_info.builtin_macros
+            preprocessed_data = preprocess_file(
+                os.path.join(self.task.cwd, self.task.source),
+                self.task.preprocessor_info.includes,
+                self.task.preprocessor_info.sysincludes,
+                macros, self.task.compiler_info)
+            send_compressed_file(server_conn.send_pyobj, io.BytesIO(preprocessed_data))
+
+    def __recv(self, client_conn, server_conn, timer):
+        with timer.timeit("receive.server"):
+            retcode, stdout, stderr = server_conn.recv_pyobj()
+        if retcode == 0:
+            length = 0
+            more = True
+            with timer.timeit("receive.object"), open(self.task.output, "wb") as file:
+                receive_compressed_file(server_conn.recv_pyobj, file)
+        with timer.timeit("receive.client"):
+            client_conn.send('COMPLETED')
+            client_conn.send((retcode, stdout, stderr))
 
 class TaskProcessor(Process):
     def __init__(self, nodes, task_queue, max_processes):
@@ -226,7 +289,7 @@ class TaskProcessor(Process):
                 self.print_stats(node_info, timer.as_dict())
                 try:
                     task, client_id = self.__task_queue.get(timeout=2)
-                    compile_pool.apply_async(compile_worker, args=(task, client_id, timer, self.__nodes, node_info, prepare_pool, pth_files))
+                    compile_pool.apply_async(CompileWorker(task), args=(client_id, timer, self.__nodes, node_info, prepare_pool, pth_files))
                 except Empty:
                     pass
 

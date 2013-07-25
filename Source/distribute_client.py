@@ -1,7 +1,6 @@
 #! python3.3
 from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
 from distribute_task import CompileTask
-from distribute_manager import QueueManager
 
 import os
 import random
@@ -38,6 +37,11 @@ class PreprocessorInfo:
     @property
     def all_macros(self):
         return self.macros + self.builtin_macros
+
+class QueueManager(BaseManager):
+    pass
+
+QueueManager.register('queue_task')
 
 class CompilationDistributer(CmdLineOptions):
     class Category: pass

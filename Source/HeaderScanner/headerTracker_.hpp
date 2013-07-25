@@ -67,11 +67,21 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( Header const & header )
-            : header_( header ) {}
+        explicit HeaderCtx( Header const & header, Cache::CacheEntry const * cacheHit )
+            :
+            header_( header ),
+            cacheHit_( cacheHit )
+        {
+            if ( !cacheHit_ )
+                return;
+
+            std::copy( cacheHit_->headers.begin(), cacheHit_->headers.end(), std::inserter( includedHeaders_, includedHeaders_.begin() ) );
+        }
 
         void macroUsed( Macro const & macro )
         {
+            if ( cacheHit_ )
+                return;
             macroUsages_.push_back( std::make_pair( MacroUsage::used, macro ) );
             if ( definedMacros_.find( macro.first ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
@@ -79,22 +89,30 @@ private:
 
         void macroDefined( Macro const & macro )
         {
+            if ( cacheHit_ )
+                return;
             macroUsages_.push_back( std::make_pair( MacroUsage::defined, macro ) );
             definedMacros_.insert( macro.first );
         }
 
         void macroUndefined( Macro const & macro )
         {
+            if ( cacheHit_ )
+                return;
             macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
         void addHeader( Header const & header )
         {
+            if ( cacheHit_ )
+                return;
             includedHeaders_.insert( header );
         }
 
         void addMacroUsage( MacroWithUsage const & macroWithUsage )
         {
+            if ( cacheHit_ )
+                return;
             switch ( macroWithUsage.first )
             {
                 case MacroUsage::used: macroUsed( macroWithUsage.second ); break;
@@ -117,15 +135,18 @@ private:
             }
         }
 
-        Macros const & usedMacros() const { return usedMacros_; }
-        MacroUsages const & macroUsages() const { return macroUsages_; }
+        Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros : usedMacros_; }
+        MacroUsages const & macroUsages() const { return cacheHit_ ? cacheHit_->macroUsages : macroUsages_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         Header const & header() { return header_; }
 
         void addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
+        bool fromCache() const { return cacheHit_ != 0; }
+
     private:
         Header header_;
+        Cache::CacheEntry const * cacheHit_;
         Macros usedMacros_;
         std::set<llvm::StringRef> definedMacros_;
         MacroUsages macroUsages_;

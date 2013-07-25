@@ -126,9 +126,6 @@ private:
 
     private:
         Header header_;
-        
-        typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
-
         Macros usedMacros_;
         std::set<llvm::StringRef> definedMacros_;
         MacroUsages macroUsages_;
@@ -153,8 +150,8 @@ private:
     clang::Preprocessor * preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache & cache_;
-    Cache::CacheHit * cacheHit_;
-    std::set<Cache::CacheHit *> cacheEntriesUsed_;
+    Cache::CacheEntry * cacheHit_;
+    std::set<Cache::CacheEntry *> cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
 };
 

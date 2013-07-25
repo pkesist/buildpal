@@ -56,20 +56,20 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
     sourceManager.disableFileContentsOverride( result );
 }
 
-Cache::CacheHit * Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
+Cache::CacheEntry * Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
 {
     // Shared ownership.
     boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
     if ( iter == headersInfo().end() )
         return 0;
-    Cache::CacheHit * const result( iter->second->second.find( preprocessor ) );
+    Cache::CacheEntry * const result( iter->second->find( preprocessor ) );
     if ( result )
         headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
     return result;
 }
 
-Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
+Cache::CacheEntry * Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
 {
     for
     (
@@ -78,7 +78,7 @@ Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preproces
         ++headerInfoIter
     )
     {
-        Macros const & inputMacros( headerInfoIter->first );
+        Macros const & inputMacros( headerInfoIter->usedMacros );
         bool isMatch( true );
 
         struct MacroIsNotCurrent
@@ -110,11 +110,11 @@ Cache::CacheHit * Cache::HeaderInfo::find( clang::Preprocessor const & preproces
     return 0;
 }
 
-void Cache::HeaderInfo::insert( Macros const & key, CacheEntry const & value )
+void Cache::HeaderInfo::insert( BOOST_RV_REF(CacheEntry) value )
 {
     while ( cacheList_.size() >= size_ )
         cacheList_.pop_back();
-    cacheList_.push_front( std::make_pair( key, value ) );
+    cacheList_.push_front( value );
 }
 
 

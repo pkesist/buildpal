@@ -37,11 +37,10 @@ namespace
             Preprocessor::HeaderRefs & includedHeaders
         )
             :
-            headerTracker_            ( headerTracker   ),
-            preprocessor_             ( preprocessor    ),
-            headers_                  ( includedHeaders ),
-            ignoredHeaders_           ( ignoredHeaders  ),
-            foundViaFileStillNotFound_( false           )
+            headerTracker_ ( headerTracker   ),
+            preprocessor_  ( preprocessor    ),
+            headers_       ( includedHeaders ),
+            ignoredHeaders_( ignoredHeaders  )
         {
         }
 
@@ -55,10 +54,7 @@ namespace
         {
             headerTracker_.findFile( filename, isAngled, file );
             if ( file )
-            {
                 includeFilename_ = filename;
-                foundViaFileStillNotFound_ = true;
-            }
         }
 
         virtual void FileChanged( clang::SourceLocation loc, FileChangeReason reason,
@@ -66,7 +62,6 @@ namespace
         {
             if ( reason == EnterFile )
             {
-                foundViaFileStillNotFound_ = false;
                 clang::FileID const fileId( preprocessor_.getSourceManager().getFileID( loc ) );
                 clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
@@ -98,20 +93,7 @@ namespace
             clang::SrcMgr::CharacteristicKind
         )
         {
-            foundViaFileStillNotFound_ = false;
             headerTracker_.headerSkipped( includeFilename_ );
-        }
-
-        virtual void InclusionDirective
-        (
-            clang::SourceLocation loc, clang::Token const &,
-            clang::StringRef fileName, bool IsAngled,
-            clang::CharSourceRange filenameRange, clang::FileEntry const * fileEntry,
-            clang::StringRef searchPath, clang::StringRef relativePath,
-            clang::Module const * imported
-        )
-        {
-            assert( !fileEntry || foundViaFileStillNotFound_ );
         }
 
         virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * )
@@ -150,7 +132,6 @@ namespace
         Preprocessor::HeaderRefs & headers_;
         PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
         clang::StringRef includeFilename_;
-        bool foundViaFileStillNotFound_;
     };
 
     class DiagnosticConsumer : public clang::TextDiagnosticBuffer

@@ -31,7 +31,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     }
 
     fileStack_.push_back( entry );
-    Cache::CacheHit * const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
+    Cache::CacheEntry * const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
@@ -39,7 +39,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     }
     cacheHit_ = cacheHit;
     cacheEntriesUsed_.insert( cacheHit );
-    fileEntry = cacheHit->second.getFileEntry( preprocessor().getSourceManager() );
+    fileEntry = cacheHit->getFileEntry( preprocessor().getSourceManager() );
 }
 
 void HeaderTracker::headerSkipped( llvm::StringRef const relative )
@@ -106,9 +106,9 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     struct Cleanup
     {
         HeaderCtxStack & stack_;
-        Cache::CacheHit * & cacheHit_;
+        Cache::CacheEntry * & cacheHit_;
 
-        Cleanup( HeaderCtxStack & stack, Cache::CacheHit * & cacheHit )
+        Cleanup( HeaderCtxStack & stack, Cache::CacheEntry * & cacheHit )
             :
             stack_( stack ),
             cacheHit_( cacheHit )
@@ -130,8 +130,8 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     {
         includer.addStuff
         (
-            cacheHit_->second.macroUsages,
-            ignoreHeaders ? 0 : &cacheHit_->second.headers
+            cacheHit_->macroUsages,
+            ignoreHeaders ? 0 : &cacheHit_->headers
         );
     }
     else
@@ -160,7 +160,7 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
 
-    //for ( std::set<Cache::CacheHit *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
+    //for ( std::set<Cache::CacheEntry *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
     //    (*iter)->second.releaseFileEntry( sourceManager() );
     cacheEntriesUsed_.clear();
     return headerCtxStack().back().includedHeaders();

@@ -6,12 +6,14 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#include <boost/container/list.hpp>
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
-#include <boost/ptr_container/ptr_map.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 #include <boost/thread/recursive_mutex.hpp>
+#include <boost/move/move.hpp>
+
 
 #include <string>
 #include <map>
@@ -44,36 +46,36 @@ public:
 
     class CacheEntry
     {
-    public:
-        CacheEntry() {}
+    private:
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(CacheEntry)
 
+    public:
         CacheEntry
         (
             std::string const & uniqueVirtualFileName,
+            Macros const & usedMacrosp,
             MacroUsages const & macroUsagesp,
             Headers const & headersp
         ) : 
             fileName_( uniqueVirtualFileName ),
+            usedMacros( usedMacrosp ),
             macroUsages( macroUsagesp ),
             headers( headersp )
         {}
 
-        CacheEntry( CacheEntry const & other )
+        CacheEntry( BOOST_RV_REF(CacheEntry) other )
         {
             this->operator=( other );
         }
             
-        CacheEntry & operator=( CacheEntry const & other )
+        CacheEntry & operator=( BOOST_RV_REF(CacheEntry) other )
         {
-            fileName_ = other.fileName_;
-            macroUsages = other.macroUsages;
-            headers = other.headers;
+            fileName_.swap( other.fileName_ );
+            usedMacros.swap( other.usedMacros );
+            macroUsages.swap( other.macroUsages );
+            headers.swap( other.headers );
 
-            if ( other.buffer_ )
-            {
-                llvm::StringRef const content( other.buffer_->getBufferStart(), other.buffer_->getBufferSize() );
-                buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( content, "" ) );
-            }
+            buffer_.reset( other.buffer_.take() );
             return *this;
         }
 
@@ -85,26 +87,50 @@ public:
         llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
 
     public:
+        Macros usedMacros;
         MacroUsages macroUsages;
         Headers headers;
     };
 
-    struct HeaderInfo
+    class HeaderInfo
     {
-        typedef std::list<std::pair<Macros, CacheEntry> > CacheList;
+    private:
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(HeaderInfo)
 
-        typedef CacheList::value_type CacheHit;
+    public:
+        typedef boost::container::list<CacheEntry> CacheList;
 
-        HeaderInfo( std::size_t const size ) : size_( size ) {}
+        HeaderInfo( std::string const & header, std::size_t const size )
+            :
+            header_( header ),
+            size_( size )
+        {}
 
-        CacheHit * find( clang::Preprocessor const & );
-        void insert( Macros const & key, CacheEntry const & );
+        HeaderInfo( BOOST_RV_REF(HeaderInfo) other )
+            :
+            cacheList_( boost::move( other.cacheList_ ) ),
+            size_( other.size_ )
+        {
+            header_.swap( other.header_ );
+        }
+
+        HeaderInfo & operator=( BOOST_RV_REF(HeaderInfo) other )
+        {
+            header_.swap( other.header_ );
+            size_ = other.size_;
+            cacheList_ = boost::move( other.cacheList_ );
+        }
+
+        CacheEntry * find( clang::Preprocessor const & );
+        void insert( BOOST_RV_REF(CacheEntry) );
+
+        std::string const & header() const { return header_; }
 
     private:
+        std::string header_;
         CacheList cacheList_;
         std::size_t size_;
     };
-    typedef HeaderInfo::CacheHit CacheHit;
 
     template <typename HeadersList>
     void addEntry
@@ -123,28 +149,31 @@ public:
         {
             while ( headersInfoList_.size() > 1024 * 4 )
             {
-                HeadersInfoList::value_type const & val( headersInfoList_.back() );
-                headersInfo_.erase( val.first );
+                headersInfo_.erase( headersInfoList_.back().header() );
                 headersInfoList_.pop_back();
             }
-            headersInfoList_.push_front( std::make_pair( file->getName(), HeaderInfo( 50 ) ) );
+            HeaderInfo tmp( file->getName(), 50 );
+            headersInfoList_.push_front( boost::move( tmp ) );
             std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
             assert( insertResult.second );
             iter = insertResult.first;
         }
 
-        iter->second->second.insert
+        CacheEntry cacheEntry
         (
+            uniqueFileName(),
             clone<Macros>( macros ),
-            CacheEntry(
-                uniqueFileName(),
-                clone( macroUsages ),
-                clone<Headers>( headers )
-            )
+            clone( macroUsages ),
+            clone<Headers>( headers )
+        );
+
+        iter->second->insert
+        (
+            boost::move( cacheEntry )
         );
     }
 
-    CacheHit * findEntry
+    CacheEntry * findEntry
     ( 
         llvm::StringRef fileName,
         clang::Preprocessor const &
@@ -184,7 +213,7 @@ private:
     }
 
 private:
-    struct HeadersInfoList : public std::list<std::pair<std::string, HeaderInfo> > {};
+    struct HeadersInfoList : public boost::container::list<HeaderInfo> {};
     struct HeadersInfo : public boost::unordered_map<std::string, HeadersInfoList::iterator> {};
 
     HeadersInfo const & headersInfo() const { return headersInfo_; }

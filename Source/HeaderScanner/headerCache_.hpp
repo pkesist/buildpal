@@ -67,7 +67,7 @@ public:
 
         CacheEntry( BOOST_RV_REF(CacheEntry) other )
         {
-            this->operator=( other );
+            this->operator=( boost::move( other ) );
         }
             
         CacheEntry & operator=( BOOST_RV_REF(CacheEntry) other )
@@ -155,7 +155,6 @@ public:
         if ( macros.size() > 20 )
             return;
 
-        // Exclusive ownership.
         boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
 
         HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );

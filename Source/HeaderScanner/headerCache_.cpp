@@ -133,7 +133,17 @@ void Cache::HeaderInfo::insert( BOOST_RV_REF(CacheEntry) value )
     }
     else
     {
-        cacheList_.push_front( boost::make_shared<CacheEntry>( boost::ref( value ) ) );
+        cacheList_.push_front
+        (
+            boost::make_shared<CacheEntry>
+            (
+            #if defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
+                boost::ref( value )
+            #else
+                boost::move( value )
+            #endif
+            )
+        );
     }
 }
 

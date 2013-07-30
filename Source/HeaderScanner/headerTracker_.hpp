@@ -32,9 +32,10 @@ public:
     typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::SourceManager & sm, Cache & cache )
-        : sourceManager_( sm ), cache_( cache ), preprocessor_( 0 ), cacheHit_( 0 )
-    {}
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch & headerSearch, Cache & cache )
+        : headerSearch_( &headerSearch ), preprocessor_( preprocessor ), cache_( cache )
+    {
+    }
 
     void enterSourceFile( clang::FileEntry const * );
     Headers exitSourceFile();
@@ -48,11 +49,6 @@ public:
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
-    void setPreprocessor( clang::Preprocessor * preprocessor )
-    {
-        preprocessor_ = preprocessor;
-    }
-
     void setHeaderSearch( clang::HeaderSearch * headerSearch )
     {
         headerSearch_.reset( headerSearch );
@@ -60,14 +56,14 @@ public:
 
     bool inOverriddenFile() const
     {
-        return cacheHit_ != 0;
+        return cacheHit_.get() != 0;
     }
 
 private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( Header const & header, Cache::CacheEntry const * cacheHit )
+        explicit HeaderCtx( Header const & header, boost::shared_ptr<Cache::CacheEntry> const & cacheHit )
             :
             header_( header ),
             cacheHit_( cacheHit )
@@ -142,11 +138,11 @@ private:
 
         void addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
-        bool fromCache() const { return cacheHit_ != 0; }
+        bool fromCache() const { return cacheHit_.get() != 0; }
 
     private:
         Header header_;
-        Cache::CacheEntry const * cacheHit_;
+        boost::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
         std::set<llvm::StringRef> definedMacros_;
         MacroUsages macroUsages_;
@@ -160,19 +156,18 @@ private:
     Cache const & cache() const { return cache_; }
     Cache       & cache()       { return cache_; }
 
-    clang::Preprocessor & preprocessor() const { assert( preprocessor_ ); return *preprocessor_; }
-    clang::SourceManager & sourceManager() const { return sourceManager_; }
+    clang::Preprocessor & preprocessor() const { return preprocessor_; }
+    clang::SourceManager & sourceManager() const;
 
     llvm::StringRef macroDefFromSourceLocation( clang::MacroDirective const * def );
 
 private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
-    clang::SourceManager & sourceManager_;
-    clang::Preprocessor * preprocessor_;
+    clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache & cache_;
-    Cache::CacheEntry * cacheHit_;
-    std::set<Cache::CacheEntry *> cacheEntriesUsed_;
+    boost::shared_ptr<Cache::CacheEntry> cacheHit_;
+    std::vector<boost::shared_ptr<Cache::CacheEntry> > cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
 };
 

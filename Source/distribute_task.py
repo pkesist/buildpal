@@ -1,14 +1,4 @@
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import zipfile
-import zlib
-import io
 
-from multiprocessing.connection import Client
-from time import sleep
 
 class CompileTask:
     def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, pch_header, distributer):

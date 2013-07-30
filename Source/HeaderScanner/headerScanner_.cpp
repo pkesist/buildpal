@@ -4,6 +4,7 @@
 
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/FileSystemStatCache.h"
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TokenKinds.h"
@@ -21,6 +22,7 @@
 #include "llvm/Config/config.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/ADT/SmallString.h"
 
 #include <iostream>
 
@@ -134,13 +136,22 @@ namespace
         clang::StringRef includeFilename_;
     };
 
-    class DiagnosticConsumer : public clang::TextDiagnosticBuffer
+    class DiagnosticConsumer : public clang::DiagnosticConsumer
     {
         virtual void HandleDiagnostic(
             clang::DiagnosticsEngine::Level level,
             clang::Diagnostic const & info) 
         {
-            clang::TextDiagnosticBuffer::HandleDiagnostic( level, info );
+            clang::DiagnosticConsumer::HandleDiagnostic( level, info );
+            //llvm::SmallString<100> buffer;
+            //info.FormatDiagnostic( buffer );
+            //switch ( level )
+            //{
+            //    case clang::DiagnosticsEngine::Note: std::cout << "Note: " << buffer.str().str() << '\n'; break;
+            //    case clang::DiagnosticsEngine::Warning: std::cout << "Warning: " << buffer.str().str() << '\n'; break;
+            //    case clang::DiagnosticsEngine::Error: std::cout << "Error: " << buffer.str().str() << '\n'; break;
+            //    case clang::DiagnosticsEngine::Fatal: std::cout << "Fatal: " << buffer.str().str() << '\n'; break;
+            //}
         }
     };
 }  // anonymous namespace
@@ -166,11 +177,27 @@ Preprocessor::Preprocessor( Cache & cache )
     hsopts.UseBuiltinIncludes = false;
     hsopts.UseStandardSystemIncludes = false;
     hsopts.UseStandardCXXIncludes = false;
+    hsopts.Sysroot.clear();
 }
+
+struct DoNotOpenFiles : public clang::FileSystemStatCache
+{
+    virtual LookupResult getStat
+    (
+        const char * path,
+        struct stat & statBuf,
+        bool isFile,
+        int * FileDescriptor
+    )
+    {
+        return statChained( path, statBuf, isFile, 0 );
+    };
+};
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
 {
     compiler().createFileManager();
+    compiler().getFileManager().addStatCache( new DoNotOpenFiles() );
     compiler().createSourceManager( compiler().getFileManager() );
     clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
     if ( !mainFileEntry )
@@ -194,6 +221,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
     preprocessor().setPredefines( predefinesStream.str() );
+    preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
 clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
@@ -255,15 +283,17 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
 
     // Do not let #pragma once interfere with cache.
     preprocessor().setPragmasEnabled( false );
-
-    HeaderTracker headerTracker( sourceManager(), cache_ );
-    headerTracker.setPreprocessor( &preprocessor() );
-    headerTracker.setHeaderSearch( getHeaderSearch( ppc.searchPath() ) );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
-        preprocessor(), ppc.ignoredHeaders(), result ) );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
+    HeaderTracker headerTracker( preprocessor(), *getHeaderSearch( ppc.searchPath() ), cache_ );
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
+        preprocessor(), ppc.ignoredHeaders(), result ) );
+
     preprocessor().EnterMainSourceFile();
+    if ( compiler().getDiagnostics().hasFatalErrorOccurred() )
+    {
+        return result;
+    }
     while ( true )
     {
         clang::Token token;
@@ -272,8 +302,6 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
             break;
     }
     preprocessor().EndSourceFile();
-    compiler().getFileManager().clearStatCaches();
-
     return result;
 }
 

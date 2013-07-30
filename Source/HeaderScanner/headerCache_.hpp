@@ -9,6 +9,7 @@
 #include <boost/container/list.hpp>
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
+#include <boost/shared_ptr.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 #include <boost/thread/recursive_mutex.hpp>
@@ -61,7 +62,8 @@ public:
             usedMacros( usedMacrosp ),
             macroUsages( macroUsagesp ),
             headers( headersp )
-        {}
+        {
+        }
 
         CacheEntry( BOOST_RV_REF(CacheEntry) other )
         {
@@ -81,6 +83,7 @@ public:
 
         clang::FileEntry const * getFileEntry( clang::SourceManager & );
         void releaseFileEntry( clang::SourceManager & );
+        void generateContent( boost::recursive_mutex & );
 
     private:
         std::string fileName_;
@@ -98,38 +101,46 @@ public:
         BOOST_MOVABLE_BUT_NOT_COPYABLE(HeaderInfo)
 
     public:
-        typedef boost::container::list<CacheEntry> CacheList;
+        typedef boost::container::list<boost::shared_ptr<CacheEntry> > CacheList;
 
         HeaderInfo( std::string const & header, std::size_t const size )
             :
-            header_( header ),
-            size_( size )
+            header_( header ), disabled_( false )
         {}
 
         HeaderInfo( BOOST_RV_REF(HeaderInfo) other )
             :
             cacheList_( boost::move( other.cacheList_ ) ),
-            size_( other.size_ )
+            disabled_( other.disabled_ )
         {
             header_.swap( other.header_ );
+        }
+
+        void disable()
+        {
+            disabled_ = true;
+            cacheList_.clear();
         }
 
         HeaderInfo & operator=( BOOST_RV_REF(HeaderInfo) other )
         {
             header_.swap( other.header_ );
-            size_ = other.size_;
             cacheList_ = boost::move( other.cacheList_ );
         }
 
-        CacheEntry * find( clang::Preprocessor const & );
+        boost::shared_ptr<Cache::CacheEntry> find( clang::Preprocessor const & );
         void insert( BOOST_RV_REF(CacheEntry) );
 
+        bool disabled() const { return disabled_; }
         std::string const & header() const { return header_; }
+
+        boost::recursive_mutex & generateMutex() { return generateMutex_; }
 
     private:
         std::string header_;
+        boost::recursive_mutex generateMutex_;
         CacheList cacheList_;
-        std::size_t size_;
+        bool disabled_;
     };
 
     template <typename HeadersList>
@@ -141,6 +152,9 @@ public:
         HeadersList const & headers
     )
     {
+        if ( macros.size() > 20 )
+            return;
+
         // Exclusive ownership.
         boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
 
@@ -152,12 +166,14 @@ public:
                 headersInfo_.erase( headersInfoList_.back().header() );
                 headersInfoList_.pop_back();
             }
-            HeaderInfo tmp( file->getName(), 50 );
+            HeaderInfo tmp( file->getName(), 20 );
             headersInfoList_.push_front( boost::move( tmp ) );
             std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
             assert( insertResult.second );
             iter = insertResult.first;
         }
+        if ( iter->second->disabled() )
+            return;
 
         CacheEntry cacheEntry
         (
@@ -167,13 +183,10 @@ public:
             clone<Headers>( headers )
         );
 
-        iter->second->insert
-        (
-            boost::move( cacheEntry )
-        );
+        iter->second->insert( boost::move( cacheEntry ) );
     }
 
-    CacheEntry * findEntry
+    boost::shared_ptr<CacheEntry> findEntry
     ( 
         llvm::StringRef fileName,
         clang::Preprocessor const &

@@ -180,7 +180,8 @@ class CompileWorker:
                     get_result = get_node(get_zmq_ctx(), nodes, node_info)
                     if get_result:
                         break
-                    sleep(1)
+                    with timer.timeit('find_available_node.sleeping'):
+                        sleep(1)
                 node_index, server_conn = get_result
 
             try:
@@ -284,7 +285,7 @@ class TaskProcessor(Process):
             pth_files = book_keeper.PTHFileRepository()
             node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
             timer = book_keeper.Timer()
-            prepare_pool = preparer.ThreadPool(4)
+            prepare_pool = preparer.ThreadPool(32)
             while True:
                 self.print_stats(node_info, timer.as_dict())
                 try:

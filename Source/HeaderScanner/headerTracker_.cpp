@@ -15,7 +15,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     assert( !fileStack_.empty() );
     clang::FileEntry const * currentFile( fileStack_.back() );
     clang::DirectoryLookup const * dontCare;
-    clang::FileEntry const * entry = headerSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, true );
+    clang::FileEntry const * entry = headerSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
     if ( !entry )
         return;
 
@@ -27,14 +27,14 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         return;
     }
 
-    Cache::CacheEntry * const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
+    boost::shared_ptr<Cache::CacheEntry> const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
         return;
     }
     cacheHit_ = cacheHit;
-    cacheEntriesUsed_.insert( cacheHit );
+    cacheEntriesUsed_.push_back( cacheHit );
     fileEntry = cacheHit->getFileEntry( preprocessor().getSourceManager() );
 }
 
@@ -72,11 +72,16 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     }
 }
 
+clang::SourceManager & HeaderTracker::sourceManager() const
+{
+    return preprocessor_.getSourceManager();
+}
+
 void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry->getName() ), 0 ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry->getName() ), boost::shared_ptr<Cache::CacheEntry>() ) );
     fileStack_.push_back( mainFileEntry );
 }
 
@@ -89,7 +94,7 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
         if ( !headerCtxStack().empty() )
             headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_ ) );
-        cacheHit_ = 0;
+        cacheHit_.reset();
     }
 }
 
@@ -137,8 +142,6 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
 
-    //for ( std::set<Cache::CacheEntry *>::const_iterator iter( cacheEntriesUsed_.begin() ); iter != cacheEntriesUsed_.end(); ++iter )
-    //    (*iter)->second.releaseFileEntry( sourceManager() );
     cacheEntriesUsed_.clear();
     return headerCtxStack().back().includedHeaders();
 }

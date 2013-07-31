@@ -209,7 +209,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     clang::HeaderSearch & headers = preprocessor().getHeaderSearchInfo();
     
     std::vector<clang::DirectoryLookup> dirs;
-    headers.SetSearchPaths(dirs, 0, 0, true);
+    headers.SetSearchPaths( dirs, 0, 0, true );
 
     // Setup predefines.
     //   Clang always tries to define some macros, even if UsePredefines is off,

@@ -54,14 +54,14 @@ public:
         CacheEntry
         (
             std::string const & uniqueVirtualFileName,
-            Macros const & usedMacrosp,
-            MacroUsages const & macroUsagesp,
-            Headers const & headersp
+            Macros const & usedMacros,
+            MacroUsages const & macroUsages,
+            Headers const & headers
         ) : 
             fileName_( uniqueVirtualFileName ),
-            usedMacros( usedMacrosp ),
-            macroUsages( macroUsagesp ),
-            headers( headersp )
+            usedMacros_( usedMacros ),
+            macroUsages_( macroUsages ),
+            headers_( headers )
         {
         }
 
@@ -73,9 +73,9 @@ public:
         CacheEntry & operator=( BOOST_RV_REF(CacheEntry) other )
         {
             fileName_.swap( other.fileName_ );
-            usedMacros.swap( other.usedMacros );
-            macroUsages.swap( other.macroUsages );
-            headers.swap( other.headers );
+            usedMacros_.swap( other.usedMacros_ );
+            macroUsages_.swap( other.macroUsages_ );
+            headers_.swap( other.headers_ );
 
             buffer_.reset( other.buffer_.take() );
             return *this;
@@ -85,14 +85,16 @@ public:
         void releaseFileEntry( clang::SourceManager & );
         void generateContent( boost::recursive_mutex & );
 
+        Macros const & usedMacros() const { return usedMacros_; }
+        MacroUsages const & macroUsages() const { return macroUsages_; }
+        Headers const & headers() const { return headers_; }
+
     private:
         std::string fileName_;
         llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
-
-    public:
-        Macros usedMacros;
-        MacroUsages macroUsages;
-        Headers headers;
+        Macros usedMacros_;
+        MacroUsages macroUsages_;
+        Headers headers_;
     };
 
     class HeaderInfo
@@ -198,7 +200,7 @@ private:
     // Poor man's flyweight.
     llvm::StringRef cloneStr( llvm::StringRef x )
     {
-        std::pair<FlyWeight::iterator, bool> insertResult( flyweight_.insert( x ) );
+        std::pair<FlyWeight::iterator, bool> const insertResult( flyweight_.insert( x ) );
         return llvm::StringRef( insertResult.first->data(), insertResult.first->size() );
     }
 
@@ -226,7 +228,8 @@ private:
 
 private:
     struct HeadersInfoList : public boost::container::list<HeaderInfo> {};
-    struct HeadersInfo : public boost::unordered_map<std::string, HeadersInfoList::iterator> {};
+    struct HeadersInfo : public boost::unordered_map<std::string, HeadersInfoList::iterator>
+    {};
 
     HeadersInfo const & headersInfo() const { return headersInfo_; }
     HeadersInfo       & headersInfo()       { return headersInfo_; }

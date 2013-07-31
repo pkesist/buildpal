@@ -71,7 +71,11 @@ private:
             if ( !cacheHit_ )
                 return;
 
-            std::copy( cacheHit_->headers.begin(), cacheHit_->headers.end(), std::inserter( includedHeaders_, includedHeaders_.begin() ) );
+            std::copy(
+                cacheHit_->headers().begin(),
+                cacheHit_->headers().end(),
+                std::inserter( includedHeaders_, includedHeaders_.begin() )
+            );
         }
 
         void macroUsed( Macro const & macro )
@@ -131,8 +135,8 @@ private:
             }
         }
 
-        Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros : usedMacros_; }
-        MacroUsages const & macroUsages() const { return cacheHit_ ? cacheHit_->macroUsages : macroUsages_; }
+        Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }
+        MacroUsages const & macroUsages() const { return cacheHit_ ? cacheHit_->macroUsages() : macroUsages_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         Header const & header() { return header_; }
 

@@ -24,7 +24,7 @@ void Cache::CacheEntry::generateContent( boost::recursive_mutex & generateMutex 
     // Cache the result.
     std::string content;
     llvm::raw_string_ostream defineStream( content );
-    for ( MacroUsages::const_iterator iter( macroUsages.begin() ); iter != macroUsages.end(); ++iter )
+    for ( MacroUsages::const_iterator iter( macroUsages().begin() ); iter != macroUsages().end(); ++iter )
     {
         if ( iter->first == MacroUsage::defined )
         {
@@ -64,7 +64,6 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 
 boost::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
 {
-    // Shared ownership.
     boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
     if ( iter == headersInfo().end() )
@@ -90,7 +89,7 @@ boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocesso
         ++headerInfoIter
     )
     {
-        Macros const & inputMacros( (*headerInfoIter)->usedMacros );
+        Macros const & inputMacros( (*headerInfoIter)->usedMacros() );
         bool isMatch( true );
 
         struct MacroIsNotCurrent

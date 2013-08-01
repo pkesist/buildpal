@@ -92,14 +92,23 @@ private:
             if ( cacheHit_ )
                 return;
             macroUsages_.push_back( std::make_pair( MacroUsage::defined, macro ) );
-            definedMacros_.insert( macro.first );
+            definedMacros_.insert( std::make_pair( macro.first, --macroUsages_.end() ) );
         }
 
         void macroUndefined( Macro const & macro )
         {
             if ( cacheHit_ )
                 return;
-            macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
+            //std::map<llvm::StringRef, MacroUsages::iterator>::iterator const iter = definedMacros_.find( macro.first );
+            //if ( iter != definedMacros_.end() )
+            //{
+            //    macroUsages_.erase( iter->second );
+            //    definedMacros_.erase( iter );
+            //}
+            //else
+            //{
+                macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
+            //}
         }
 
         void addHeader( Header const & header )
@@ -148,8 +157,8 @@ private:
         Header header_;
         boost::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
-        std::set<llvm::StringRef> definedMacros_;
         MacroUsages macroUsages_;
+        std::map<llvm::StringRef, MacroUsages::iterator> definedMacros_;
         Headers includedHeaders_;
     };
     typedef std::vector<HeaderCtx> HeaderCtxStack;

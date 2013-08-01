@@ -39,38 +39,18 @@ def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
         ppc.add_ignored_header(ignored_header)
     return preprocessor, ppc
 
-def create_pth(hpp_file, pth_file, includes, sysincludes, defines):
-    preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines)
-    with TempFile(suffix='.cpp') as cpp:
-        with cpp.open('wt') as cpp_file:
-            cpp_file.write('#include "{}"\n'.format(hpp_file))
-        preprocessor.emitPTH(ppc, cpp.filename(), pth_file)
-    return pth_file
-
-def preprocess_file(cpp_file, includes, sysincludes, defines):
-    try:
-        preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines)
-        return preprocessor.preprocess(ppc, cpp_file)
-    except Exception:
-        import traceback
-        traceback.print_exc()
-
-    # We failed to collect headers.
-    return None
-
-def all_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
+def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
-    return preprocessor.scanHeaders(ppc, cpp_file, pth_file)
+    return preprocessor.scanHeaders(ppc, cpp_file)
 
-
-def collect_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_headers=[]):
+def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     try:
         preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
         zip_file = TempFile(suffix='.zip')
         paths_to_include = []
         relative_paths = {}
         with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
-            for file, full in preprocessor.scanHeaders(ppc, cpp_file, pth_file):
+            for file, full in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.
@@ -100,20 +80,6 @@ def collect_headers(cpp_file, includes, sysincludes, defines, pth_file, ignored_
 
     # We failed to collect headers.
     return None
-
-def rewrite_includes(cpp_file, includes, sysincludes, defines, pth_file):
-    try:
-        includes = list(a.replace('\\', '/') for a in includes)
-        sysincludes = list(a.replace('\\', '/') for a in sysincludes)
-        ppc = setup_preprocessor(includes, sysincludes, defines)
-        return preprocessor.rewriteIncludes(ppc, cpp_file)
-    except:
-        import traceback
-        traceback.print_exc()
-
-    # We failed to rewrite includes.
-    return None
-
 
 def test1():
     include = mkdtemp()

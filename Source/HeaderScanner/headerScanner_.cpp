@@ -246,19 +246,9 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
     return headerSearch;
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename, std::string const & pth )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
 {
     clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
-    struct TokenCacheSetter
-    {
-        TokenCacheSetter( std::string & tc, std::string const & pth )
-            : tc_( tc ) { tc_ = pth; }
-
-        ~TokenCacheSetter() { tc_.clear(); }
-
-        std::string & tc_;
-    } tokenCacheSetter( ppOpts.TokenCache, pth );
-
     setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
     {
@@ -335,17 +325,6 @@ std::string & Preprocessor::rewriteIncludes( PreprocessingContext const & ppc, s
 
     clang::RewriteIncludesInInput( preprocessor(), &os, preprocessorOutputOptions );
     return os.str();
-}
-
-
-void Preprocessor::emitPTH( PreprocessingContext const & ppc, std::string const & filename, std::string const & outputFile )
-{
-    setupPreprocessor( ppc, filename );
-    std::string error;
-    llvm::raw_fd_ostream output( outputFile.c_str(), error, llvm::raw_fd_ostream::F_Binary );
-    if ( !error.empty() )
-        throw std::runtime_error( error );
-    clang::CacheTokens( preprocessor(), &output );
 }
 
 

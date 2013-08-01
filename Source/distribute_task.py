@@ -16,6 +16,4 @@ class CompileTask:
         self.tempfile = None
 
         self.algorithm = 'SCAN_HEADERS'
-        #self.algorithm = 'PREPROCESS_LOCALLY_WITH_BUILTIN_PREPROCESSOR'
-        #self.algorithm = 'REWRITE_INCLUDES'
         #self.algorithm = 'PREPROCESS_LOCALLY'

@@ -299,15 +299,14 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", "pth_file", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", NULL };
 
     PyObject * pObject = 0;
     PyObject * filename = 0;
-    PyObject * pth = 0;
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OOO", kwlist, &pObject, &filename, &pth ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OO", kwlist, &pObject, &filename ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -324,14 +323,8 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         return NULL;
     }
 
-    if ( pth && !PyUnicode_Check( pth ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Expected a string as 'pth' parameter." );
-        return NULL;
-    }
-
     AllowPythonThreads threads;
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), PyUnicode_AsUTF8( pth ) );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ) );
     threads.release();
 
     PyObject * result = PyTuple_New( headers.size() );
@@ -441,37 +434,11 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
     Py_RETURN_NONE;
 }
 
-PyObject * PyPreprocessor_emitPTH( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "pp_ctx", "pch_src", "output", NULL };
-
-    PyObject * pObject = 0;
-    char const * pch_src = 0;
-    char const * output = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Oss", kwlist, &pObject, &pch_src, &output ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Invalid preprocessing context parameter." );
-        return NULL;
-    }
-
-    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    self->pp->emitPTH( *ppContext->ppContext, pch_src, output );
-    Py_RETURN_NONE;
-}
-
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
     {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
     {"rewriteIncludes" , (PyCFunction)PyPreprocessor_rewriteIncludes , METH_VARARGS | METH_KEYWORDS, "Rewrite #include directives."},
-    {"emitPTH"         , (PyCFunction)PyPreprocessor_emitPTH         , METH_VARARGS | METH_KEYWORDS, "Create a pre-tokenized header file."},
     {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}

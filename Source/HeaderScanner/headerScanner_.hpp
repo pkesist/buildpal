@@ -59,15 +59,13 @@ public:
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename, std::string const & pth );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
     std::string & rewriteIncludes( PreprocessingContext const &, std::string const & filename, std::string & output );
     std::string & preprocess( PreprocessingContext const &, std::string const & filename, std::string & output );
     clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
-
-    void emitPTH( PreprocessingContext const & ppc, std::string const & src, std::string const & output );
 
 private:
     void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );

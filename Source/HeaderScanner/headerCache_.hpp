@@ -16,9 +16,10 @@
 #include <boost/move/move.hpp>
 
 
-#include <string>
+#include <list>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 //------------------------------------------------------------------------------
 

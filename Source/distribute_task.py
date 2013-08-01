@@ -1,12 +1,12 @@
 
 
 class CompileTask:
-    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, pch_header, distributer):
+    def __init__(self, cwd, call, source, source_type, preprocessor_info, output, compiler_info, pch_file, pch_header, compilerWrapper):
         self.call = call
         self.source_type = source_type
         self.compiler_info = compiler_info
-        self.output_switch = distributer.object_name_option().make_value('{}').make_str()
-        self.compile_switch = distributer.compile_no_link_option().make_value().make_str()
+        self.output_switch = compilerWrapper.object_name_option().make_value('{}').make_str()
+        self.compile_switch = compilerWrapper.compile_no_link_option().make_value().make_str()
         self.cwd = cwd
         self.preprocessor_info = preprocessor_info
         self.pch_file = pch_file

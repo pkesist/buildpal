@@ -43,7 +43,7 @@ class QueueManager(BaseManager):
 
 QueueManager.register('queue_task')
 
-class CompilationDistributer(CmdLineOptions):
+class CompilerWrapper(CmdLineOptions):
     class Category: pass
     class BuildLocalCategory(Category): pass
     class PCHCategory(Category): pass
@@ -106,11 +106,11 @@ class CompilationDistributer(CmdLineOptions):
             return (token for token in self.__options if type(token.option) == FreeOption)
 
         def filter_options(self, filter):
-            if type(filter) == type and issubclass(filter, CompilationDistributer.Category):
+            if type(filter) == type and issubclass(filter, CompilerWrapper.Category):
                 return (token for token in self.__options
-                    if type(token.option) == CompilationDistributer.CompilerOption and
+                    if type(token.option) == CompilerWrapper.CompilerOption and
                     token.option.test_category(filter))
-            if isinstance(filter, CompilationDistributer.CompilerOption):
+            if isinstance(filter, CompilerWrapper.CompilerOption):
                 return (token for token in self.__options
                     if token.option.name() == filter.name())
             raise RuntimeError("Unknown option filter.")
@@ -119,7 +119,7 @@ class CompilationDistributer(CmdLineOptions):
             return (input.make_str() for input in self.free_options())
         
     def create_context(self, command):
-        return CompilationDistributer.Context(command, self)
+        return CompilerWrapper.Context(command, self)
 
     def __run_locally(self, ctx):
         call = [ctx.executable()]
@@ -127,7 +127,7 @@ class CompilationDistributer(CmdLineOptions):
         return subprocess.call(call)
 
     def build_local(self, ctx):
-        tokens = list(ctx.filter_options(CompilationDistributer.BuildLocalCategory))
+        tokens = list(ctx.filter_options(CompilerWrapper.BuildLocalCategory))
         if not tokens:
             return False
 
@@ -160,8 +160,8 @@ class CompilationDistributer(CmdLineOptions):
     def compiler_option_macros(self, tokens):
         result = []
         for token in (token for token in tokens
-            if type(token.option) == CompilationDistributer.CompilerOption and
-            token.option.test_category(CompilationDistributer.PreprocessingCategory)):
+            if type(token.option) == CompilerWrapper.CompilerOption and
+            token.option.test_category(CompilerWrapper.PreprocessingCategory)):
             option = token.option
             if not option:
                 continue
@@ -169,11 +169,11 @@ class CompilationDistributer(CmdLineOptions):
         return result
 
     def __init__(self):
-        self.use_pch_option().add_category(CompilationDistributer.CompilationCategory)
-        self.pch_file_option().add_category(CompilationDistributer.PCHCategory)
-        self.compile_no_link_option().add_category(CompilationDistributer.CompilationCategory)
-        self.include_file_option().add_category(CompilationDistributer.PreprocessingCategory)
-        self.define_option().add_category(CompilationDistributer.PreprocessingCategory)
+        self.use_pch_option().add_category(CompilerWrapper.CompilationCategory)
+        self.pch_file_option().add_category(CompilerWrapper.PCHCategory)
+        self.compile_no_link_option().add_category(CompilerWrapper.CompilationCategory)
+        self.include_file_option().add_category(CompilerWrapper.PreprocessingCategory)
+        self.define_option().add_category(CompilerWrapper.PreprocessingCategory)
         self.add_option(self.compile_no_link_option())
         self.add_option(self.object_name_option())
         self.add_option(self.use_pch_option())
@@ -200,12 +200,12 @@ class CompilationDistributer(CmdLineOptions):
 
         preprocess_call = [ctx.executable()]
         preprocess_call.extend(option.make_str() for option in 
-            ctx.filter_options(CompilationDistributer.PreprocessingCategory))
+            ctx.filter_options(CompilerWrapper.PreprocessingCategory))
         preprocess_call.append(self.preprocess_option().make_value().make_str())
 
         compile_call = [ctx.executable()]
         compile_call.extend(option.make_str() for option in
-            ctx.filter_options(CompilationDistributer.CompilationCategory))
+            ctx.filter_options(CompilerWrapper.CompilationCategory))
 
         includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
         macros = [token.val for token in ctx.filter_options(self.define_option())]
@@ -244,7 +244,7 @@ class CompilationDistributer(CmdLineOptions):
                 compiler_info = compiler_info,
                 pch_file = pch_file,
                 pch_header = pch_header,
-                distributer = self)
+                compilerWrapper = self)
 
         ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]
 
@@ -284,7 +284,7 @@ class CompilationDistributer(CmdLineOptions):
 
         call = [ctx.executable()]
         call.extend(o.make_str() for o in
-            ctx.filter_options(CompilationDistributer.LinkingCategory))
+            ctx.filter_options(CompilerWrapper.LinkingCategory))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])

@@ -1,5 +1,5 @@
 from cmdline_processing import CmdLineOption, FreeOption
-from distribute_client import CompilationDistributer, CompilerInfo
+from distribute_client import CompilerWrapper, CompilerInfo
 from utils import get_batch_file_environment_side_effects, TempFile
 
 import subprocess
@@ -26,25 +26,25 @@ def find_on_path(executable):
 
 esc = ['/', '-']
 def simple(name, macros=[]): 
-    result = CompilationDistributer.CompilerOption(name, esc, None, False)
+    result = CompilerWrapper.CompilerOption(name, esc, None, False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def simple_w_minus(name, macros=[]):
-    result = CompilationDistributer.CompilerOption(name, esc, '-', False)
+    result = CompilerWrapper.CompilerOption(name, esc, '-', False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def with_param(name, macros=[]):
-    result = CompilationDistributer.CompilerOption(name, esc, None, True, False, False)
+    result = CompilerWrapper.CompilerOption(name, esc, None, True, False, False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 
-class MSVCDistributer(CompilationDistributer):
+class MSVCWrapper(CompilerWrapper):
     __preprocess_option = simple('E')
     __object_name_option = with_param('Fo')
     __compile_no_link_option = simple('c')
@@ -62,39 +62,39 @@ class MSVCDistributer(CompilationDistributer):
     def pch_file_option(self): return self.__pch_file_option
 
     def __init__(self):
-        super(MSVCDistributer, self).__init__()
+        super(MSVCWrapper, self).__init__()
 
         # Build Local
         for option in self.build_local_options:
-            option.add_category(MSVCDistributer.BuildLocalCategory)
+            option.add_category(MSVCWrapper.BuildLocalCategory)
             self.add_option(option)
         # Preprocessing
         for option in self.preprocessing_options:
-            option.add_category(MSVCDistributer.PreprocessingCategory)
+            option.add_category(MSVCWrapper.PreprocessingCategory)
             self.add_option(option)
         # PCH options which require local build.        
         for option in self.pch_build_local_options:
-            option.add_category(MSVCDistributer.BuildLocalCategory)
-            option.add_category(MSVCDistributer.PCHCategory)
+            option.add_category(MSVCWrapper.BuildLocalCategory)
+            option.add_category(MSVCWrapper.PCHCategory)
             self.add_option(option)
         # PCH options.
         for option in self.pch_options:
-            option.add_category(MSVCDistributer.PCHCategory)
+            option.add_category(MSVCWrapper.PCHCategory)
             self.add_option(option)
         # Both preprocessing and compilation.
         for option in self.preprocess_and_compile:
-            option.add_category(MSVCDistributer.PreprocessingCategory)
-            option.add_category(MSVCDistributer.CompilationCategory)
+            option.add_category(MSVCWrapper.PreprocessingCategory)
+            option.add_category(MSVCWrapper.CompilationCategory)
             self.add_option(option)
         # Compilation
         for option in self.compilation_options:
-            option.add_category(MSVCDistributer.CompilationCategory)
+            option.add_category(MSVCWrapper.CompilationCategory)
             self.add_option(option)
         # Always.
         for option in self.always:
-            option.add_category(MSVCDistributer.PreprocessingCategory)
-            option.add_category(MSVCDistributer.CompilationCategory)
-            option.add_category(MSVCDistributer.LinkingCategory)
+            option.add_category(MSVCWrapper.PreprocessingCategory)
+            option.add_category(MSVCWrapper.CompilationCategory)
+            option.add_category(MSVCWrapper.LinkingCategory)
             self.add_option(option)
 
     def requires_preprocessing(self, input):
@@ -104,7 +104,7 @@ class MSVCDistributer(CompilationDistributer):
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
     def create_context(self, command):
-        ctx = super(MSVCDistributer, self).create_context(command)
+        ctx = super(MSVCWrapper, self).create_context(command)
         ctx.set_executable('cl.exe')
         return ctx
 
@@ -192,7 +192,7 @@ class MSVCDistributer(CompilationDistributer):
             with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
-        compiler_env = MSVCDistributer.get_compiler_environment(compiler_info)
+        compiler_env = MSVCWrapper.get_compiler_environment(compiler_info)
         if compiler_env:
             return lambda command : run_compiler(command, compiler_env)
         return None
@@ -201,8 +201,8 @@ class MSVCDistributer(CompilationDistributer):
         result = []
         add_extensions = True
         for token in (token for token in tokens
-            if type(token.option) == CompilationDistributer.CompilerOption and
-            token.option.test_category(CompilationDistributer.PreprocessingCategory)):
+            if type(token.option) == CompilerWrapper.CompilerOption and
+            token.option.test_category(CompilerWrapper.PreprocessingCategory)):
             option = token.option
             if not option:
                 continue
@@ -289,6 +289,6 @@ class MSVCDistributer(CompilationDistributer):
         with_param     ('F'), simple      ('link'), with_param('analyze')]
 
 if __name__ == "__main__":
-    distributer = MSVCDistributer()
-    retcode = distributer.execute(sys.argv[1:])
+    compilerWrapper = MSVCWrapper()
+    retcode = compilerWrapper.execute(sys.argv[1:])
     sys.exit(retcode)

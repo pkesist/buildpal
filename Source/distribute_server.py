@@ -41,7 +41,7 @@ class ServerCompiler:
 
         if compiler_info.toolset() == 'msvc':
             import msvc
-            setup = msvc.MSVCDistributer.setup_compiler(compiler_info)
+            setup = msvc.MSVCWrapper.setup_compiler(compiler_info)
             if setup:
                 self.__compiler_setup[compiler_info] = setup
             return setup

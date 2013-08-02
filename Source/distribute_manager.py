@@ -62,64 +62,61 @@ def get_zmq_ctx():
     return zmq_ctx
 
 class ScanHeaders(Process):
-    def __init__(self, port, workers):
+    def __init__(self, port, workers, timer):
         self.__port = port
         self.__workers = workers
+        self.__timer = timer
         return super().__init__()
 
     def run(self):
         zmq_ctx = zmq.Context()
         executor = ThreadPoolExecutor(max_workers=self.__workers)
-        self.socket = zmq_ctx.socket(zmq.DEALER)
-        self.socket.connect('tcp://localhost:{}'.format(self.__port))
+        socket = zmq_ctx.socket(zmq.DEALER)
+        socket.connect('tcp://localhost:{}'.format(self.__port))
+
+        class TaskDone:
+            def __init__(self, client_id, socket):
+                self.__client_id = client_id
+                self.__socket = socket
+
+            def __call__(self, future):
+                assert future.done()
+                result = future.result()
+                socket.send_multipart([self.__client_id, pickle.dumps(result)])
 
         while True:
-            client_id, task = self.socket.recv_multipart()
+            client_id, task = socket.recv_multipart()
             task = pickle.loads(task)
             future = executor.submit(self.prepare_task, task)
-            future.add_done_callback(lambda future : self.task_done(client_id, future))
-
-    def task_done(self, client_id, future):
-        assert future.done()
-        result = future.result()
-        self.socket.send_multipart([client_id, pickle.dumps(result)])
+            future.add_done_callback(TaskDone(client_id, socket))
 
     def prepare_task(self, task):
         # TODO: This does not belong here. Move this to msvc.py.
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
         # hardcode this knowledge here.
-        macros = task.preprocessor_info.all_macros
-        if '_DEBUG' in macros:
-            if not any(('_SECURE_SCL' in x for x in macros)):
-                macros.append('_SECURE_SCL=1')
-            if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
-                macros.append('_HAS_ITERATOR_DEBUGGING=1')
+        with self.__timer.timeit('prepare'):
+            macros = task.preprocessor_info.all_macros
+            if '_DEBUG' in macros:
+                if not any(('_SECURE_SCL' in x for x in macros)):
+                    macros.append('_SECURE_SCL=1')
+                if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
+                    macros.append('_HAS_ITERATOR_DEBUGGING=1')
 
-        if task.algorithm == 'SCAN_HEADERS':
-            return collect_headers(os.path.join(task.cwd, task.source),
-                task.preprocessor_info.includes, [], macros,
-                [task.pch_header] if task.pch_header else [])
+            if task.algorithm == 'SCAN_HEADERS':
+                return collect_headers(os.path.join(task.cwd, task.source),
+                    task.preprocessor_info.includes, [], macros,
+                    [task.pch_header] if task.pch_header else [])
 
-        else:
-            raise Exception("Invalid algorithm.")
+            else:
+                raise Exception("Invalid algorithm.")
 
 
-class CompileWorker:
-    def __init__(self, task, timer, done_port, preprocess_port):
+class CompileSession:
+    def __init__(self, task, timer, client_port):
         self.task = task
         self.timer = timer
-        self.done_port = done_port
-        self.preprocess_port = preprocess_port
-
-    def __prepare_task(self, zmq_ctx):
-        if self.task.algorithm != 'SCAN_HEADERS':
-            return None
-
-        socket = zmq_ctx.socket(zmq.DEALER)
-        socket.connect('tcp://localhost:{}'.format(self.preprocess_port))
-        socket.send_pyobj(self.task)
-        return socket
+        self.client_port = client_port
 
     def __find_node(self, nodes, node_info):
         def cmp(lhs, rhs):
@@ -176,9 +173,9 @@ class CompileWorker:
 
     def __call__(self, client_id, nodes, node_info):
         try:
+            assert self.task.tempfile
             zmq_ctx = zmq.Context()
-            client_conn = self.SendProxy(self.done_port, client_id, zmq_ctx)
-            self.prepare_socket = self.__prepare_task(zmq_ctx)
+            client_conn = self.SendProxy(self.client_port, client_id, zmq_ctx)
             node_index, server_conn = self.__find_node(nodes, node_info)
 
             try:
@@ -213,10 +210,7 @@ class CompileWorker:
         if self.task.algorithm == 'SCAN_HEADERS':
             server_conn.send_pyobj('SCAN_HEADERS')
             server_conn.send_pyobj('ZIP_FILE')
-            with self.timer.timeit('prepare_result'):
-                tempfile = self.prepare_socket.recv_pyobj()
-            assert tempfile
-            with self.timer.timeit('send.zip'), open(tempfile, 'rb') as file:
+            with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
                 send_file(server_conn.send_pyobj, file)
             server_conn.send_pyobj('SOURCE_FILE')
             with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
@@ -265,20 +259,15 @@ class TaskProcessor:
         done_socket = zmq_ctx.socket(zmq.DEALER)
         done_port = done_socket.bind_to_random_port('tcp://*')
         
-        preprocess_worker_socket = zmq_ctx.socket(zmq.DEALER)
-        preprocess_worker_port = preprocess_worker_socket.bind_to_random_port('tcp://*')
-
-        preprocess_socket = zmq_ctx.socket(zmq.ROUTER)
+        preprocess_socket = zmq_ctx.socket(zmq.DEALER)
         preprocess_socket_port = preprocess_socket.bind_to_random_port('tcp://*')
-
-        scanHeaders = ScanHeaders(preprocess_worker_port, 32)
-        scanHeaders.start()
 
         poller = zmq.Poller()
         poller.register(socket, zmq.POLLIN)
         poller.register(done_socket, zmq.POLLIN)
-        poller.register(preprocess_worker_socket, zmq.POLLIN)
         poller.register(preprocess_socket, zmq.POLLIN)
+
+        tasks = {}
 
         try:
             with BookKeepingManager() as book_keeper, \
@@ -286,26 +275,30 @@ class TaskProcessor:
                 Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
+
+                scanHeaders = ScanHeaders(preprocess_socket_port, 32, timer)
+                scanHeaders.start()
+
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     sockets = dict(poller.poll(1000))
                     if sockets.get(socket) == zmq.POLLIN:
                         client_id, task = socket.recv_multipart()
-                        task = pickle.loads(task)
                         socket.send_multipart([client_id, pickle.dumps("TASK_RECEIVED")])
-                        compile_pool.apply_async(CompileWorker(task, timer, done_port, preprocess_socket_port), args=(client_id, self.__nodes, node_info))
+                        preprocess_socket.send_multipart([client_id, task])
+                        task = pickle.loads(task)
+                        tasks[client_id] = task
 
                     if sockets.get(done_socket) == zmq.POLLIN:
                         msg = done_socket.recv_multipart()
                         socket.send_multipart(msg)
 
-                    if sockets.get(preprocess_worker_socket) == zmq.POLLIN:
-                        msg = preprocess_worker_socket.recv_multipart()
-                        preprocess_socket.send_multipart(msg)
-
                     if sockets.get(preprocess_socket) == zmq.POLLIN:
-                        msg = preprocess_socket.recv_multipart()
-                        preprocess_worker_socket.send_multipart(msg)
+                        client_id, result = preprocess_socket.recv_multipart()
+                        task = tasks[client_id]
+                        task.tempfile = pickle.loads(result)
+                        #del tasks[client_id]
+                        compile_pool.apply_async(CompileSession(task, timer, done_port), args=(client_id, self.__nodes, node_info))
         finally:
             scanHeaders.terminate()
 

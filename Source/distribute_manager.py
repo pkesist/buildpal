@@ -240,9 +240,9 @@ class TaskProcessor:
         done_socket = zmq_ctx.socket(zmq.DEALER)
         done_port = done_socket.bind_to_random_port('tcp://*')
 
-        poll_clients = zmq.Poller()
-        poll_clients.register(socket, zmq.POLLIN)
-        poll_clients.register(done_socket, zmq.POLLIN)
+        poller = zmq.Poller()
+        poller.register(socket, zmq.POLLIN)
+        poller.register(done_socket, zmq.POLLIN)
 
         with BookKeepingManager() as book_keeper, \
             BookKeepingManager() as preparer, \
@@ -252,7 +252,7 @@ class TaskProcessor:
             prepare_pool = preparer.ThreadPool(32)
             while True:
                 self.print_stats(node_info, timer.as_dict())
-                sockets = dict(poll_clients.poll(1000))
+                sockets = dict(poller.poll(1000))
                 if sockets.get(socket) == zmq.POLLIN:
                     client_id, task = socket.recv_multipart()
                     task = pickle.loads(task)

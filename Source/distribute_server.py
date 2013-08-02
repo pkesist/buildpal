@@ -1,5 +1,4 @@
 #! python3.3
-from multiprocessing.connection import Listener, Client
 from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
 from time import sleep

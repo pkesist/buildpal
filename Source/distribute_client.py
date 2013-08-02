@@ -8,10 +8,9 @@ import subprocess
 import string
 import sys
 import zlib
+import zmq
 
 from utils import send_compressed_file
-from multiprocessing.connection import Listener
-from multiprocessing.managers import BaseManager
 
 class CompilerInfo:
     def __init__(self, toolset, executable, size, id, macros):
@@ -37,11 +36,6 @@ class PreprocessorInfo:
     @property
     def all_macros(self):
         return self.macros + self.builtin_macros
-
-class QueueManager(BaseManager):
-    pass
-
-QueueManager.register('queue_task')
 
 class CompilerWrapper(CmdLineOptions):
     class Category: pass
@@ -78,19 +72,18 @@ class CompilerWrapper(CmdLineOptions):
             return result
 
     class Context:
-        def __init__(self, command, option_parser):
+        def __init__(self, command, option_parser, zmq_ctx):
             self.__options = list(option_parser.parse_options(command[1:]))
-            self.__manager_id = command[0]
+            self.__zmq_ctx = zmq_ctx
+            self.__address = "tcp://localhost:{}".format(command[0])
 
-            try:
-                self.__manager = QueueManager(r"\\.\pipe\{}".format(self.__manager_id), b"")
-                self.__manager.connect()
-            except Exception:
-                raise EnvironmentError("Failed to connect to build manager "
-                    "'{}'.".format(self.__manager_id))
+        def connection(self):
+            socket = self.__zmq_ctx.socket(zmq.DEALER)
+            socket.connect(self.__address)
+            return socket
 
-        def queue_task(self, task, endpoint):
-            self.__manager.queue_task(task, endpoint)
+        def zmq_ctx(self):
+            return self.__zmq_ctx
 
         def executable(self):
             if not self.__executable:
@@ -119,7 +112,7 @@ class CompilerWrapper(CmdLineOptions):
             return (input.make_str() for input in self.free_options())
         
     def create_context(self, command):
-        return CompilerWrapper.Context(command, self)
+        return CompilerWrapper.Context(command, self, zmq.Context())
 
     def __run_locally(self, ctx):
         call = [ctx.executable()]
@@ -249,29 +242,32 @@ class CompilerWrapper(CmdLineOptions):
         ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]
 
     def execute_remotely(self, ctx):
-        rnd = random.Random()
-        rnd.seed()
-        endpoint = "".join(rnd.choice(string.ascii_uppercase) for x in range(15))
-        listener = Listener(r'\\.\pipe\{}'.format(endpoint), b"")
+        zmq_ctx = ctx.zmq_ctx()
         for preprocess_call, compile_task in ctx.tasks:
-            ctx.queue_task(compile_task, endpoint)
-            conn = listener.accept()
+            conn = ctx.connection()
+            conn.send_pyobj(compile_task)
+            response = conn.recv_pyobj()
+            assert response == "TASK_RECEIVED"
+
             while True:
-                task = conn.recv()
-                if task == 'PREPROCESS':
+                request = conn.recv_pyobj()
+                if request == 'PREPROCESS':
                     p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
-                    send_compressed_file(conn.send, p.stdout)
-                if task == "COMPLETED":
-                    retcode, stdout, stderr = conn.recv()
+                    send_compressed_file(conn.send_pyobj, p.stdout)
+                elif request == 'COMPLETED':
+                    retcode, stdout, stderr = conn.recv_pyobj()
                     sys.stdout.write(stdout.decode())
                     if stderr:
                         sys.stderr.write("---------------------------- STDERR ----------------------------\n")
                         sys.stderr.write(stderr.decode())
                         sys.stderr.write("----------------------------------------------------------------\n")
-                    listener.close()
                     return retcode
-                if task == "FAILED":
+                elif request == "FAILED":
                     return -1
+                else:
+                    print("GOT {}".format(request))
+                    return -1
+                
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):

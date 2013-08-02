@@ -18,8 +18,8 @@ DistriBuild
     It works by distributing parts of compilation process to other machines on
     the network (i.e. the build farm).
     
-    It is inspired by the distcc project. However, DistriBuild's main focus is
-    on the Microsoft Visual C compiler.
+    It is inspired by the distcc project. However, DistriBuild's goal is to
+    support different platforms and compilers, especially MS VC compiler.
 
 --------------------------------------------------------------------------------
 --------------
@@ -40,6 +40,9 @@ DistriBuild
         that task distribution does not affect the produced objects.
         (more correctly - will soon ;)
         
+    PCH support.
+    Pump-mode.
+
     Free.
         DistriBuild is open-source, free and has a permissive license.
 
@@ -52,11 +55,9 @@ DistriBuild
 ------------------
 
     DistriBuild is written in Python (www.python.org). All machines need to have
-    Pyhton installed. DistriBuild works only with Python 3. Python 2 is not, was
-    not and probably never will be supported.
-    
-    An additional Python package, psutil, is optional but recommended to utilize
-    task rejection.
+    Pyhton installed. DistriBuild works only with Python 3.3+.
+
+    Compiler needs to be installed on all machines on the network.
 
 --------------------------------------------------------------------------------
 -----------------
@@ -89,7 +90,9 @@ DistriBuild
     Calling the compiler.
     ---------------------
 
-    Instead of calling 'cl.exe' you need to call 'msvc.py <manager_id> cl.exe'.
+    Instead of calling 'cl.exe' you need to call 'msvc.py <manager_id>'. Your
+    environment should already be configured - msvc.py will try to locate
+    the compiler executable on PATH.
     
 --------------------------------------------------------------------------------
 ------------
@@ -103,9 +106,6 @@ DistriBuild
 (6.) Future development plans.
 ------------------------------
 
-    * Support more complex tasks to delegate more work to the build farm.
-        * Remote preprocessing.
-        * PCH support.
     * Support more platforms (Linux) and compilers (GCC/Clang).
 
 --------------------------------------------------------------------------------

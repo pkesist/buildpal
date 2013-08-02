@@ -2,8 +2,7 @@
 from functools import cmp_to_key
 from queue import Empty
 from multiprocessing import Lock, Process, Pool, Queue
-from multiprocessing.connection import Connection, Client
-from multiprocessing.managers import BaseManager, SyncManager, BaseProxy
+from multiprocessing.managers import SyncManager, BaseProxy
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock as ThreadLock
 from time import sleep, time
@@ -14,6 +13,7 @@ from utils import send_file, receive_compressed_file, send_compressed_file, rela
 import configparser
 import operator
 import os
+import pickle
 import socket
 import sys
 import zmq
@@ -73,38 +73,6 @@ def prepare_task(algorithm, cwd, source, preprocessor_info, pch_header):
     else:
         raise Exception("Invalid algorithm.")
 
-def get_node(zmq_ctx, nodes, node_info):
-    def cmp(lhs, rhs):
-        #lhs_tasks_processing = node_info.tasks_processing(lhs)
-        #rhs_tasks_processing = node_info.tasks_processing(rhs)
-        lhs_tasks_processing = node_info.connections(lhs)
-        rhs_tasks_processing = node_info.connections(rhs)
-        lhs_average_time = node_info.average_time(lhs)
-        rhs_average_time = node_info.average_time(rhs)
-        if lhs_average_time == 0 and rhs_average_time == 0:
-            return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
-        if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
-            return -1 if lhs_average_time < rhs_average_time else 1
-        return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
-        
-    node_index = min(range(len(nodes)), key=cmp_to_key(cmp))
-    node = nodes[node_index]
-    try:
-        client = MsgClient(zmq_ctx)
-        client.connect('tcp://{}:{}'.format(node[0], node[1]))
-    except Exception:
-        print("Failed to connect to '{}'".format(node))
-        print(node)
-        import traceback
-        traceback.print_exc()
-        return None
-    accept = client.recv_pyobj()
-    if accept == "ACCEPT":
-        return node_index, client
-    else:
-        assert accept == "REJECT"
-        return None
-
 def set_zmq_ctx():
     global zmq_ctx
     zmq_ctx = zmq.Context()
@@ -114,9 +82,10 @@ def get_zmq_ctx():
     return zmq_ctx
 
 class CompileWorker:
-    def __init__(self, task, timer, prepare_pool):
+    def __init__(self, task, timer, prepare_pool, port):
         self.task = task
         self.timer = timer
+        self.port = port
         self.prepare_pool = prepare_pool
 
     def __prepare_task(self):
@@ -128,18 +97,62 @@ class CompileWorker:
                 self.task.preprocessor_info, self.task.pch_header))
 
     def __find_node(self, nodes, node_info):
+        def cmp(lhs, rhs):
+            #lhs_tasks_processing = node_info.tasks_processing(lhs)
+            #rhs_tasks_processing = node_info.tasks_processing(rhs)
+            lhs_tasks_processing = node_info.connections(lhs)
+            rhs_tasks_processing = node_info.connections(rhs)
+            lhs_average_time = node_info.average_time(lhs)
+            rhs_average_time = node_info.average_time(rhs)
+            if lhs_average_time == 0 and rhs_average_time == 0:
+                return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
+            if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
+                return -1 if lhs_average_time < rhs_average_time else 1
+            return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
+        compare_key = cmp_to_key(cmp)
+
         with self.timer.timeit('find_available_node'):
-            get_result = None
             while True:
-                get_result = get_node(get_zmq_ctx(), nodes, node_info)
-                if get_result:
-                    return get_result
-                with self.timer.timeit('find_available_node.sleeping'):
-                    sleep(1)
+                node_index = min(range(len(nodes)), key=compare_key)
+                node = nodes[node_index]
+                try:
+                    client = MsgClient(zmq_ctx)
+                    client.connect('tcp://{}:{}'.format(node[0], node[1]))
+                except Exception:
+                    print("Failed to connect to '{}'".format(node))
+                    import traceback
+                    traceback.print_exc()
+                    return None
+                accept = client.recv_pyobj()
+                if accept == "ACCEPT":
+                    return node_index, client
+                else:
+                    assert accept == "REJECT"
+                    with self.timer.timeit('find_available_node.sleeping'):
+                        sleep(1)
+
+    class SendProxy:
+        def __init__(self, port, id, zmq_ctx):
+            self.socket = zmq_ctx.socket(zmq.DEALER)
+            self.id = id
+            self.socket.connect('tcp://localhost:{}'.format(port))
+
+        def send(self, data):
+            self.socket.send_multipart([self.id] + data)
+
+        def recv(self):
+            self.socket.recv_multipart()
+
+        def send_pyobj(self,obj):
+            self.send([pickle.dumps(obj)])
+
+        def recv_pyobj(self):
+            return pickle.loads(self.recv()[0])
 
     def __call__(self, client_id, nodes, node_info):
         try:
-            client_conn = Client(address=r"\\.\pipe\{}".format(client_id), authkey=None)
+            zmq_ctx = zmq.Context()
+            client_conn = self.SendProxy(self.port, client_id, zmq_ctx)
             self.prepare_handle = self.__prepare_task()
             node_index, server_conn = self.__find_node(nodes, node_info)
 
@@ -195,9 +208,9 @@ class CompileWorker:
         if self.task.algorithm == 'PREPROCESS_LOCALLY':
             server_conn.send('PREPROCESS_LOCALLY')
             # Signal the client to do preprocessing.
-            client_conn.send('PREPROCESS')
-            server_conn.send('PREPROCESSED_FILE')
-            relay_file(client_conn.recv, server_conn.send_pyobj)
+            client_conn.send_pyobj('PREPROCESS')
+            server_conn.send_pyobj('PREPROCESSED_FILE')
+            relay_file(client_conn.recv_pyobj, server_conn.send_pyobj)
 
     def __recv(self, client_conn, server_conn):
         with self.timer.timeit("receive.server"):
@@ -208,18 +221,29 @@ class CompileWorker:
             with self.timer.timeit("receive.object"), open(self.task.output, "wb") as file:
                 receive_compressed_file(server_conn.recv_pyobj, file)
         with self.timer.timeit("receive.client"):
-            client_conn.send('COMPLETED')
-            client_conn.send((retcode, stdout, stderr))
+            client_conn.send_pyobj('COMPLETED')
+            client_conn.send_pyobj((retcode, stdout, stderr))
 
-class TaskProcessor(Process):
-    def __init__(self, nodes, task_queue, max_processes):
-        self.__task_queue = task_queue
+class TaskProcessor:
+    def __init__(self, nodes, max_processes, port):
+        self.__port = port
         self.__nodes = nodes
         self.__max_processes = max_processes
 
         super(TaskProcessor, self).__init__()
 
     def run(self):
+        zmq_ctx = zmq.Context()
+        socket = zmq_ctx.socket(zmq.ROUTER)
+        socket.bind('tcp://*:{}'.format(self.__port))
+
+        done_socket = zmq_ctx.socket(zmq.DEALER)
+        done_port = done_socket.bind_to_random_port('tcp://*')
+
+        poll_clients = zmq.Poller()
+        poll_clients.register(socket, zmq.POLLIN)
+        poll_clients.register(done_socket, zmq.POLLIN)
+
         with BookKeepingManager() as book_keeper, \
             BookKeepingManager() as preparer, \
             Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
@@ -228,11 +252,15 @@ class TaskProcessor(Process):
             prepare_pool = preparer.ThreadPool(32)
             while True:
                 self.print_stats(node_info, timer.as_dict())
-                try:
-                    task, client_id = self.__task_queue.get(timeout=2)
-                    compile_pool.apply_async(CompileWorker(task, timer, prepare_pool), args=(client_id, self.__nodes, node_info))
-                except Empty:
-                    pass
+                sockets = dict(poll_clients.poll(1000))
+                if sockets.get(socket) == zmq.POLLIN:
+                    client_id, task = socket.recv_multipart()
+                    task = pickle.loads(task)
+                    socket.send_multipart([client_id, pickle.dumps("TASK_RECEIVED")])
+                    compile_pool.apply_async(CompileWorker(task, timer, prepare_pool, done_port), args=(client_id, self.__nodes, node_info))
+                if sockets.get(done_socket) == zmq.POLLIN:
+                    msg = done_socket.recv_multipart()
+                    socket.send_multipart(msg)
 
     def print_stats(self, node_info, times):
         sys.stdout.write("================\n")
@@ -332,14 +360,6 @@ BookKeepingManager.register('ThreadPool', ThreadPool)
 BookKeepingManager.register('Timer', Timer, TimerProxy)
 BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
 
-def queue_task(task, client_id):
-    task_queue.put((task, client_id))
-
-class QueueManager(BaseManager):
-    pass
-
-QueueManager.register('queue_task', callable=queue_task)
-
 default_script = 'distribute_manager.ini'
 
 if __name__ == "__main__":
@@ -365,7 +385,7 @@ Usage:
     manager_section = 'Manager'
     nodes_section = 'Build Nodes'
 
-    id = config.get(manager_section, 'id')
+    port = config.get(manager_section, 'port')
     max_processes = config.getint(manager_section, 'max_processes', fallback=None)
 
     if not nodes_section in config:
@@ -394,12 +414,10 @@ Usage:
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
+    import zmq
+    zmq_ctx = zmq.Context()
+
     try:
-        taskProcessor = TaskProcessor(nodes, task_queue, max_processes=max_processes)
-        taskProcessor.start()
-        queue_manager = QueueManager(r"\\.\pipe\{}".format(id), b"")
-        server = queue_manager.get_server()
-        server.serve_forever()
+        TaskProcessor(nodes, max_processes, port).run()
     finally:
         print("Shutting down.")
-        taskProcessor.terminate()

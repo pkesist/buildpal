@@ -316,10 +316,10 @@ class TaskProcessor:
                                 session_from_server[server_conn.socket] = session
                             else:
                                 session = session_from_client[client_id]
+                                server_socket = session.server_conn.socket
+                                assert server_socket in session_from_server
                                 session_done = session.got_data_from_client(msg)
                                 if session_done:
-	                                server_socket = session.server_conn.socket
-	                                assert server_socket in session_from_server
                                     del session_from_client[client_id]
                                     del session_from_server[server_socket]
                                     poller.unregister(server_socket)
@@ -336,10 +336,10 @@ class TaskProcessor:
                             assert socket in session_from_server
                             session = session_from_server[socket]
                             msg = socket.recv_pyobj()
+                            client_id = session.client_conn.id
+                            assert client_id in session_from_client
                             session_done = session.got_data_from_server(msg)
                             if session_done:
-	                            client_id = session.client_conn.id
-	                            assert client_id in session_from_client
                                 del session_from_client[client_id]
                                 del session_from_server[socket]
                                 poller.unregister(socket)

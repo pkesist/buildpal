@@ -17,6 +17,7 @@ import pickle
 import socket
 import sys
 import zmq
+import zlib
 
 from Messaging import Client as MsgClient
 
@@ -52,14 +53,6 @@ class TimerProxy(BaseProxy):
 
     def timeit(self, name):
         return ScopedTimer(lambda value : self.add_time(name, value))
-
-def set_zmq_ctx():
-    global zmq_ctx
-    zmq_ctx = zmq.Context()
-
-def get_zmq_ctx():
-    global zmq_ctx
-    return zmq_ctx
 
 class ScanHeaders(Process):
     def __init__(self, port, workers, timer):
@@ -113,12 +106,121 @@ class ScanHeaders(Process):
 
 
 class CompileSession:
-    def __init__(self, task, timer, client_port):
+    STATE_START = 0
+    STATE_WAIT_FOR_OK = 1
+    STATE_WAIT_FOR_PCH_RESPONSE = 2
+    STATE_WAIT_FOR_SERVER_RESPONSE = 3
+    STATE_PREPROCESS_LOCALLY_START = 4
+    STATE_RELAY_PREPROCESSED_FILE = 5
+    STATE_WAIT_FOR_SERVER_RESPONSE = 6
+    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 7
+    STATE_RECEIVE_RESULT_FILE = 8
+    
+    def __init__(self, task, timer, client_conn, server_conn, node_info, node_index):
         self.task = task
         self.timer = timer
-        self.client_port = client_port
+        self.client_conn = client_conn
+        self.server_conn = server_conn
+        self.node_info = node_info
+        self.node_index = node_index
 
-    def __find_node(self, nodes, node_info):
+        self.node_info.connection_open(self.node_index)
+        with self.timer.timeit('send'):
+            self.server_conn.send_pyobj(self.task)
+        self.node_info.add_tasks_sent(self.node_index)
+        self.state = self.STATE_WAIT_FOR_OK
+
+    def __del__(self):
+        self.node_info.connection_closed(self.node_index)
+
+    def got_data_from_client(self, msg):
+        assert self.task.algoritm == 'PREPROCESS_LOCALLY'
+        assert self.state == self.STATE_RELAY_PREPROCESSED_FILE
+        more, data = msg
+        self.server_conn.send_pyobj((more, data))
+        if not more:
+            self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+        return False
+
+    def got_data_from_server(self, msg):
+        assert self.state != self.STATE_RELAY_PREPROCESSED_FILE
+        if self.state == self.STATE_WAIT_FOR_OK:
+            task_ok = msg
+            assert task_ok == "OK"
+            if self.task.algorithm == 'SCAN_HEADERS':
+                self.server_conn.send_pyobj('SCAN_HEADERS')
+                self.server_conn.send_pyobj('ZIP_FILE')
+                print(self.client_conn.id, "self.task.tempfile is ", self.task.tempfile)
+                with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
+                    send_file(self.server_conn.send_pyobj, file)
+                self.server_conn.send_pyobj('SOURCE_FILE')
+                with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
+                    send_compressed_file(self.server_conn.send_pyobj, cpp)
+                if self.task.pch_file:
+                    self.server_conn.send_pyobj('NEED_PCH_FILE')
+                    self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
+                else:
+                    self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+
+            elif self.task.algorithm == 'PREPROCESS_LOCALLY':
+                self.server_conn.send('PREPROCESS_LOCALLY')
+                # Signal the client to do preprocessing.
+                self.client_conn.send_pyobj('PREPROCESS')
+                self.server_conn.send_pyobj('PREPROCESSED_FILE')
+                self.state = self.STATE_RELAY_PREPROCESSED_FILE
+            else:
+                assert not "Invalid state"
+
+        elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
+            response = msg
+            if response == "YES":
+                with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
+                    send_compressed_file(self.server_conn.send_pyobj, pch_file)
+            else:
+                assert response == "NO"
+            self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+
+        elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
+            server_status = msg
+            if server_status == "SERVER_FAILED":
+                self.state = self.STATE_DONE
+                return True
+            assert server_status == "SERVER_DONE"
+            self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
+
+        elif self.state == self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT:
+            self.retcode, self.stdout, self.stderr = msg
+            print("GOT ", self.retcode)
+            if self.retcode == 0:
+                self.output = open(self.task.output, "wb")
+                self.output_decompressor = zlib.decompressobj()
+                self.state = self.STATE_RECEIVE_RESULT_FILE
+            else:
+                return True
+
+        elif self.state == self.STATE_RECEIVE_RESULT_FILE:
+            more, data = msg
+            self.output.write(self.output_decompressor.decompress(data))
+            if not more:
+                self.output.write(self.output_decompressor.flush())
+                del self.output_decompressor
+                self.output.close()
+                del self.output
+                self.client_conn.send_pyobj('COMPLETED')
+                self.client_conn.send_pyobj((self.retcode, self.stdout, self.stderr))
+                self.node_info.add_tasks_completed(self.node_index)
+                return True
+        return False
+
+class TaskProcessor:
+    def __init__(self, nodes, max_processes, port):
+        self.__port = port
+        self.__nodes = nodes
+        self.__max_processes = max_processes
+
+        super(TaskProcessor, self).__init__()
+
+    def __find_node(self, nodes, node_info, timer):
         def cmp(lhs, rhs):
             #lhs_tasks_processing = node_info.tasks_processing(lhs)
             #rhs_tasks_processing = node_info.tasks_processing(rhs)
@@ -133,31 +235,30 @@ class CompileSession:
             return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
         compare_key = cmp_to_key(cmp)
 
-        with self.timer.timeit('find_available_node'):
+        with timer.timeit('find_available_node'):
             while True:
                 node_index = min(range(len(nodes)), key=compare_key)
                 node = nodes[node_index]
                 try:
-                    client = MsgClient(zmq_ctx)
-                    client.connect('tcp://{}:{}'.format(node[0], node[1]))
+                    server_conn = MsgClient(zmq_ctx)
+                    server_conn.connect('tcp://{}:{}'.format(node[0], node[1]))
                 except Exception:
                     print("Failed to connect to '{}'".format(node))
                     import traceback
                     traceback.print_exc()
                     return None
-                accept = client.recv_pyobj()
+                accept = server_conn.recv_pyobj()
                 if accept == "ACCEPT":
-                    return node_index, client
+                    return node_index, server_conn
                 else:
                     assert accept == "REJECT"
-                    with self.timer.timeit('find_available_node.sleeping'):
+                    with timer.timeit('find_available_node.sleeping'):
                         sleep(1)
 
     class SendProxy:
-        def __init__(self, port, id, zmq_ctx):
-            self.socket = zmq_ctx.socket(zmq.DEALER)
+        def __init__(self, socket, id):
+            self.socket = socket
             self.id = id
-            self.socket.connect('tcp://localhost:{}'.format(port))
 
         def send(self, data):
             self.socket.send_multipart([self.id] + data)
@@ -171,108 +272,23 @@ class CompileSession:
         def recv_pyobj(self):
             return pickle.loads(self.recv()[0])
 
-    def __call__(self, client_id, nodes, node_info):
-        try:
-            assert self.task.tempfile
-            zmq_ctx = zmq.Context()
-            client_conn = self.SendProxy(self.client_port, client_id, zmq_ctx)
-            node_index, server_conn = self.__find_node(nodes, node_info)
-
-            try:
-                node_info.connection_open(node_index)
-                node_info.add_tasks_sent(node_index)
-                with self.timer.timeit('send'):
-                    server_conn.send_pyobj(self.task)
-                task_ok = server_conn.recv_pyobj()
-                assert task_ok == 'OK'
-                self.__send(client_conn, server_conn)
-
-                # Just block
-                with self.timer.timeit('server_time'), ScopedTimer(lambda value : node_info.add_total_time(node_index, value)):
-                    server_status = server_conn.recv_pyobj()
-                    if server_status == "SERVER_FAILED":
-                        return None
-
-                assert server_status == "SERVER_DONE"
-                with self.timer.timeit('receive'):
-                    self.__recv(client_conn, server_conn)
-                    node_info.add_tasks_completed(node_index)
-            except:
-                import traceback
-                traceback.print_exc()
-            finally:
-                node_info.connection_closed(node_index)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-
-    def __send(self, client_conn, server_conn):
-        if self.task.algorithm == 'SCAN_HEADERS':
-            server_conn.send_pyobj('SCAN_HEADERS')
-            server_conn.send_pyobj('ZIP_FILE')
-            with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
-                send_file(server_conn.send_pyobj, file)
-            server_conn.send_pyobj('SOURCE_FILE')
-            with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
-                send_compressed_file(server_conn.send_pyobj, cpp)
-            if self.task.pch_file:
-                server_conn.send_pyobj('NEED_PCH_FILE')
-                response = server_conn.recv_pyobj()
-                if response == "YES":
-                    with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
-                        send_compressed_file(server_conn.send_pyobj, pch_file)
-                else:
-                    assert response == "NO"
-
-        if self.task.algorithm == 'PREPROCESS_LOCALLY':
-            server_conn.send('PREPROCESS_LOCALLY')
-            # Signal the client to do preprocessing.
-            client_conn.send_pyobj('PREPROCESS')
-            server_conn.send_pyobj('PREPROCESSED_FILE')
-            relay_file(client_conn.recv_pyobj, server_conn.send_pyobj)
-
-    def __recv(self, client_conn, server_conn):
-        with self.timer.timeit("receive.server"):
-            retcode, stdout, stderr = server_conn.recv_pyobj()
-        if retcode == 0:
-            length = 0
-            more = True
-            with self.timer.timeit("receive.object"), open(self.task.output, "wb") as file:
-                receive_compressed_file(server_conn.recv_pyobj, file)
-        with self.timer.timeit("receive.client"):
-            client_conn.send_pyobj('COMPLETED')
-            client_conn.send_pyobj((retcode, stdout, stderr))
-
-class TaskProcessor:
-    def __init__(self, nodes, max_processes, port):
-        self.__port = port
-        self.__nodes = nodes
-        self.__max_processes = max_processes
-
-        super(TaskProcessor, self).__init__()
-
     def run(self):
         zmq_ctx = zmq.Context()
-        socket = zmq_ctx.socket(zmq.ROUTER)
-        socket.bind('tcp://*:{}'.format(self.__port))
+        client_socket = zmq_ctx.socket(zmq.ROUTER)
+        client_socket.bind('tcp://*:{}'.format(self.__port))
 
-        done_socket = zmq_ctx.socket(zmq.DEALER)
-        done_port = done_socket.bind_to_random_port('tcp://*')
-        
         preprocess_socket = zmq_ctx.socket(zmq.DEALER)
         preprocess_socket_port = preprocess_socket.bind_to_random_port('tcp://*')
 
         poller = zmq.Poller()
-        poller.register(socket, zmq.POLLIN)
-        poller.register(done_socket, zmq.POLLIN)
+        poller.register(client_socket, zmq.POLLIN)
         poller.register(preprocess_socket, zmq.POLLIN)
 
-        tasks = {}
+        session_from_server = {}
+        session_from_client = {}
 
         try:
-            with BookKeepingManager() as book_keeper, \
-                BookKeepingManager() as preparer, \
-                Pool(processes=self.__max_processes, initializer=set_zmq_ctx, initargs=()) as compile_pool:
+            with BookKeepingManager() as book_keeper:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
 
@@ -282,23 +298,51 @@ class TaskProcessor:
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     sockets = dict(poller.poll(1000))
-                    if sockets.get(socket) == zmq.POLLIN:
-                        client_id, task = socket.recv_multipart()
-                        socket.send_multipart([client_id, pickle.dumps("TASK_RECEIVED")])
-                        preprocess_socket.send_multipart([client_id, task])
-                        task = pickle.loads(task)
-                        tasks[client_id] = task
+                    for socket, flags in sockets.items():
+                        if flags != zmq.POLLIN:
+                            continue
 
-                    if sockets.get(done_socket) == zmq.POLLIN:
-                        msg = done_socket.recv_multipart()
-                        socket.send_multipart(msg)
+                        if socket is client_socket:
+                            msg = client_socket.recv_multipart()
+                            client_id = msg[0]
+                            if client_id not in session_from_client:
+                                task = pickle.loads(msg[1])
+                                node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
+                                client_conn = self.SendProxy(client_socket, client_id)
+                                client_conn.send_pyobj("TASK_RECEIVED")
+                                preprocess_socket.send_multipart([client_id, msg[1]])
+                                session = CompileSession(task, timer, client_conn, server_conn, node_info, node_index)
+                                session_from_client[client_conn.id] = session
+                                session_from_server[server_conn.socket] = session
+                            else:
+                                session = session_from_client[client_id]
+                                session_done = session.got_data_from_client(msg)
+                                if session_done:
+	                                server_socket = session.server_conn.socket
+	                                assert server_socket in session_from_server
+                                    del session_from_client[client_id]
+                                    del session_from_server[server_socket]
+                                    poller.unregister(server_socket)
 
-                    if sockets.get(preprocess_socket) == zmq.POLLIN:
-                        client_id, result = preprocess_socket.recv_multipart()
-                        task = tasks[client_id]
-                        task.tempfile = pickle.loads(result)
-                        #del tasks[client_id]
-                        compile_pool.apply_async(CompileSession(task, timer, done_port), args=(client_id, self.__nodes, node_info))
+                        elif socket is preprocess_socket:
+                            client_id, result = preprocess_socket.recv_multipart()
+                            print("Task preprocessed", client_id)
+                            assert client_id in session_from_client
+                            session = session_from_client[client_id]
+                            session.task.tempfile = pickle.loads(result)
+                            poller.register(session.server_conn.socket, zmq.POLLIN)
+
+                        else:
+                            assert socket in session_from_server
+                            session = session_from_server[socket]
+                            msg = socket.recv_pyobj()
+                            session_done = session.got_data_from_server(msg)
+                            if session_done:
+	                            client_id = session.client_conn.id
+	                            assert client_id in session_from_client
+                                del session_from_client[client_id]
+                                del session_from_server[socket]
+                                poller.unregister(socket)
         finally:
             scanHeaders.terminate()
 

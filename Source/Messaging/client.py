@@ -13,10 +13,10 @@ class Client:
     def connect(self, address):
         self.socket.connect(address)
         self.socket.send(b'GIMME')
-        self.server_id = self.socket.recv()
+        self.id = self.socket.recv()
 
     def send(self, msg):
-        self.socket.send_multipart([self.server_id] + msg)
+        self.socket.send_multipart([self.id] + msg)
 
     def recv(self):
         return self.socket.recv_multipart()

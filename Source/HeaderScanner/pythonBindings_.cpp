@@ -282,7 +282,13 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
         return -1;
     }
 
-    if ( !pCache || ( (PyTypeObject *)PyObject_Type( pCache ) != &PyCacheType ) )
+    if ( !pCache || ( pCache == Py_None ) )
+    {
+        self->pp = new Preprocessor( 0 );
+        return 0;
+    }
+
+    if ( (PyTypeObject *)PyObject_Type( pCache ) != &PyCacheType )
     {
         PyErr_SetString( PyExc_Exception, "Invalid cache parameter." );
         return -1;
@@ -293,7 +299,7 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
     self->cache = pCache;
     Py_XINCREF( self->cache );
-    self->pp = new Preprocessor( *pyCache->cache );
+    self->pp = new Preprocessor( pyCache->cache );
     return 0;
 }
 

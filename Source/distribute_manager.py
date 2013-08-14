@@ -1,10 +1,10 @@
 #! python3.3
 from functools import cmp_to_key
 from queue import Empty
-from multiprocessing import Lock, Process, Pool, Queue
+from multiprocessing import Process, Pool, Queue
 from multiprocessing.managers import SyncManager, BaseProxy
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock as ThreadLock
+from threading import Lock
 from time import sleep, time
 
 from scan_headers import collect_headers
@@ -66,22 +66,25 @@ class ScanHeaders(Process):
         executor = ThreadPoolExecutor(max_workers=self.__workers)
         socket = zmq_ctx.socket(zmq.DEALER)
         socket.connect('tcp://localhost:{}'.format(self.__port))
+        result_lock = Lock()
 
         class TaskDone:
-            def __init__(self, client_id, socket):
+            def __init__(self, client_id, socket, lock):
                 self.__client_id = client_id
                 self.__socket = socket
+                self.__lock = lock
 
             def __call__(self, future):
                 assert future.done()
                 result = future.result()
-                socket.send_multipart([self.__client_id, pickle.dumps(result)])
+                with self.__lock:
+                    socket.send_multipart([self.__client_id, pickle.dumps(result)])
 
         while True:
             client_id, task = socket.recv_multipart()
             task = pickle.loads(task)
             future = executor.submit(self.prepare_task, task)
-            future.add_done_callback(TaskDone(client_id, socket))
+            future.add_done_callback(TaskDone(client_id, socket, result_lock))
 
     def prepare_task(self, task):
         # TODO: This does not belong here. Move this to msvc.py.
@@ -143,6 +146,7 @@ class CompileSession:
         return False
 
     def got_data_from_server(self, msg):
+        print("state is ", self.state)
         assert self.state != self.STATE_RELAY_PREPROCESSED_FILE
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
@@ -196,6 +200,9 @@ class CompileSession:
                 self.output_decompressor = zlib.decompressobj()
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
+                self.client_conn.send_pyobj('COMPLETED')
+                self.client_conn.send_pyobj((self.retcode, self.stdout, self.stderr))
+                self.node_info.add_tasks_completed(self.node_index)
                 return True
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
@@ -325,7 +332,9 @@ class TaskProcessor:
                                     poller.unregister(server_socket)
 
                         elif socket is preprocess_socket:
-                            client_id, result = preprocess_socket.recv_multipart()
+                            msg = preprocess_socket.recv_multipart()
+                            print(msg)
+                            client_id, result = msg
                             print("Task preprocessed", client_id)
                             assert client_id in session_from_client
                             session = session_from_client[client_id]

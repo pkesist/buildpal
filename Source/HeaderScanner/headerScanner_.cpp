@@ -156,7 +156,7 @@ namespace
     };
 }  // anonymous namespace
 
-Preprocessor::Preprocessor( Cache & cache )
+Preprocessor::Preprocessor( Cache * cache )
     : cache_( cache )
 {
     // Create diagnostics.

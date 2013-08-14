@@ -168,7 +168,7 @@ public:
                 headersInfo_.erase( headersInfoList_.back().header() );
                 headersInfoList_.pop_back();
             }
-            HeaderInfo tmp( file->getName(), 20 );
+            HeaderInfo tmp( file->getName(), 50 );
             headersInfoList_.push_front( boost::move( tmp ) );
             std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
             assert( insertResult.second );

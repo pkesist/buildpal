@@ -20,7 +20,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         return;
 
     fileStack_.push_back( entry );
-    if ( !headerSearch_->ShouldEnterIncludeFile( entry, false ) )
+    if ( cacheDisabled() || !headerSearch_->ShouldEnterIncludeFile( entry, false ) )
     {
         // File will be skipped anyway. Do not search cache.
         fileEntry = entry;
@@ -49,24 +49,27 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     Header const header( std::make_pair( relative, file->getName() ) );
     if ( !headerCtxStack().empty() )
     {
-        clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-        clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( file ) );
-        assert( !headerInfo.isImport );
-        assert( !headerInfo.ControllingMacroID );
-        assert( !headerInfo.isPragmaOnce );
-        if ( headerInfo.ControllingMacro )
+        if ( !cacheDisabled() )
         {
-            clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
-            assert( directive );
+            clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
+            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( file ) );
+            assert( !headerInfo.isImport );
+            assert( !headerInfo.ControllingMacroID );
+            assert( !headerInfo.isPragmaOnce );
+            if ( headerInfo.ControllingMacro )
+            {
+                clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
+                assert( directive );
 
-            headerCtxStack().back().macroUsed
-            (
-                std::make_pair
+                headerCtxStack().back().macroUsed
                 (
-                    headerInfo.ControllingMacro->getName(),
-                    macroDefFromSourceLocation( directive )
-                )
-            );
+                    std::make_pair
+                    (
+                        headerInfo.ControllingMacro->getName(),
+                        macroDefFromSourceLocation( directive )
+                    )
+                );
+            }
         }
         headerCtxStack().back().addHeader( header );
     }
@@ -119,11 +122,11 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 
     includer.addStuff
     (
-        headerCtxStack().back().macroUsages(),
+        cacheDisabled() ? 0 : &headerCtxStack().back().macroUsages(),
         ignoreHeaders ? 0 : &headerCtxStack().back().includedHeaders()
     );
 
-    if ( !headerCtxStack().back().fromCache() )
+    if ( !cacheDisabled() && !headerCtxStack().back().fromCache() )
         headerCtxStack().back().addToCache( cache(), file, sourceManager() );
 }
 
@@ -153,21 +156,21 @@ llvm::StringRef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective
 
 void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( headerCtxStack().empty() )
+    if ( headerCtxStack().empty() || cacheDisabled() )
         return;
     headerCtxStack().back().macroUsed( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( headerCtxStack().empty() )
+    if ( headerCtxStack().empty() || cacheDisabled() )
         return;
     headerCtxStack().back().macroDefined( std::make_pair( name, macroDefFromSourceLocation( def ) ) );
 }
 
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( headerCtxStack().empty() )
+    if ( headerCtxStack().empty() || cacheDisabled() )
         return;
     headerCtxStack().back().macroUndefined( std::make_pair( name, llvm::StringRef() ) );
 }

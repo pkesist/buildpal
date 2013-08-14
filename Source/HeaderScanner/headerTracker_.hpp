@@ -32,7 +32,7 @@ public:
     typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch & headerSearch, Cache & cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch & headerSearch, Cache * cache )
         : headerSearch_( &headerSearch ), preprocessor_( preprocessor ), cache_( cache )
     {
     }
@@ -82,6 +82,9 @@ private:
         {
             if ( cacheHit_ )
                 return;
+            if ( usedMacros_.find( macro ) != usedMacros_.end() )
+                // We already know about this.
+                return;
             macroUsages_.push_back( std::make_pair( MacroUsage::used, macro ) );
             if ( definedMacros_.find( macro.first ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
@@ -99,23 +102,14 @@ private:
         {
             if ( cacheHit_ )
                 return;
-            //std::map<llvm::StringRef, MacroUsages::iterator>::iterator const iter = definedMacros_.find( macro.first );
-            //if ( iter != definedMacros_.end() )
-            //{
-            //    macroUsages_.erase( iter->second );
-            //    definedMacros_.erase( iter );
-            //}
-            //else
-            //{
-                macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
-            //}
+            macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
         void addHeader( Header const & header )
         {
             if ( cacheHit_ )
                 return;
-            includedHeaders_.insert( header );
+            std::pair<Headers::iterator, bool> const insertResult( includedHeaders_.insert( header ) );
         }
 
         void addMacroUsage( MacroWithUsage const & macroWithUsage )
@@ -132,10 +126,13 @@ private:
         }
 
         template <typename Headers>
-        void addStuff( MacroUsages const & macroUsages, Headers const * headers )
+        void addStuff( MacroUsages const * macroUsages, Headers const * headers )
         {
-            std::for_each( macroUsages.begin(), macroUsages.end(),
-                    boost::bind( &HeaderTracker::HeaderCtx::addMacroUsage, this, _1 ) );
+            if ( macroUsages )
+            {
+                std::for_each( macroUsages->begin(), macroUsages->end(),
+                        boost::bind( &HeaderTracker::HeaderCtx::addMacroUsage, this, _1 ) );
+            }
 
             if ( headers )
             {
@@ -166,8 +163,9 @@ private:
     HeaderCtxStack const & headerCtxStack() const { return headerCtxStack_; }
     HeaderCtxStack       & headerCtxStack()       { return headerCtxStack_; }
 
-    Cache const & cache() const { return cache_; }
-    Cache       & cache()       { return cache_; }
+    bool cacheDisabled() const { return cache_ == 0; }
+    Cache const & cache() const { return *cache_; }
+    Cache       & cache()       { return *cache_; }
 
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
@@ -178,7 +176,7 @@ private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
-    Cache & cache_;
+    Cache * cache_;
     boost::shared_ptr<Cache::CacheEntry> cacheHit_;
     std::vector<boost::shared_ptr<Cache::CacheEntry> > cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;

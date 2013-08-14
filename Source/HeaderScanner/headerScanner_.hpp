@@ -55,7 +55,7 @@ private:
 class Preprocessor
 {
 public:
-    Preprocessor( Cache & cache );
+    Preprocessor( Cache * cache );
 
     typedef std::pair<std::string, std::string> HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
@@ -80,7 +80,7 @@ private:
 
 private:
     clang::CompilerInstance compiler_;
-    Cache & cache_;
+    Cache * cache_;
 };
 
 

@@ -28,7 +28,7 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
     {
         if ( *end == '\n' && !lastNonspaceIsBackslash )
             break;
-        bool const currentIsSpace = *end != ' ' && *end != '\t' && *end != '\r';
+        bool const currentIsSpace = *end == ' ' || *end == '\t' || *end == '\r';
         if ( !currentIsSpace )
             lastNonspaceIsBackslash = ( !lastNonspaceIsBackslash || lastIsSpace ) && ( *end == '\\' );
         lastIsSpace = currentIsSpace;

@@ -29,17 +29,17 @@ namespace clang
     class FileEntry;
 }
 
-typedef std::pair<llvm::StringRef, llvm::StringRef> StringPair;
+typedef std::pair<std::string, std::string> StringPair;
 typedef StringPair Macro;
-typedef StringPair Header;
+typedef StringPair HeaderName;
 typedef std::set<StringPair> StringPairSet;
-typedef StringPairSet Headers;
 typedef StringPairSet Macros;
-typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
-
+typedef std::map<std::string, std::string> MacroMap;
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
+typedef boost::variant<HeaderName, boost::shared_ptr<CacheEntry> > Header;
+typedef std::vector<Header> Headers;
 typedef boost::variant<MacroWithUsage, boost::shared_ptr<CacheEntry> > HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
@@ -140,13 +140,12 @@ public:
         CacheList cacheList_;
     };
 
-    template <typename HeadersList>
     boost::shared_ptr<Cache::CacheEntry> addEntry
     (
         clang::FileEntry const * file,
         Macros const & macros,
         HeaderContent const & headerContent,
-        HeadersList const & headers
+        Headers const & headers
     )
     {
         boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
@@ -169,9 +168,9 @@ public:
         CacheEntry cacheEntry
         (
             uniqueFileName(),
-            clone<Macros>( macros ),
-            clone( headerContent ),
-            clone<Headers>( headers )
+            macros,
+            headerContent,
+            headers
         );
 
         return iter->second->insert( boost::move( cacheEntry ) );
@@ -200,11 +199,11 @@ private:
     }
 
     template <typename StrPairCloner>
-    struct Inserter
+    struct HeaderContentInserter
     {
         typedef void result_type;
 
-        Inserter( HeaderContent & result, StrPairCloner strPairCloner ) :
+        HeaderContentInserter( HeaderContent & result, StrPairCloner strPairCloner ) :
             result_( result ), strPairCloner_( strPairCloner )
         {}
 
@@ -223,23 +222,62 @@ private:
     };
 
     template <typename StrPairCloner>
-    static Inserter<StrPairCloner> makeInserter( HeaderContent & result, StrPairCloner strPairCloner )
+    static HeaderContentInserter<StrPairCloner> makeHeaderContentInserter( HeaderContent & result, StrPairCloner strPairCloner )
     {
-        return Inserter<StrPairCloner>( result, strPairCloner );
+        return HeaderContentInserter<StrPairCloner>( result, strPairCloner );
     }
 
-    HeaderContent clone( HeaderContent const & hc )
+    HeaderContent cloneHeaderContent( HeaderContent const & hc )
     {
         HeaderContent result;
-        auto inserter( makeInserter( result, [this]( StringPair const & p ) { return cloneStrPair( p ); } ) );
+        auto inserter( makeHeaderContentInserter( result, [this]( StringPair const & p ) { return cloneStrPair( p ); } ) );
         std::for_each( hc.begin(), hc.end(), [&]( HeaderEntry const & he ) { boost::apply_visitor( inserter, he ); } );
         return result;
     }
 
-    template <typename Result, typename StringPairContainer>
-    Result clone( StringPairContainer const & cont )
+    template <typename StrPairCloner>
+    struct HeaderNameInserter
     {
-        Result result;
+        typedef void result_type;
+
+        HeaderNameInserter( Headers & result, StrPairCloner strPairCloner ) :
+            result_( result ), strPairCloner_( strPairCloner )
+        {}
+
+        void operator()( HeaderName const & hn )
+        {
+            std::cout << "Inserting into cache " << std::string( hn.first ) << ' ' << std::string( hn.second ) << '\n';
+            result_.push_back( strPairCloner_( hn ) );
+        }
+
+        void operator()( boost::shared_ptr<CacheEntry> const & ce )
+        {
+            result_.push_back( ce );
+        }
+
+        Headers & result_;
+        StrPairCloner strPairCloner_;
+    };
+
+    template <typename StrPairCloner>
+    static HeaderNameInserter<StrPairCloner> makeHeaderNameInserter( Headers & result, StrPairCloner strPairCloner )
+    {
+        return HeaderNameInserter<StrPairCloner>( result, strPairCloner );
+    }
+
+    template <typename StringPairContainer>
+    Headers cloneHeaderNames( StringPairContainer const & cont )
+    {
+        Headers result;
+        auto inserter( makeHeaderNameInserter( result, [this]( StringPair const & p ) { return cloneStrPair( p ); } ) );
+        std::for_each( cont.begin(), cont.end(), [&]( Header const & h ) { boost::apply_visitor( inserter, h ); } );
+        return result;
+    }
+
+    template <typename StringPairContainer>
+    StringPairSet clone( StringPairContainer const & cont )
+    {
+        StringPairSet result;
         for ( StringPairContainer::const_iterator iter( cont.begin() ); iter != cont.end(); ++iter )
             result.insert( std::make_pair( cloneStr( iter->first ), cloneStr( iter->second ) ) );
         return result;

@@ -46,7 +46,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
-    Header const header( std::make_pair( relative, file->getName() ) );
+    HeaderName header( std::make_pair( relative, file->getName() ) );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
@@ -93,9 +93,8 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     clang::FileEntry const * file( fileStack_.back() );
     if ( file )
     {
-        Header const header( std::make_pair( relative, file->getName() ) );
-        if ( !headerCtxStack().empty() )
-            headerCtxStack().back().addHeader( header );
+        HeaderName header( std::make_pair( relative, file->getName() ) );
+        headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_ ) );
         cacheHit_.reset();
     }
@@ -138,7 +137,7 @@ boost::shared_ptr<Cache::CacheEntry> HeaderTracker::HeaderCtx::addToCache( Cache
     return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders() );
 }
 
-HeaderTracker::Headers HeaderTracker::exitSourceFile()
+Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
 {
     struct Cleanup
     {
@@ -148,7 +147,25 @@ HeaderTracker::Headers HeaderTracker::exitSourceFile()
     } const cleanup( headerCtxStack() );
 
     cacheEntriesUsed_.clear();
-    return headerCtxStack().back().includedHeaders();
+    Preprocessor::HeaderRefs result;
+    struct Inserter
+    {
+        typedef void result_type;
+        Inserter( Preprocessor::HeaderRefs & result ) : result_( result ) {}
+
+        void operator()( HeaderName const & sp ) { result_.insert( sp ); }
+        void operator()( boost::shared_ptr<Cache::CacheEntry> const & ce )
+        {
+            std::for_each( ce->headers().begin(), ce->headers().end(), [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
+        }
+
+        Preprocessor::HeaderRefs & result_;
+    } inserter( result );
+    std::for_each(
+        headerCtxStack().back().includedHeaders().begin(),
+        headerCtxStack().back().includedHeaders().end(),
+        [&]( Header const & h ) { boost::apply_visitor( inserter, h ); } );
+    return result;
 }
 
 llvm::StringRef HeaderTracker::macroDefFromSourceLocation( clang::MacroDirective const * def )

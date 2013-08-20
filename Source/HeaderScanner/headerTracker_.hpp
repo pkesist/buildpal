@@ -28,8 +28,6 @@ namespace clang
 class HeaderTracker
 {
 public:
-    typedef Preprocessor::HeaderRef Header;
-    typedef Preprocessor::HeaderRefs Headers;
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
     explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch & headerSearch, Cache * cache )
@@ -38,7 +36,7 @@ public:
     }
 
     void enterSourceFile( clang::FileEntry const * );
-    Headers exitSourceFile();
+    Preprocessor::HeaderRefs exitSourceFile();
 
     void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
     void headerSkipped( llvm::StringRef relative );
@@ -63,19 +61,13 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( Header const & header, boost::shared_ptr<Cache::CacheEntry> const & cacheHit )
+        explicit HeaderCtx( HeaderName const & header, boost::shared_ptr<Cache::CacheEntry> const & cacheHit )
             :
             header_( header ),
             cacheHit_( cacheHit )
         {
-            if ( !cacheHit_ )
-                return;
-
-            std::copy(
-                cacheHit_->headers().begin(),
-                cacheHit_->headers().end(),
-                std::inserter( includedHeaders_, includedHeaders_.begin() )
-            );
+            if ( cacheHit_ )
+                includedHeaders_.push_back( cacheHit );
         }
 
         void macroUsed( Macro const & macro )
@@ -104,11 +96,11 @@ private:
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
-        void addHeader( Header const & header )
+        void addHeader( HeaderName const & header )
         {
             if ( cacheHit_ )
                 return;
-            std::pair<Headers::iterator, bool> const insertResult( includedHeaders_.insert( header ) );
+            includedHeaders_.push_back( header );
         }
 
         void addStuff( boost::shared_ptr<Cache::CacheEntry> const & cacheEntry, Headers const * headers )
@@ -120,9 +112,11 @@ private:
                     std::inserter( usedMacros_, usedMacros_.end() ) );
 
                 headerContent_.push_back( cacheEntry );
+                // FIXME: Ugly
+                if ( headers )
+                    includedHeaders_.push_back( cacheEntry );
             }
-
-            if ( headers )
+            else if ( headers )
             {
                 std::copy( headers->begin(), headers->end(),
                     std::inserter( includedHeaders_, includedHeaders_.begin() ) );
@@ -132,14 +126,14 @@ private:
         Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }
         HeaderContent const & headerContent() const { return cacheHit_ ? cacheHit_->headerContent() : headerContent_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
-        Header const & header() { return header_; }
+        HeaderName const & header() { return header_; }
 
         boost::shared_ptr<Cache::CacheEntry> addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
         boost::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
 
     private:
-        Header header_;
+        HeaderName header_;
         boost::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
         Macros definedMacros_;

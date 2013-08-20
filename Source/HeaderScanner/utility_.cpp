@@ -19,19 +19,21 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
     bool invalid;
     llvm::MemoryBuffer const * buffer( sourceManager.getBuffer( spellingLoc.first, loc, &invalid ) );
     assert( !invalid );
-    // Find beginning of directive.
     char const * defLoc( buffer->getBufferStart() + spellingLoc.second );
     // Find end of directive.
-    clang::Lexer rawLex( loc, preprocessor.getLangOpts(),
-        defLoc, defLoc, buffer->getBufferEnd() );
-    rawLex.setParsingPreprocessorDirective( true );
-    clang::Token rawToken;
-    do { rawLex.LexFromRawLexer( rawToken ); } while ( rawToken.isNot( clang::tok::eod ) );
-    std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( rawToken.getLocation() ) );
-    assert( spellingLoc.first == endSpellingLoc.first );
-    assert( spellingLoc.second < endSpellingLoc.second );
-    std::size_t size( endSpellingLoc.second - spellingLoc.second );
-    while ( defLoc[ size - 1 ] == ' ' || defLoc[ size - 1 ] == '\t' )
-        size--;
-    return llvm::StringRef( defLoc, size );
+    char const * end( defLoc );
+    bool lastNonspaceIsBackslash( false );
+    bool lastIsSpace( false );
+    for ( ; ; ++end )
+    {
+        if ( *end == '\n' && !lastNonspaceIsBackslash )
+            break;
+        bool const currentIsSpace = *end != ' ' && *end != '\t' && *end != '\r';
+        if ( !currentIsSpace )
+            lastNonspaceIsBackslash = ( !lastNonspaceIsBackslash || lastIsSpace ) && ( *end == '\\' );
+        lastIsSpace = currentIsSpace;
+    }
+    while ( *end == ' ' || *end == '\t' || *end == '\r' )
+        end--;
+    return llvm::StringRef( defLoc, end - defLoc );
 }

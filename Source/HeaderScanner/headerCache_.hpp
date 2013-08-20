@@ -135,11 +135,8 @@ public:
 
         std::string const & header() const { return header_; }
 
-        boost::recursive_mutex & generateMutex() { return generateMutex_; }
-
     private:
         std::string header_;
-        boost::recursive_mutex generateMutex_;
         CacheList cacheList_;
     };
 

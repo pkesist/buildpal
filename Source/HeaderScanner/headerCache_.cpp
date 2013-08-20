@@ -19,7 +19,7 @@ clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager &
     return result;
 }
 
-void Cache::CacheEntry::generateContent( boost::recursive_mutex & generateMutex )
+void Cache::CacheEntry::generateContent()
 {
     if ( buffer_.get() )
         return;
@@ -31,8 +31,8 @@ void Cache::CacheEntry::generateContent( boost::recursive_mutex & generateMutex 
     {
         typedef void result_type;
 
-        GenerateContent( llvm::raw_string_ostream & ostream, boost::recursive_mutex & generateMutex )
-            : ostream_( ostream ), generateMutex_( generateMutex ) {}
+        GenerateContent( llvm::raw_string_ostream & ostream )
+            : ostream_( ostream ) {}
 
         void operator()( MacroWithUsage const & mwu )
         {
@@ -54,19 +54,17 @@ void Cache::CacheEntry::generateContent( boost::recursive_mutex & generateMutex 
         void operator()( boost::shared_ptr<CacheEntry> const & ce )
         {
             if ( !ce->buffer_ )
-                ce->generateContent( generateMutex_ );
+                ce->generateContent();
             ostream_ << ce->buffer_->getBuffer();
         }
 
         llvm::raw_string_ostream & ostream_;
-        boost::recursive_mutex & generateMutex_;
-    } contentGenerator( defineStream, generateMutex );
+    } contentGenerator( defineStream );
 
     std::for_each( headerContent().begin(), headerContent().end(),
         [&]( HeaderEntry const & he ) { boost::apply_visitor( contentGenerator, he ); } );
 
     defineStream << '\0';
-    boost::unique_lock<boost::recursive_mutex> generateLock( generateMutex );
     buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( defineStream.str(), "" ) );
 }
 
@@ -95,7 +93,7 @@ boost::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName,
     if ( result )
     {
         headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
-        result->generateContent( iter->second->generateMutex() );
+        result->generateContent();
     }
     return result;
 }

@@ -17,7 +17,7 @@ import zlib
 
 from Messaging import ServerSession, ServerWorker, Broker
 
-from utils import TempFile, send_compressed_file, receive_compressed_file
+from utils import TempFile, send_compressed_file
 
 class ServerCompiler:
     def __init__(self, file_repository, cpu_usage_hwm):

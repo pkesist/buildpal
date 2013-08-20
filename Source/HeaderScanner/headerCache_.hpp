@@ -6,6 +6,7 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#include <boost/variant.hpp>
 #include <boost/container/list.hpp>
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
@@ -36,9 +37,64 @@ typedef StringPairSet Headers;
 typedef StringPairSet Macros;
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroMap;
 
-struct MacroUsage { enum Enum { used, defined, undefined }; };
+struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
-typedef std::vector<MacroWithUsage> MacroUsages;
+class CacheEntry;
+typedef boost::variant<MacroWithUsage, boost::shared_ptr<CacheEntry> > HeaderEntry;
+typedef std::vector<HeaderEntry> HeaderContent;
+
+class CacheEntry
+{
+private:
+    BOOST_MOVABLE_BUT_NOT_COPYABLE(CacheEntry)
+
+public:
+    CacheEntry
+    (
+        std::string const & uniqueVirtualFileName,
+        Macros const & usedMacros,
+        HeaderContent const & headerContent,
+        Headers const & headers
+    ) : 
+        fileName_( uniqueVirtualFileName ),
+        usedMacros_( usedMacros ),
+        headerContent_( headerContent ),
+        headers_( headers )
+    {
+    }
+
+    CacheEntry( BOOST_RV_REF(CacheEntry) other )
+    {
+        this->operator=( boost::move( other ) );
+    }
+            
+    CacheEntry & operator=( BOOST_RV_REF(CacheEntry) other )
+    {
+        fileName_.swap( other.fileName_ );
+        usedMacros_.swap( other.usedMacros_ );
+        headerContent_.swap( other.headerContent_ );
+        headers_.swap( other.headers_ );
+
+        buffer_.reset( other.buffer_.take() );
+        return *this;
+    }
+
+    clang::FileEntry const * getFileEntry( clang::SourceManager & );
+    void releaseFileEntry( clang::SourceManager & );
+    void generateContent( boost::recursive_mutex & );
+
+    Macros const & usedMacros() const { return usedMacros_; }
+    HeaderContent       & headerContent()       { return headerContent_; }
+    HeaderContent const & headerContent() const { return headerContent_; }
+    Headers const & headers() const { return headers_; }
+
+private:
+    std::string fileName_;
+    llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
+    Macros usedMacros_;
+    HeaderContent headerContent_;
+    Headers headers_;
+};
 
 
 class Cache
@@ -46,57 +102,7 @@ class Cache
 public:
     Cache() : counter_( 0 ) {}
 
-    class CacheEntry
-    {
-    private:
-        BOOST_MOVABLE_BUT_NOT_COPYABLE(CacheEntry)
-
-    public:
-        CacheEntry
-        (
-            std::string const & uniqueVirtualFileName,
-            Macros const & usedMacros,
-            MacroUsages const & macroUsages,
-            Headers const & headers
-        ) : 
-            fileName_( uniqueVirtualFileName ),
-            usedMacros_( usedMacros ),
-            macroUsages_( macroUsages ),
-            headers_( headers )
-        {
-        }
-
-        CacheEntry( BOOST_RV_REF(CacheEntry) other )
-        {
-            this->operator=( boost::move( other ) );
-        }
-            
-        CacheEntry & operator=( BOOST_RV_REF(CacheEntry) other )
-        {
-            fileName_.swap( other.fileName_ );
-            usedMacros_.swap( other.usedMacros_ );
-            macroUsages_.swap( other.macroUsages_ );
-            headers_.swap( other.headers_ );
-
-            buffer_.reset( other.buffer_.take() );
-            return *this;
-        }
-
-        clang::FileEntry const * getFileEntry( clang::SourceManager & );
-        void releaseFileEntry( clang::SourceManager & );
-        void generateContent( boost::recursive_mutex & );
-
-        Macros const & usedMacros() const { return usedMacros_; }
-        MacroUsages const & macroUsages() const { return macroUsages_; }
-        Headers const & headers() const { return headers_; }
-
-    private:
-        std::string fileName_;
-        llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
-        Macros usedMacros_;
-        MacroUsages macroUsages_;
-        Headers headers_;
-    };
+    typedef CacheEntry CacheEntry;
 
     class HeaderInfo
     {
@@ -108,21 +114,14 @@ public:
 
         HeaderInfo( std::string const & header, std::size_t const size )
             :
-            header_( header ), disabled_( false )
+            header_( header )
         {}
 
         HeaderInfo( BOOST_RV_REF(HeaderInfo) other )
             :
-            cacheList_( boost::move( other.cacheList_ ) ),
-            disabled_( other.disabled_ )
+            cacheList_( boost::move( other.cacheList_ ) )
         {
             header_.swap( other.header_ );
-        }
-
-        void disable()
-        {
-            disabled_ = true;
-            cacheList_.clear();
         }
 
         HeaderInfo & operator=( BOOST_RV_REF(HeaderInfo) other )
@@ -132,9 +131,8 @@ public:
         }
 
         boost::shared_ptr<Cache::CacheEntry> find( clang::Preprocessor const & );
-        void insert( BOOST_RV_REF(CacheEntry) );
+        boost::shared_ptr<Cache::CacheEntry> insert( BOOST_RV_REF(CacheEntry) );
 
-        bool disabled() const { return disabled_; }
         std::string const & header() const { return header_; }
 
         boost::recursive_mutex & generateMutex() { return generateMutex_; }
@@ -143,21 +141,17 @@ public:
         std::string header_;
         boost::recursive_mutex generateMutex_;
         CacheList cacheList_;
-        bool disabled_;
     };
 
     template <typename HeadersList>
-    void addEntry
+    boost::shared_ptr<Cache::CacheEntry> addEntry
     (
         clang::FileEntry const * file,
         Macros const & macros,
-        MacroUsages const & macroUsages,
+        HeaderContent const & headerContent,
         HeadersList const & headers
     )
     {
-        if ( macros.size() > 20 )
-            return;
-
         boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
 
         HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );
@@ -174,18 +168,16 @@ public:
             assert( insertResult.second );
             iter = insertResult.first;
         }
-        if ( iter->second->disabled() )
-            return;
 
         CacheEntry cacheEntry
         (
             uniqueFileName(),
             clone<Macros>( macros ),
-            clone( macroUsages ),
+            clone( headerContent ),
             clone<Headers>( headers )
         );
 
-        iter->second->insert( boost::move( cacheEntry ) );
+        return iter->second->insert( boost::move( cacheEntry ) );
     }
 
     boost::shared_ptr<CacheEntry> findEntry
@@ -210,14 +202,43 @@ private:
         return std::make_pair( cloneStr( p.first ), cloneStr( p.second ) );
     }
 
-    MacroUsages clone( MacroUsages const & mu )
+    template <typename StrPairCloner>
+    struct Inserter
     {
-        MacroUsages result;
-        for ( MacroUsages::const_iterator iter( mu.begin() ); iter != mu.end(); ++iter )
-            result.push_back( std::make_pair( iter->first, cloneStrPair( iter->second ) ) );
+        typedef void result_type;
+
+        Inserter( HeaderContent & result, StrPairCloner strPairCloner ) :
+            result_( result ), strPairCloner_( strPairCloner )
+        {}
+
+        void operator()( MacroWithUsage const & mwu )
+        {
+            result_.push_back( std::make_pair( mwu.first, strPairCloner_( mwu.second ) ) );
+        }
+
+        void operator()( boost::shared_ptr<CacheEntry> const & ce )
+        {
+            result_.push_back( ce );
+        }
+
+        HeaderContent & result_;
+        StrPairCloner strPairCloner_;
+    };
+
+    template <typename StrPairCloner>
+    static Inserter<StrPairCloner> makeInserter( HeaderContent & result, StrPairCloner strPairCloner )
+    {
+        return Inserter<StrPairCloner>( result, strPairCloner );
+    }
+
+    HeaderContent clone( HeaderContent const & hc )
+    {
+        HeaderContent result;
+        auto inserter( makeInserter( result, [this]( StringPair const & p ) { return cloneStrPair( p ); } ) );
+        std::for_each( hc.begin(), hc.end(), [&]( HeaderEntry const & he ) { boost::apply_visitor( inserter, he ); } );
         return result;
     }
-    
+
     template <typename Result, typename StringPairContainer>
     Result clone( StringPairContainer const & cont )
     {

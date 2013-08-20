@@ -21,30 +21,53 @@ clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager &
 
 void Cache::CacheEntry::generateContent( boost::recursive_mutex & generateMutex )
 {
+    if ( buffer_.get() )
+        return;
+
     // Cache the result.
     std::string content;
     llvm::raw_string_ostream defineStream( content );
-    for ( MacroUsages::const_iterator iter( macroUsages().begin() ); iter != macroUsages().end(); ++iter )
+    struct GenerateContent
     {
-        if ( iter->first == MacroUsage::defined )
+        typedef void result_type;
+
+        GenerateContent( llvm::raw_string_ostream & ostream, boost::recursive_mutex & generateMutex )
+            : ostream_( ostream ), generateMutex_( generateMutex ) {}
+
+        void operator()( MacroWithUsage const & mwu )
         {
-            Macro const & macro( iter->second );
-            assert( macro.second.data() );
-            defineStream << "#define " << macro.second << '\n';
+            if ( mwu.first == MacroUsage::defined )
+            {
+                Macro const & macro( mwu.second );
+                assert( macro.second.data() );
+                ostream_ << "#define " << macro.second << '\n';
+            }
+
+            if ( mwu.first == MacroUsage::undefined )
+            {
+                Macro const & macro( mwu.second );
+                assert( macro.second.data() );
+                ostream_ << "#undef " << macro.first << '\n';
+            }
         }
 
-        if ( iter->first == MacroUsage::undefined )
+        void operator()( boost::shared_ptr<CacheEntry> const & ce )
         {
-            Macro const & macro( iter->second );
-            assert( macro.second.data() );
-            defineStream << "#undef " << macro.first << '\n';
+            if ( !ce->buffer_ )
+                ce->generateContent( generateMutex_ );
+            ostream_ << ce->buffer_->getBuffer();
         }
-    }
+
+        llvm::raw_string_ostream & ostream_;
+        boost::recursive_mutex & generateMutex_;
+    } contentGenerator( defineStream, generateMutex );
+
+    std::for_each( headerContent().begin(), headerContent().end(),
+        [&]( HeaderEntry const & he ) { boost::apply_visitor( contentGenerator, he ); } );
+
     defineStream << '\0';
-
     boost::unique_lock<boost::recursive_mutex> generateLock( generateMutex );
-    if ( !buffer_.get() )
-        buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( defineStream.str(), "" ) );
+    buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( defineStream.str(), "" ) );
 }
 
 std::string Cache::uniqueFileName()
@@ -79,9 +102,6 @@ boost::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName,
 
 boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
 {
-    if ( disabled_ )
-        return boost::shared_ptr<Cache::CacheEntry>();
-
     for
     (
         CacheList::iterator headerInfoIter( cacheList_.begin() );
@@ -121,29 +141,22 @@ boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocesso
     return boost::shared_ptr<Cache::CacheEntry>();
 }
 
-void Cache::HeaderInfo::insert( BOOST_RV_REF(CacheEntry) value )
+boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::insert( BOOST_RV_REF(CacheEntry) value )
 {
-    if ( disabled() )
-        return;
-
-    if ( cacheList_.size() >= 20 )
-    {
-        disable();
-    }
-    else
-    {
-        cacheList_.push_front
+    boost::shared_ptr<Cache::CacheEntry> const result
+    (
+        boost::make_shared<CacheEntry>
         (
-            boost::make_shared<CacheEntry>
-            (
-            #if defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
-                boost::ref( value )
-            #else
-                boost::move( value )
-            #endif
-            )
-        );
-    }
+        #if defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
+            boost::ref( value )
+        #else
+            boost::move( value )
+        #endif
+        )
+    );
+
+    cacheList_.push_front( result );
+    return result;
 }
 
 

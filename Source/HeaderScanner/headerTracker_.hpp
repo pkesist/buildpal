@@ -85,8 +85,7 @@ private:
             if ( usedMacros_.find( macro ) != usedMacros_.end() )
                 // We already know about this.
                 return;
-            macroUsages_.push_back( std::make_pair( MacroUsage::used, macro ) );
-            if ( definedMacros_.find( macro.first ) == definedMacros_.end() )
+            if ( definedMacros_.find( macro ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
         }
 
@@ -94,15 +93,15 @@ private:
         {
             if ( cacheHit_ )
                 return;
-            macroUsages_.push_back( std::make_pair( MacroUsage::defined, macro ) );
-            definedMacros_.insert( std::make_pair( macro.first, --macroUsages_.end() ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
+            definedMacros_.insert( macro );
         }
 
         void macroUndefined( Macro const & macro )
         {
             if ( cacheHit_ )
                 return;
-            macroUsages_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
         void addHeader( Header const & header )
@@ -112,26 +111,15 @@ private:
             std::pair<Headers::iterator, bool> const insertResult( includedHeaders_.insert( header ) );
         }
 
-        void addMacroUsage( MacroWithUsage const & macroWithUsage )
+        void addStuff( boost::shared_ptr<Cache::CacheEntry> const & cacheEntry, Headers const * headers )
         {
-            if ( cacheHit_ )
-                return;
-            switch ( macroWithUsage.first )
+            if ( cacheEntry )
             {
-                case MacroUsage::used: macroUsed( macroWithUsage.second ); break;
-                case MacroUsage::defined: macroDefined( macroWithUsage.second ); break;
-                case MacroUsage::undefined: macroUndefined( macroWithUsage.second ); break;
-                default: assert( !"Invalid macro usage." );
-            }
-        }
+                std::set_difference( cacheEntry->usedMacros().begin(), cacheEntry->usedMacros().end(),
+                    definedMacros_.begin(), definedMacros_.end(),
+                    std::inserter( usedMacros_, usedMacros_.end() ) );
 
-        template <typename Headers>
-        void addStuff( MacroUsages const * macroUsages, Headers const * headers )
-        {
-            if ( macroUsages )
-            {
-                std::for_each( macroUsages->begin(), macroUsages->end(),
-                        boost::bind( &HeaderTracker::HeaderCtx::addMacroUsage, this, _1 ) );
+                headerContent_.push_back( cacheEntry );
             }
 
             if ( headers )
@@ -142,20 +130,20 @@ private:
         }
 
         Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }
-        MacroUsages const & macroUsages() const { return cacheHit_ ? cacheHit_->macroUsages() : macroUsages_; }
+        HeaderContent const & headerContent() const { return cacheHit_ ? cacheHit_->headerContent() : headerContent_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         Header const & header() { return header_; }
 
-        void addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
+        boost::shared_ptr<Cache::CacheEntry> addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
-        bool fromCache() const { return cacheHit_.get() != 0; }
+        boost::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
 
     private:
         Header header_;
         boost::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
-        MacroUsages macroUsages_;
-        std::map<llvm::StringRef, MacroUsages::iterator> definedMacros_;
+        Macros definedMacros_;
+        HeaderContent headerContent_;
         Headers includedHeaders_;
     };
     typedef std::vector<HeaderCtx> HeaderCtxStack;

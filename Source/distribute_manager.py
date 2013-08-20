@@ -21,7 +21,7 @@ import zlib
 
 from Messaging import Client as MsgClient
 
-class ScopedTimer:
+class ContextManagerTimer:
     def __init__(self, callable):
         self.__callable = callable
         self.__start = time()
@@ -31,6 +31,15 @@ class ScopedTimer:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.__callable(time() - self.__start)
+
+class ScopedTimer:
+    def __init__(self, callable):
+        self.__callable = callable
+        self.__start = time()
+
+    def __del__(self):
+        self.__callable(time() - self.__start)
+
 
 class Timer:
     def __init__(self):
@@ -52,6 +61,9 @@ class TimerProxy(BaseProxy):
         return self._callmethod('as_dict')
 
     def timeit(self, name):
+        return ContextManagerTimer(lambda value : self.add_time(name, value))
+
+    def scoped_timer(self, name):
         return ScopedTimer(lambda value : self.add_time(name, value))
 
 class ScanHeaders(Process):
@@ -62,7 +74,7 @@ class ScanHeaders(Process):
         return super().__init__()
 
     def run(self):
-        zmq_ctx = zmq.Context()
+        zmq_ctx = zmq.Context(4)
         executor = ThreadPoolExecutor(max_workers=self.__workers)
         socket = zmq_ctx.socket(zmq.DEALER)
         socket.connect('tcp://localhost:{}'.format(self.__port))
@@ -146,7 +158,6 @@ class CompileSession:
         return False
 
     def got_data_from_server(self, msg):
-        print("state is ", self.state)
         assert self.state != self.STATE_RELAY_PREPROCESSED_FILE
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
@@ -154,7 +165,6 @@ class CompileSession:
             if self.task.algorithm == 'SCAN_HEADERS':
                 self.server_conn.send_pyobj('SCAN_HEADERS')
                 self.server_conn.send_pyobj('ZIP_FILE')
-                print(self.client_conn.id, "self.task.tempfile is ", self.task.tempfile)
                 with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
                     send_file(self.server_conn.send_pyobj, file)
                 self.server_conn.send_pyobj('SOURCE_FILE')
@@ -164,6 +174,8 @@ class CompileSession:
                     self.server_conn.send_pyobj('NEED_PCH_FILE')
                     self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
                 else:
+                    self.server_timer = self.timer.scoped_timer('server_time')
+                    self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
                     self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
             elif self.task.algorithm == 'PREPROCESS_LOCALLY':
@@ -182,9 +194,13 @@ class CompileSession:
                     send_compressed_file(self.server_conn.send_pyobj, pch_file)
             else:
                 assert response == "NO"
+            self.server_timer = self.timer.scoped_timer('server_time')
+            self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
+            del self.server_timer
+            del self.average_timer
             server_status = msg
             if server_status == "SERVER_FAILED":
                 self.state = self.STATE_DONE
@@ -194,7 +210,6 @@ class CompileSession:
 
         elif self.state == self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT:
             self.retcode, self.stdout, self.stderr = msg
-            print("GOT ", self.retcode)
             if self.retcode == 0:
                 self.output = open(self.task.output, "wb")
                 self.output_decompressor = zlib.decompressobj()
@@ -294,13 +309,15 @@ class TaskProcessor:
         session_from_server = {}
         session_from_client = {}
 
+        self.last_time = None
         try:
             with BookKeepingManager() as book_keeper:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
 
-                scanHeaders = ScanHeaders(preprocess_socket_port, 32, timer)
-                scanHeaders.start()
+                scan_workers = [ScanHeaders(preprocess_socket_port, 8, timer) for i in range(4)]
+                for scan_worker in scan_workers:
+                    scan_worker.start()
 
                 while True:
                     self.print_stats(node_info, timer.as_dict())
@@ -309,7 +326,15 @@ class TaskProcessor:
                         if flags != zmq.POLLIN:
                             continue
 
-                        if socket is client_socket:
+                        if socket is preprocess_socket:
+                            msg = preprocess_socket.recv_multipart()
+                            client_id, result = msg
+                            assert client_id in session_from_client
+                            session = session_from_client[client_id]
+                            session.task.tempfile = pickle.loads(result)
+                            poller.register(session.server_conn.socket, zmq.POLLIN)
+
+                        elif socket is client_socket:
                             msg = client_socket.recv_multipart()
                             client_id = msg[0]
                             if client_id not in session_from_client:
@@ -331,16 +356,6 @@ class TaskProcessor:
                                     del session_from_server[server_socket]
                                     poller.unregister(server_socket)
 
-                        elif socket is preprocess_socket:
-                            msg = preprocess_socket.recv_multipart()
-                            print(msg)
-                            client_id, result = msg
-                            print("Task preprocessed", client_id)
-                            assert client_id in session_from_client
-                            session = session_from_client[client_id]
-                            session.task.tempfile = pickle.loads(result)
-                            poller.register(session.server_conn.socket, zmq.POLLIN)
-
                         else:
                             assert socket in session_from_server
                             session = session_from_server[socket]
@@ -353,9 +368,14 @@ class TaskProcessor:
                                 del session_from_server[socket]
                                 poller.unregister(socket)
         finally:
-            scanHeaders.terminate()
+            for scan_worker in scan_workers:
+                scan_worker.terminate()
 
     def print_stats(self, node_info, times):
+        current = time()
+        if self.last_time and (current - self.last_time < 2):
+            return
+        self.last_time = current
         sys.stdout.write("================\n")
         sys.stdout.write("Build nodes:\n")
         sys.stdout.write("================\n")
@@ -377,8 +397,8 @@ class TaskProcessor:
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
         sorted_times.sort(key=operator.itemgetter(3), reverse=True)
-        for name, time, count, average in sorted_times:
-            print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, time, count, average))
+        for name, tm, count, average in sorted_times:
+            print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, tm, count, average))
 
 task_queue = Queue()
 

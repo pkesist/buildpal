@@ -118,22 +118,24 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
     // Propagate the results to the file which included us.
     bool const ignoreHeaders( ignoredHeaders.find( headerCtxStack().back().header().first ) != ignoredHeaders.end() );
+
+    boost::shared_ptr<Cache::CacheEntry> cacheEntry;
+
+    if ( !cacheDisabled() )
+    {
+        cacheEntry = headerCtxStack().back().cacheHit();
+        if ( !cacheEntry )
+            cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
+    }
+
     HeaderCtx & includer( headerCtxStack()[ stackSize - 2 ] );
-
-    includer.addStuff
-    (
-        cacheDisabled() ? 0 : &headerCtxStack().back().macroUsages(),
-        ignoreHeaders ? 0 : &headerCtxStack().back().includedHeaders()
-    );
-
-    if ( !cacheDisabled() && !headerCtxStack().back().fromCache() )
-        headerCtxStack().back().addToCache( cache(), file, sourceManager() );
+    includer.addStuff( cacheEntry, ignoreHeaders ? 0 : &headerCtxStack().back().includedHeaders() );
 }
 
 
-void HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
+boost::shared_ptr<Cache::CacheEntry> HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
-    cache.addEntry( file, usedMacros(), macroUsages(), includedHeaders() );
+    return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders() );
 }
 
 HeaderTracker::Headers HeaderTracker::exitSourceFile()

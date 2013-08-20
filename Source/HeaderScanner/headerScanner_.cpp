@@ -154,6 +154,20 @@ namespace
             //}
         }
     };
+
+    struct DoNotOpenFiles : public clang::MemorizeStatCalls
+    {
+        virtual LookupResult getStat
+        (
+            const char * path,
+            struct stat & statBuf,
+            bool isFile,
+            int * FileDescriptor
+        )
+        {
+            return clang::MemorizeStatCalls::getStat( path, statBuf, isFile, 0 );
+        };
+    };
 }  // anonymous namespace
 
 Preprocessor::Preprocessor( Cache * cache )
@@ -178,27 +192,18 @@ Preprocessor::Preprocessor( Cache * cache )
     hsopts.UseStandardSystemIncludes = false;
     hsopts.UseStandardCXXIncludes = false;
     hsopts.Sysroot.clear();
-}
 
-struct DoNotOpenFiles : public clang::FileSystemStatCache
-{
-    virtual LookupResult getStat
-    (
-        const char * path,
-        struct stat & statBuf,
-        bool isFile,
-        int * FileDescriptor
-    )
-    {
-        return statChained( path, statBuf, isFile, 0 );
-    };
-};
+    compiler().createFileManager();
+    compiler().getFileManager().addStatCache( new DoNotOpenFiles() );
+}
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
 {
-    compiler().createFileManager();
-    compiler().getFileManager().addStatCache( new DoNotOpenFiles() );
-    compiler().createSourceManager( compiler().getFileManager() );
+    if ( compiler().hasSourceManager() )
+        compiler().getSourceManager().clearIDTables();
+    else
+        compiler().createSourceManager( compiler().getFileManager() );
+
     clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
     if ( !mainFileEntry )
         throw std::runtime_error( "Could not find source file." );

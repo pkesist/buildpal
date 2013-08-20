@@ -81,7 +81,7 @@ public:
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
     void releaseFileEntry( clang::SourceManager & );
-    void generateContent( boost::recursive_mutex & );
+    void generateContent();
 
     Macros const & usedMacros() const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }

@@ -11,7 +11,7 @@ import traceback
 import sys
 import os
 import zmq
-import zipfile
+import tarfile
 import shutil
 import zlib
 
@@ -52,15 +52,14 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_GET_TASK = 1
     STATE_DONE = 2
     STATE_GET_ALGORITHM = 3
-    STATE_SH_GET_ZIP_TAG = 4
-    STATE_SH_GET_ZIP_TAG = 5
-    STATE_SH_GET_ZIP_DATA = 6
-    STATE_SH_GET_SOURCE_TAG = 7
-    STATE_SH_GET_SOURCE_DATA = 8
-    STATE_SH_CHECK_PCH_TAG = 9
-    STATE_SH_GET_PCH_DATA = 10
-    STATE_PL_GET_PP_TAG = 11
-    STATE_PL_GET_PP_DATA = 12
+    STATE_SH_GET_ARCHIVE_TAG = 4
+    STATE_SH_GET_ARCHIVE_DATA = 5
+    STATE_SH_GET_SOURCE_TAG = 6
+    STATE_SH_GET_SOURCE_DATA = 7
+    STATE_SH_CHECK_PCH_TAG = 8
+    STATE_SH_GET_PCH_DATA = 9
+    STATE_PL_GET_PP_TAG = 10
+    STATE_PL_GET_PP_DATA = 11
 
     def __init__(self, file_repository, cpu_usage_hwm):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
@@ -72,10 +71,10 @@ class CompileSession(ServerSession, ServerCompiler):
             False : STATE_DONE },
         STATE_GET_TASK : STATE_GET_ALGORITHM,
         STATE_GET_ALGORITHM : {
-            'SCAN_HEADERS' : STATE_SH_GET_ZIP_TAG,
+            'SCAN_HEADERS' : STATE_SH_GET_ARCHIVE_TAG,
             'PREPROCESS_LOCALLY' : STATE_PL_GET_PP_TAG },
-        STATE_SH_GET_ZIP_TAG : STATE_SH_GET_ZIP_DATA,
-        STATE_SH_GET_ZIP_DATA : STATE_SH_GET_SOURCE_TAG,
+        STATE_SH_GET_ARCHIVE_TAG : STATE_SH_GET_ARCHIVE_DATA,
+        STATE_SH_GET_ARCHIVE_DATA : STATE_SH_GET_SOURCE_TAG,
         STATE_SH_GET_SOURCE_TAG : STATE_SH_GET_SOURCE_DATA,
         STATE_SH_GET_SOURCE_DATA : STATE_SH_CHECK_PCH_TAG,
         STATE_SH_CHECK_PCH_TAG : STATE_SH_GET_PCH_DATA,
@@ -97,8 +96,10 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def setup_include_dirs(self):
         self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
-        with zipfile.ZipFile(self.zipfile.filename()) as zip:
-            zip.extractall(path=self.include_path)
+        with tarfile.open(self.archivefile.filename()) as tar:
+            tar.extractall(path=self.include_path)
+        os.remove(self.archivefile.filename())
+        del self.archivefile
         self.include_dirs = [self.include_path]
 
         include_list = os.path.join(self.include_path, 'include_paths.txt')
@@ -168,18 +169,18 @@ class CompileSession(ServerSession, ServerCompiler):
         elif self.state == self.STATE_GET_ALGORITHM:
             self.algorithm = self.recv_pyobj()
             self.next_state(self.algorithm)
-        elif self.state == self.STATE_SH_GET_ZIP_TAG:
-            zip_tag = self.recv_pyobj()
-            assert zip_tag == 'ZIP_FILE'
-            self.zipfile = TempFile()
-            self.zipdesc = open(self.zipfile.filename(), 'wb')
+        elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
+            archive_tag = self.recv_pyobj()
+            assert archive_tag == 'HEADERS_ARCHIVE'
+            self.archivefile = TempFile()
+            self.archivedesc = open(self.archivefile.filename(), 'wb')
             self.next_state()
-        elif self.state == self.STATE_SH_GET_ZIP_DATA:
+        elif self.state == self.STATE_SH_GET_ARCHIVE_DATA:
             more, data = self.recv_pyobj()
-            self.zipdesc.write(data)
+            self.archivedesc.write(data)
             if not more:
-                self.zipdesc.close()
-                del self.zipdesc
+                self.archivedesc.close()
+                del self.archivedesc
                 self.setup_include_dirs()
                 self.next_state()
         elif self.state == self.STATE_SH_GET_SOURCE_TAG:

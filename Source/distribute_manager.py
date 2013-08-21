@@ -164,7 +164,7 @@ class CompileSession:
             assert task_ok == "OK"
             if self.task.algorithm == 'SCAN_HEADERS':
                 self.server_conn.send_pyobj('SCAN_HEADERS')
-                self.server_conn.send_pyobj('ZIP_FILE')
+                self.server_conn.send_pyobj('HEADERS_ARCHIVE')
                 with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
                     send_file(self.server_conn.send_pyobj, file)
                 self.server_conn.send_pyobj('SOURCE_FILE')
@@ -235,10 +235,9 @@ class CompileSession:
         return False
 
 class TaskProcessor:
-    def __init__(self, nodes, max_processes, port):
+    def __init__(self, nodes, port):
         self.__port = port
         self.__nodes = nodes
-        self.__max_processes = max_processes
 
         super(TaskProcessor, self).__init__()
 
@@ -481,7 +480,6 @@ Usage:
     nodes_section = 'Build Nodes'
 
     port = config.get(manager_section, 'port')
-    max_processes = config.getint(manager_section, 'max_processes', fallback=None)
 
     if not nodes_section in config:
         raise "ERROR: No '{}' section in '{}'.".format(nodes_section, iniFile)
@@ -503,9 +501,6 @@ Usage:
     if not nodes:
         raise RuntimeErrors("No build nodes configured.")
 
-    if max_processes is None:
-        max_processes = 4 * len(nodes)
-   
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
@@ -513,6 +508,6 @@ Usage:
     zmq_ctx = zmq.Context()
 
     try:
-        TaskProcessor(nodes, max_processes, port).run()
+        TaskProcessor(nodes, port).run()
     finally:
         print("Shutting down.")

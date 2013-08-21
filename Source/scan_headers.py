@@ -1,4 +1,5 @@
 #! python3.3
+from io import BytesIO
 from utils import TempFile
 
 import preprocessing
@@ -9,7 +10,7 @@ import os
 import sys
 import types
 import time
-import zipfile
+import tarfile
 import threading
 
 from tempfile import mkdtemp
@@ -44,12 +45,19 @@ def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     return preprocessor.scanHeaders(ppc, cpp_file)
 
 def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
+    def write_str_to_tar(tar, name, content):
+        info = tarfile.TarInfo(name=name)
+        string = BytesIO()
+        info.size = string.write(content.encode())
+        string.seek(0)
+        tar.addfile(tarinfo=info, fileobj=string)
+
     try:
         preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
-        zip_file = TempFile(suffix='.zip')
+        archive = TempFile(suffix='.tar')
         paths_to_include = []
         relative_paths = {}
-        with zipfile.ZipFile(zip_file.filename(), 'w', zipfile.ZIP_DEFLATED, False) as zip:
+        with tarfile.open(archive.filename(), 'w') as tar:
             for file, full in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')
@@ -69,11 +77,11 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
                         # Add a dummy file which will create this structure.
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
-                        zip.writestr(relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
-                zip.write(full, '/'.join(path_elements))
+                        write_str_to_tar(tar, relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
+                tar.add(full, '/'.join(path_elements))
             if paths_to_include:
-                zip.writestr('include_paths.txt', "\n".join(paths_to_include))
-        return zip_file.filename()
+                write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include))
+        return archive.filename()
     except Exception:
         import traceback
         traceback.print_exc()

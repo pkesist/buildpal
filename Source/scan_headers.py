@@ -75,7 +75,7 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
         relative_paths = {}
         tarBuffer = BytesIO()
         with tarfile.open(mode='w', fileobj=tarBuffer) as tar:
-            for file, full, memoryview in preprocessor.scanHeaders(ppc, cpp_file):
+            for file, content in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.
@@ -95,7 +95,7 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
                         write_str_to_tar(tar, relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
-                write_file_to_tar(tar, '/'.join(path_elements), memoryview)
+                write_file_to_tar(tar, '/'.join(path_elements), content)
             if paths_to_include:
                 write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include))
         tarBuffer.seek(0)

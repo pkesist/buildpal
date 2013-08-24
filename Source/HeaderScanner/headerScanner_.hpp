@@ -54,12 +54,11 @@ private:
 
 struct HeaderRef
 {
-    HeaderRef( std::string const & rel, std::string const & abs, char const * d, std::size_t s )
-        : relative( rel ), absolute( abs ), data( d ), size( s )
+    HeaderRef( std::string const & rel, char const * d, std::size_t s )
+        : relative( rel ), data( d ), size( s )
     {}
 
     std::string relative;
-    std::string absolute;
     char const * data;
     std::size_t size;
 
@@ -67,14 +66,12 @@ struct HeaderRef
     {
         if ( relative < other.relative )
             return true;
-        if ( absolute < other.absolute )
-            return true;
         return false;
     }
 
     bool operator==( HeaderRef const & other ) const
     {
-        return relative == other.relative && absolute == other.absolute;
+        return relative == other.relative;
     }
 };
 

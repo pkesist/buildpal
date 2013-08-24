@@ -52,12 +52,38 @@ private:
     IgnoredHeaders ignoredHeaders_;
 };
 
+struct HeaderRef
+{
+    HeaderRef( std::string const & rel, std::string const & abs, char const * d, std::size_t s )
+        : relative( rel ), absolute( abs ), data( d ), size( s )
+    {}
+
+    std::string relative;
+    std::string absolute;
+    char const * data;
+    std::size_t size;
+
+    bool operator<( HeaderRef const & other ) const
+    {
+        if ( relative < other.relative )
+            return true;
+        if ( absolute < other.absolute )
+            return true;
+        return false;
+    }
+
+    bool operator==( HeaderRef const & other ) const
+    {
+        return relative == other.relative && absolute == other.absolute;
+    }
+};
+
 class Preprocessor
 {
 public:
-    Preprocessor( Cache * cache );
+    explicit Preprocessor( Cache * );
 
-    typedef std::pair<std::string, std::string> HeaderRef;
+    typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
     std::string & rewriteIncludes( PreprocessingContext const &, std::string const & filename, std::string & output );

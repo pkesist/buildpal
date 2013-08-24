@@ -143,3 +143,36 @@ class CmdLineOptions:
         return CmdLineOption.Value(FreeOption(), None, None, None, token)
         
 
+class Category: pass
+class BuildLocalCategory(Category): pass
+class PCHCategory(Category): pass
+class PreprocessingCategory(Category): pass
+class CompilationCategory(Category): pass
+class LinkingCategory(Category): pass
+
+class CompilerOption(CmdLineOption):
+    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
+        super().__init__(name, esc, suff, has_arg, allow_spaces, allow_equal, default_separator)
+        self.__categories = set()
+        self.__macros = set()
+
+    def add_category(self, cat):
+        self.__categories.add(cat)
+        
+    def test_category(self, cat):
+        return cat in self.__categories
+
+    def add_macro(self, macro):
+        self.__macros.add(macro)
+
+    def get_macros(self, value):
+        result = []
+        for macro in self.__macros:
+            if callable(macro):
+                t = macro(value)
+                if t:
+                    result.append(t)
+            else:
+                result.append(macro)
+        return result
+

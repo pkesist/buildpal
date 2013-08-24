@@ -31,7 +31,7 @@ namespace clang
 
 typedef std::pair<std::string, std::string> StringPair;
 typedef StringPair Macro;
-typedef StringPair HeaderName;
+typedef std::pair<std::string, clang::FileEntry const *> HeaderName;
 typedef std::set<StringPair> StringPairSet;
 typedef StringPairSet Macros;
 typedef std::map<std::string, std::string> MacroMap;
@@ -153,12 +153,12 @@ public:
         HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );
         if ( iter == headersInfo().end() )
         {
-            while ( headersInfoList_.size() > 1024 * 4 )
+            while ( headersInfoList_.size() > 1024 * 1 )
             {
                 headersInfo_.erase( headersInfoList_.back().header() );
                 headersInfoList_.pop_back();
             }
-            HeaderInfo tmp( file->getName(), 50 );
+            HeaderInfo tmp( file->getName(), 20 );
             headersInfoList_.push_front( boost::move( tmp ) );
             std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
             assert( insertResult.second );

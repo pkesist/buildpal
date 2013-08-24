@@ -1,4 +1,4 @@
-from cmdline_processing import CmdLineOption, FreeOption
+from cmdline_processing import *
 from distribute_client import CompilerWrapper, CompilerInfo
 from utils import get_batch_file_environment_side_effects, TempFile
 
@@ -26,19 +26,19 @@ def find_on_path(executable):
 
 esc = ['/', '-']
 def simple(name, macros=[]): 
-    result = CompilerWrapper.CompilerOption(name, esc, None, False)
+    result = CompilerOption(name, esc, None, False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def simple_w_minus(name, macros=[]):
-    result = CompilerWrapper.CompilerOption(name, esc, '-', False)
+    result = CompilerOption(name, esc, '-', False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def with_param(name, macros=[]):
-    result = CompilerWrapper.CompilerOption(name, esc, None, True, False, False)
+    result = CompilerOption(name, esc, None, True, False, False)
     for macro in macros:
         result.add_macro(macro)
     return result
@@ -48,7 +48,7 @@ class MSVCWrapper(CompilerWrapper):
     __preprocess_option = simple('E')
     __object_name_option = with_param('Fo')
     __compile_no_link_option = simple('c')
-    __include_file_option = with_param('I')
+    __include_option = with_param('I')
     __define_option = with_param('D')
     __use_pch_option = with_param('Yu')
     __pch_file_option = with_param('Fp')
@@ -56,7 +56,7 @@ class MSVCWrapper(CompilerWrapper):
     def preprocess_option(self): return self.__preprocess_option
     def object_name_option(self): return self.__object_name_option
     def compile_no_link_option(self): return self.__compile_no_link_option
-    def include_file_option(self): return self.__include_file_option
+    def include_option(self): return self.__include_option
     def define_option(self): return self.__define_option
     def use_pch_option(self): return self.__use_pch_option
     def pch_file_option(self): return self.__pch_file_option
@@ -66,35 +66,35 @@ class MSVCWrapper(CompilerWrapper):
 
         # Build Local
         for option in self.build_local_options:
-            option.add_category(MSVCWrapper.BuildLocalCategory)
+            option.add_category(BuildLocalCategory)
             self.add_option(option)
         # Preprocessing
         for option in self.preprocessing_options:
-            option.add_category(MSVCWrapper.PreprocessingCategory)
+            option.add_category(PreprocessingCategory)
             self.add_option(option)
         # PCH options which require local build.        
         for option in self.pch_build_local_options:
-            option.add_category(MSVCWrapper.BuildLocalCategory)
-            option.add_category(MSVCWrapper.PCHCategory)
+            option.add_category(BuildLocalCategory)
+            option.add_category(PCHCategory)
             self.add_option(option)
         # PCH options.
         for option in self.pch_options:
-            option.add_category(MSVCWrapper.PCHCategory)
+            option.add_category(PCHCategory)
             self.add_option(option)
         # Both preprocessing and compilation.
         for option in self.preprocess_and_compile:
-            option.add_category(MSVCWrapper.PreprocessingCategory)
-            option.add_category(MSVCWrapper.CompilationCategory)
+            option.add_category(PreprocessingCategory)
+            option.add_category(CompilationCategory)
             self.add_option(option)
         # Compilation
         for option in self.compilation_options:
-            option.add_category(MSVCWrapper.CompilationCategory)
+            option.add_category(CompilationCategory)
             self.add_option(option)
         # Always.
         for option in self.always:
-            option.add_category(MSVCWrapper.PreprocessingCategory)
-            option.add_category(MSVCWrapper.CompilationCategory)
-            option.add_category(MSVCWrapper.LinkingCategory)
+            option.add_category(PreprocessingCategory)
+            option.add_category(CompilationCategory)
+            option.add_category(LinkingCategory)
             self.add_option(option)
 
     def requires_preprocessing(self, input):
@@ -112,7 +112,7 @@ class MSVCWrapper(CompilerWrapper):
         command = [manager,
             self.object_name_option().make_value(obj).make_str(),
             self.compile_no_link_option().make_value().make_str()]
-        command.extend((self.include_file_option().make_value(include).make_str() for include in includes))
+        command.extend((self.include_option().make_value(include).make_str() for include in includes))
         command.extend(['-nologo', '/EHsc', source])
         return self.execute(command, locally)
 
@@ -121,7 +121,8 @@ class MSVCWrapper(CompilerWrapper):
         if not abs:
             raise RuntimeError("Cannot find compiler executable '{}'.".format(executable))
         #   Here we should test only for macros which do not change depending on
-        # compiler options.
+        # compiler options, i.e. which are fixed for a specific compiler
+        # executable.
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
@@ -158,7 +159,11 @@ class MSVCWrapper(CompilerWrapper):
                 raise EnvironmentError("Failed to identify compiler - unexpected output.")
             version = (m.group('ver'), m.group('plat'))
             assert version in self.compiler_versions
-            return CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version, macros)
+            result = CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version, macros)
+            result.use_pch_option = self.use_pch_option()
+            result.define_option = self.define_option()
+            result.include_option = self.include_option()
+            return result
 
     @classmethod
     def get_compiler_environment(cls, compiler_info):
@@ -201,8 +206,8 @@ class MSVCWrapper(CompilerWrapper):
         result = []
         add_extensions = True
         for token in (token for token in tokens
-            if type(token.option) == CompilerWrapper.CompilerOption and
-            token.option.test_category(CompilerWrapper.PreprocessingCategory)):
+            if type(token.option) == CompilerOption and
+            token.option.test_category(PreprocessingCategory)):
             option = token.option
             if not option:
                 continue

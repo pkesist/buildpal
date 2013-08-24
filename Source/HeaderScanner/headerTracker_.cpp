@@ -43,10 +43,10 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     clang::FileEntry const * file( fileStack_.back() );
     fileStack_.pop_back();
     assert( file );
-    
+
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
-    HeaderName header( std::make_pair( relative, file->getName() ) );
+    HeaderName header( std::make_pair( relative, file ) );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
@@ -84,7 +84,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry->getName() ), boost::shared_ptr<Cache::CacheEntry>() ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), boost::shared_ptr<Cache::CacheEntry>() ) );
     fileStack_.push_back( mainFileEntry );
 }
 
@@ -93,7 +93,7 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     clang::FileEntry const * file( fileStack_.back() );
     if ( file )
     {
-        HeaderName header( std::make_pair( relative, file->getName() ) );
+        HeaderName header( std::make_pair( relative, file ) );
         headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_ ) );
         cacheHit_.reset();
@@ -151,16 +151,27 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
     struct Inserter
     {
         typedef void result_type;
-        Inserter( Preprocessor::HeaderRefs & result ) : result_( result ) {}
+        Inserter( Preprocessor::HeaderRefs & result, clang::SourceManager & sourceManager )
+            : result_( result ), sourceManager_( sourceManager ) {}
 
-        void operator()( HeaderName const & sp ) { result_.insert( sp ); }
+        void operator()( HeaderName const & sp )
+        {
+            std::string error;
+            bool invalid;
+            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( sp.second, &invalid );
+            if ( invalid )
+                buffer = sourceManager_.getFileManager().getBufferForFile( sp.second, &error );
+            assert( buffer );
+            result_.insert( HeaderRef( sp.first, sp.second->getName(), buffer->getBufferStart(), buffer->getBufferSize() ) );
+        }
         void operator()( boost::shared_ptr<Cache::CacheEntry> const & ce )
         {
-            std::for_each( ce->headers().begin(), ce->headers().end(), [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
+            std::for_each( ce->headers().begin(), ce->headers().end(),
+                [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
         }
-
         Preprocessor::HeaderRefs & result_;
-    } inserter( result );
+        clang::SourceManager & sourceManager_;
+    } inserter( result, preprocessor_.getSourceManager() );
     std::for_each(
         headerCtxStack().back().includedHeaders().begin(),
         headerCtxStack().back().includedHeaders().end(),

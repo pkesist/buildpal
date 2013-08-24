@@ -1,5 +1,5 @@
 #! python3.3
-from io import BytesIO
+from io import BytesIO, RawIOBase
 from utils import TempFile
 
 import preprocessing
@@ -47,18 +47,35 @@ def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
 def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     def write_str_to_tar(tar, name, content):
         info = tarfile.TarInfo(name=name)
-        string = BytesIO()
-        info.size = string.write(content.encode())
-        string.seek(0)
-        tar.addfile(tarinfo=info, fileobj=string)
+        info.size = len(content)
+        data = BytesIO(content.encode())
+        data.seek(0)
+        tar.addfile(tarinfo=info, fileobj=data)
+
+    def write_file_to_tar(tar, name, content):
+        class MemViewAsFileInput(RawIOBase):
+            def __init__(self, membuf):
+                self.membuf = membuf
+                self.offset = 0
+                self.remaining = len(membuf)
+
+            def read(self, n=-1):
+                if n is None or n < 0 or self.remaining < n:
+                    n = self.remaining
+                self.remaining -= n
+                self.offset += n
+                return self.membuf[self.offset - n : self.offset]
+        info = tarfile.TarInfo(name=name)
+        info.size = len(content)
+        tar.addfile(info, fileobj=MemViewAsFileInput(content))
 
     try:
         preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
-        archive = TempFile(suffix='.tar')
         paths_to_include = []
         relative_paths = {}
-        with tarfile.open(archive.filename(), 'w') as tar:
-            for file, full in preprocessor.scanHeaders(ppc, cpp_file):
+        tarBuffer = BytesIO()
+        with tarfile.open(mode='w', fileobj=tarBuffer) as tar:
+            for file, full, memoryview in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.
@@ -78,9 +95,13 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
                         write_str_to_tar(tar, relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
-                tar.add(full, '/'.join(path_elements))
+                write_file_to_tar(tar, '/'.join(path_elements), memoryview)
             if paths_to_include:
                 write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include))
+        tarBuffer.seek(0)
+        archive = TempFile(suffix='.tar')
+        with open(archive.filename(), 'wb') as file:
+            file.write(tarBuffer.read())
         return archive.filename()
     except Exception:
         import traceback

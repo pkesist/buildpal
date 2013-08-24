@@ -129,18 +129,21 @@ class CompileSession(ServerSession, ServerCompiler):
                 noLink = self.task.compile_switch
                 output = self.task.output_switch.format(object_file.filename())
 
-                # FIXME - remove hardcoded switches, use compiler_info
-                defines = ['-D{}'.format(define) for define in self.task.preprocessor_info.macros]
+                compiler_info = self.task.compiler_info
+                defines = [compiler_info.define_option.make_value(define).make_str()
+                    for define in self.task.preprocessor_info.macros]
                 pch_switch = []
                 if self.task.pch_file:
                     assert self.pch_file is not None
                     assert os.path.exists(self.pch_file)
-                    pch_switch.append('-Fp{}'.format(self.pch_file))
+                    pch_switch.append(
+                        compiler_info.use_pch_option.make_value(self.pch_file).make_str())
 
                 try:
                     command = (self.task.call + defines + pch_switch +
                         [noLink, output] +
-                        ['-I{}'.format(incpath) for incpath in self.include_dirs] +
+                        [compiler_info.include_option.make_value(incpath).make_str()
+                            for incpath in self.include_dirs] +
                         [self.source_file.filename()])
                     retcode, stdout, stderr = self.compiler(command)
                 except Exception:
@@ -258,6 +261,9 @@ class FileRepository:
         self.__lock = ThreadLock()
         self.__files = {}
         self.__partial_files = {}
+
+    def __del__(self):
+        shutil.rmtree(self.__dir)
 
     def register_file(self, filename, size, last_modified):
         key = (filename, size, last_modified)

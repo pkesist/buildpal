@@ -67,36 +67,20 @@ class TimerProxy(BaseProxy):
         return ScopedTimer(lambda value : self.add_time(name, value))
 
 class ScanHeaders(Process):
-    def __init__(self, port, workers, timer):
+    def __init__(self, port, timer):
         self.__port = port
-        self.__workers = workers
         self.__timer = timer
         return super().__init__()
 
     def run(self):
-        zmq_ctx = zmq.Context(4)
-        executor = ThreadPoolExecutor(max_workers=self.__workers)
+        zmq_ctx = zmq.Context()
         socket = zmq_ctx.socket(zmq.DEALER)
         socket.connect('tcp://localhost:{}'.format(self.__port))
-        result_lock = Lock()
-
-        class TaskDone:
-            def __init__(self, client_id, socket, lock):
-                self.__client_id = client_id
-                self.__socket = socket
-                self.__lock = lock
-
-            def __call__(self, future):
-                assert future.done()
-                result = future.result()
-                with self.__lock:
-                    socket.send_multipart([self.__client_id, pickle.dumps(result)])
 
         while True:
             client_id, task = socket.recv_multipart()
-            task = pickle.loads(task)
-            future = executor.submit(self.prepare_task, task)
-            future.add_done_callback(TaskDone(client_id, socket, result_lock))
+            result = self.prepare_task(pickle.loads(task))
+            socket.send_multipart([client_id, pickle.dumps(result)])
 
     def prepare_task(self, task):
         # TODO: This does not belong here. Move this to msvc.py.
@@ -105,6 +89,7 @@ class ScanHeaders(Process):
         # hardcode this knowledge here.
         with self.__timer.timeit('prepare'):
             macros = task.preprocessor_info.all_macros
+            macros += task.compiler_info.macros()
             if '_DEBUG' in macros:
                 if not any(('_SECURE_SCL' in x for x in macros)):
                     macros.append('_SECURE_SCL=1')
@@ -130,8 +115,10 @@ class CompileSession:
     STATE_WAIT_FOR_SERVER_RESPONSE = 6
     STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 7
     STATE_RECEIVE_RESULT_FILE = 8
+    STATE_WAIT_FOR_COMPILER_INFO = 9
+    STATE_DONE = 10
     
-    def __init__(self, task, timer, client_conn, server_conn, node_info, node_index):
+    def __init__(self, task, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
         self.task = task
         self.timer = timer
         self.client_conn = client_conn
@@ -140,21 +127,37 @@ class CompileSession:
         self.node_index = node_index
 
         self.node_info.connection_open(self.node_index)
-        with self.timer.timeit('send'):
-            self.server_conn.send_pyobj(self.task)
-        self.node_info.add_tasks_sent(self.node_index)
-        self.state = self.STATE_WAIT_FOR_OK
+
+        if task.compiler_executable in compiler_info:
+            self.task.compiler_info = compiler_info[task.compiler_executable]
+            preprocess_socket.send_multipart([client_conn.id, pickle.dumps(self.task)])
+            with self.timer.timeit('send'):
+                self.server_conn.send_pyobj(self.task)
+            self.node_info.add_tasks_sent(self.node_index)
+            self.state = self.STATE_WAIT_FOR_OK
+        else:
+            self.client_conn.send_pyobj("GET_COMPILER_INFO")
+            self.state = self.STATE_WAIT_FOR_COMPILER_INFO
+            self.preprocess_socket = preprocess_socket
 
     def __del__(self):
         self.node_info.connection_closed(self.node_index)
 
     def got_data_from_client(self, msg):
-        assert self.task.algoritm == 'PREPROCESS_LOCALLY'
-        assert self.state == self.STATE_RELAY_PREPROCESSED_FILE
-        more, data = msg
-        self.server_conn.send_pyobj((more, data))
-        if not more:
-            self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+        assert self.state in [self.STATE_RELAY_PREPROCESSED_FILE, self.STATE_WAIT_FOR_COMPILER_INFO]
+        if self.state == self.STATE_RELAY_PREPROCESSED_FILE:
+            assert self.task.algoritm == 'PREPROCESS_LOCALLY'
+            more, data = msg
+            self.server_conn.send_pyobj((more, data))
+            if not more:
+                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+        else:
+            self.task.compiler_info = pickle.loads(msg[1])
+            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+            with self.timer.timeit('send'):
+                self.server_conn.send_pyobj(self.task)
+            self.node_info.add_tasks_sent(self.node_index)
+            self.state = self.STATE_WAIT_FOR_OK
         return False
 
     def got_data_from_server(self, msg):
@@ -167,6 +170,7 @@ class CompileSession:
                 self.server_conn.send_pyobj('HEADERS_ARCHIVE')
                 with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
                     send_file(self.server_conn.send_pyobj, file)
+                os.remove(self.task.tempfile)
                 self.server_conn.send_pyobj('SOURCE_FILE')
                 with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
                     send_compressed_file(self.server_conn.send_pyobj, cpp)
@@ -243,8 +247,6 @@ class TaskProcessor:
 
     def __find_node(self, nodes, node_info, timer):
         def cmp(lhs, rhs):
-            #lhs_tasks_processing = node_info.tasks_processing(lhs)
-            #rhs_tasks_processing = node_info.tasks_processing(rhs)
             lhs_tasks_processing = node_info.connections(lhs)
             rhs_tasks_processing = node_info.connections(rhs)
             lhs_average_time = node_info.average_time(lhs)
@@ -308,13 +310,15 @@ class TaskProcessor:
         session_from_server = {}
         session_from_client = {}
 
+        compiler_info = {}
+
         self.last_time = None
         try:
             with BookKeepingManager() as book_keeper:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
 
-                scan_workers = [ScanHeaders(preprocess_socket_port, 8, timer) for i in range(4)]
+                scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(6)]
                 for scan_worker in scan_workers:
                     scan_worker.start()
 
@@ -326,8 +330,7 @@ class TaskProcessor:
                             continue
 
                         if socket is preprocess_socket:
-                            msg = preprocess_socket.recv_multipart()
-                            client_id, result = msg
+                            client_id, result = preprocess_socket.recv_multipart()
                             assert client_id in session_from_client
                             session = session_from_client[client_id]
                             session.task.tempfile = pickle.loads(result)
@@ -341,8 +344,7 @@ class TaskProcessor:
                                 node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
                                 client_conn = self.SendProxy(client_socket, client_id)
                                 client_conn.send_pyobj("TASK_RECEIVED")
-                                preprocess_socket.send_multipart([client_id, msg[1]])
-                                session = CompileSession(task, timer, client_conn, server_conn, node_info, node_index)
+                                session = CompileSession(task, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
                                 session_from_client[client_conn.id] = session
                                 session_from_server[server_conn.socket] = session
                             else:

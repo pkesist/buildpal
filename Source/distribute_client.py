@@ -1,5 +1,5 @@
 #! python3.3
-from cmdline_processing import FreeOption, CmdLineOption, CmdLineOptions
+from cmdline_processing import *
 from distribute_task import CompileTask
 
 import os
@@ -38,39 +38,6 @@ class PreprocessorInfo:
         return self.macros + self.builtin_macros
 
 class CompilerWrapper(CmdLineOptions):
-    class Category: pass
-    class BuildLocalCategory(Category): pass
-    class PCHCategory(Category): pass
-    class PreprocessingCategory(Category): pass
-    class CompilationCategory(Category): pass
-    class LinkingCategory(Category): pass
-
-    class CompilerOption(CmdLineOption):
-        def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
-            super().__init__(name, esc, suff, has_arg, allow_spaces, allow_equal, default_separator)
-            self.__categories = set()
-            self.__macros = set()
-
-        def add_category(self, cat):
-            self.__categories.add(cat)
-        
-        def test_category(self, cat):
-            return cat in self.__categories
-
-        def add_macro(self, macro):
-            self.__macros.add(macro)
-
-        def get_macros(self, value):
-            result = []
-            for macro in self.__macros:
-                if callable(macro):
-                    t = macro(value)
-                    if t:
-                        result.append(t)
-                else:
-                    result.append(macro)
-            return result
-
     class Context:
         def __init__(self, command, option_parser, zmq_ctx):
             self.__options = list(option_parser.parse_options(command[1:]))
@@ -99,11 +66,11 @@ class CompilerWrapper(CmdLineOptions):
             return (token for token in self.__options if type(token.option) == FreeOption)
 
         def filter_options(self, filter):
-            if type(filter) == type and issubclass(filter, CompilerWrapper.Category):
+            if type(filter) == type and issubclass(filter, Category):
                 return (token for token in self.__options
-                    if type(token.option) == CompilerWrapper.CompilerOption and
+                    if type(token.option) == CompilerOption and
                     token.option.test_category(filter))
-            if isinstance(filter, CompilerWrapper.CompilerOption):
+            if isinstance(filter, CompilerOption):
                 return (token for token in self.__options
                     if token.option.name() == filter.name())
             raise RuntimeError("Unknown option filter.")
@@ -120,7 +87,7 @@ class CompilerWrapper(CmdLineOptions):
         return subprocess.call(call)
 
     def build_local(self, ctx):
-        tokens = list(ctx.filter_options(CompilerWrapper.BuildLocalCategory))
+        tokens = list(ctx.filter_options(BuildLocalCategory))
         if not tokens:
             return False
 
@@ -153,8 +120,8 @@ class CompilerWrapper(CmdLineOptions):
     def compiler_option_macros(self, tokens):
         result = []
         for token in (token for token in tokens
-            if type(token.option) == CompilerWrapper.CompilerOption and
-            token.option.test_category(CompilerWrapper.PreprocessingCategory)):
+            if type(token.option) == CompilerOption and
+            token.option.test_category(PreprocessingCategory)):
             option = token.option
             if not option:
                 continue
@@ -162,11 +129,11 @@ class CompilerWrapper(CmdLineOptions):
         return result
 
     def __init__(self):
-        self.use_pch_option().add_category(CompilerWrapper.CompilationCategory)
-        self.pch_file_option().add_category(CompilerWrapper.PCHCategory)
-        self.compile_no_link_option().add_category(CompilerWrapper.CompilationCategory)
-        self.include_file_option().add_category(CompilerWrapper.PreprocessingCategory)
-        self.define_option().add_category(CompilerWrapper.PreprocessingCategory)
+        self.use_pch_option().add_category(CompilationCategory)
+        self.pch_file_option().add_category(PCHCategory)
+        self.compile_no_link_option().add_category(CompilationCategory)
+        self.include_option().add_category(PreprocessingCategory)
+        self.define_option().add_category(PreprocessingCategory)
         self.add_option(self.compile_no_link_option())
         self.add_option(self.object_name_option())
         self.add_option(self.use_pch_option())
@@ -193,19 +160,16 @@ class CompilerWrapper(CmdLineOptions):
 
         preprocess_call = [ctx.executable()]
         preprocess_call.extend(option.make_str() for option in 
-            ctx.filter_options(CompilerWrapper.PreprocessingCategory))
+            ctx.filter_options(PreprocessingCategory))
         preprocess_call.append(self.preprocess_option().make_value().make_str())
 
         compile_call = [ctx.executable()]
         compile_call.extend(option.make_str() for option in
-            ctx.filter_options(CompilerWrapper.CompilationCategory))
+            ctx.filter_options(CompilationCategory))
 
-        includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_file_option())]
+        includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_option())]
         macros = [token.val for token in ctx.filter_options(self.define_option())]
         sysincludes = os.getenv('INCLUDE', '').split(';')
-
-        compiler_info = self.compiler_info(ctx.executable())
-        builtin_macros = compiler_info.macros() + self.compiler_option_macros(ctx.options())
 
         pch_header = list(ctx.filter_options(self.use_pch_option()))
         if pch_header:
@@ -228,13 +192,13 @@ class CompilerWrapper(CmdLineOptions):
 
         def create_task(source):
             return CompileTask(
+                compiler_executable = ctx.executable(),
                 call = compile_call,
                 cwd = os.getcwd(),
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                preprocessor_info = PreprocessorInfo(macros, builtin_macros, includes, sysincludes),
+                preprocessor_info = PreprocessorInfo(macros, self.compiler_option_macros(ctx.options()), includes, sysincludes),
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
-                compiler_info = compiler_info,
                 pch_file = pch_file,
                 pch_header = pch_header,
                 compilerWrapper = self)
@@ -262,12 +226,13 @@ class CompilerWrapper(CmdLineOptions):
                         sys.stderr.write(stderr.decode())
                         sys.stderr.write("----------------------------------------------------------------\n")
                     return retcode
+                elif request == "GET_COMPILER_INFO":
+                    conn.send_pyobj(self.compiler_info(compile_task.compiler_executable))
                 elif request == "FAILED":
                     return -1
                 else:
                     print("GOT {}".format(request))
                     return -1
-                
 
     def postprocess(self, ctx):
         if not self.should_invoke_linker(ctx):
@@ -280,7 +245,7 @@ class CompilerWrapper(CmdLineOptions):
 
         call = [ctx.executable()]
         call.extend(o.make_str() for o in
-            ctx.filter_options(CompilerWrapper.LinkingCategory))
+            ctx.filter_options(LinkingCategory))
         for input in ctx.input_files():
             if input in objects:
                 call.append(objects[input])

@@ -160,7 +160,7 @@ class MSVCWrapper(CompilerWrapper):
             version = (m.group('ver'), m.group('plat'))
             assert version in self.compiler_versions
             result = CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version, macros)
-            result.use_pch_option = self.use_pch_option()
+            result.pch_file_option = self.pch_file_option()
             result.define_option = self.define_option()
             result.include_option = self.include_option()
             return result

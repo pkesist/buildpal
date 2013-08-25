@@ -137,7 +137,7 @@ class CompileSession(ServerSession, ServerCompiler):
                     assert self.pch_file is not None
                     assert os.path.exists(self.pch_file)
                     pch_switch.append(
-                        compiler_info.use_pch_option.make_value(self.pch_file).make_str())
+                        compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
                 try:
                     command = (self.task.call + defines + pch_switch +

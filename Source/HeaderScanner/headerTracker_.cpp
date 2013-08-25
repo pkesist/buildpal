@@ -27,7 +27,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         return;
     }
 
-    boost::shared_ptr<Cache::CacheEntry> const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
+    std::shared_ptr<Cache::CacheEntry> const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
@@ -84,7 +84,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), boost::shared_ptr<Cache::CacheEntry>() ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), std::shared_ptr<Cache::CacheEntry>() ) );
     fileStack_.push_back( mainFileEntry );
 }
 
@@ -118,7 +118,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     // Propagate the results to the file which included us.
     bool const ignoreHeaders( ignoredHeaders.find( headerCtxStack().back().header().first ) != ignoredHeaders.end() );
 
-    boost::shared_ptr<Cache::CacheEntry> cacheEntry;
+    std::shared_ptr<Cache::CacheEntry> cacheEntry;
 
     if ( !cacheDisabled() )
     {
@@ -132,7 +132,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 }
 
 
-boost::shared_ptr<Cache::CacheEntry> HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
+std::shared_ptr<Cache::CacheEntry> HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
     return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders() );
 }
@@ -164,7 +164,7 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
             assert( buffer );
             result_.insert( HeaderRef( sp.first, buffer->getBufferStart(), buffer->getBufferSize() ) );
         }
-        void operator()( boost::shared_ptr<Cache::CacheEntry> const & ce )
+        void operator()( std::shared_ptr<Cache::CacheEntry> const & ce )
         {
             std::for_each( ce->headers().begin(), ce->headers().end(),
                 [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );

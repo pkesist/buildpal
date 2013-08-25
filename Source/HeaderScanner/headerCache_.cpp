@@ -51,7 +51,7 @@ void Cache::CacheEntry::generateContent()
             }
         }
 
-        void operator()( boost::shared_ptr<CacheEntry> const & ce )
+        void operator()( std::shared_ptr<CacheEntry> const & ce )
         {
             if ( !ce->buffer_ )
                 ce->generateContent();
@@ -83,13 +83,13 @@ void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
     sourceManager.disableFileContentsOverride( result );
 }
 
-boost::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
+std::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
 {
     boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
     if ( iter == headersInfo().end() )
-        return boost::shared_ptr<Cache::CacheEntry>();
-    boost::shared_ptr<Cache::CacheEntry> result( iter->second->find( preprocessor ) );
+        return std::shared_ptr<Cache::CacheEntry>();
+    std::shared_ptr<Cache::CacheEntry> result( iter->second->find( preprocessor ) );
     if ( result )
     {
         headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
@@ -98,7 +98,7 @@ boost::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName,
     return result;
 }
 
-boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
+std::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
 {
     for
     (
@@ -136,23 +136,13 @@ boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocesso
         cacheList_.splice( cacheList_.begin(), cacheList_, headerInfoIter );
         return *headerInfoIter;
     }
-    return boost::shared_ptr<Cache::CacheEntry>();
+    return std::shared_ptr<Cache::CacheEntry>();
 }
 
-boost::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::insert( BOOST_RV_REF(CacheEntry) value )
+std::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::insert( CacheEntry && value )
 {
-    boost::shared_ptr<Cache::CacheEntry> const result
-    (
-        boost::make_shared<CacheEntry>
-        (
-        #if defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
-            boost::ref( value )
-        #else
-            boost::move( value )
-        #endif
-        )
-    );
-
+    std::shared_ptr<Cache::CacheEntry> const result(
+        std::make_shared<CacheEntry>( std::move( value ) ) );
     cacheList_.push_front( result );
     return result;
 }

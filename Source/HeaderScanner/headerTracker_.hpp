@@ -61,7 +61,7 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( HeaderName const & header, boost::shared_ptr<Cache::CacheEntry> const & cacheHit )
+        explicit HeaderCtx( HeaderName const & header, std::shared_ptr<Cache::CacheEntry> const & cacheHit )
             :
             header_( header ),
             cacheHit_( cacheHit )
@@ -103,7 +103,7 @@ private:
             includedHeaders_.push_back( header );
         }
 
-        void addStuff( boost::shared_ptr<Cache::CacheEntry> const & cacheEntry, Headers const * headers )
+        void addStuff( std::shared_ptr<Cache::CacheEntry> const & cacheEntry, Headers const * headers )
         {
             if ( cacheEntry )
             {
@@ -128,13 +128,13 @@ private:
         Headers const & includedHeaders() const { return includedHeaders_; }
         HeaderName const & header() { return header_; }
 
-        boost::shared_ptr<Cache::CacheEntry> addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
+        std::shared_ptr<Cache::CacheEntry> addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
-        boost::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
+        std::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
 
     private:
         HeaderName header_;
-        boost::shared_ptr<Cache::CacheEntry> cacheHit_;
+        std::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
         Macros definedMacros_;
         HeaderContent headerContent_;
@@ -159,8 +159,8 @@ private:
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
-    boost::shared_ptr<Cache::CacheEntry> cacheHit_;
-    std::vector<boost::shared_ptr<Cache::CacheEntry> > cacheEntriesUsed_;
+    std::shared_ptr<Cache::CacheEntry> cacheHit_;
+    std::vector<std::shared_ptr<Cache::CacheEntry> > cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
 };
 

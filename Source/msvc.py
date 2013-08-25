@@ -294,6 +294,4 @@ class MSVCWrapper(CompilerWrapper):
         with_param     ('F'), simple      ('link'), with_param('analyze')]
 
 if __name__ == "__main__":
-    compilerWrapper = MSVCWrapper()
-    retcode = compilerWrapper.execute(sys.argv[1:])
-    sys.exit(retcode)
+    sys.exit(MSVCWrapper().execute(sys.argv[1:]))

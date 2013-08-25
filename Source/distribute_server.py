@@ -61,9 +61,14 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_PL_GET_PP_TAG = 10
     STATE_PL_GET_PP_DATA = 11
 
-    def __init__(self, file_repository, cpu_usage_hwm):
+    def __init__(self, file_repository, cpu_usage_hwm, task_counter):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
         self.state = self.STATE_START
+        self.task_counter = task_counter
+        self.task_counter.inc()
+
+    def __del__(self):
+        self.task_counter.dec()
 
     transition_table = {
         STATE_START : {
@@ -217,8 +222,11 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.next_state()
             else:
                 self.send_pyobj("NO")
-                # Ugliness
                 while not self.file_repository().file_arrived(*self.task.pch_file):
+                    # The PCH file is being downloaded by another session.
+                    # This could be made prettier by introducing another state
+                    # in this state machine. However, wake-up event for that
+                    # state would require inter-session communication.
                     sleep(1)
                 self.run_compiler_with_source_and_headers()
                 return True
@@ -301,29 +309,31 @@ ServerManager.register('FileRepository', FileRepository)
 ServerManager.register('Counter', Counter)
 
 class CompileWorker(Process):
-    def __init__(self, address, control_address, file_repository, cpu_usage_hwm):
+    def __init__(self, address, control_address, file_repository, cpu_usage_hwm, task_counter):
         Process.__init__(self)
         self.__address = address
         self.__control_address = control_address
         self.__file_repository = file_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
+        self.__task_counter = task_counter
 
     def run(self):
         class SessionMaker:
-            def __init__(self, file_repository, cpu_usage_hwm):
+            def __init__(self, file_repository, cpu_usage_hwm, task_counter):
                 self.__file_repository = file_repository
                 self.__cpu_usage_hwm = cpu_usage_hwm
+                self.__task_counter = task_counter
 
             def __call__(self):
-                return CompileSession(self.__file_repository, self.__cpu_usage_hwm)
+                return CompileSession(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter)
 
-        worker = ServerWorker(zmq.Context(), SessionMaker(self.__file_repository, self.__cpu_usage_hwm))
+        worker = ServerWorker(zmq.Context(), SessionMaker(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter))
         worker.connect_broker(self.__address)
         worker.connect_control(self.__control_address)
         worker.run()
 
 class ServerRunner(Process):
-    def __init__(self, port, control_port, processes, file_repository, cpu_usage_hwm=None):
+    def __init__(self, port, control_port, processes, file_repository, cpu_usage_hwm, task_counter):
         super(ServerRunner, self).__init__()
         print("Starting server on port {} with {} worker processes.".format(
             port, processes))
@@ -334,6 +344,7 @@ class ServerRunner(Process):
         self.__control_address = 'tcp://localhost:{}'.format(control_port)
         self.__file_repository = file_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
+        self.__task_counter = task_counter
 
     def run(self):
         broker = Broker(zmq.Context())
@@ -341,7 +352,7 @@ class ServerRunner(Process):
         broker.connect_control(self.__control_address)
         worker_address = 'tcp://localhost:{}'.format(broker.servers.bind_to_random_port('tcp://*'))
         workers = list((CompileWorker(worker_address, self.__control_address,
-            self.__file_repository, self.__cpu_usage_hwm)
+            self.__file_repository, self.__cpu_usage_hwm, self.__task_counter)
             for proc in range(self.__processes)))
         for worker in workers:
             worker.start()
@@ -387,7 +398,8 @@ Usage:
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)
         control_port = control.bind_to_random_port('tcp://*')
-        server_runner = ServerRunner(port, control_port, processes, file_repository, cpu_usage_hwm)
+        server_runner = ServerRunner(port, control_port,
+            processes, file_repository, cpu_usage_hwm, task_counter)
         server_runner.start()
 
         import signal

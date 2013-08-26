@@ -86,7 +86,7 @@ def receive_file(receiver, fileobj):
 
 def send_compressed_file(sender, fileobj):
     compressor = zlib.compressobj(1)
-    for data in iter(lambda : fileobj.read(100 * 1024), b''):
+    for data in iter(lambda : fileobj.read(32 * 1024), b''):
         sender((True, compressor.compress(data)))
     sender((False, compressor.flush(zlib.Z_FINISH)))
 
@@ -99,7 +99,7 @@ def receive_compressed_file(receiver, fileobj):
     fileobj.write(decompressor.flush())
 
 def send_file(sender, file):
-    for data in iter(lambda : file.read(1024 * 1024), b''):
+    for data in iter(lambda : file.read(32 * 1024), b''):
         sender((True, data))
     sender((False, b''))
 

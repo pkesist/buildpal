@@ -125,6 +125,7 @@ class CompileSession:
         self.server_conn = server_conn
         self.node_info = node_info
         self.node_index = node_index
+        self.compiler_info = compiler_info
 
         self.node_info.connection_open(self.node_index)
 
@@ -152,7 +153,8 @@ class CompileSession:
             if not more:
                 self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
         else:
-            self.task.compiler_info = pickle.loads(msg[1])
+            self.compiler_info[self.task.compiler_executable] = pickle.loads(msg[1])
+            self.task.compiler_info = self.compiler_info[self.task.compiler_executable]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)

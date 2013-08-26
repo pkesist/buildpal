@@ -262,23 +262,25 @@ class TaskProcessor:
 
         with timer.timeit('find_available_node'):
             while True:
-                node_index = min(range(len(nodes)), key=compare_key)
-                node = nodes[node_index]
-                try:
-                    server_conn = MsgClient(zmq_ctx)
-                    server_conn.connect('tcp://{}:{}'.format(node[0], node[1]))
-                except Exception:
-                    print("Failed to connect to '{}'".format(node))
-                    import traceback
-                    traceback.print_exc()
-                    return None
-                accept = server_conn.recv_pyobj()
-                if accept == "ACCEPT":
-                    return node_index, server_conn
-                else:
-                    assert accept == "REJECT"
-                    with timer.timeit('find_available_node.sleeping'):
-                        sleep(1)
+                node_indices = list(range(len(nodes)))
+                node_indices.sort(key=compare_key)
+                for node_index in node_indices:
+                    node = nodes[node_index]
+                    try:
+                        server_conn = MsgClient(zmq_ctx)
+                        server_conn.connect('tcp://{}:{}'.format(node[0], node[1]))
+                    except Exception:
+                        print("Failed to connect to '{}'".format(node))
+                        import traceback
+                        traceback.print_exc()
+                        continue
+                    accept = server_conn.recv_pyobj()
+                    if accept == "ACCEPT":
+                        return node_index, server_conn
+                    else:
+                        assert accept == "REJECT"
+                with timer.timeit("find_available_node.sleeping"):
+                    sleep(0.5)
 
     class SendProxy:
         def __init__(self, socket, id):

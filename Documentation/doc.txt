@@ -4,10 +4,12 @@ DistriBuild
 
 (1.) Motivation.
 (2.) Features.
-(3.) Requirements.
-(4.) Quick-start.
-(5.) Design.
-(6.) Future development plans.
+(3.) Trade-offs.
+(4.) Requirements.
+(5.) Quick-start.
+(6.) Design.
+(7.) Benchmarks.
+(8.) Future development plans.
 
 --------------------------------------------------------------------------------
 ----------------
@@ -18,8 +20,8 @@ DistriBuild
     It works by distributing parts of compilation process to other machines on
     the network (i.e. the build farm).
     
-    It is inspired by the distcc project. However, DistriBuild's goal is to
-    support different platforms and compilers, especially MS VC compiler.
+    It is inspired by the distcc project. However, DistriBuild's primary
+    platform is Windows/Visual C++.
 
 --------------------------------------------------------------------------------
 --------------
@@ -30,8 +32,7 @@ DistriBuild
         Server may reject task if it doesn't have enough resources. In this
         case the client will try another farm node. This allows you to run a lot
         of parallel tasks without the danger of suffocating the build farm or
-        the local machine. If you plan on running many paralell tasks consider
-        turning on the LAZY_PREPROCESS option.
+        the local machine.
 
     Build consistency.
         DistriBuild takes special care that exact same compiler is used both on
@@ -39,19 +40,38 @@ DistriBuild
         DistriBuild takes special care to preserve compilation environment, so
         that task distribution does not affect the produced objects.
         (more correctly - will soon ;)
-        
+
     PCH support.
+        DistriBuild supports pre-compiled headers. Precompiled headers are
+        created locally, on the host machine and are transferred as needed to
+        the farm nodes.
+
     Pump-mode.
+        DistriBuild collects all headers required by a source file and transfers
+        this data to the farm node. For this part to be done properly,
+        DistriBuild has to preprocess source file. For this purpose, Distribuild
+        uses (a bit modified) Clang's preprocessor.
 
     Free.
         DistriBuild is open-source, free and has a permissive license.
 
-    ALLOW_LOCAL_COMPILATION ...
-    LAZY_PREPROCESS ...
+--------------------------------------------------------------------------------
+----------------
+(3.) Trade-offs.
+----------------
+
+    * Many farm nodes and PCH.
+        * Precompiled headers are usually very large. Transferring them to
+          multiple farm nodes may add
+
+    * Small (simple) sources.
+        * Simple and small sources are not good candidates for distributed
+          compilation - overhead which is added by DistriBuild might cause that
+          the overall compilation time increases.
 
 --------------------------------------------------------------------------------
 ------------------
-(3.) Requirements.
+(4.) Requirements.
 ------------------
 
     DistriBuild is written in Python (www.python.org). All machines need to have
@@ -61,7 +81,7 @@ DistriBuild
 
 --------------------------------------------------------------------------------
 -----------------
-(4.) Quick-start.
+(5.) Quick-start.
 -----------------
 
     ----------------------
@@ -79,10 +99,11 @@ DistriBuild
     build process global data. It is the entity which contains all information
     about the farm.
 
-    Setup farm nodes in manager.
+    Set up distribute_manager.ini
 
-    Run distribute_manager.py with an additional parameter which denotes manager
-    id. You can have multiple managers on the same machine.
+    Run distribute_manager.py.
+    
+    You can have multiple managers on the same machine.
 
     The build environment is now set. Now you need to call the compiler.
 
@@ -91,21 +112,65 @@ DistriBuild
     ---------------------
 
     Instead of calling 'cl.exe' you need to call 'msvc.py <manager_id>'. Your
-    environment should already be configured - msvc.py will try to locate
-    the compiler executable on PATH.
+    environment should already be configured for compilation, i.e. you should
+    manually call the compiler setup script. msvc.py will try to locate the
+    compiler executable on PATH.
     
 --------------------------------------------------------------------------------
 ------------
-(5.) Design.
+(6.) Design.
 ------------
 
-    * In progress.
+    * Why aren't sources preprocessed on the host machine?
+    * Why use Clang?
+    * Why use ZeroMQ?
+    * Why is there a cache?
+    * Is cache optional?
+
+--------------------------------------------------------------------------------
+----------------
+(7.) Benchmarks.
+----------------
+
+    * Currently DistriBuild is mainly tested on building Boost libraries
+      (www.boost.org).
+        * Boost libraries make heavy use of preprocessor, and are thus an ideal
+          candidates for testing both speed and sanity.
+    * Building Boost was done with the following command. (Boost.Build was
+      modified to use DistriBuild's compiler executable).
+        * >>>> bjam stage --stagedir=. -j ## 
+    * The host machine was not a farm node in distributed compilation.
+    * Boost version tested was 1.54.
+
+    ------------------------------------------------------------
+    | type          | parallel # | local   | 2 nodes | 3 nodes |
+    ------------------------------------------------------------
+    | regular build | 4  tasks   | 7:32.09 |         |         |
+    | distributed   | 4  tasks   |         | 8:20.54 | 7:56.79 |
+    | distributed   | 16 tasks   |         | 5:07.55 | 4:14.09 |
+    | distributed   | 32 tasks   |         | 4:27.89 | 3:57.90 |
+    | distributed   | 40 tasks   |         | 4:22.89 | 4:01.11 |
+    ------------------------------------------------------------
 
 --------------------------------------------------------------------------------
 ------------------------------
-(6.) Future development plans.
+(8.) Future development plans.
 ------------------------------
 
-    * Support more platforms (Linux) and compilers (GCC/Clang).
+    * Support more platforms.
+        * Support GCC on Windows (MinGW).
+        * Support GCC on Linux.
+        * Support Clang.
+        * ...
+
+    * Performance improvement. Currently the client is written in python. Running
+      many (30+) of these in parallel chokes the host machine, wasting cycles
+      which would be better used in pumping new tasks.
+        * Move out all business logic out of client script to manager.
+        * Make client as thin as possible.
+        * Rewrite client in C++.
+        
+    * Implement broken (invalid) connection detection using heart-beats.
+        * see http://zguide.zeromq.org/page:all#Chapter-Reliable-Request-Reply-Patterns
 
 --------------------------------------------------------------------------------

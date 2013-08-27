@@ -76,12 +76,11 @@ class CompilerWrapper(CmdLineOptions):
 
 class TaskCreator:
     def __init__(self, compiler_wrapper, command):
-        self.__executable = compiler_wrapper.compiler_executable()
         self.__compiler = compiler_wrapper
         self.__option_values = list(compiler_wrapper.parse_options(command[1:]))
 
     def executable(self):
-        return self.__executable
+        return self.__compiler.compiler_executable()
 
     def option_values(self):
         return self.__option_values
@@ -212,7 +211,7 @@ def execute_remotely(compiler_wrapper, tasks, port):
                     sys.stderr.write("----------------------------------------------------------------\n")
                 return retcode
             elif request == "GET_COMPILER_INFO":
-                conn.send_pyobj(compiler_wrapper.compiler_info(compile_task.compiler_executable))
+                conn.send_pyobj(compiler_wrapper.compiler_info())
             elif request == "FAILED":
                 return -1
             else:

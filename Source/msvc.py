@@ -98,7 +98,7 @@ class MSVCWrapper(CompilerWrapper):
             self.add_option(option)
 
     def requires_preprocessing(self, input):
-        # This should be handled better.
+        # FIXME: This should be handled better.
         # Currently we expect there is no /TC, /TP,
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
@@ -107,23 +107,10 @@ class MSVCWrapper(CompilerWrapper):
     def compiler_executable(cls):
         return 'cl.exe'
 
-    def create_context(self, command):
-        ctx = super(MSVCWrapper, self).create_context(command)
-        ctx.set_executable('cl.exe')
-        return ctx
-
-    def compile_cpp(self, manager, source, obj, includes, locally=False):
-        command = [manager,
-            self.object_name_option().make_value(obj).make_str(),
-            self.compile_no_link_option().make_value().make_str()]
-        command.extend((self.include_option().make_value(include).make_str() for include in includes))
-        command.extend(['-nologo', '/EHsc', source])
-        return self.execute(command, locally)
-
-    def compiler_info(self, executable):
-        abs = find_on_path(executable)
+    def compiler_info(self):
+        abs = find_on_path(self.compiler_executable())
         if not abs:
-            raise RuntimeError("Cannot find compiler executable '{}'.".format(executable))
+            raise RuntimeError("Cannot find compiler executable '{}'.".format(self.compiler_executable()))
         #   Here we should test only for macros which do not change depending on
         # compiler options, i.e. which are fixed for a specific compiler
         # executable.
@@ -163,7 +150,7 @@ class MSVCWrapper(CompilerWrapper):
                 raise EnvironmentError("Failed to identify compiler - unexpected output.")
             version = (m.group('ver'), m.group('plat'))
             assert version in self.compiler_versions
-            result = CompilerInfo("msvc", os.path.split(executable)[1], os.path.getsize(abs), version, macros)
+            result = CompilerInfo("msvc", os.path.split(self.compiler_executable())[1], os.path.getsize(abs), version, macros)
             result.pch_file_option = self.pch_file_option()
             result.define_option = self.define_option()
             result.include_option = self.include_option()

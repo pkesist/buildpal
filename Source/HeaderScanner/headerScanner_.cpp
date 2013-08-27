@@ -301,36 +301,4 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
 }
 
 
-std::string & Preprocessor::preprocess( PreprocessingContext const & ppc,
-    std::string const & filename, std::string & output )
-{
-    llvm::raw_string_ostream os( output );
-    setupPreprocessor( ppc, filename );
-    clang::PreprocessorOutputOptions & preprocessorOutputOptions( compiler().getPreprocessorOutputOpts() );
-    preprocessorOutputOptions.ShowCPP = 1;
-    preprocessorOutputOptions.ShowLineMarkers = 1;
-    preprocessorOutputOptions.ShowMacroComments = 1;
-    preprocessorOutputOptions.ShowMacros = 0;
-    preprocessorOutputOptions.RewriteIncludes = 0;
-
-    clang::DoPrintPreprocessedInput( preprocessor(), &os, preprocessorOutputOptions );
-    return os.str();
-}
-
-std::string & Preprocessor::rewriteIncludes( PreprocessingContext const & ppc, std::string const & filename, std::string & output )
-{
-    llvm::raw_string_ostream os( output );
-    setupPreprocessor( ppc, filename );
-    clang::PreprocessorOutputOptions & preprocessorOutputOptions( compiler().getPreprocessorOutputOpts() );
-    preprocessorOutputOptions.ShowCPP = 1;
-    preprocessorOutputOptions.ShowLineMarkers = 1;
-    preprocessorOutputOptions.ShowMacroComments = 1;
-    preprocessorOutputOptions.ShowMacros = 0;
-    preprocessorOutputOptions.RewriteIncludes = 1;
-
-    clang::RewriteIncludesInInput( preprocessor(), &os, preprocessorOutputOptions );
-    return os.str();
-}
-
-
 //------------------------------------------------------------------------------

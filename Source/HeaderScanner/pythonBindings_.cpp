@@ -348,64 +348,6 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     return result;
 }
 
-PyObject * PyPreprocessor_preprocess( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "pp_ctx", "filename", NULL };
-
-    PyObject * pObject = 0;
-    char const * filename = 0;
-
-
-    assert( self->pp );
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Invalid preprocessor object." );
-        return NULL;
-    }
-
-    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    std::string output;
-    output.reserve( 100 * 1024 );
-    self->pp->preprocess( *ppContext->ppContext, filename, output );
-
-    return PyBytes_FromStringAndSize( output.data(), output.size() );
-}
-
-PyObject * PyPreprocessor_rewriteIncludes( PyPreprocessor * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "pp_ctx", "filename", NULL };
-
-    PyObject * pObject = 0;
-    char const * filename = 0;
-
-
-    assert( self->pp );
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "Os", kwlist, &pObject, &filename ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Failed to parse parameters." );
-        return NULL;
-    }
-
-    if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Invalid preprocessor object." );
-        return NULL;
-    }
-
-    PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
-    std::string output;
-    output.reserve( 100 * 1024 );
-    self->pp->rewriteIncludes( *ppContext->ppContext, filename, output );
-
-    return PyBytes_FromStringAndSize( output.data(), output.size() );
-}
-
 PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "value", NULL };
@@ -443,8 +385,6 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
-    {"preprocess"      , (PyCFunction)PyPreprocessor_preprocess      , METH_VARARGS | METH_KEYWORDS, "Preprocess a file into a buffer."},
-    {"rewriteIncludes" , (PyCFunction)PyPreprocessor_rewriteIncludes , METH_VARARGS | METH_KEYWORDS, "Rewrite #include directives."},
     {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}

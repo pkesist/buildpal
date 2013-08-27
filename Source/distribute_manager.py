@@ -1,14 +1,11 @@
 #! python3.3
 from functools import cmp_to_key
-from queue import Empty
-from multiprocessing import Process, Pool, Queue
+from multiprocessing import Process, Pool, cpu_count
 from multiprocessing.managers import SyncManager, BaseProxy
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
 from time import sleep, time
 
 from scan_headers import collect_headers
-from utils import send_file, receive_compressed_file, send_compressed_file, relay_file
+from utils import send_file, send_compressed_file
 
 import configparser
 import operator
@@ -123,15 +120,21 @@ class CompileSession:
         self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
+        self.preprocess_socket = preprocess_socket
         self.node_info = node_info
         self.node_index = node_index
         self.compiler_info = compiler_info
 
         self.node_info.connection_open(self.node_index)
+        self.start_task()
 
-        if task.compiler_executable in compiler_info:
-            self.task.compiler_info = compiler_info[task.compiler_executable]
-            preprocess_socket.send_multipart([client_conn.id, pickle.dumps(self.task)])
+    def __del__(self):
+        self.node_info.connection_closed(self.node_index)
+
+    def start_task(self):
+        if self.task.compiler_executable in self.compiler_info:
+            self.task.compiler_info = self.compiler_info[self.task.compiler_executable]
+            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
             self.node_info.add_tasks_sent(self.node_index)
@@ -139,10 +142,6 @@ class CompileSession:
         else:
             self.client_conn.send_pyobj("GET_COMPILER_INFO")
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO
-            self.preprocess_socket = preprocess_socket
-
-    def __del__(self):
-        self.node_info.connection_closed(self.node_index)
 
     def got_data_from_client(self, msg):
         assert self.state in [self.STATE_RELAY_PREPROCESSED_FILE, self.STATE_WAIT_FOR_COMPILER_INFO]
@@ -322,7 +321,7 @@ class TaskProcessor:
                 node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
                 timer = book_keeper.Timer()
 
-                scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(6)]
+                scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
                 for scan_worker in scan_workers:
                     scan_worker.start()
 
@@ -388,9 +387,9 @@ class TaskProcessor:
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Average Time {:<3.2f} Ratio {:<3.2f}\n'.format(
-                node[0],
-                node[1],
+                '{:<3} Running {:<3} Average Time {:<3.2f} Ratio {:<3.2f}\n'
+            .format(
+                node[0], node[1],
                 node_info.tasks_sent      (index),
                 node_info.connections     (index),
                 node_info.tasks_completed (index),
@@ -401,11 +400,9 @@ class TaskProcessor:
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
-        sorted_times.sort(key=operator.itemgetter(3), reverse=True)
+        sorted_times.sort(key=operator.itemgetter(1), reverse=True)
         for name, tm, count, average in sorted_times:
             print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, tm, count, average))
-
-task_queue = Queue()
 
 class NodeInfoHolder:
     class NodeInfo:

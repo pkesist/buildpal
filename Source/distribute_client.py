@@ -71,9 +71,6 @@ class CompilerWrapper(CmdLineOptions):
     def requires_preprocessing(self, file):
         return False
 
-    def compile_cpp(self, manager, source, obj, includes, locally=False):
-        raise NotImplementedError()
-
 class TaskCreator:
     def __init__(self, compiler_wrapper, command):
         self.__compiler = compiler_wrapper

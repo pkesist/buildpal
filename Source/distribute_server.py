@@ -115,8 +115,9 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def run_compiler_with_preprocessed_file(self):
         with self.pp_file as pp_file, TempFile(suffix='.obj') as object_file:
-            noLink = self.compile_switch
-            output = self.output_switch.format(object_file.filename())
+            compiler_info = self.task.compiler_info
+            noLink = compiler_info.compile_no_link_option.make_value().make_str()
+            output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
             try:
                 retcode, stdout, stderr = self.compiler(self.call +  [noLink, output, pp_file.filename()])
             except Exception:
@@ -131,10 +132,9 @@ class CompileSession(ServerSession, ServerCompiler):
     def run_compiler_with_source_and_headers(self):
         try:
             with TempFile(suffix='.obj') as object_file:
-                noLink = self.task.compile_switch
-                output = self.task.output_switch.format(object_file.filename())
-
                 compiler_info = self.task.compiler_info
+                noLink = compiler_info.compile_no_link_option.make_value().make_str()
+                output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
                 defines = [compiler_info.define_option.make_value(define).make_str()
                     for define in self.task.preprocessor_info.macros]
                 pch_switch = []

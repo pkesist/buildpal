@@ -1,5 +1,5 @@
 from cmdline_processing import *
-from distribute_client import CompilerWrapper, CompilerInfo
+from distribute_client import execute, CompilerWrapper, CompilerInfo
 from utils import get_batch_file_environment_side_effects, TempFile
 
 import subprocess
@@ -103,6 +103,10 @@ class MSVCWrapper(CompilerWrapper):
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
+    @classmethod
+    def compiler_executable(cls):
+        return 'cl.exe'
+
     def create_context(self, command):
         ctx = super(MSVCWrapper, self).create_context(command)
         ctx.set_executable('cl.exe')
@@ -163,6 +167,8 @@ class MSVCWrapper(CompilerWrapper):
             result.pch_file_option = self.pch_file_option()
             result.define_option = self.define_option()
             result.include_option = self.include_option()
+            result.object_name_option = self.object_name_option()
+            result.compile_no_link_option = self.compile_no_link_option()
             return result
 
     @classmethod
@@ -294,4 +300,4 @@ class MSVCWrapper(CompilerWrapper):
         with_param     ('F'), simple      ('link'), with_param('analyze')]
 
 if __name__ == "__main__":
-    sys.exit(MSVCWrapper().execute(sys.argv[1:]))
+    sys.exit(execute(MSVCWrapper(), sys.argv[1:]))

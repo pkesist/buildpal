@@ -38,95 +38,13 @@ class PreprocessorInfo:
         return self.macros + self.builtin_macros
 
 class CompilerWrapper(CmdLineOptions):
-    class Context:
-        def __init__(self, command, option_parser, zmq_ctx):
-            self.__options = list(option_parser.parse_options(command[1:]))
-            self.__zmq_ctx = zmq_ctx
-            self.__address = "tcp://localhost:{}".format(command[0])
-
-        def connection(self):
-            socket = self.__zmq_ctx.socket(zmq.DEALER)
-            socket.connect(self.__address)
-            return socket
-
-        def zmq_ctx(self):
-            return self.__zmq_ctx
-
-        def executable(self):
-            if not self.__executable:
-                raise Exception("Internal error, compiler executable not set.")
-            return self.__executable
-
-        def set_executable(self, value):
-            self.__executable = value
-
-        def options(self): return self.__options
-
-        def free_options(self):
-            return (token for token in self.__options if type(token.option) == FreeOption)
-
-        def filter_options(self, filter):
-            if type(filter) == type and issubclass(filter, Category):
-                return (token for token in self.__options
-                    if type(token.option) == CompilerOption and
-                    token.option.test_category(filter))
-            if isinstance(filter, CompilerOption):
-                return (token for token in self.__options
-                    if token.option.name() == filter.name())
-            raise RuntimeError("Unknown option filter.")
-
-        def input_files(self):
-            return (input.make_str() for input in self.free_options())
-        
-    def create_context(self, command):
-        return CompilerWrapper.Context(command, self, zmq.Context())
-
-    def __run_locally(self, ctx):
-        call = [ctx.executable()]
-        call.extend(option.make_str() for option in ctx.options())
-        return subprocess.call(call)
-
-    def build_local(self, ctx):
-        tokens = list(ctx.filter_options(BuildLocalCategory))
-        if not tokens:
-            return False
-
-        print("Command requires local compilation.")
-        return True
-
-    def execute(self, command, force_local=False):
-        ctx = self.create_context(command)
-        if self.build_local(ctx) or force_local:
-            return self.__run_locally(ctx)
-        self.create_tasks(ctx)
-        retcode = self.execute_remotely(ctx)
-        if retcode != 0:
-            return retcode
-        postprocessed, result = self.postprocess(ctx)
-        if postprocessed:
-            return result
-        return retcode
-
-
-    def compiler_info(self, executable):
-        raise NotImplementedError("Compiler identification not implemented.")
-
     def preprocess_option(self): raise NotImplementedError()
     def object_name_option(self): raise NotImplementedError()
     def compile_no_link_option(self): raise NotImplementedError()
+    def define_option(self): raise NotImplementedError()
+    def include_option(self): raise NotImplementedError()
     def use_pch_option(self): raise NotImplementedError()
     def pch_file_option(self): raise NotImplementedError()
-
-    def compiler_option_macros(self, tokens):
-        result = []
-        for token in (token for token in tokens
-            if type(token.option) == CompilerOption and
-            token.option.test_category(PreprocessingCategory)):
-            option = token.option
-            if not option:
-                continue
-            result += token.option.get_macros(token.val)
-        return result
 
     def __init__(self):
         self.use_pch_option().add_category(CompilationCategory)
@@ -139,8 +57,16 @@ class CompilerWrapper(CmdLineOptions):
         self.add_option(self.use_pch_option())
         self.add_option(self.pch_file_option())
 
-    def should_invoke_linker(self, ctx):
-        return self.compile_no_link_option() not in [token.option for token in ctx.options()]
+    def compiler_info(self, executable):
+        raise NotImplementedError("Compiler identification not implemented.")
+
+    def compiler_option_macros(self, option_values):
+        result = []
+        for option_value in (x for x in option_values
+            if type(x.option) == CompilerOption and
+            x.option.test_category(PreprocessingCategory)):
+            result += token.option.get_macros(token.val)
+        return result
 
     def requires_preprocessing(self, file):
         return False
@@ -148,34 +74,70 @@ class CompilerWrapper(CmdLineOptions):
     def compile_cpp(self, manager, source, obj, includes, locally=False):
         raise NotImplementedError()
 
-    def create_tasks(self, ctx):
+class TaskCreator:
+    def __init__(self, compiler_wrapper, command):
+        self.__executable = compiler_wrapper.compiler_executable()
+        self.__compiler = compiler_wrapper
+        self.__option_values = list(compiler_wrapper.parse_options(command[1:]))
+
+    def executable(self):
+        return self.__executable
+
+    def option_values(self):
+        return self.__option_values
+
+    def free_options(self):
+        return (token for token in self.option_values() if type(token.option) == FreeOption)
+
+    def filter_options(self, filter):
+        if type(filter) == type and issubclass(filter, Category):
+            return (token for token in self.option_values()
+                if type(token.option) == CompilerOption and
+                token.option.test_category(filter))
+        if isinstance(filter, CompilerOption):
+            return (token for token in self.option_values()
+                if token.option.name() == filter.name())
+        raise RuntimeError("Unknown option filter.")
+
+    def input_files(self):
+        return (input.make_str() for input in self.free_options())
+
+    def build_local(self):
+        tokens = list(self.filter_options(BuildLocalCategory))
+        if not tokens:
+            return False
+
+        print("Command requires local compilation.")
+        return True
+
+    def create_tasks(self):
         # See if user specified an explicit name for the object file.
-        output = list(ctx.filter_options(self.object_name_option()))
+        output = list(self.filter_options(self.__compiler.object_name_option()))
         if output:
             output = output[-1].val
-        sources = [input for input in ctx.input_files() if self.requires_preprocessing(input)]
+        sources = [input for input in self.input_files() if self.__compiler.requires_preprocessing(input)]
         if output and len(sources) > 1:
             raise RuntimeError("Cannot use {}{} with multiple sources."
-                .format(self.object_name_option.esc(), self.object_name_option.name()))
+                .format(self.__compiler.object_name_option.esc(), self.__compiler.object_name_option.name()))
 
-        preprocess_call = [ctx.executable()]
+        preprocess_call = [self.executable()]
         preprocess_call.extend(option.make_str() for option in 
-            ctx.filter_options(PreprocessingCategory))
-        preprocess_call.append(self.preprocess_option().make_value().make_str())
+            self.filter_options(PreprocessingCategory))
+        preprocess_call.append(self.__compiler.preprocess_option().make_value().make_str())
 
-        compile_call = [ctx.executable()]
+        compile_call = [self.executable()]
         compile_call.extend(option.make_str() for option in
-            ctx.filter_options(CompilationCategory))
+            self.filter_options(CompilationCategory))
 
-        includes = [os.path.join(os.getcwd(), token.val) for token in ctx.filter_options(self.include_option())]
-        macros = [token.val for token in ctx.filter_options(self.define_option())]
+        includes = [os.path.join(os.getcwd(), token.val) for token in self.filter_options(self.__compiler.include_option())]
+        macros = [token.val for token in self.filter_options(self.__compiler.define_option())]
         sysincludes = os.getenv('INCLUDE', '').split(';')
 
-        pch_header = list(ctx.filter_options(self.use_pch_option()))
+        pch_header = list(self.filter_options(self.__compiler.use_pch_option()))
         if pch_header:
             assert len(pch_header) == 1
             pch_header = pch_header[0].val
-            pch_file = list(ctx.filter_options(self.pch_file_option()))
+            pch_file = list(self.filter_options(self.__compiler.pch_file_option()))
             assert len(pch_file) <= 1
             if pch_file:
                 pch_file = pch_file[0].val
@@ -192,64 +154,81 @@ class CompilerWrapper(CmdLineOptions):
 
         def create_task(source):
             return CompileTask(
-                compiler_executable = ctx.executable(),
+                compiler_executable = self.executable(),
                 call = compile_call,
                 cwd = os.getcwd(),
                 source = source,
                 source_type = os.path.splitext(source)[1],
-                preprocessor_info = PreprocessorInfo(macros, self.compiler_option_macros(ctx.options()), includes, sysincludes),
+                preprocessor_info = PreprocessorInfo(macros, self.__compiler.compiler_option_macros(self.option_values()), includes, sysincludes),
                 output = os.path.join(os.getcwd(), output or os.path.splitext(source)[0] + '.obj'),
                 pch_file = pch_file,
-                pch_header = pch_header,
-                compilerWrapper = self)
+                pch_header = pch_header)
 
-        ctx.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]
+        self.tasks = [(preprocess_call + [source], create_task(source)) for source in sources]
 
-    def execute_remotely(self, ctx):
-        zmq_ctx = ctx.zmq_ctx()
-        for preprocess_call, compile_task in ctx.tasks:
-            conn = ctx.connection()
-            conn.send_pyobj(compile_task)
-            response = conn.recv_pyobj()
-            assert response == "TASK_RECEIVED"
+    def should_invoke_linker(self):
+        return self.__compiler.compile_no_link_option() not in [token.option for token in self.option_values()]
 
-            while True:
-                request = conn.recv_pyobj()
-                if request == 'PREPROCESS':
-                    p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
-                    send_compressed_file(conn.send_pyobj, p.stdout)
-                elif request == 'COMPLETED':
-                    retcode, stdout, stderr = conn.recv_pyobj()
-                    sys.stdout.write(stdout.decode())
-                    if stderr:
-                        sys.stderr.write("---------------------------- STDERR ----------------------------\n")
-                        sys.stderr.write(stderr.decode())
-                        sys.stderr.write("----------------------------------------------------------------\n")
-                    return retcode
-                elif request == "GET_COMPILER_INFO":
-                    conn.send_pyobj(self.compiler_info(compile_task.compiler_executable))
-                elif request == "FAILED":
-                    return -1
-                else:
-                    print("GOT {}".format(request))
-                    return -1
-
-    def postprocess(self, ctx):
-        if not self.should_invoke_linker(ctx):
+    def postprocess(self):
+        if not self.should_invoke_linker():
             return False, None
 
         print("Linking...")
         objects = {}
-        for preprocess_call, task in ctx.tasks:
+        for preprocess_call, task in self.tasks:
             objects[task.source] = task.output
 
-        call = [ctx.executable()]
+        call = [self.executable()]
         call.extend(o.make_str() for o in
-            ctx.filter_options(LinkingCategory))
-        for input in ctx.input_files():
+            self.filter_options(LinkingCategory))
+        for input in self.input_files():
             if input in objects:
                 call.append(objects[input])
             else:
                 call.append(input)
         print("Calling '{}'.".format(call))
         return True, subprocess.call(call)
+
+def execute_remotely(compiler_wrapper, tasks, port):
+    zmq_ctx = zmq.Context()
+    conn = zmq_ctx.socket(zmq.DEALER)
+    conn.connect("tcp://localhost:{}".format(port))
+    for preprocess_call, compile_task in tasks:
+        conn.send_pyobj(compile_task)
+        response = conn.recv_pyobj()
+        assert response == "TASK_RECEIVED"
+
+        while True:
+            request = conn.recv_pyobj()
+            if request == 'PREPROCESS':
+                p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
+                send_compressed_file(conn.send_pyobj, p.stdout)
+            elif request == 'COMPLETED':
+                retcode, stdout, stderr = conn.recv_pyobj()
+                sys.stdout.write(stdout.decode())
+                if stderr:
+                    sys.stderr.write("---------------------------- STDERR ----------------------------\n")
+                    sys.stderr.write(stderr.decode())
+                    sys.stderr.write("----------------------------------------------------------------\n")
+                return retcode
+            elif request == "GET_COMPILER_INFO":
+                conn.send_pyobj(compiler_wrapper.compiler_info(compile_task.compiler_executable))
+            elif request == "FAILED":
+                return -1
+            else:
+                print("GOT {}".format(request))
+                return -1
+
+def execute(compiler_wrapper, command, force_local=False):
+    ctx = TaskCreator(compiler_wrapper, command[1:])
+    if ctx.build_local() or force_local:
+        call = [ctx.executable()]
+        call.extend(option.make_str() for option in ctx.option_values())
+        return subprocess.call(call)
+    ctx.create_tasks()
+    retcode = execute_remotely(compiler_wrapper, ctx.tasks, command[0])
+    postprocessed, result = ctx.postprocess()
+    if postprocessed:
+        return result
+    return retcode
+

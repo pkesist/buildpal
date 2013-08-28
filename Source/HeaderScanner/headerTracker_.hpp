@@ -103,24 +103,21 @@ private:
             includedHeaders_.push_back( header );
         }
 
-        void addStuff( std::shared_ptr<Cache::CacheEntry> const & cacheEntry, Headers const * headers )
+        void addStuff( std::shared_ptr<Cache::CacheEntry> const & cacheEntry, bool ignoreHeaders )
         {
-            if ( cacheEntry )
-            {
-                std::set_difference( cacheEntry->usedMacros().begin(), cacheEntry->usedMacros().end(),
-                    definedMacros_.begin(), definedMacros_.end(),
-                    std::inserter( usedMacros_, usedMacros_.end() ) );
+            std::set_difference( cacheEntry->usedMacros().begin(), cacheEntry->usedMacros().end(),
+                definedMacros_.begin(), definedMacros_.end(),
+                std::inserter( usedMacros_, usedMacros_.end() ) );
 
-                headerContent_.push_back( cacheEntry );
-                // FIXME: Ugly
-                if ( headers )
-                    includedHeaders_.push_back( cacheEntry );
-            }
-            else if ( headers )
-            {
-                std::copy( headers->begin(), headers->end(),
-                    std::inserter( includedHeaders_, includedHeaders_.begin() ) );
-            }
+            headerContent_.push_back( cacheEntry );
+            if ( !ignoreHeaders )
+                includedHeaders_.push_back( cacheEntry );
+        }
+
+        void addHeaders( Headers const & headers )
+        {
+            std::copy( headers.begin(), headers.end(),
+                std::inserter( includedHeaders_, includedHeaders_.begin() ) );
         }
 
         Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }

@@ -116,6 +116,10 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
     // Propagate the results to the file which included us.
+
+    // Sometimes we do not want to propagate headers upwards. More specifically,
+    // if we are in a PCH source header, headers it includes are not needed as
+    // their contents is a part of the PCH file.
     bool const ignoreHeaders( ignoredHeaders.find( headerCtxStack().back().header().first ) != ignoredHeaders.end() );
 
     std::shared_ptr<Cache::CacheEntry> cacheEntry;
@@ -128,7 +132,14 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     }
 
     HeaderCtx & includer( headerCtxStack()[ stackSize - 2 ] );
-    includer.addStuff( cacheEntry, ignoreHeaders ? 0 : &headerCtxStack().back().includedHeaders() );
+    if ( cacheEntry )
+    {
+        includer.addStuff( cacheEntry, ignoreHeaders );
+    }
+    else if ( !ignoreHeaders )
+    {
+        includer.addHeaders( headerCtxStack().back().includedHeaders() );
+    }
 }
 
 

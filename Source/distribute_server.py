@@ -3,6 +3,8 @@ from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
 from time import sleep
 from threading import Lock as ThreadLock
+#FIXME
+from distribute_manager import CompileTask, PreprocessorInfo
 
 import configparser
 import psutil

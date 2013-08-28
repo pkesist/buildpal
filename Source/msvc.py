@@ -1,5 +1,5 @@
 from cmdline_processing import *
-from distribute_client import execute, CompilerWrapper, CompilerInfo
+from distribute_client import execute
 from utils import get_batch_file_environment_side_effects, TempFile
 
 import subprocess
@@ -8,21 +8,6 @@ import os
 import re
 import sys
 import winreg
-
-def find_on_path(executable):
-    def test_exe(location):
-        return os.path.isfile(location) and os.access(location, os.X_OK)
-    direct = os.path.join(os.getcwd(), executable)
-    if test_exe(direct):
-        return direct
-    # If searching PATH we must have only file name, without directory
-    # components.
-    if os.path.split(executable)[0]:
-        return None
-    for location in (os.path.join(path, executable) for path in
-        os.environ["PATH"].split(os.pathsep)):
-        if test_exe(location):
-            return location
 
 esc = ['/', '-']
 def simple(name, macros=[]): 
@@ -43,6 +28,52 @@ def with_param(name, macros=[]):
         result.add_macro(macro)
     return result
 
+
+class CompilerInfo:
+    def __init__(self, toolset, executable, id, macros):
+        self.__toolset = toolset
+        self.__executable = executable
+        self.__id = id
+        self.__macros = macros
+
+    def toolset(self): return self.__toolset
+    def executable(self): return self.__executable
+    def id(self): return self.__id
+    def macros(self): return self.__macros
+
+class CompilerWrapper(CmdLineOptions):
+    def preprocess_option(self): raise NotImplementedError()
+    def object_name_option(self): raise NotImplementedError()
+    def compile_no_link_option(self): raise NotImplementedError()
+    def define_option(self): raise NotImplementedError()
+    def include_option(self): raise NotImplementedError()
+    def use_pch_option(self): raise NotImplementedError()
+    def pch_file_option(self): raise NotImplementedError()
+
+    def __init__(self):
+        self.use_pch_option().add_category(CompilationCategory)
+        self.pch_file_option().add_category(PCHCategory)
+        self.compile_no_link_option().add_category(CompilationCategory)
+        self.include_option().add_category(PreprocessingCategory)
+        self.define_option().add_category(PreprocessingCategory)
+        self.add_option(self.compile_no_link_option())
+        self.add_option(self.object_name_option())
+        self.add_option(self.use_pch_option())
+        self.add_option(self.pch_file_option())
+
+    def compiler_info(self, executable):
+        raise NotImplementedError("Compiler identification not implemented.")
+
+    def compiler_option_macros(self, option_values):
+        result = []
+        for option_value in (x for x in option_values
+            if type(x.option) == CompilerOption and
+            x.option.test_category(PreprocessingCategory)):
+            result += token.option.get_macros(token.val)
+        return result
+
+    def requires_preprocessing(self, file):
+        return False
 
 class MSVCWrapper(CompilerWrapper):
     __preprocess_option = simple('E')
@@ -107,20 +138,14 @@ class MSVCWrapper(CompilerWrapper):
     def compiler_executable(cls):
         return 'cl.exe'
 
-    def compiler_info(self):
-        abs = find_on_path(self.compiler_executable())
-        if not abs:
-            raise RuntimeError("Cannot find compiler executable '{}'.".format(self.compiler_executable()))
-        #   Here we should test only for macros which do not change depending on
-        # compiler options, i.e. which are fixed for a specific compiler
-        # executable.
-        macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
-            '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
-            '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
+    placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
 
-        with TempFile(suffix='.cpp') as tempfile, TempFile(suffix='.obj') as obj:
-            placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
-            with tempfile.open("wt") as file:
+    class TestSource:
+        def __init__(self, executable, macros, placeholder_string):
+            self.executable = executable
+            self.cpp = TempFile(suffix='.cpp')
+            self.obj = TempFile(suffix='.obj')
+            with self.cpp.open("wt") as file:
                 lines = []
                 # For _CPPLIB_VER and _HAS_ITERATOR_DEBUGGING
                 lines.append("#include <yvals.h>\n")
@@ -135,28 +160,44 @@ class MSVCWrapper(CompilerWrapper):
                     lines.append('#pragma message("{plh} /{m}/" STR({m}) "/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#endif\n')
                 file.writelines(lines)
-            proc = subprocess.Popen([abs, '/Fo{}'.format(obj.filename), '-c', tempfile.filename()], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = proc.communicate()
-            output = stdout.split(b'\r\n')
-            macros = []
-            for line in output:
-                m = re.match(('{plh} /(.*)/(.*)/'.format(plh=placeholder_string)).encode('ascii'), line)
-                if m:
-                    if m.group(2) == b'__NOT_DEFINED__':
-                        continue
-                    macros.append('{}={}'.format(m.group(1).decode(), m.group(2).decode()))
-            m = re.search(b'C/C\+\+ Optimizing Compiler Version (?P<ver>.*) for (?P<plat>.*)\r\n', stderr)
-            if not m:
-                raise EnvironmentError("Failed to identify compiler - unexpected output.")
-            version = (m.group('ver'), m.group('plat'))
-            assert version in self.compiler_versions
-            result = CompilerInfo("msvc", os.path.split(self.compiler_executable())[1], os.path.getsize(abs), version, macros)
-            result.pch_file_option = self.pch_file_option()
-            result.define_option = self.define_option()
-            result.include_option = self.include_option()
-            result.object_name_option = self.object_name_option()
-            result.compile_no_link_option = self.compile_no_link_option()
-            return result
+
+        def __del__(self):
+            self.cpp.__exit__(None, None, None)
+            self.obj.__exit__(None, None, None)
+
+        def command(self):
+            return [self.executable, '/Fo{}'.format(self.obj.filename()), '-c', self.cpp.filename()]
+
+    def prepare_test_source(self):
+        #   Here we should test only for macros which do not change depending on
+        # compiler options, i.e. which are fixed for a specific compiler
+        # executable.
+        macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
+            '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
+            '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
+        return MSVCWrapper.TestSource(self.compiler_executable(), macros, self.placeholder_string)
+
+    def compiler_info(self, stdout, stderr):
+        output = stdout.split(b'\r\n')
+        macros = []
+        for line in output:
+            m = re.match(('{plh} /(.*)/(.*)/'.format(plh=self.placeholder_string)).encode('ascii'), line)
+            if m:
+                if m.group(2) == b'__NOT_DEFINED__':
+                    continue
+                macros.append('{}={}'.format(m.group(1).decode(), m.group(2).decode()))
+        m = re.search(b'C/C\+\+ Optimizing Compiler Version (?P<ver>.*) for (?P<plat>.*)\r\n', stderr)
+        if not m:
+            raise EnvironmentError("Failed to identify compiler - unexpected output.")
+        version = (m.group('ver'), m.group('plat'))
+        assert version in self.compiler_versions
+        result = CompilerInfo("msvc", os.path.split(self.compiler_executable())[1], version, macros)
+        result.pch_file_option = self.pch_file_option()
+        result.define_option = self.define_option()
+        result.include_option = self.include_option()
+        result.object_name_option = self.object_name_option()
+        result.compile_no_link_option = self.compile_no_link_option()
+        return result
 
     @classmethod
     def get_compiler_environment(cls, compiler_info):
@@ -285,6 +326,3 @@ class MSVCWrapper(CompilerWrapper):
         simple      ('Wall'), simple        ('WL'), simple        ('WX'), with_param  ('W'),
         simple        ('Yd'), with_param    ('Zm'), simple        ('LD'), simple      ('LN'),
         with_param     ('F'), simple      ('link'), with_param('analyze')]
-
-if __name__ == "__main__":
-    sys.exit(execute(MSVCWrapper(), sys.argv[1:]))

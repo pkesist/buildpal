@@ -1,3 +1,4 @@
+import os
 import re
 import shlex
 
@@ -103,8 +104,9 @@ class CmdLineOptions:
     def add_option(self, option):
         self.__options.append(option)
 
-    def __parse_option(self, tokenIter):
+    def parse_options(self, cwd, options):
         result = []
+        tokenIter = iter(options)
         while True:
             try:
                 token = next(tokenIter)
@@ -112,9 +114,9 @@ class CmdLineOptions:
                     # Found a response file - read contents and parse it
                     # recursively.
                     options = None
-                    with open(token[1:], 'rt') as responseFile:
+                    with open(os.path.join(cwd, token[1:]), 'rt') as responseFile:
                         options = shlex.split(" ".join(responseFile.readlines()))
-                    result.extend(self.parse_options(options))
+                    result.extend(self.parse_options(cwd, options))
                     continue
                 found = False
                 for option in self.__options:
@@ -129,13 +131,10 @@ class CmdLineOptions:
                 break
         return result
 
-    def parse_options(self, options):
-        return self.__parse_option( (option for option in options) )
-
-    def get_options(self, command, types):
+    def get_options(self, command, cwd, types):
         if isinstance(types, type):
             types = [types]
-        for token in self.parse_options(command):
+        for token in self.parse_options(cwd, command):
             if type(token.option) in types:
                 yield token
 

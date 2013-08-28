@@ -1,8 +1,10 @@
 #! python3.3
+from cmdline_processing import *
 from functools import cmp_to_key
 from multiprocessing import Process, Pool, cpu_count
 from multiprocessing.managers import SyncManager, BaseProxy
 from time import sleep, time
+from msvc import MSVCWrapper
 
 from scan_headers import collect_headers
 from utils import send_file, send_compressed_file
@@ -101,6 +103,148 @@ class ScanHeaders(Process):
             else:
                 raise Exception("Invalid algorithm.")
 
+class PreprocessorInfo:
+    def __init__(self, macros, builtin_macros, includes, sysincludes):
+        self.macros = macros
+        self.includes = includes
+        self.sysincludes = sysincludes
+        self.builtin_macros = builtin_macros
+
+    @property
+    def all_macros(self):
+        return self.macros + self.builtin_macros
+
+class CompileTask:
+    def __init__(self, compiler_executable, cwd, call, source, source_type, preprocessor_info, output, pch_file, pch_header):
+        self.call = call
+        self.source_type = source_type
+        self.compiler_executable = compiler_executable
+        self.cwd = cwd
+        self.preprocessor_info = preprocessor_info
+        self.pch_file = pch_file
+        self.pch_header = pch_header
+        self.output = output
+        self.source = source
+        self.tempfile = None
+
+        self.algorithm = 'SCAN_HEADERS'
+        #self.algorithm = 'PREPROCESS_LOCALLY'
+
+class TaskCreator:
+    def __init__(self, compiler_wrapper, cwd, command):
+        self.__compiler = compiler_wrapper
+        self.__option_values = list(compiler_wrapper.parse_options(cwd, command[1:]))
+        self.__cwd = cwd
+
+    def executable(self):
+        return self.__compiler.compiler_executable()
+
+    def option_values(self):
+        return self.__option_values
+
+    def free_options(self):
+        return (token for token in self.option_values() if type(token.option) == FreeOption)
+
+    def filter_options(self, filter):
+        if type(filter) == type and issubclass(filter, Category):
+            return (token for token in self.option_values()
+                if type(token.option) == CompilerOption and
+                token.option.test_category(filter))
+        if isinstance(filter, CompilerOption):
+            return (token for token in self.option_values()
+                if token.option.name() == filter.name())
+        raise RuntimeError("Unknown option filter.")
+
+    def input_files(self):
+        return (input.make_str() for input in self.free_options())
+
+    def build_local(self):
+        tokens = list(self.filter_options(BuildLocalCategory))
+        if not tokens:
+            return False
+
+        print("Command requires local compilation.")
+        return True
+
+    def create_tasks(self):
+        # See if user specified an explicit name for the object file.
+        output = list(self.filter_options(self.__compiler.object_name_option()))
+        if output:
+            output = output[-1].val
+        sources = [input for input in self.input_files() if self.__compiler.requires_preprocessing(input)]
+        if output and len(sources) > 1:
+            raise RuntimeError("Cannot use {}{} with multiple sources."
+                .format(self.__compiler.object_name_option.esc(), self.__compiler.object_name_option.name()))
+
+        preprocess_call = [self.executable()]
+        preprocess_call.extend(option.make_str() for option in 
+            self.filter_options(PreprocessingCategory))
+        preprocess_call.append(self.__compiler.preprocess_option().make_value().make_str())
+
+        compile_call = [self.executable()]
+        compile_call.extend(option.make_str() for option in
+            self.filter_options(CompilationCategory))
+
+        includes = [os.path.join(self.__cwd, token.val) for token in self.filter_options(self.__compiler.include_option())]
+        macros = [token.val for token in self.filter_options(self.__compiler.define_option())]
+        # FIXME
+        sysincludes = os.getenv('INCLUDE', '').split(';')
+
+        pch_header = list(self.filter_options(self.__compiler.use_pch_option()))
+        if pch_header:
+            assert len(pch_header) == 1
+            pch_header = pch_header[0].val
+            pch_file = list(self.filter_options(self.__compiler.pch_file_option()))
+            assert len(pch_file) <= 1
+            if pch_file:
+                pch_file = pch_file[0].val
+            else:
+                pch_file = os.path.splitext(pch_header)[0] + '.pch'
+            if not os.path.exists(pch_file):
+                raise Exception("PCH file '{}' does not exist.".format(pch_file))
+            pch_file = os.path.join(self.__cwd, pch_file)
+            pch_file_stat = os.stat(pch_file)
+            pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
+        else:
+            pch_header = None
+            pch_file = None
+
+        def create_task(source):
+            return CompileTask(
+                compiler_executable = self.executable(),
+                call = compile_call,
+                cwd = self.__cwd,
+                source = source,
+                source_type = os.path.splitext(source)[1],
+                preprocessor_info = PreprocessorInfo(macros, self.__compiler.compiler_option_macros(self.option_values()), includes, sysincludes),
+                output = os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
+                pch_file = pch_file,
+                pch_header = pch_header)
+
+        return [(preprocess_call + [source], create_task(source)) for source in sources]
+
+    def should_invoke_linker(self):
+        return self.__compiler.compile_no_link_option() not in [token.option for token in self.option_values()]
+
+    def postprocess(self):
+        if not self.should_invoke_linker():
+            return False, None
+
+        print("Linking...")
+        objects = {}
+        for preprocess_call, task in self.tasks:
+            objects[task.source] = task.output
+
+        call = [self.executable()]
+        call.extend(o.make_str() for o in
+            self.filter_options(LinkingCategory))
+        for input in self.input_files():
+            if input in objects:
+                call.append(objects[input])
+            else:
+                call.append(input)
+        print("Calling '{}'.".format(call))
+        return True, subprocess.call(call)
 
 class CompileSession:
     STATE_START = 0
@@ -112,11 +256,12 @@ class CompileSession:
     STATE_WAIT_FOR_SERVER_RESPONSE = 6
     STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 7
     STATE_RECEIVE_RESULT_FILE = 8
-    STATE_WAIT_FOR_COMPILER_INFO = 9
-    STATE_DONE = 10
-    
-    def __init__(self, task, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
-        self.task = task
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 9
+    STATE_POSTPROCESS = 10
+    STATE_DONE = 11
+    STATE_WAIT_FOR_RETCODE = 12
+
+    def __init__(self, compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
         self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
@@ -126,34 +271,72 @@ class CompileSession:
         self.compiler_info = compiler_info
 
         self.node_info.connection_open(self.node_index)
-        self.start_task()
+
+        assert compiler == 'msvc'
+        self.compiler = MSVCWrapper()
+
+        self.create_tasks(self.compiler, cwd, command)
 
     def __del__(self):
         self.node_info.connection_closed(self.node_index)
 
+    def create_tasks(self, compiler_wrapper, cwd, command):
+        ctx = TaskCreator(compiler_wrapper, cwd, command)
+        if ctx.build_local():
+            call = [ctx.executable()]
+            call.extend(option.make_str() for option in ctx.option_values())
+            self.client_conn.send_pyobj("EXECUTE_AND_EXIT")
+            self.client_conn.send_pyobj(command)
+        else:
+            self.tasks = ctx.create_tasks()
+            self.task_index = 0
+            self.start_task()
+
+    @property
+    def task(self):
+        return self.tasks[self.task_index][1]
+
+    @property
+    def preprocess_call(self):
+        return self.tasks[self.task_index][0]
+
+    def next_task(self):
+        if self.task_index >= len(self.tasks) - 1:
+            return False
+        self.task_index += 1
+        return True
+
+    def compiler_executable(self):
+        return self.compiler.compiler_executable()
+
     def start_task(self):
-        if self.task.compiler_executable in self.compiler_info:
-            self.task.compiler_info = self.compiler_info[self.task.compiler_executable]
+        if self.compiler_executable() in self.compiler_info:
+            self.task.compiler_info = self.compiler_info[self.compiler_executable()]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
             self.node_info.add_tasks_sent(self.node_index)
             self.state = self.STATE_WAIT_FOR_OK
         else:
-            self.client_conn.send_pyobj("GET_COMPILER_INFO")
-            self.state = self.STATE_WAIT_FOR_COMPILER_INFO
+            self.test_source = self.compiler.prepare_test_source()
+            self.client_conn.send_pyobj('EXECUTE_GET_OUTPUT')
+            self.client_conn.send_pyobj(self.test_source.command())
+            self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
-        assert self.state in [self.STATE_RELAY_PREPROCESSED_FILE, self.STATE_WAIT_FOR_COMPILER_INFO]
+        assert self.state in [self.STATE_RELAY_PREPROCESSED_FILE, self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
         if self.state == self.STATE_RELAY_PREPROCESSED_FILE:
             assert self.task.algoritm == 'PREPROCESS_LOCALLY'
             more, data = msg
             self.server_conn.send_pyobj((more, data))
             if not more:
                 self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
-        else:
-            self.compiler_info[self.task.compiler_executable] = pickle.loads(msg[1])
-            self.task.compiler_info = self.compiler_info[self.task.compiler_executable]
+        elif self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
+            del self.test_source
+            retcode, stdout, stderr = pickle.loads(msg[1])
+            info = self.compiler.compiler_info(stdout, stderr)
+            self.compiler_info[self.compiler_executable()] = info
+            self.task.compiler_info = self.compiler_info[self.compiler_executable()]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
@@ -185,9 +368,10 @@ class CompileSession:
 
             elif self.task.algorithm == 'PREPROCESS_LOCALLY':
                 self.server_conn.send('PREPROCESS_LOCALLY')
+                self.server_conn.send_pyobj('PREPROCESSED_FILE')
                 # Signal the client to do preprocessing.
                 self.client_conn.send_pyobj('PREPROCESS')
-                self.server_conn.send_pyobj('PREPROCESSED_FILE')
+                self.client_conn.send_pyobj(self.preprocess_call)
                 self.state = self.STATE_RELAY_PREPROCESSED_FILE
             else:
                 assert not "Invalid state"
@@ -209,6 +393,8 @@ class CompileSession:
             server_status = msg
             if server_status == "SERVER_FAILED":
                 self.state = self.STATE_DONE
+                self.client_conn.send_pyobj("EXIT")
+                self.client_conn.send_pyobj(-1)
                 return True
             assert server_status == "SERVER_DONE"
             self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
@@ -236,6 +422,8 @@ class CompileSession:
                 self.client_conn.send_pyobj('COMPLETED')
                 self.client_conn.send_pyobj((self.retcode, self.stdout, self.stderr))
                 self.node_info.add_tasks_completed(self.node_index)
+                if self.next_task():
+                    self.start_task()
                 return True
         return False
 
@@ -343,11 +531,11 @@ class TaskProcessor:
                             msg = client_socket.recv_multipart()
                             client_id = msg[0]
                             if client_id not in session_from_client:
-                                task = pickle.loads(msg[1])
+                                compiler, cwd, command = pickle.loads(msg[1])
                                 node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
                                 client_conn = self.SendProxy(client_socket, client_id)
                                 client_conn.send_pyobj("TASK_RECEIVED")
-                                session = CompileSession(task, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
+                                session = CompileSession(compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
                                 session_from_client[client_conn.id] = session
                                 session_from_server[server_conn.socket] = session
                             else:

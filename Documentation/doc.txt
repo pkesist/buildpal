@@ -175,8 +175,6 @@ DistriBuild
     * Performance improvement. Currently the client is written in Python.
       Running many (30+) of these in parallel chokes the host machine, wasting
       cycles which would be better used for pumping new tasks.
-        * Move out all business logic out of client script to manager.
-        * Make the client as thin as possible.
         * Rewrite the client in C++.
 
     * Implement broken (invalid) connection detection using heart-beats.

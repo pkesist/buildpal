@@ -22,6 +22,12 @@ def execute(compiler, manager_port, command):
         elif request == 'EXECUTE_AND_EXIT':
             command = conn.recv_pyobj()
             return subprocess.call(command)
+        elif request == "EXECUTE_GET_OUTPUT":
+            command = conn.recv_pyobj()
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+                stdout, stderr = proc.communicate()
+                retcode = proc.returncode
+            conn.send_pyobj((retcode, stdout, stderr))
         elif request == 'EXIT':
             retcode = conn.recv_pyobj()
             return retcode
@@ -33,19 +39,9 @@ def execute(compiler, manager_port, command):
                 sys.stderr.write(stderr.decode())
                 sys.stderr.write("----------------------------------------------------------------\n")
             return retcode
-        elif request == "GET_COMPILER_INFO":
-            conn.send_pyobj(compiler_wrapper.compiler_info())
         elif request == "GETENV":
             envvar = conn.recv_pyobj()
             conn.send_pyobj(os.environ.get(envvar, ''))
-        elif request == "EXECUTE_GET_OUTPUT":
-            command = conn.recv_pyobj()
-            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-                stdout, stderr = proc.communicate()
-                retcode = proc.returncode
-            conn.send_pyobj((retcode, stdout, stderr))
-        elif request == "FAILED":
-            return -1
         else:
             print("GOT {}".format(request))
             return -1

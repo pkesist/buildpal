@@ -237,15 +237,14 @@ class TaskCreator:
 class CompileSession:
     STATE_START = 0
     STATE_WAIT_FOR_OK = 1
-    STATE_WAIT_FOR_PCH_RESPONSE = 2
-    STATE_WAIT_FOR_SERVER_RESPONSE = 3
-    STATE_WAIT_FOR_SERVER_RESPONSE = 6
-    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 7
-    STATE_RECEIVE_RESULT_FILE = 8
-    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 9
-    STATE_POSTPROCESS = 10
-    STATE_DONE = 11
-    STATE_WAIT_FOR_RETCODE = 12
+    STATE_WAIT_FOR_RETCODE = 2
+    STATE_WAIT_FOR_PCH_RESPONSE = 3
+    STATE_WAIT_FOR_SERVER_RESPONSE = 4
+    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 5
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 6
+    STATE_RECEIVE_RESULT_FILE = 7
+    STATE_POSTPROCESS = 8
+    STATE_DONE = 9
 
     def __init__(self, compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
         self.timer = timer

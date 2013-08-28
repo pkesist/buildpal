@@ -69,28 +69,11 @@ class CompileSession(ServerSession, ServerCompiler):
     def __del__(self):
         self.task_counter.dec()
 
-    transition_table = {
-        STATE_START : {
-            True : STATE_GET_TASK,
-            False : STATE_DONE },
-        STATE_GET_TASK : STATE_SH_GET_ARCHIVE_TAG,
-        STATE_SH_GET_ARCHIVE_TAG : STATE_SH_GET_ARCHIVE_DATA,
-        STATE_SH_GET_ARCHIVE_DATA : STATE_SH_GET_SOURCE_TAG,
-        STATE_SH_GET_SOURCE_TAG : STATE_SH_GET_SOURCE_DATA,
-        STATE_SH_GET_SOURCE_DATA : STATE_SH_CHECK_PCH_TAG,
-        STATE_SH_CHECK_PCH_TAG : STATE_SH_GET_PCH_DATA }
-    
-    def next_state(self, data=None):
-        if data is None:
-            self.state = self.transition_table[self.state]
-        else:
-            self.state = self.transition_table[self.state][data]
-
     def created(self):
         assert self.state == self.STATE_START
         accept = self.accept()
         self.send_pyobj('ACCEPT' if accept else 'REJECT')
-        self.next_state(accept)
+        self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
         return accept
 
     def setup_include_dirs(self):
@@ -151,13 +134,13 @@ class CompileSession(ServerSession, ServerCompiler):
             else:
                 self.send_pyobj("FAIL")
                 return False
-            self.next_state()
+            self.state = self.STATE_SH_GET_ARCHIVE_TAG
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()
             assert archive_tag == 'HEADERS_ARCHIVE'
             self.archivefile = TempFile()
             self.archivedesc = open(self.archivefile.filename(), 'wb')
-            self.next_state()
+            self.state = self.STATE_SH_GET_ARCHIVE_DATA
         elif self.state == self.STATE_SH_GET_ARCHIVE_DATA:
             more, data = self.recv_pyobj()
             self.archivedesc.write(data)
@@ -165,14 +148,14 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.archivedesc.close()
                 del self.archivedesc
                 self.setup_include_dirs()
-                self.next_state()
+                self.state = self.STATE_SH_GET_SOURCE_TAG
         elif self.state == self.STATE_SH_GET_SOURCE_TAG:
             tag = self.recv_pyobj()
             assert tag == 'SOURCE_FILE'
             self.source_file = TempFile(suffix=self.task.source_type)
             self.source_desc = open(self.source_file.filename(), 'wb')
             self.source_decompressor = zlib.decompressobj()
-            self.next_state()
+            self.state = self.STATE_SH_GET_SOURCE_DATA
         elif self.state == self.STATE_SH_GET_SOURCE_DATA:
             more, data = self.recv_pyobj()
             self.source_desc.write(self.source_decompressor.decompress(data))
@@ -185,7 +168,7 @@ class CompileSession(ServerSession, ServerCompiler):
                     self.run_compiler_with_source_and_headers()
                     return True
                 else:
-                    self.next_state()
+                    self.state = self.STATE_SH_CHECK_PCH_TAG
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = self.recv_pyobj()
             assert tag == 'NEED_PCH_FILE'
@@ -194,7 +177,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.send_pyobj("YES")
                 self.pch_desc = open(self.pch_file, 'wb')
                 self.pch_decompressor = zlib.decompressobj()
-                self.next_state()
+                self.state = self.STATE_SH_GET_PCH_DATA
             else:
                 self.send_pyobj("NO")
                 while not self.file_repository().file_arrived(*self.task.pch_file):

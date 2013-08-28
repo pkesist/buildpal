@@ -268,10 +268,9 @@ class CompileSession:
     def create_tasks(self, compiler_wrapper, cwd, command):
         ctx = TaskCreator(compiler_wrapper, cwd, command)
         if ctx.build_local():
-            call = [ctx.executable()]
-            call.extend(option.make_str() for option in ctx.option_values())
-            self.client_conn.send_pyobj("EXECUTE_AND_EXIT")
-            self.client_conn.send_pyobj(command)
+            call = [b'EXECUTE_AND_EXIT', ctx.executable().encode()]
+            call.extend(option.make_str().encode() for option in ctx.option_values())
+            self.client_conn.send(call)
         else:
             self.tasks = ctx.create_tasks()
             self.task_index = 0
@@ -300,14 +299,17 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_OK
         else:
             self.test_source = self.compiler.prepare_test_source()
-            self.client_conn.send_pyobj('EXECUTE_GET_OUTPUT')
-            self.client_conn.send_pyobj(self.test_source.command())
+            command = [b'EXECUTE_GET_OUTPUT']
+            command.extend([x.encode() for x in self.test_source.command()])
+            self.client_conn.send(command)
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
         assert self.state in [self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
         del self.test_source
-        retcode, stdout, stderr = pickle.loads(msg[1])
+        retcode = int(msg[1])
+        stdout = msg[2]
+        stderr = msg[3]
         info = self.compiler.compiler_info(stdout, stderr)
         self.compiler_info[self.compiler_executable()] = info
         self.task.compiler_info = self.compiler_info[self.compiler_executable()]
@@ -354,8 +356,7 @@ class CompileSession:
             server_status = msg
             if server_status == "SERVER_FAILED":
                 self.state = self.STATE_DONE
-                self.client_conn.send_pyobj("EXIT")
-                self.client_conn.send_pyobj(-1)
+                self.client_conn.send([b'EXIT', b'-1'])
                 return True
             assert server_status == "SERVER_DONE"
             self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
@@ -367,8 +368,7 @@ class CompileSession:
                 self.output_decompressor = zlib.decompressobj()
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
-                self.client_conn.send_pyobj('COMPLETED')
-                self.client_conn.send_pyobj((self.retcode, self.stdout, self.stderr))
+                self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed(self.node_index)
                 return True
 
@@ -380,8 +380,7 @@ class CompileSession:
                 del self.output_decompressor
                 self.output.close()
                 del self.output
-                self.client_conn.send_pyobj('COMPLETED')
-                self.client_conn.send_pyobj((self.retcode, self.stdout, self.stderr))
+                self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed(self.node_index)
                 if self.next_task():
                     self.start_task()
@@ -492,10 +491,12 @@ class TaskProcessor:
                             msg = client_socket.recv_multipart()
                             client_id = msg[0]
                             if client_id not in session_from_client:
-                                compiler, cwd, command = pickle.loads(msg[1])
+                                compiler = msg[1].decode()
+                                cwd = msg[2].decode()
+                                command = [x.decode() for x in msg[3:]]
                                 node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
                                 client_conn = self.SendProxy(client_socket, client_id)
-                                client_conn.send_pyobj("TASK_RECEIVED")
+                                client_conn.send([b"TASK_RECEIVED"])
                                 session = CompileSession(compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
                                 session_from_client[client_conn.id] = session
                                 session_from_server[server_conn.socket] = session

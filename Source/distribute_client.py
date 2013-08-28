@@ -15,11 +15,7 @@ def execute(compiler, manager_port, command):
     assert response == "TASK_RECEIVED"
     while True:
         request = conn.recv_pyobj()
-        if request == 'PREPROCESS':
-            preprocess_call = conn.recv_pyobj()
-            p = subprocess.Popen(preprocess_call, stdout=subprocess.PIPE)
-            send_compressed_file(conn.send_pyobj, p.stdout)
-        elif request == 'EXECUTE_AND_EXIT':
+        if request == 'EXECUTE_AND_EXIT':
             command = conn.recv_pyobj()
             return subprocess.call(command)
         elif request == "EXECUTE_GET_OUTPUT":

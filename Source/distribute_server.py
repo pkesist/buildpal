@@ -53,15 +53,12 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
-    STATE_GET_ALGORITHM = 3
     STATE_SH_GET_ARCHIVE_TAG = 4
     STATE_SH_GET_ARCHIVE_DATA = 5
     STATE_SH_GET_SOURCE_TAG = 6
     STATE_SH_GET_SOURCE_DATA = 7
     STATE_SH_CHECK_PCH_TAG = 8
     STATE_SH_GET_PCH_DATA = 9
-    STATE_PL_GET_PP_TAG = 10
-    STATE_PL_GET_PP_DATA = 11
 
     def __init__(self, file_repository, cpu_usage_hwm, task_counter):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
@@ -76,17 +73,12 @@ class CompileSession(ServerSession, ServerCompiler):
         STATE_START : {
             True : STATE_GET_TASK,
             False : STATE_DONE },
-        STATE_GET_TASK : STATE_GET_ALGORITHM,
-        STATE_GET_ALGORITHM : {
-            'SCAN_HEADERS' : STATE_SH_GET_ARCHIVE_TAG,
-            'PREPROCESS_LOCALLY' : STATE_PL_GET_PP_TAG },
+        STATE_GET_TASK : STATE_SH_GET_ARCHIVE_TAG,
         STATE_SH_GET_ARCHIVE_TAG : STATE_SH_GET_ARCHIVE_DATA,
         STATE_SH_GET_ARCHIVE_DATA : STATE_SH_GET_SOURCE_TAG,
         STATE_SH_GET_SOURCE_TAG : STATE_SH_GET_SOURCE_DATA,
         STATE_SH_GET_SOURCE_DATA : STATE_SH_CHECK_PCH_TAG,
-        STATE_SH_CHECK_PCH_TAG : STATE_SH_GET_PCH_DATA,
-
-        STATE_PL_GET_PP_TAG : STATE_PL_GET_PP_DATA }
+        STATE_SH_CHECK_PCH_TAG : STATE_SH_GET_PCH_DATA }
     
     def next_state(self, data=None):
         if data is None:
@@ -114,22 +106,6 @@ class CompileSession(ServerSession, ServerCompiler):
             for path in open(include_list, 'rt'):
                 assert not os.path.isabs(path)
                 self.include_dirs.append(os.path.normpath(os.path.join(self.include_path, path)))
-
-    def run_compiler_with_preprocessed_file(self):
-        with self.pp_file as pp_file, TempFile(suffix='.obj') as object_file:
-            compiler_info = self.task.compiler_info
-            noLink = compiler_info.compile_no_link_option.make_value().make_str()
-            output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
-            try:
-                retcode, stdout, stderr = self.compiler(self.call +  [noLink, output, pp_file.filename()])
-            except Exception:
-                self.send_pyobj('SERVER_FAILED')
-                return
-            self.send_pyobj('SERVER_DONE')
-            self.send_pyobj((retcode, stdout, stderr))
-            if retcode == 0:
-                with object_file.open('rb') as obj:
-                    send_compressed_file(self.send_pyobj, obj)
 
     def run_compiler_with_source_and_headers(self):
         try:
@@ -176,9 +152,6 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.send_pyobj("FAIL")
                 return False
             self.next_state()
-        elif self.state == self.STATE_GET_ALGORITHM:
-            self.algorithm = self.recv_pyobj()
-            self.next_state(self.algorithm)
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()
             assert archive_tag == 'HEADERS_ARCHIVE'
@@ -242,23 +215,6 @@ class CompileSession(ServerSession, ServerCompiler):
                 del self.pch_decompressor
                 self.file_repository().file_completed(*self.task.pch_file)
                 self.run_compiler_with_source_and_headers()
-                return True
-        elif self.state == self.STATE_PL_GET_PP_TAG:
-            tag = self.recv_pyobj()
-            assert tag == 'PREPROCESSED_FILE'
-            self.pp_file = TempFile()
-            self.pp_desc = open(self.pp_file, 'wb')
-            self.pp_decompressor = zlib.decompressobj()
-            self.next_state()
-        elif self.state == self.STATE_PL_GET_PP_DATA:
-            more, data = self.recv_pyobj()
-            self.pp_desc.write(self.pp_decompressor.decompress(data))
-            if not more:
-                self.pp_desc.write(self.pp_decompressor.flush())
-                self.pp_desc.close()
-                del self.pp_desc
-                del self.pp_decompressor
-                self.run_compiler_with_preprocessed_file()
                 return True
         return False
 

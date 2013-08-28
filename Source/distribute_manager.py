@@ -95,13 +95,9 @@ class ScanHeaders(Process):
                 if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                     macros.append('_HAS_ITERATOR_DEBUGGING=1')
 
-            if task.algorithm == 'SCAN_HEADERS':
-                return collect_headers(os.path.join(task.cwd, task.source),
-                    task.preprocessor_info.includes, [], macros,
-                    [task.pch_header] if task.pch_header else [])
-
-            else:
-                raise Exception("Invalid algorithm.")
+            return collect_headers(os.path.join(task.cwd, task.source),
+                task.preprocessor_info.includes, [], macros,
+                [task.pch_header] if task.pch_header else [])
 
 class PreprocessorInfo:
     def __init__(self, macros, builtin_macros, includes, sysincludes):
@@ -126,9 +122,6 @@ class CompileTask:
         self.output = output
         self.source = source
         self.tempfile = None
-
-        self.algorithm = 'SCAN_HEADERS'
-        #self.algorithm = 'PREPROCESS_LOCALLY'
 
 class TaskCreator:
     def __init__(self, compiler_wrapper, cwd, command):
@@ -176,11 +169,6 @@ class TaskCreator:
             raise RuntimeError("Cannot use {}{} with multiple sources."
                 .format(self.__compiler.object_name_option.esc(), self.__compiler.object_name_option.name()))
 
-        preprocess_call = [self.executable()]
-        preprocess_call.extend(option.make_str() for option in 
-            self.filter_options(PreprocessingCategory))
-        preprocess_call.append(self.__compiler.preprocess_option().make_value().make_str())
-
         compile_call = [self.executable()]
         compile_call.extend(option.make_str() for option in
             self.filter_options(CompilationCategory))
@@ -221,7 +209,7 @@ class TaskCreator:
                 pch_file = pch_file,
                 pch_header = pch_header)
 
-        return [(preprocess_call + [source], create_task(source)) for source in sources]
+        return [create_task(source) for source in sources]
 
     def should_invoke_linker(self):
         return self.__compiler.compile_no_link_option() not in [token.option for token in self.option_values()]
@@ -232,7 +220,7 @@ class TaskCreator:
 
         print("Linking...")
         objects = {}
-        for preprocess_call, task in self.tasks:
+        for task in self.tasks:
             objects[task.source] = task.output
 
         call = [self.executable()]
@@ -251,8 +239,6 @@ class CompileSession:
     STATE_WAIT_FOR_OK = 1
     STATE_WAIT_FOR_PCH_RESPONSE = 2
     STATE_WAIT_FOR_SERVER_RESPONSE = 3
-    STATE_PREPROCESS_LOCALLY_START = 4
-    STATE_RELAY_PREPROCESSED_FILE = 5
     STATE_WAIT_FOR_SERVER_RESPONSE = 6
     STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 7
     STATE_RECEIVE_RESULT_FILE = 8
@@ -294,11 +280,7 @@ class CompileSession:
 
     @property
     def task(self):
-        return self.tasks[self.task_index][1]
-
-    @property
-    def preprocess_call(self):
-        return self.tasks[self.task_index][0]
+        return self.tasks[self.task_index]
 
     def next_task(self):
         if self.task_index >= len(self.tasks) - 1:
@@ -324,57 +306,37 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
-        assert self.state in [self.STATE_RELAY_PREPROCESSED_FILE, self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
-        if self.state == self.STATE_RELAY_PREPROCESSED_FILE:
-            assert self.task.algoritm == 'PREPROCESS_LOCALLY'
-            more, data = msg
-            self.server_conn.send_pyobj((more, data))
-            if not more:
-                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
-        elif self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
-            del self.test_source
-            retcode, stdout, stderr = pickle.loads(msg[1])
-            info = self.compiler.compiler_info(stdout, stderr)
-            self.compiler_info[self.compiler_executable()] = info
-            self.task.compiler_info = self.compiler_info[self.compiler_executable()]
-            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
-            with self.timer.timeit('send'):
-                self.server_conn.send_pyobj(self.task)
-            self.node_info.add_tasks_sent(self.node_index)
-            self.state = self.STATE_WAIT_FOR_OK
+        assert self.state in [self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
+        del self.test_source
+        retcode, stdout, stderr = pickle.loads(msg[1])
+        info = self.compiler.compiler_info(stdout, stderr)
+        self.compiler_info[self.compiler_executable()] = info
+        self.task.compiler_info = self.compiler_info[self.compiler_executable()]
+        self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+        with self.timer.timeit('send'):
+            self.server_conn.send_pyobj(self.task)
+        self.node_info.add_tasks_sent(self.node_index)
+        self.state = self.STATE_WAIT_FOR_OK
         return False
 
     def got_data_from_server(self, msg):
-        assert self.state != self.STATE_RELAY_PREPROCESSED_FILE
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
             assert task_ok == "OK"
-            if self.task.algorithm == 'SCAN_HEADERS':
-                self.server_conn.send_pyobj('SCAN_HEADERS')
-                self.server_conn.send_pyobj('HEADERS_ARCHIVE')
-                with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
-                    send_file(self.server_conn.send_pyobj, file)
-                os.remove(self.task.tempfile)
-                self.server_conn.send_pyobj('SOURCE_FILE')
-                with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
-                    send_compressed_file(self.server_conn.send_pyobj, cpp)
-                if self.task.pch_file:
-                    self.server_conn.send_pyobj('NEED_PCH_FILE')
-                    self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
-                else:
-                    self.server_timer = self.timer.scoped_timer('server_time')
-                    self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
-                    self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
-
-            elif self.task.algorithm == 'PREPROCESS_LOCALLY':
-                self.server_conn.send('PREPROCESS_LOCALLY')
-                self.server_conn.send_pyobj('PREPROCESSED_FILE')
-                # Signal the client to do preprocessing.
-                self.client_conn.send_pyobj('PREPROCESS')
-                self.client_conn.send_pyobj(self.preprocess_call)
-                self.state = self.STATE_RELAY_PREPROCESSED_FILE
+            self.server_conn.send_pyobj('HEADERS_ARCHIVE')
+            with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
+                send_file(self.server_conn.send_pyobj, file)
+            os.remove(self.task.tempfile)
+            self.server_conn.send_pyobj('SOURCE_FILE')
+            with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
+                send_compressed_file(self.server_conn.send_pyobj, cpp)
+            if self.task.pch_file:
+                self.server_conn.send_pyobj('NEED_PCH_FILE')
+                self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
             else:
-                assert not "Invalid state"
+                self.server_timer = self.timer.scoped_timer('server_time')
+                self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
+                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
             response = msg

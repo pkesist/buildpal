@@ -29,9 +29,7 @@ project distribute_client ;
 exe distribute_client
 :
     distribute_client.cpp
-    /boost//filesystem/<link>static
-    /boost//system/<link>static
-    zmq_lib/<link>static
+    zmq_lib/<link> static
 ;
 
 explicit distribute_client ;

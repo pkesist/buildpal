@@ -4,10 +4,10 @@
 
 #include <zmq.h>
 
-#include <boost/filesystem.hpp>
-
+#include <cassert>
 #include <deque>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <sstream>
 
@@ -21,29 +21,10 @@ void freeBuffer( void * buffer, void * hint )
     delete[] buffer;
 }
 
-void pipeToSocket( HANDLE pipe, void * socket, int sendFlags )
+void sendData( void * socket, std::unique_ptr<char []> & buffer, std::size_t size, int sendFlags )
 {
-    DWORD available = 0;
-    DWORD inBuffer = 0;
-    if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
-        available = 0;
-
-    std::unique_ptr<char []> buffer;
-    if ( available )
-    {
-        buffer.reset( new char[ available ] );
-        ReadFile( pipe, buffer.get(), available, &inBuffer, NULL );
-    }
-
     zmq_msg_t outputMsg;
-    if ( inBuffer )
-    {
-        assert( buffer );
-        assert( inBuffer == available );
-        zmq_msg_init_data( &outputMsg, buffer.release(), available, &freeBuffer, 0 );
-    }
-    else
-        zmq_msg_init_size( &outputMsg, 0 );
+    zmq_msg_init_data( &outputMsg, buffer.release(), size, &freeBuffer, 0 );
     zmq_msg_send( &outputMsg, socket, sendFlags | ZMQ_DONTWAIT );
     zmq_msg_close( &outputMsg );
 }
@@ -60,6 +41,31 @@ void sendData( void * socket, char const * buffer, std::size_t size, int sendFla
 void sendData( void * socket, std::string const & data, int sendFlags )
 {
     sendData( socket, data.data(), data.size(), sendFlags );
+}
+
+void pipeToSocket( HANDLE pipe, void * socket, int sendFlags )
+{
+    DWORD available = 0;
+    DWORD inBuffer = 0;
+    if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
+        available = 0;
+
+    std::unique_ptr<char []> buffer;
+    if ( available )
+    {
+        buffer.reset( new char[ available ] );
+        ReadFile( pipe, buffer.get(), available, &inBuffer, NULL );
+    }
+
+    if ( inBuffer )
+        sendData( socket, buffer, inBuffer, sendFlags );
+    else
+    {
+        zmq_msg_t outputMsg;
+        zmq_msg_init_size( &outputMsg, 0 );
+        zmq_msg_send( &outputMsg, socket, sendFlags | ZMQ_DONTWAIT );
+        zmq_msg_close( &outputMsg );
+    }
 }
 
 class MsgReceiver
@@ -122,29 +128,99 @@ private:
     std::size_t parts_;
 };
 
+class ZmqSocket
+{
+private:
+    ZmqSocket( ZmqSocket const & );
+    ZmqSocket & operator=( ZmqSocket const & );
+
+public:
+    explicit ZmqSocket( void * socket ) : socket_( socket ), connected_( false ) {}
+
+    ZmqSocket( ZmqSocket && other )
+    {
+        socket_ = other.socket_;
+        connected_ = other.connected_;
+        endpoint_.swap( other.endpoint_ );
+        other.socket_ = 0;
+        other.connected_ = false;
+    }
+
+    ZmqSocket & operator=( ZmqSocket && other )
+    {
+        std::swap( socket_, other.socket_ );
+        std::swap( connected_, other.connected_ );
+        endpoint_.swap( other.endpoint_ );
+    }
+
+    ~ZmqSocket()
+    {
+        disconnect();
+        zmq_close( socket_ );
+    }
+
+    void connect( std::string const & endpoint )
+    {
+        disconnect();
+
+        connected_ = true;
+        endpoint_ = endpoint;
+        zmq_connect( socket_, endpoint_.c_str() );
+    }
+
+    void disconnect()
+    {
+        if ( !connected_ )
+            return;
+        zmq_disconnect( socket_, endpoint_.c_str() );
+        endpoint_.clear();
+        connected_ = false;
+    }
+
+    void * handle() const { return socket_; }
+
+private:
+    void * socket_;
+    std::string endpoint_;
+    bool connected_;
+};
+
+class ZmqContext
+{
+public:
+    ZmqContext() : context_( zmq_ctx_new() ) {}
+    ~ZmqContext() { zmq_ctx_destroy( context_ ); }
+
+    ZmqSocket socket( int type ) const { return ZmqSocket( zmq_socket( context_, type ) ); }
+
+private:
+    void * context_;
+};
+
 int main( int argc, char * argv[] )
 {
-    void * context = zmq_ctx_new();
-    void * socket = zmq_socket( context, ZMQ_DEALER );
+    ZmqContext context;
+    ZmqSocket socket = context.socket( ZMQ_DEALER );
 
     std::string endpoint( "tcp://localhost:" );
     endpoint.append( argv[1] );
     
-    int const result = zmq_connect( socket, endpoint.c_str() );
-    if ( result != 0 )
-        return -1;
+    socket.connect( endpoint );
 
-    boost::filesystem::path const currentPath( boost::filesystem::current_path() );
+    sendData( socket.handle(), compiler, compilerSize, ZMQ_SNDMORE );
 
-    sendData( socket, compiler, compilerSize, ZMQ_SNDMORE );
-    sendData( socket, currentPath.string(), ZMQ_SNDMORE );
+    DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
+    std::unique_ptr<char []> currentPathBuffer( new char[ currentPathSize ] );
+    GetCurrentDirectory( currentPathSize, currentPathBuffer.get() );
+    sendData( socket.handle(), currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
+
     for ( int arg( 2 ); arg < argc; ++arg )
     {
-        sendData( socket, argv[arg], strlen(argv[arg]), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
+        sendData( socket.handle(), argv[arg], strlen(argv[arg]), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
     }
 
     {
-        MsgReceiver reply( socket );
+        MsgReceiver reply( socket.handle() );
         assert( reply.parts() == 1 );
         std::pair<char const *, std::size_t> data( reply.getPart( 0 ) );
         assert( data.second == 13 );
@@ -153,7 +229,7 @@ int main( int argc, char * argv[] )
 
     while ( true )
     {
-        MsgReceiver requestReceiver( socket );
+        MsgReceiver requestReceiver( socket.handle() );
 
         assert( requestReceiver.parts() >= 1 );
 
@@ -260,11 +336,11 @@ int main( int argc, char * argv[] )
                     char buffer[20];
                     _itoa( result, buffer, 10 );
                     std::size_t const size( strlen( buffer ) );
-                    sendData( socket, buffer, strlen( buffer ), ZMQ_SNDMORE );
+                    sendData( socket.handle(), buffer, strlen( buffer ), ZMQ_SNDMORE );
                 }
 
-                pipeToSocket( stdOutRead, socket, ZMQ_SNDMORE );
-                pipeToSocket( stdErrRead, socket, 0 );
+                pipeToSocket( stdOutRead, socket.handle(), ZMQ_SNDMORE );
+                pipeToSocket( stdErrRead, socket.handle(), 0 );
 
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );

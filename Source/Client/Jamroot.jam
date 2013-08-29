@@ -1,0 +1,26 @@
+path-constant ZMQ_ROOT : C:\\Users\\Juraj\\Desktop\\zeromq-3.2.3 ;
+
+project zmqlib : usage-requirements <include>$(ZMQ_ROOT)/include ;
+
+alias zmq_headers ;
+
+lib zmq_lib : : <file>$(ZMQ_ROOT)/lib/Win32/libzmq_d.lib <variant>debug : ;
+lib zmq_dll : : <file>$(ZMQ_ROOT)/bin/Win32/libzmq_d.dll <variant>debug ;
+
+lib zmq_lib : : <file>$(ZMQ_ROOT)/lib/Win32/libzmq.lib ;
+lib zmq_dll : : <file>$(ZMQ_ROOT)/bin/Win32/libzmq.dll ;
+
+
+project distribute_client ;
+
+exe distribute_client
+:
+    distribute_client.cpp
+    /boost//filesystem/<link>static
+    /boost//system/<link>static
+    zmq_lib
+;
+
+explicit distribute_client ;
+
+install install-client : distribute_client zmq_dll : <location>.. <install-type>EXE <install-type>SHARED_LIB ;

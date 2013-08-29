@@ -29,7 +29,6 @@
     <Compile Include="Source\distribute_client.py" />
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
-    <Compile Include="Source\distribute_task.py" />
     <Compile Include="Source\Messaging\client.py" />
     <Compile Include="Source\Messaging\broker.py" />
     <Compile Include="Source\Messaging\server.py" />
@@ -44,9 +43,13 @@
     <Folder Include="Source\" />
     <Folder Include="Source\HeaderScanner\" />
     <Folder Include="Source\Messaging\" />
+    <Folder Include="Source\Client\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />
+    <Content Include="Source\Client\build-config.ini" />
+    <Content Include="Source\Client\distribute_client.cpp" />
+    <Content Include="Source\Client\Jamroot.jam" />
     <Content Include="Source\HeaderScanner\build-config.ini" />
     <Content Include="Source\HeaderScanner\headerCache_.cpp" />
     <Content Include="Source\HeaderScanner\headerCache_.hpp" />

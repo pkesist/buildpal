@@ -88,41 +88,17 @@ class ScanHeaders(Process):
         # If we do so, we lose any preprocessor side-effects. We try to
         # hardcode this knowledge here.
         with self.__timer.timeit('prepare'):
-            macros = task.preprocessor_info.all_macros
-            macros += task.compiler_info.macros()
+            macros = task['macros'] + task['builtin_macros']
+            macros += task['compiler_info'].macros()
             if '_DEBUG' in macros:
                 if not any(('_SECURE_SCL' in x for x in macros)):
                     macros.append('_SECURE_SCL=1')
                 if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                     macros.append('_HAS_ITERATOR_DEBUGGING=1')
 
-            return collect_headers(os.path.join(task.cwd, task.source),
-                task.preprocessor_info.includes, [], macros,
-                [task.pch_header] if task.pch_header else [])
-
-class PreprocessorInfo:
-    def __init__(self, macros, builtin_macros, includes, sysincludes):
-        self.macros = macros
-        self.includes = includes
-        self.sysincludes = sysincludes
-        self.builtin_macros = builtin_macros
-
-    @property
-    def all_macros(self):
-        return self.macros + self.builtin_macros
-
-class CompileTask:
-    def __init__(self, compiler_executable, cwd, call, source, source_type, preprocessor_info, output, pch_file, pch_header):
-        self.call = call
-        self.source_type = source_type
-        self.compiler_executable = compiler_executable
-        self.cwd = cwd
-        self.preprocessor_info = preprocessor_info
-        self.pch_file = pch_file
-        self.pch_header = pch_header
-        self.output = output
-        self.source = source
-        self.tempfile = None
+            return collect_headers(os.path.join(task['cwd'], task['source']),
+                task['includes'], [], macros,
+                [task['pch_header']] if task['pch_header'] else [])
 
 class TaskCreator:
     def __init__(self, compiler_wrapper, cwd, command):
@@ -199,16 +175,19 @@ class TaskCreator:
             pch_file = None
 
         def create_task(source):
-            return CompileTask(
-                compiler_executable = self.executable(),
-                call = compile_call,
-                cwd = self.__cwd,
-                source = source,
-                source_type = os.path.splitext(source)[1],
-                preprocessor_info = PreprocessorInfo(macros, self.__compiler.compiler_option_macros(self.option_values()), includes, sysincludes),
-                output = os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
-                pch_file = pch_file,
-                pch_header = pch_header)
+            return {
+                'compiler_executable' : self.executable(),
+                'call' : compile_call,
+                'cwd' : self.__cwd,
+                'source' : source,
+                'source_type' : os.path.splitext(source)[1],
+                'macros' : macros,
+                'builtin_macros' : self.__compiler.compiler_option_macros(self.option_values()),
+                'includes' : includes,
+                'sysincludes' : sysincludes,
+                'output' : os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
+                'pch_file' : pch_file,
+                'pch_header' : pch_header }
 
         return [create_task(source) for source in sources]
 
@@ -292,7 +271,7 @@ class CompileSession:
 
     def start_task(self):
         if self.compiler_executable() in self.compiler_info:
-            self.task.compiler_info = self.compiler_info[self.compiler_executable()]
+            self.task['compiler_info'] = self.compiler_info[self.compiler_executable()]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
@@ -311,7 +290,7 @@ class CompileSession:
         stderr = msg[3]
         info = self.compiler.compiler_info(stdout, stderr)
         self.compiler_info[self.compiler_executable()] = info
-        self.task.compiler_info = self.compiler_info[self.compiler_executable()]
+        self.task['compiler_info'] = self.compiler_info[self.compiler_executable()]
         self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
         with self.timer.timeit('send'):
             self.server_conn.send_pyobj(self.task)
@@ -324,13 +303,13 @@ class CompileSession:
             task_ok = msg
             assert task_ok == "OK"
             self.server_conn.send_pyobj('HEADERS_ARCHIVE')
-            with self.timer.timeit('send.zip'), open(self.task.tempfile, 'rb') as file:
+            with self.timer.timeit('send.zip'), open(self.task['tempfile'], 'rb') as file:
                 send_file(self.server_conn.send_pyobj, file)
-            os.remove(self.task.tempfile)
+            os.remove(self.task['tempfile'])
             self.server_conn.send_pyobj('SOURCE_FILE')
-            with self.timer.timeit('send.source'), open(os.path.join(self.task.cwd, self.task.source), 'rb') as cpp:
+            with self.timer.timeit('send.source'), open(os.path.join(self.task['cwd'], self.task['source']), 'rb') as cpp:
                 send_compressed_file(self.server_conn.send_pyobj, cpp)
-            if self.task.pch_file:
+            if self.task['pch_file']:
                 self.server_conn.send_pyobj('NEED_PCH_FILE')
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
             else:
@@ -341,7 +320,7 @@ class CompileSession:
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
             response = msg
             if response == "YES":
-                with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
+                with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task['pch_file'][0]), 'rb') as pch_file:
                     send_compressed_file(self.server_conn.send_pyobj, pch_file)
             else:
                 assert response == "NO"
@@ -363,7 +342,7 @@ class CompileSession:
         elif self.state == self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT:
             self.retcode, self.stdout, self.stderr = msg
             if self.retcode == 0:
-                self.output = open(self.task.output, "wb")
+                self.output = open(self.task['output'], "wb")
                 self.output_decompressor = zlib.decompressobj()
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
@@ -483,7 +462,7 @@ class TaskProcessor:
                             client_id, result = preprocess_socket.recv_multipart()
                             assert client_id in session_from_client
                             session = session_from_client[client_id]
-                            session.task.tempfile = pickle.loads(result)
+                            session.task['tempfile'] = pickle.loads(result)
                             poller.register(session.server_conn.socket, zmq.POLLIN)
 
                         elif socket is client_socket:

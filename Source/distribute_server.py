@@ -3,8 +3,6 @@ from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
 from time import sleep
 from threading import Lock as ThreadLock
-#FIXME
-from distribute_manager import CompileTask, PreprocessorInfo
 
 import configparser
 import psutil
@@ -48,6 +46,10 @@ class ServerCompiler:
             return setup
         else:
             raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
+
+class Task:
+    def __init__(self, dict):
+        self.__dict__.update(dict)
 
 class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
@@ -97,7 +99,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 noLink = compiler_info.compile_no_link_option.make_value().make_str()
                 output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
                 defines = [compiler_info.define_option.make_value(define).make_str()
-                    for define in self.task.preprocessor_info.macros]
+                    for define in self.task.macros]
                 pch_switch = []
                 if self.task.pch_file:
                     assert self.pch_file is not None
@@ -127,7 +129,7 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_msg(self):
         if self.state == self.STATE_GET_TASK:
-            self.task = self.recv_pyobj()
+            self.task = Task(self.recv_pyobj())
             self.compiler = self.setup_compiler(self.task.compiler_info)
             if self.compiler:
                 self.send_pyobj("OK")

@@ -5,6 +5,7 @@ from multiprocessing import Process, Pool, cpu_count
 from multiprocessing.managers import SyncManager, BaseProxy
 from time import sleep, time
 from msvc import MSVCWrapper
+from subprocess import list2cmdline
 
 from scan_headers import collect_headers
 from utils import send_file, send_compressed_file
@@ -268,9 +269,9 @@ class CompileSession:
     def create_tasks(self, compiler_wrapper, cwd, command):
         ctx = TaskCreator(compiler_wrapper, cwd, command)
         if ctx.build_local():
-            call = [b'EXECUTE_AND_EXIT', ctx.executable().encode()]
-            call.extend(option.make_str().encode() for option in ctx.option_values())
-            self.client_conn.send(call)
+            call = [ctx.executable().encode()]
+            call.extend(option.make_str() for option in ctx.option_values())
+            self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(cmd).encode()])
         else:
             self.tasks = ctx.create_tasks()
             self.task_index = 0
@@ -299,9 +300,7 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_OK
         else:
             self.test_source = self.compiler.prepare_test_source()
-            command = [b'EXECUTE_GET_OUTPUT']
-            command.extend([x.encode() for x in self.test_source.command()])
-            self.client_conn.send(command)
+            self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):

@@ -16,10 +16,10 @@ def execute(compiler, manager_port, command):
     while True:
         request = conn.recv_multipart()
         if request[0] == b'EXECUTE_AND_EXIT':
-            cmd = [x.decode() for x in request[1:]]
+            cmd = request[1].decode()
             return subprocess.call(cmd)
         elif request[0] == b'EXECUTE_GET_OUTPUT':
-            cmd = [x.decode() for x in request[1:]]
+            cmd = request[1].decode()
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 stdout, stderr = proc.communicate()
             conn.send_multipart([str(proc.returncode).encode(), stdout, stderr])

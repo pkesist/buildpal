@@ -101,14 +101,15 @@ class ScanHeaders(Process):
                 [task['pch_header']] if task['pch_header'] else [])
 
 class TaskCreator:
-    def __init__(self, compiler_wrapper, cwd, command, timer):
+    def __init__(self, compiler_wrapper, executable, cwd, command, timer):
         self.__compiler = compiler_wrapper
-        with timer.timeit("parse_options"):
+        self.__executable = executable
+        with timer.timeit('parse_options'):
             self.__option_values = list(compiler_wrapper.parse_options(cwd, command[1:]))
         self.__cwd = cwd
 
     def executable(self):
-        return self.__compiler.compiler_executable()
+        return self.__executable
 
     def option_values(self):
         return self.__option_values
@@ -223,7 +224,7 @@ class CompileSession:
     STATE_POSTPROCESS = 8
     STATE_DONE = 9
 
-    def __init__(self, compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
+    def __init__(self, compiler, executable, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
         self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
@@ -231,6 +232,7 @@ class CompileSession:
         self.node_info = node_info
         self.node_index = node_index
         self.compiler_info = compiler_info
+        self.executable = executable
 
         self.node_info.connection_open(self.node_index)
 
@@ -243,7 +245,7 @@ class CompileSession:
         self.node_info.connection_closed(self.node_index)
 
     def create_tasks(self, compiler_wrapper, cwd, command):
-        ctx = TaskCreator(compiler_wrapper, cwd, command, self.timer)
+        ctx = TaskCreator(compiler_wrapper, self.executable, cwd, command, self.timer)
         if ctx.build_local():
             call = [ctx.executable()]
             call.extend(option.make_str() for option in ctx.option_values())
@@ -252,7 +254,6 @@ class CompileSession:
             self.tasks = ctx.create_tasks()
             self.task_index = 0
             self.start_task()
-
 
     @property
     def task(self):
@@ -264,19 +265,16 @@ class CompileSession:
         self.task_index += 1
         return True
 
-    def compiler_executable(self):
-        return self.compiler.compiler_executable()
-
     def start_task(self):
-        if self.compiler_executable() in self.compiler_info:
-            self.task['compiler_info'] = self.compiler_info[self.compiler_executable()]
+        if self.executable in self.compiler_info:
+            self.task['compiler_info'] = self.compiler_info[self.executable]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
             self.node_info.add_tasks_sent(self.node_index)
             self.state = self.STATE_WAIT_FOR_OK
         else:
-            self.test_source = self.compiler.prepare_test_source()
+            self.test_source = self.compiler.prepare_test_source(self.executable)
             self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
@@ -286,9 +284,9 @@ class CompileSession:
         retcode = int(msg[1])
         stdout = msg[2]
         stderr = msg[3]
-        info = self.compiler.compiler_info(stdout, stderr)
-        self.compiler_info[self.compiler_executable()] = info
-        self.task['compiler_info'] = self.compiler_info[self.compiler_executable()]
+        info = self.compiler.compiler_info(self.executable, stdout, stderr)
+        self.compiler_info[self.executable] = info
+        self.task['compiler_info'] = self.compiler_info[self.executable]
         self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
         with self.timer.timeit('send'):
             self.server_conn.send_pyobj(self.task)
@@ -374,13 +372,13 @@ class TaskProcessor:
         def cmp(lhs, rhs):
             lhs_tasks_processing = node_info.connections(lhs)
             rhs_tasks_processing = node_info.connections(rhs)
-            lhs_average_time = node_info.average_time(lhs)
-            rhs_average_time = node_info.average_time(rhs)
-            if lhs_average_time == 0 and rhs_average_time == 0:
+            lhs_time_per_task = node_info.average_time_for_single_task(lhs)
+            rhs_time_per_task = node_info.average_time_for_single_task(rhs)
+            if lhs_time_per_task == 0 and rhs_time_per_task == 0:
                 return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
             if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
-                return -1 if lhs_average_time < rhs_average_time else 1
-            return -1 if lhs_tasks_processing * lhs_average_time <= rhs_tasks_processing * rhs_average_time else 1
+                return -1 if lhs_time_per_task < rhs_time_per_task else 1
+            return -1 if lhs_tasks_processing * lhs_time_per_task <= rhs_tasks_processing * rhs_time_per_task else 1
         compare_key = cmp_to_key(cmp)
 
         with timer.timeit('find_available_node'):
@@ -470,12 +468,16 @@ class TaskProcessor:
                                 client_id = msg[0]
                                 if client_id not in session_from_client:
                                     compiler = msg[1].decode()
-                                    cwd = msg[2].decode()
-                                    command = [x.decode() for x in msg[3:]]
-                                    node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
+                                    executable = msg[2].decode()
+                                    cwd = msg[3].decode()
+                                    command = [x.decode() for x in msg[4:]]
                                     client_conn = self.SendProxy(client_socket, client_id)
                                     client_conn.send([b"TASK_RECEIVED"])
-                                    session = CompileSession(compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
+                                    node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
+                                    session = CompileSession(compiler, executable, cwd,
+                                        command, timer, client_conn, server_conn,
+                                        preprocess_socket, node_info, node_index,
+                                        compiler_info)
                                     session_from_client[client_conn.id] = session
                                     session_from_server[server_conn.socket] = session
                                 else:
@@ -515,16 +517,15 @@ class TaskProcessor:
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Average Time {:<3.2f} Ratio {:<3.2f}\n'
+                '{:<3} Running {:<3} Avg. Time {:<3.2f}\n'
             .format(
                 node[0], node[1],
-                node_info.tasks_sent      (index),
-                node_info.connections     (index),
-                node_info.tasks_completed (index),
-                node_info.tasks_failed    (index),
-                node_info.tasks_processing(index),
-                node_info.average_time    (index),
-                node_info.completion_ratio(index)))
+                node_info.tasks_sent                  (index),
+                node_info.connections                 (index),
+                node_info.tasks_completed             (index),
+                node_info.tasks_failed                (index),
+                node_info.tasks_processing            (index),
+                node_info.average_time_for_single_task(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
@@ -540,9 +541,19 @@ class NodeInfoHolder:
             self._tasks_sent       = 0
             self._total_time       = 0
             self._open_connections = 0
+            self._tasks_change     = None
+            self._avg_tasks = {}
 
     def __init__(self, size):
         self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
+
+    def average_time_for_single_task(self, index):
+        average_tasks = self.average_tasks(index)
+        if not average_tasks:
+            return 0
+        return self.average_time_per_task(index) / average_tasks
+
+    def avg_tasks(self, index): return self.__nodes[index]._avg_tasks
 
     def connection_open(self, index): self.__nodes[index]._open_connections += 1
 
@@ -560,24 +571,42 @@ class NodeInfoHolder:
 
     def total_time(self, index): return self.__nodes[index]._total_time
 
-    def average_time(self, index):
+    def average_time_per_task(self, index):
         tasks_completed = self.tasks_completed(index)
         return self.total_time(index) / tasks_completed if tasks_completed else 0
 
-    def add_tasks_sent(self, index): self.__nodes[index]._tasks_sent += 1
+    def average_tasks(self, index):
+        weighted_duration = 0
+        regular_duration = 0
+        for tasks, duration in self.__nodes[index]._avg_tasks.items():
+            weighted_duration += tasks * duration
+            regular_duration += duration
+        return (weighted_duration / regular_duration) if regular_duration else 0
 
-    def dec_tasks_sent(self, index): self.__nodes[index]._tasks_sent -= 1
+    def __tasks_processing_about_to_change(self, index):
+        node_info = self.__nodes[index]
+        tasks_processing = self.tasks_processing(index)
+        if tasks_processing > 0:
+            current_time = time()
+            duration = current_time - node_info._tasks_change
+            node_info._tasks_change = current_time
+            node_info._avg_tasks.setdefault(tasks_processing, 0)
+            node_info._avg_tasks[tasks_processing] += duration
+        else:
+            node_info._tasks_change = time()
 
-    def add_tasks_completed(self, index): self.__nodes[index]._tasks_completed += 1
+    def add_tasks_sent(self, index):
+        self.__tasks_processing_about_to_change(index)
+        self.__nodes[index]._tasks_sent += 1
+
+    def add_tasks_completed(self, index):
+        self.__tasks_processing_about_to_change(index)
+        self.__nodes[index]._tasks_completed += 1
 
     def add_tasks_failed(self, index): self.__nodes[index]._add_tasks_failed += 1
 
     def add_total_time(self, index, value): self.__nodes[index]._total_time += value
 
-    def completion_ratio(self, index):
-        if not self.tasks_sent(index):
-            return 1.0
-        return self.tasks_completed(index) / self.tasks_sent(index)
 
 class BookKeepingManager(SyncManager):
     pass

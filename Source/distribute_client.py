@@ -5,16 +5,28 @@ import sys
 import zmq
 
 compiler = b'msvc'
+compiler_executable = 'cl.exe'
+
+def find_exe_on_path():
+    path = os.environ['PATH']
+    for p in path.split(';'):
+        name = os.path.join(p, compiler_executable)
+        if os.path.exists(name):
+            return name
 
 def execute(command):
     zmq_ctx = zmq.Context()
     conn = zmq_ctx.socket(zmq.DEALER)
     manager_port = os.environ.get('DB_MGR_PORT')
     if manager_port is None:
-        sys.stderr.write("Set DB_MGR_PORT environment variable.")
+        sys.stderr.write("Set DB_MGR_PORT environment variable.\n")
         return -1
     conn.connect("tcp://localhost:{}".format(manager_port))
-    task = [compiler, os.getcwd().encode()]
+    exe = find_exe_on_path()
+    if not exe:
+        sys.stderr.write('Failed to find compiler executable on PATH.\n')
+        return -1
+    task = [compiler, exe, os.getcwd().encode()]
     task.extend(x.encode() for x in command)
     conn.send_multipart(task)
     response = conn.recv()

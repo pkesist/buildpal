@@ -14,119 +14,36 @@
 char const compiler[] = "msvc";
 unsigned int compilerSize = sizeof(compiler) / sizeof(compiler[0]) - 1;
 
-void freeBuffer( void * buffer, void * hint )
+char const compilerExecutable[] = "cl.exe";
+
+bool locateExecutable( std::string & executable )
 {
-    assert( buffer );
-    assert( !hint );
-    delete[] buffer;
+    DWORD const size = GetEnvironmentVariable( "PATH", NULL, 0 );
+    if ( size == 0 )
+        return false;
+
+    if ( size > 16 * 1024 )
+        return false;
+
+    char * const pathBuffer( static_cast<char *>( alloca( size ) ) );
+    GetEnvironmentVariable( "PATH", pathBuffer, size );
+    std::stringstream pathStream( pathBuffer );
+    std::string path;
+    while ( std::getline( pathStream, path, ';' ) )
+    {
+        if ( path.empty() )
+            continue;
+        if ( *path.rbegin() != '\\' )
+            path.push_back('\\');
+        path.append( compilerExecutable );
+        DWORD const faResult = GetFileAttributes( path.c_str() );
+        if ( faResult == INVALID_FILE_ATTRIBUTES )
+            continue;
+        executable.swap( path );
+        return true;
+    }
+    return false;
 }
-
-void sendData( void * socket, std::unique_ptr<char []> & buffer, std::size_t size, int sendFlags )
-{
-    zmq_msg_t outputMsg;
-    zmq_msg_init_data( &outputMsg, buffer.release(), size, &freeBuffer, 0 );
-    zmq_msg_send( &outputMsg, socket, sendFlags | ZMQ_DONTWAIT );
-    zmq_msg_close( &outputMsg );
-}
-
-void sendData( void * socket, char const * buffer, std::size_t size, int sendFlags )
-{
-    zmq_msg_t msg;
-    zmq_msg_init_size( &msg, size );
-    std::memcpy( zmq_msg_data( &msg ), buffer, size );
-    zmq_msg_send( &msg, socket, sendFlags );
-    zmq_msg_close( &msg );
-}
-
-void sendData( void * socket, std::string const & data, int sendFlags )
-{
-    sendData( socket, data.data(), data.size(), sendFlags );
-}
-
-void pipeToSocket( HANDLE pipe, void * socket, int sendFlags )
-{
-    DWORD available = 0;
-    DWORD inBuffer = 0;
-    if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
-        available = 0;
-
-    std::unique_ptr<char []> buffer;
-    if ( available )
-    {
-        buffer.reset( new char[ available ] );
-        ReadFile( pipe, buffer.get(), available, &inBuffer, NULL );
-    }
-
-    if ( inBuffer )
-        sendData( socket, buffer, inBuffer, sendFlags );
-    else
-    {
-        zmq_msg_t outputMsg;
-        zmq_msg_init_size( &outputMsg, 0 );
-        zmq_msg_send( &outputMsg, socket, sendFlags | ZMQ_DONTWAIT );
-        zmq_msg_close( &outputMsg );
-    }
-}
-
-class MsgReceiver
-{
-public:
-    typedef std::deque<zmq_msg_t> Msgs;
-
-    explicit MsgReceiver( void * socket )
-        : socket_( socket ), msgs_( 2 ), parts_( 0 )
-    {
-        getParts();
-    }
-
-    ~MsgReceiver()
-    {
-        for ( std::size_t msgIndex( 0 ); msgIndex < parts_; ++msgIndex )
-            zmq_msg_close( &msgs_[ msgIndex ] );
-    }
-
-    std::pair<char const *, std::size_t> getPart( std::size_t index )
-    {
-        if ( index >= parts_ )
-            return std::make_pair<char const *, std::size_t>( 0, 0 );
-
-        zmq_msg_t & msg( msgs_[ index ] );
-        char const * const data = static_cast<char *>( zmq_msg_data( &msg ) );
-        std::size_t const size = zmq_msg_size( &msg );
-        return std::make_pair( data, size );
-    }
-
-    void getPart( std::size_t index, char const * * buff, std::size_t * size )
-    {
-        std::pair<char const *, std::size_t> const result( getPart( index ) );
-        if ( buff ) *buff = result.first;
-        if ( size ) *size = result.second;
-    }
-
-    std::size_t parts() const { return parts_; }
-
-private:
-    void getParts()
-    {
-        if ( msgs_.size() <= parts_ )
-            msgs_.resize( 2 * msgs_.size() );
-        zmq_msg_t & msg( msgs_[ parts_ ] );
-        zmq_msg_init( &msg );
-        zmq_msg_recv( &msg, socket_, 0 );
-        parts_++;
-
-        int64_t more = 0;
-        size_t more_size = sizeof(more);
-        int const rc = zmq_getsockopt( socket_, ZMQ_RCVMORE, &more, &more_size );
-        if ( more )
-            getParts();
-    }
-
-private:
-    void * socket_;
-    Msgs msgs_;
-    std::size_t parts_;
-};
 
 class ZmqSocket
 {
@@ -177,12 +94,116 @@ public:
         connected_ = false;
     }
 
+    void sendData( std::unique_ptr<char []> & buffer, std::size_t size, int sendFlags )
+    {
+        zmq_msg_t outputMsg;
+        zmq_msg_init_data( &outputMsg, buffer.release(), size, &freeBuffer, 0 );
+        zmq_msg_send( &outputMsg, socket_, sendFlags | ZMQ_DONTWAIT );
+        zmq_msg_close( &outputMsg );
+    }
+
+    void sendData( char const * buffer, std::size_t size, int sendFlags )
+    {
+        zmq_msg_t msg;
+        zmq_msg_init_size( &msg, size );
+        std::memcpy( zmq_msg_data( &msg ), buffer, size );
+        zmq_msg_send( &msg, socket_, sendFlags );
+        zmq_msg_close( &msg );
+    }
+
+    void sendData( std::string const & data, int sendFlags )
+    {
+        sendData( data.data(), data.size(), sendFlags );
+    }
+
     void * handle() const { return socket_; }
+
+private:
+    static void freeBuffer( void * buffer, void * hint )
+    {
+        assert( buffer );
+        assert( !hint );
+        delete[] buffer;
+    }
 
 private:
     void * socket_;
     std::string endpoint_;
     bool connected_;
+};
+
+void pipeToSocket( HANDLE pipe, ZmqSocket & socket, int sendFlags )
+{
+    DWORD available = 0;
+    DWORD inBuffer = 0;
+    if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
+        available = 0;
+
+    std::unique_ptr<char []> buffer;
+    if ( available )
+    {
+        buffer.reset( new char[ available ] );
+        ReadFile( pipe, buffer.get(), available, &inBuffer, NULL );
+    }
+
+    if ( inBuffer )
+        socket.sendData( buffer, inBuffer, sendFlags );
+    else
+        socket.sendData( std::string(), sendFlags );
+}
+
+class MsgReceiver
+{
+public:
+    typedef std::deque<zmq_msg_t> Msgs;
+
+    explicit MsgReceiver( ZmqSocket & socket )
+        : msgs_( 2 ), parts_( 0 )
+    {
+        int64_t more = 0;
+        size_t more_size = sizeof(more);
+        do
+        {
+            if ( msgs_.size() <= parts_ )
+                msgs_.resize( 2 * msgs_.size() );
+            zmq_msg_t & msg( msgs_[ parts_ ] );
+            zmq_msg_init( &msg );
+            zmq_msg_recv( &msg, socket.handle(), 0 );
+            parts_++;
+
+            int const rc = zmq_getsockopt( socket.handle(), ZMQ_RCVMORE, &more, &more_size );
+        } while ( more );
+    }
+
+    ~MsgReceiver()
+    {
+        for ( std::size_t msgIndex( 0 ); msgIndex < parts_; ++msgIndex )
+            zmq_msg_close( &msgs_[ msgIndex ] );
+    }
+
+    std::pair<char const *, std::size_t> getPart( std::size_t index )
+    {
+        if ( index >= parts_ )
+            return std::make_pair<char const *, std::size_t>( 0, 0 );
+
+        zmq_msg_t & msg( msgs_[ index ] );
+        char const * const data = static_cast<char *>( zmq_msg_data( &msg ) );
+        std::size_t const size = zmq_msg_size( &msg );
+        return std::make_pair( data, size );
+    }
+
+    void getPart( std::size_t index, char const * * buff, std::size_t * size )
+    {
+        std::pair<char const *, std::size_t> const result( getPart( index ) );
+        if ( buff ) *buff = result.first;
+        if ( size ) *size = result.second;
+    }
+
+    std::size_t parts() const { return parts_; }
+
+private:
+    Msgs msgs_;
+    std::size_t parts_;
 };
 
 class ZmqContext
@@ -218,6 +239,13 @@ int main( int argc, char * argv[] )
         return -1;
     }
 
+    std::string executable;
+    if ( !locateExecutable( executable ) )
+    {
+        std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
+        return -1;
+    }
+
     char * buffer = static_cast<char *>( alloca( size ) );
     GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
 
@@ -225,21 +253,20 @@ int main( int argc, char * argv[] )
     endpoint.append( buffer );
     
     socket.connect( endpoint );
-
-    sendData( socket.handle(), compiler, compilerSize, ZMQ_SNDMORE );
+    socket.sendData( compiler, compilerSize, ZMQ_SNDMORE );
 
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
     std::unique_ptr<char []> currentPathBuffer( new char[ currentPathSize ] );
     GetCurrentDirectory( currentPathSize, currentPathBuffer.get() );
-    sendData( socket.handle(), currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
-
+    socket.sendData( executable, ZMQ_SNDMORE );
+    socket.sendData( currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
     for ( int arg( 1 ); arg < argc; ++arg )
     {
-        sendData( socket.handle(), argv[arg], strlen( argv[arg] ), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
+        socket.sendData( argv[arg], strlen( argv[arg] ), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
     }
 
     {
-        MsgReceiver reply( socket.handle() );
+        MsgReceiver reply( socket );
         assert( reply.parts() == 1 );
         std::pair<char const *, std::size_t> data( reply.getPart( 0 ) );
         assert( data.second == 13 );
@@ -248,7 +275,7 @@ int main( int argc, char * argv[] )
 
     while ( true )
     {
-        MsgReceiver requestReceiver( socket.handle() );
+        MsgReceiver requestReceiver( socket );
 
         assert( requestReceiver.parts() >= 1 );
 
@@ -355,11 +382,11 @@ int main( int argc, char * argv[] )
                     char buffer[20];
                     _itoa( result, buffer, 10 );
                     std::size_t const size( strlen( buffer ) );
-                    sendData( socket.handle(), buffer, strlen( buffer ), ZMQ_SNDMORE );
+                    socket.sendData( buffer, strlen( buffer ), ZMQ_SNDMORE );
                 }
 
-                pipeToSocket( stdOutRead, socket.handle(), ZMQ_SNDMORE );
-                pipeToSocket( stdErrRead, socket.handle(), 0 );
+                pipeToSocket( stdOutRead, socket, ZMQ_SNDMORE );
+                pipeToSocket( stdErrRead, socket, 0 );
 
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );

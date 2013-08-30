@@ -134,10 +134,6 @@ class MSVCWrapper(CompilerWrapper):
         # /Tc or /Tp options on the command line
         return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
-    @classmethod
-    def compiler_executable(cls):
-        return 'cl.exe'
-
     placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
 
     class TestSource:
@@ -168,16 +164,16 @@ class MSVCWrapper(CompilerWrapper):
         def command(self):
             return [self.executable, '/Fo{}'.format(self.obj.filename()), '-c', self.cpp.filename()]
 
-    def prepare_test_source(self):
+    def prepare_test_source(self, executable):
         #   Here we should test only for macros which do not change depending on
         # compiler options, i.e. which are fixed for a specific compiler
         # executable.
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
-        return MSVCWrapper.TestSource(self.compiler_executable(), macros, self.placeholder_string)
+        return MSVCWrapper.TestSource(executable, macros, self.placeholder_string)
 
-    def compiler_info(self, stdout, stderr):
+    def compiler_info(self, executable, stdout, stderr):
         output = stdout.split(b'\r\n')
         macros = []
         for line in output:
@@ -191,7 +187,7 @@ class MSVCWrapper(CompilerWrapper):
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
         assert version in self.compiler_versions
-        result = CompilerInfo("msvc", os.path.split(self.compiler_executable())[1], version, macros)
+        result = CompilerInfo("msvc", os.path.split(executable)[1], version, macros)
         result.pch_file_option = self.pch_file_option()
         result.define_option = self.define_option()
         result.include_option = self.include_option()

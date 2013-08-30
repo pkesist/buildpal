@@ -372,8 +372,8 @@ class TaskProcessor:
         def cmp(lhs, rhs):
             lhs_tasks_processing = node_info.connections(lhs)
             rhs_tasks_processing = node_info.connections(rhs)
-            lhs_time_per_task = node_info.average_time_for_single_task(lhs)
-            rhs_time_per_task = node_info.average_time_for_single_task(rhs)
+            lhs_time_per_task = node_info.average_task_time(lhs)
+            rhs_time_per_task = node_info.average_task_time(rhs)
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
                 return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
             if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
@@ -517,15 +517,17 @@ class TaskProcessor:
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Avg. Time {:<3.2f}\n'
+                '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
+                'Avg. Time {:<3.2f}\n'
             .format(
                 node[0], node[1],
-                node_info.tasks_sent                  (index),
-                node_info.connections                 (index),
-                node_info.tasks_completed             (index),
-                node_info.tasks_failed                (index),
-                node_info.tasks_processing            (index),
-                node_info.average_time_for_single_task(index)))
+                node_info.tasks_sent       (index),
+                node_info.connections      (index),
+                node_info.tasks_completed  (index),
+                node_info.tasks_failed     (index),
+                node_info.tasks_processing (index),
+                node_info.average_tasks    (index),
+                node_info.average_task_time(index)))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
@@ -547,13 +549,13 @@ class NodeInfoHolder:
     def __init__(self, size):
         self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
 
-    def average_time_for_single_task(self, index):
+    def average_task_time(self, index):
         average_tasks = self.average_tasks(index)
         if not average_tasks:
             return 0
-        return self.average_time_per_task(index) / average_tasks
-
-    def avg_tasks(self, index): return self.__nodes[index]._avg_tasks
+        tasks_completed = self.tasks_completed(index)
+        average_time_per_task = self.total_time(index) / tasks_completed if tasks_completed else 0
+        return average_time_per_task / average_tasks
 
     def connection_open(self, index): self.__nodes[index]._open_connections += 1
 
@@ -571,16 +573,10 @@ class NodeInfoHolder:
 
     def total_time(self, index): return self.__nodes[index]._total_time
 
-    def average_time_per_task(self, index):
-        tasks_completed = self.tasks_completed(index)
-        return self.total_time(index) / tasks_completed if tasks_completed else 0
-
     def average_tasks(self, index):
-        weighted_duration = 0
-        regular_duration = 0
-        for tasks, duration in self.__nodes[index]._avg_tasks.items():
-            weighted_duration += tasks * duration
-            regular_duration += duration
+        avg_tasks = self.__nodes[index]._avg_tasks
+        regular_duration = sum((duration for duration in avg_tasks.values()))
+        weighted_duration = sum((duration * tasks for tasks, duration in avg_tasks.items()))
         return (weighted_duration / regular_duration) if regular_duration else 0
 
     def __tasks_processing_about_to_change(self, index):

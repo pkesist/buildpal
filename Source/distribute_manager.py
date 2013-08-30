@@ -101,9 +101,10 @@ class ScanHeaders(Process):
                 [task['pch_header']] if task['pch_header'] else [])
 
 class TaskCreator:
-    def __init__(self, compiler_wrapper, cwd, command):
+    def __init__(self, compiler_wrapper, cwd, command, timer):
         self.__compiler = compiler_wrapper
-        self.__option_values = list(compiler_wrapper.parse_options(cwd, command[1:]))
+        with timer.timeit("parse_options"):
+            self.__option_values = list(compiler_wrapper.parse_options(cwd, command[1:]))
         self.__cwd = cwd
 
     def executable(self):
@@ -129,12 +130,7 @@ class TaskCreator:
         return (input.make_str() for input in self.free_options())
 
     def build_local(self):
-        tokens = list(self.filter_options(BuildLocalCategory))
-        if not tokens:
-            return False
-
-        print("Command requires local compilation.")
-        return True
+        return bool(list(self.filter_options(BuildLocalCategory)))
 
     def create_tasks(self):
         # See if user specified an explicit name for the object file.
@@ -165,6 +161,7 @@ class TaskCreator:
                 pch_file = pch_file[0].val
             else:
                 pch_file = os.path.splitext(pch_header)[0] + '.pch'
+            pch_file = os.path.join(self.__cwd, pch_file)
             if not os.path.exists(pch_file):
                 raise Exception("PCH file '{}' does not exist.".format(pch_file))
             pch_file = os.path.join(self.__cwd, pch_file)
@@ -246,15 +243,16 @@ class CompileSession:
         self.node_info.connection_closed(self.node_index)
 
     def create_tasks(self, compiler_wrapper, cwd, command):
-        ctx = TaskCreator(compiler_wrapper, cwd, command)
+        ctx = TaskCreator(compiler_wrapper, cwd, command, self.timer)
         if ctx.build_local():
-            call = [ctx.executable().encode()]
+            call = [ctx.executable()]
             call.extend(option.make_str() for option in ctx.option_values())
-            self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(cmd).encode()])
+            self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
         else:
             self.tasks = ctx.create_tasks()
             self.task_index = 0
             self.start_task()
+
 
     @property
     def task(self):
@@ -303,7 +301,7 @@ class CompileSession:
             task_ok = msg
             assert task_ok == "OK"
             self.server_conn.send_pyobj('HEADERS_ARCHIVE')
-            with self.timer.timeit('send.zip'), open(self.task['tempfile'], 'rb') as file:
+            with self.timer.timeit('send.tar'), open(self.task['tempfile'], 'rb') as file:
                 send_file(self.server_conn.send_pyobj, file)
             os.remove(self.task['tempfile'])
             self.server_conn.send_pyobj('SOURCE_FILE')
@@ -442,15 +440,16 @@ class TaskProcessor:
         compiler_info = {}
 
         self.last_time = None
-        try:
-            with BookKeepingManager() as book_keeper:
-                node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
-                timer = book_keeper.Timer()
 
-                scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
-                for scan_worker in scan_workers:
-                    scan_worker.start()
+        with BookKeepingManager() as book_keeper:
+            node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
+            timer = book_keeper.Timer()
 
+            scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
+            for scan_worker in scan_workers:
+                scan_worker.start()
+
+            try:
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     sockets = dict(poller.poll(1000))
@@ -466,27 +465,28 @@ class TaskProcessor:
                             poller.register(session.server_conn.socket, zmq.POLLIN)
 
                         elif socket is client_socket:
-                            msg = client_socket.recv_multipart()
-                            client_id = msg[0]
-                            if client_id not in session_from_client:
-                                compiler = msg[1].decode()
-                                cwd = msg[2].decode()
-                                command = [x.decode() for x in msg[3:]]
-                                node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
-                                client_conn = self.SendProxy(client_socket, client_id)
-                                client_conn.send([b"TASK_RECEIVED"])
-                                session = CompileSession(compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
-                                session_from_client[client_conn.id] = session
-                                session_from_server[server_conn.socket] = session
-                            else:
-                                session = session_from_client[client_id]
-                                server_socket = session.server_conn.socket
-                                assert server_socket in session_from_server
-                                session_done = session.got_data_from_client(msg)
-                                if session_done:
-                                    del session_from_client[client_id]
-                                    del session_from_server[server_socket]
-                                    poller.unregister(server_socket)
+                            with timer.timeit('poll.iteration.client'):
+                                msg = client_socket.recv_multipart()
+                                client_id = msg[0]
+                                if client_id not in session_from_client:
+                                    compiler = msg[1].decode()
+                                    cwd = msg[2].decode()
+                                    command = [x.decode() for x in msg[3:]]
+                                    node_index, server_conn = self.__find_node(self.__nodes, node_info, timer)
+                                    client_conn = self.SendProxy(client_socket, client_id)
+                                    client_conn.send([b"TASK_RECEIVED"])
+                                    session = CompileSession(compiler, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info)
+                                    session_from_client[client_conn.id] = session
+                                    session_from_server[server_conn.socket] = session
+                                else:
+                                    session = session_from_client[client_id]
+                                    server_socket = session.server_conn.socket
+                                    assert server_socket in session_from_server
+                                    session_done = session.got_data_from_client(msg)
+                                    if session_done:
+                                        del session_from_client[client_id]
+                                        del session_from_server[server_socket]
+                                        poller.unregister(server_socket)
 
                         else:
                             assert socket in session_from_server
@@ -499,9 +499,9 @@ class TaskProcessor:
                                 del session_from_client[client_id]
                                 del session_from_server[socket]
                                 poller.unregister(socket)
-        finally:
-            for scan_worker in scan_workers:
-                scan_worker.terminate()
+            finally:
+                for scan_worker in scan_workers:
+                    scan_worker.terminate()
 
     def print_stats(self, node_info, times):
         current = time()

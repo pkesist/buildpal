@@ -11,19 +11,19 @@ import winreg
 
 esc = ['/', '-']
 def simple(name, macros=[]): 
-    result = CompilerOption(name, esc, None, False)
+    result = CompilerOption(name, esc, suff=None, has_arg=False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def simple_w_minus(name, macros=[]):
-    result = CompilerOption(name, esc, '-', False)
+    result = CompilerOption(name, esc, suff='-', has_arg=False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def with_param(name, macros=[]):
-    result = CompilerOption(name, esc, None, True, False, False)
+    result = CompilerOption(name, esc, suff=None, has_arg=True, allow_spaces=False)
     for macro in macros:
         result.add_macro(macro)
     return result

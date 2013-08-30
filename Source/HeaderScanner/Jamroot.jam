@@ -1,7 +1,11 @@
 using winlibs ;
 
-project HeaderScanner : requirements <warnings>off ;
+local release-variants = profile release ;
 
+project HeaderScanner : requirements <warnings>off
+    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL "
+    <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG "
+;
 
 alias clangLibs :
     /clang//clangRewriteCore    

@@ -26,12 +26,15 @@ explicit zmq_lib ;
 
 project distribute_client ;
 
-exe distribute_client
+exe db_cl
 :
-    distribute_client.cpp
-    zmq_lib/<link> static
+    db_cl.cpp
+    zmq_lib/<link>static
+:
+    <toolset>msvc,<variant>release:<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL"
+    <toolset>msvc,<variant>release:<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
 ;
 
-explicit distribute_client ;
+explicit db_cl ;
 
-install install-client : distribute_client : <location>.. <install-dependencies>on <install-type>EXE <install-type>SHARED_LIB ;
+install install-client : db_cl : <location>.. <install-dependencies>on <install-type>EXE <install-type>SHARED_LIB ;

@@ -6,34 +6,40 @@
 
 llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
 {
-    clang::SourceManager const & sourceManager( preprocessor.getSourceManager() );
     if ( !def )
+        // Empty string means undefined macro. If defined it will at least
+        // contain its name.
         return llvm::StringRef();
-    clang::SourceLocation loc( def->getLocation() );
-    if ( !loc.isValid() )
-        return llvm::StringRef();
-    std::pair<clang::FileID, unsigned> spellingLoc( sourceManager.getDecomposedSpellingLoc( loc ) );
-    if ( spellingLoc.first.isInvalid() )
-        throw std::runtime_error( "Invalid FileID." );
-    clang::FileEntry const * fileEntry( sourceManager.getFileEntryForID( spellingLoc.first ) );
+
+    clang::SourceManager & sourceManager( preprocessor.getSourceManager() );
+    clang::MacroInfo const * macroInfo( def->getMacroInfo() );
+    assert( macroInfo );
+
+    clang::SourceLocation const startLoc( macroInfo->getDefinitionLoc() );
+    std::pair<clang::FileID, unsigned> startSpellingLoc( sourceManager.getDecomposedSpellingLoc( startLoc ) );
     bool invalid;
-    llvm::MemoryBuffer const * buffer( sourceManager.getBuffer( spellingLoc.first, loc, &invalid ) );
+    llvm::StringRef const buffer( sourceManager.getBufferData( startSpellingLoc.first, &invalid ) );
     assert( !invalid );
-    char const * defLoc( buffer->getBufferStart() + spellingLoc.second );
-    // Find end of directive.
-    char const * end( defLoc );
-    bool lastNonspaceIsBackslash( false );
-    bool lastIsSpace( false );
-    for ( ; ; ++end )
+    char const * const macroStart = buffer.data() + startSpellingLoc.second;
+    unsigned int const tokCount( macroInfo->getNumTokens() );
+    if ( !tokCount )
     {
-        if ( *end == '\n' && !lastNonspaceIsBackslash )
-            break;
-        bool const currentIsSpace = *end == ' ' || *end == '\t' || *end == '\r';
-        if ( !currentIsSpace )
-            lastNonspaceIsBackslash = ( !lastNonspaceIsBackslash || lastIsSpace ) && ( *end == '\\' );
-        lastIsSpace = currentIsSpace;
+        // Macro does not have any tokens. I have no idea how to get the length
+        // of the directive itself. Just go to the end of line and then back up
+        // until the first character. In case we see a backslash, just ignore it
+        // and keep backing up.
+        char const * end = macroStart;
+        while ( *end != '\n' ) ++end;
+        --end;
+        while ( ( *end == '\t' ) || ( *end == ' ' ) || ( *end == '\r' ) || ( *end == '\\' ) ) --end;
+        return llvm::StringRef( macroStart, end - macroStart + 1 );
     }
-    while ( *end == ' ' || *end == '\t' || *end == '\r' )
-        end--;
-    return llvm::StringRef( defLoc, end - defLoc );
+
+    clang::Token const & lastToken( macroInfo->getReplacementToken( tokCount - 1 ) );
+    clang::SourceLocation const endLoc( lastToken.getLocation() );
+    std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( endLoc ) );
+    endSpellingLoc.second += lastToken.getLength();
+    assert( startSpellingLoc.first == endSpellingLoc.first );
+    assert( startSpellingLoc.second <= endSpellingLoc.second );
+    return llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second );
 }

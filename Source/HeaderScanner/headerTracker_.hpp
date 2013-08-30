@@ -7,6 +7,7 @@
 #include "headerScanner_.hpp"
 
 #include "headerCache_.hpp"
+#include "utility_.hpp"
 
 #include "boost/bind.hpp"
 
@@ -61,19 +62,20 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( HeaderName const & header, std::shared_ptr<Cache::CacheEntry> const & cacheHit )
+        explicit HeaderCtx( HeaderName const & header, std::shared_ptr<Cache::CacheEntry> const & cacheHit, clang::Preprocessor const & preprocessor )
             :
             header_( header ),
-            cacheHit_( cacheHit )
+            cacheHit_( cacheHit ),
+            preprocessor_( preprocessor )
         {
             if ( cacheHit_ )
                 includedHeaders_.push_back( cacheHit );
         }
 
-        void macroUsed( Macro const & macro )
+        void macroUsed( llvm::StringRef macroName, clang::MacroDirective const * macroDef )
         {
-            if ( cacheHit_ )
-                return;
+            assert ( !fromCache() );
+            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, macroDef ) ) );
             if ( usedMacros_.find( macro ) != usedMacros_.end() )
                 // We already know about this.
                 return;
@@ -81,25 +83,24 @@ private:
                 usedMacros_.insert( macro );
         }
 
-        void macroDefined( Macro const & macro )
+        void macroDefined( llvm::StringRef macroName, clang::MacroDirective const * macroDef )
         {
-            if ( cacheHit_ )
-                return;
+            assert ( !fromCache() );
+            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, macroDef ) ) );
             headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
             definedMacros_.insert( macro );
         }
 
-        void macroUndefined( Macro const & macro )
+        void macroUndefined( llvm::StringRef macroName )
         {
-            if ( cacheHit_ )
-                return;
+            assert ( !fromCache() );
+            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, 0 ) ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
         void addHeader( HeaderName const & header )
         {
-            if ( cacheHit_ )
-                return;
+            assert ( !fromCache() );
             includedHeaders_.push_back( header );
         }
 
@@ -129,7 +130,10 @@ private:
 
         std::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
 
+        bool fromCache() const { return cacheHit_; }
+
     private:
+        clang::Preprocessor const & preprocessor_;
         HeaderName header_;
         std::shared_ptr<Cache::CacheEntry> cacheHit_;
         Macros usedMacros_;
@@ -148,8 +152,6 @@ private:
 
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
-
-    llvm::StringRef macroDefFromSourceLocation( clang::MacroDirective const * def );
 
 private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;

@@ -4,11 +4,17 @@ import subprocess
 import sys
 import zmq
 
-def execute(compiler, manager_port, command):
+compiler = b'msvc'
+
+def execute(command):
     zmq_ctx = zmq.Context()
     conn = zmq_ctx.socket(zmq.DEALER)
+    manager_port = os.environ.get('DB_MGR_PORT')
+    if manager_port is None:
+        sys.stderr.write("Set DB_MGR_PORT environment variable.")
+        return -1
     conn.connect("tcp://localhost:{}".format(manager_port))
-    task = [compiler.encode(), os.getcwd().encode()]
+    task = [compiler, os.getcwd().encode()]
     task.extend(x.encode() for x in command)
     conn.send_multipart(task)
     response = conn.recv()
@@ -42,4 +48,4 @@ def execute(compiler, manager_port, command):
             return -1
 
 if __name__ == '__main__':
-    sys.exit(execute(sys.argv[1], sys.argv[2], sys.argv[3:]))
+    sys.exit(execute(sys.argv[1:]))

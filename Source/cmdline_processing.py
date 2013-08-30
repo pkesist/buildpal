@@ -23,11 +23,10 @@ class CmdLineOption:
                 self.sep or '',
                 self.val or '')
 
-    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
+    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True):
         self.__name = name
         self.__has_arg = has_arg
         self.__allow_spaces = allow_spaces
-        self.__allow_equal = allow_equal
         if esc is None:
             raise RuntimeError("Command line option must have escape sequence defined.")
         if isinstance(esc, str):
@@ -35,23 +34,13 @@ class CmdLineOption:
         if not isinstance(esc, list):
             raise RuntimeError("Escape sequence parameter must be a string or list of strings.")
         self.__esc = esc
-        self.__suff = suff
-        self.__def_sep = '' if not self.__has_arg else default_separator or (' ' if allow_spaces else '=' if allow_equal else '')
+        self.__def_sep = '' if not self.__has_arg or not allow_spaces else ' '
 
-    def __esc_regex(self):
-        return "(?P<esc>({}))".format("|".join([re.escape(esc) for esc in self.__esc]))
-
-    def __value_regex(self):
-        result = []
-        result.append("(?P<suf>{})?".format(re.escape(self.__suff if self.__suff else '')))
-        if not self.__has_arg:
-            result.append("$")
-            return "".join(result)
-        if self.__allow_equal:
-            result.append(r"(\=(?P<val>.+))?$")
-        else:
-            result.append(r"(?P<val>.+)?$")
-        return "".join(result)
+        val_regex = "(?P<suf>{})?{}$".format(
+            re.escape(suff if suff else ''),
+            r"(?P<val>.+)?" if self.__has_arg else '')
+        self.__option_regex = re.compile(r"{name}{end}".format(
+            name=re.escape(self.__name), end=val_regex))
 
     def name(self):
         return self.__name
@@ -66,23 +55,19 @@ class CmdLineOption:
         return CmdLineOption.Value(self, self.esc(), '', self.__def_sep, val)
 
     def parse(self, option, iter):
-        regex = r"^{esc}{name}{end}".format(esc=self.__esc_regex(),
-            name=re.escape(self.__name),
-            end=self.__value_regex())
-        match = re.match(regex, option)
+        if option[0] not in self.__esc:
+            return None
+        esc = option[0]
+        match = self.__option_regex.match(option[1:])
         if not match:
             return None
-        esc = match.group('esc')
-        if not esc in self.__esc:
-            return None
-        name = self.name()
         suf = match.group('suf')
         if not self.__has_arg:
             return self.__make_match(esc, suf, None, None)
 
         val = match.group('val')
         if val is not None:
-            return self.__make_match(esc, suf, '=' if self.__allow_equal else '', val)
+            return self.__make_match(esc, suf, '', val)
 
         if self.__allow_spaces:
             try:
@@ -150,8 +135,8 @@ class CompilationCategory(Category): pass
 class LinkingCategory(Category): pass
 
 class CompilerOption(CmdLineOption):
-    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True, allow_equal=True, default_separator=None):
-        super().__init__(name, esc, suff, has_arg, allow_spaces, allow_equal, default_separator)
+    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True):
+        super().__init__(name, esc, suff, has_arg, allow_spaces)
         self.__categories = set()
         self.__macros = set()
 

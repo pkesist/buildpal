@@ -202,8 +202,27 @@ int main( int argc, char * argv[] )
     ZmqContext context;
     ZmqSocket socket = context.socket( ZMQ_DEALER );
 
+    DWORD size = GetEnvironmentVariable("DB_MGR_PORT", NULL, 0 );
+    if ( size == 0 )
+    {
+        if ( GetLastError() == ERROR_ENVVAR_NOT_FOUND )
+            std::cerr << "You must define DB_MGR_PORT environment variable.\n";
+        else
+            std::cerr << "Failed to get DB_MGR_PORT environment variable.\n";
+        return -1;
+    }
+
+    if ( size > 256 )
+    {
+        std::cerr << "Invalid DB_MGR_PORT environment variable value.\n";
+        return -1;
+    }
+
+    char * buffer = static_cast<char *>( alloca( size ) );
+    GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
+
     std::string endpoint( "tcp://localhost:" );
-    endpoint.append( argv[1] );
+    endpoint.append( buffer );
     
     socket.connect( endpoint );
 
@@ -214,9 +233,9 @@ int main( int argc, char * argv[] )
     GetCurrentDirectory( currentPathSize, currentPathBuffer.get() );
     sendData( socket.handle(), currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
 
-    for ( int arg( 2 ); arg < argc; ++arg )
+    for ( int arg( 1 ); arg < argc; ++arg )
     {
-        sendData( socket.handle(), argv[arg], strlen(argv[arg]), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
+        sendData( socket.handle(), argv[arg], strlen( argv[arg] ), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
     }
 
     {

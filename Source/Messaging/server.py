@@ -58,7 +58,7 @@ class ServerWorker:
         # socket.
         incoming.setsockopt(zmq.IDENTITY, client_id)
         incoming.connect(self.sessions_addr)
-                    
+
         class Recv:
             def __init__(self, poller, incoming):
                 self.__poller = poller

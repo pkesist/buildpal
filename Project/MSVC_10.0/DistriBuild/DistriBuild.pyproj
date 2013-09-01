@@ -48,7 +48,7 @@
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />
     <Content Include="Source\Client\build-config.ini" />
-    <Content Include="Source\Client\distribute_client.cpp" />
+    <Content Include="Source\Client\db_cl.cpp" />
     <Content Include="Source\Client\Jamroot.jam" />
     <Content Include="Source\HeaderScanner\build-config.ini" />
     <Content Include="Source\HeaderScanner\headerCache_.cpp" />

@@ -14,8 +14,6 @@ class Broker:
         self.poll_all.register(self.clients, zmq.POLLIN)
         self.poll_all.register(self.servers, zmq.POLLIN)
 
-        self.workers = collections.deque()
-
         self.control = zmq_ctx.socket(zmq.SUB)
         self.control.setsockopt(zmq.SUBSCRIBE, b'')
         self.poll_servers.register(self.control, zmq.POLLIN)
@@ -37,17 +35,19 @@ class Broker:
         self.control.bind(address)
 
     def run(self):
+        workers = collections.deque()
+
         while True:
-            socks = dict((self.poll_all if self.workers else self.poll_servers).poll())
+            socks = dict((self.poll_all if workers else self.poll_servers).poll())
 
             if socks.get(self.servers) == zmq.POLLIN:
                 msg = self.servers.recv_multipart()
                 name = msg[0]
                 if len(msg) == 2 and msg[1] == b'READY':
-                    if name in self.workers:
+                    if name in workers:
                         self.servers.send_multipart([name, b'ONCE IS FINE'])
                     else:
-                        self.workers.append(name)
+                        workers.append(name)
                         self.servers.send_multipart([name, b'OK'])
                 else:
                     self.clients.send_multipart(msg[1:])
@@ -57,8 +57,8 @@ class Broker:
                 name = msg[0]
                 
                 if len(msg) == 2 and msg[1] == b'GIMME':
-                    server = self.workers[0]
-                    self.workers.rotate(1)
+                    server = workers[0]
+                    workers.rotate(1)
                     self.clients.send_multipart([name, server])
                     self.servers.send_multipart([server, name, b'CREATE_SESSION'])
                 else:

@@ -1,35 +1,9 @@
-path-constant ZMQ_ROOT : D:\\Sandboxes\\External\\libzmq ;
-
-project zmqlib ;
-using winlibs ;
-
-alias zmq_headers ;
-
-lib zmq_lib
-:
-    [ glob $(ZMQ_ROOT)/src/*.cpp ]
-:
-    <link>static:<define>ZMQ_STATIC
-    <toolset>msvc:<include>$(ZMQ_ROOT)/builds/msvc
-    <toolset>gcc,<target-os>windows:<include>$(ZMQ_ROOT)/builds/mingw32
-:
-:
-    <include>$(ZMQ_ROOT)/include
-    <link>shared:<define>DLL_EXPORT
-    <link>static:<define>ZMQ_STATIC
-    <toolset>msvc:<include>$(ZMQ_ROOT)/builds/msvc
-    <toolset>gcc,<target-os>windows:<include>$(ZMQ_ROOT)/builds/mingw32
-    <source>/winlibs//ws2_32lib
-    <source>/winlibs//advapi32lib
-;
-explicit zmq_lib ;
-
 project distribute_client ;
 
 exe db_cl
 :
     db_cl.cpp
-    zmq_lib/<link>static
+    /zmq//libzmq/<link>static
 :
     <toolset>msvc,<variant>release:<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL"
     <toolset>msvc,<variant>release:<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"

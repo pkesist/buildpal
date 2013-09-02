@@ -9,21 +9,20 @@ import re
 import sys
 import winreg
 
-esc = ['/', '-']
 def simple(name, macros=[]): 
-    result = CompilerOption(name, esc, suff=None, has_arg=False)
+    result = CompilerOption(name, suff=None, has_arg=False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def simple_w_minus(name, macros=[]):
-    result = CompilerOption(name, esc, suff='-', has_arg=False)
+    result = CompilerOption(name, suff='-', has_arg=False)
     for macro in macros:
         result.add_macro(macro)
     return result
 
 def with_param(name, macros=[]):
-    result = CompilerOption(name, esc, suff=None, has_arg=True, allow_spaces=False)
+    result = CompilerOption(name, suff=None, has_arg=True, allow_spaces=False)
     for macro in macros:
         result.add_macro(macro)
     return result
@@ -50,7 +49,8 @@ class CompilerWrapper(CmdLineOptions):
     def use_pch_option(self): raise NotImplementedError()
     def pch_file_option(self): raise NotImplementedError()
 
-    def __init__(self):
+    def __init__(self, esc):
+        super(CompilerWrapper, self).__init__(esc)
         self.use_pch_option().add_category(CompilationCategory)
         self.pch_file_option().add_category(PCHCategory)
         self.compile_no_link_option().add_category(CompilationCategory)
@@ -60,6 +60,8 @@ class CompilerWrapper(CmdLineOptions):
         self.add_option(self.object_name_option())
         self.add_option(self.use_pch_option())
         self.add_option(self.pch_file_option())
+        self.add_option(self.define_option())
+        self.add_option(self.include_option())
 
     def compiler_info(self, executable):
         raise NotImplementedError("Compiler identification not implemented.")
@@ -93,7 +95,7 @@ class MSVCWrapper(CompilerWrapper):
     def pch_file_option(self): return self.__pch_file_option
 
     def __init__(self):
-        super(MSVCWrapper, self).__init__()
+        super(MSVCWrapper, self).__init__(esc = ['/', '-'])
 
         # Build Local
         for option in self.build_local_options:

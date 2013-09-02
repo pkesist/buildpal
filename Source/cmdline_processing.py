@@ -17,23 +17,16 @@ class CmdLineOption:
 
         def make_str(self):
             return "{}{}{}{}{}".format(
-                self.esc or (self.option.esc() if self.option else ''),
+                self.esc or (self.option.def_esc() if self.option else ''),
                 self.option.name() if self.option else '',
                 self.suf or '',
                 self.sep or '',
                 self.val or '')
 
-    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True):
+    def __init__(self, name, suff=None, has_arg=True, allow_spaces=True):
         self.__name = name
         self.__has_arg = has_arg
         self.__allow_spaces = allow_spaces
-        if esc is None:
-            raise RuntimeError("Command line option must have escape sequence defined.")
-        if isinstance(esc, str):
-            esc = [esc]
-        if not isinstance(esc, list):
-            raise RuntimeError("Escape sequence parameter must be a string or list of strings.")
-        self.__esc = esc
         self.__def_sep = '' if not self.__has_arg or not allow_spaces else ' '
 
         val_regex = "(?P<suf>{})?{}$".format(
@@ -45,17 +38,20 @@ class CmdLineOption:
     def name(self):
         return self.__name
         
-    def esc(self):
-        return self.__esc[0]
+    def set_esc(self, esc):
+        self.esc = esc
+
+    def def_esc(self):
+        return self.esc[0]
 
     def __make_match(self, esc, suf, sep, val):
         return CmdLineOption.Value(self, esc, suf, sep, val)
 
     def make_value(self, val=None):
-        return CmdLineOption.Value(self, self.esc(), '', self.__def_sep, val)
+        return CmdLineOption.Value(self, self.def_esc(), '', self.__def_sep, val)
 
     def parse(self, option, iter):
-        if option[0] not in self.__esc:
+        if option[0] not in self.esc:
             return None
         esc = option[0]
         match = self.__option_regex.match(option[1:])
@@ -81,13 +77,23 @@ class CmdLineOption:
 
 class FreeOption:
     def name(self): return ''
-    def esc(self): return ''
+    def def_esc(self): return ''
         
 class CmdLineOptions:
-    __options = []
+    __options = {}
+
+    def __init__(self, esc):
+        if esc is None:
+            raise RuntimeError("Command line option must have escape sequence defined.")
+        if isinstance(esc, str):
+            esc = [esc]
+        if not isinstance(esc, list):
+            raise RuntimeError("Escape sequence parameter must be a string or list of strings.")
+        self.esc = esc
 
     def add_option(self, option):
-        self.__options.append(option)
+        option.esc = self.esc
+        self.__options[option.name()] = option
 
     def parse_options(self, cwd, options):
         result = []
@@ -103,15 +109,19 @@ class CmdLineOptions:
                         options = shlex.split(" ".join(responseFile.readlines()))
                     result.extend(self.parse_options(cwd, options))
                     continue
-                found = False
-                for option in self.__options:
-                    match = option.parse(token, tokenIter)
-                    if match:
-                        found = True
-                        result.append(match)
-                        break
-                if not found:
+                if token[0] not in self.esc:
                     result.append(self.__free_option(token))
+                    continue
+
+                found = False
+                option_found = token[1:]
+                while option_found and option_found not in self.__options:
+                    option_found = option_found[:-1]
+                assert option_found
+                option = self.__options[option_found]
+                match = option.parse(token, tokenIter)
+                assert match
+                result.append(match)
             except StopIteration:
                 break
         return result
@@ -135,8 +145,8 @@ class CompilationCategory(Category): pass
 class LinkingCategory(Category): pass
 
 class CompilerOption(CmdLineOption):
-    def __init__(self, name, esc, suff=None, has_arg=True, allow_spaces=True):
-        super().__init__(name, esc, suff, has_arg, allow_spaces)
+    def __init__(self, name, suff=None, has_arg=True, allow_spaces=True):
+        super().__init__(name, suff, has_arg, allow_spaces)
         self.__categories = set()
         self.__macros = set()
 

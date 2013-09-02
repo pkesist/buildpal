@@ -76,9 +76,6 @@ private:
         {
             assert ( !fromCache() );
             Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, macroDef ) ) );
-            if ( usedMacros_.find( macro ) != usedMacros_.end() )
-                // We already know about this.
-                return;
             if ( definedMacros_.find( macro ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
         }

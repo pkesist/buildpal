@@ -369,7 +369,7 @@ class TaskProcessor:
 
         super(TaskProcessor, self).__init__()
 
-    def __request_node(self, node_info, zmq_ctx, poller, node_indices):
+    def find_available_node(self, node_info, zmq_ctx):
         def cmp(lhs, rhs):
             lhs_tasks_processing = node_info.tasks_processing(lhs)
             rhs_tasks_processing = node_info.tasks_processing(rhs)
@@ -399,10 +399,8 @@ class TaskProcessor:
                 traceback.print_exc()
                 continue
             socket.send(b'GIMME')
-            poller.register(socket, zmq.POLLIN)
-            node_indices[socket] = node_index
-            return True
-        return False
+            return socket, node_index
+        return None
 
     class SendProxy:
         def __init__(self, socket, id):
@@ -433,9 +431,6 @@ class TaskProcessor:
         poller.register(client_socket, zmq.POLLIN)
         poller.register(preprocess_socket, zmq.POLLIN)
 
-        session_from_server = {}
-        session_from_client = {}
-
         compiler_info = {}
 
         self.last_time = None
@@ -450,16 +445,36 @@ class TaskProcessor:
 
             max_nodes_waiting = 4
             nodes_requested = 0
+
+            # Server socket to session mapping.
+            session_from_server = {}
+
+            # Client id to session mapping.
+            session_from_client = {}
+
+            # Contains nodes which were contacted, but have not yet responded.
+            # Value is node_index which is used in local statistics.
+            nodes_contacted = {}
+
+            # Contains nodes which responded, but did not yet send whether they
+            # accept a task. Value is id.
             node_ids = {}
-            node_indices = {}
+
+            # Nodes waiting for a task.
             nodes_waiting = []
+
+            # Clients waiting for a node.
             clients_waiting = []
 
             try:
                 while True:
                     self.print_stats(node_info, timer.as_dict())
                     for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
-                        if self.__request_node(node_info, zmq_ctx, poller, node_indices):
+                        result = self.find_available_node(node_info, zmq_ctx)
+                        if result is not None:
+                            socket, node_index = result
+                            poller.register(socket, zmq.POLLIN)
+                            nodes_contacted[socket] = node_index
                             nodes_requested += 1
 
                     sockets = dict(poller.poll(1000))
@@ -477,27 +492,8 @@ class TaskProcessor:
                         elif socket is client_socket:
                             msg = client_socket.recv_multipart()
                             client_id = msg[0]
-                            if client_id not in session_from_client:
-                                compiler = msg[1].decode()
-                                executable = msg[2].decode()
-                                cwd = msg[3].decode()
-                                command = [x.decode() for x in msg[4:]]
-                                client_conn = self.SendProxy(client_socket, client_id)
-                                client_conn.send([b"TASK_RECEIVED"])
-                                if not nodes_waiting:
-                                    clients_waiting.append((client_conn, compiler, executable, cwd, command))
-                                else:
-                                    server_socket, server_id, node_index = nodes_waiting[0]
-                                    del nodes_waiting[0]
-                                    server_conn = self.SendProxy(server_socket, server_id)
-                                    poller.unregister(server_socket)
-                                    session = CompileSession(compiler, executable, cwd,
-                                        command, timer, client_conn, server_conn,
-                                        preprocess_socket, node_info, node_index,
-                                        compiler_info)
-                                    session_from_client[client_conn.id] = session
-                                    session_from_server[server_conn.socket] = session
-                            else:
+                            if client_id in session_from_client:
+                                # Session already exists.
                                 session = session_from_client[client_id]
                                 server_socket = session.server_conn.socket
                                 assert server_socket in session_from_server
@@ -506,6 +502,26 @@ class TaskProcessor:
                                     del session_from_client[client_id]
                                     del session_from_server[server_socket]
                                     poller.unregister(server_socket)
+                            else:
+                                # Create new session.
+                                compiler = msg[1].decode()
+                                executable = msg[2].decode()
+                                cwd = msg[3].decode()
+                                command = [x.decode() for x in msg[4:]]
+                                client_conn = self.SendProxy(client_socket, client_id)
+                                client_conn.send([b"TASK_RECEIVED"])
+                                if nodes_waiting:
+                                    server_conn, node_index = nodes_waiting[0]
+                                    del nodes_waiting[0]
+                                    poller.unregister(server_conn.socket)
+                                    session = CompileSession(compiler, executable, cwd,
+                                        command, timer, client_conn, server_conn,
+                                        preprocess_socket, node_info, node_index,
+                                        compiler_info)
+                                    session_from_client[client_conn.id] = session
+                                    session_from_server[server_conn.socket] = session
+                                else:
+                                    clients_waiting.append((client_conn, compiler, executable, cwd, command))
 
                         elif socket in session_from_server:
                             session = session_from_server[socket]
@@ -523,11 +539,11 @@ class TaskProcessor:
                                 node_id = node_ids[socket][0]
                                 node_index = node_ids[socket][1]
                                 del node_ids[socket]
+                                server_conn = self.SendProxy(socket, node_id)
                                 if accept == "ACCEPT":
                                     if clients_waiting:
                                         client_conn, compiler, executable, cwd, command = clients_waiting[0]
                                         del clients_waiting[0]
-                                        server_conn = self.SendProxy(socket, node_id)
                                         poller.unregister(socket)
                                         session = CompileSession(compiler, executable, cwd,
                                             command, timer, client_conn, server_conn,
@@ -536,15 +552,15 @@ class TaskProcessor:
                                         session_from_client[client_conn.id] = session
                                         session_from_server[server_conn.socket] = session
                                     else:
-                                        nodes_waiting.append((socket, node_id, node_index))
+                                        nodes_waiting.append((server_conn, node_index))
                                 else:
                                     assert accept == "REJECT"
                                 nodes_requested -= 1
                             else:
-                                assert socket in node_indices
+                                assert socket in nodes_contacted
                                 server_id = socket.recv()
-                                node_index = node_indices[socket]
-                                del node_indices[socket]
+                                node_index = nodes_contacted[socket]
+                                del nodes_contacted[socket]
                                 node_ids[socket] = (server_id, node_index)
             finally:
                 for scan_worker in scan_workers:

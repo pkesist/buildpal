@@ -115,11 +115,11 @@ class CompileSession(ServerSession, ServerCompiler):
                         [self.source_file.filename()])
                     retcode, stdout, stderr = self.compiler(command)
                 except Exception:
-                    self.send_pyobj('SERVER_FAILED')
+                    self.send(b'SERVER_FAILED')
                     import traceback
                     traceback.print_exc()
                     return
-                self.send_pyobj('SERVER_DONE')
+                self.send(b'SERVER_DONE')
                 self.send_pyobj((retcode, stdout, stderr))
                 if retcode == 0:
                     with object_file.open('rb') as obj:
@@ -132,7 +132,7 @@ class CompileSession(ServerSession, ServerCompiler):
             self.task = Task(self.recv_pyobj())
             self.compiler = self.setup_compiler(self.task.compiler_info)
             if self.compiler:
-                self.send_pyobj("OK")
+                self.send(b'OK')
             else:
                 self.send_pyobj("FAIL")
                 return False
@@ -176,12 +176,12 @@ class CompileSession(ServerSession, ServerCompiler):
             assert tag == 'NEED_PCH_FILE'
             self.pch_file, required = self.file_repository().register_file(*self.task.pch_file)
             if required:
-                self.send_pyobj("YES")
+                self.send(b'YES')
                 self.pch_desc = open(self.pch_file, 'wb')
                 self.pch_decompressor = zlib.decompressobj()
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
-                self.send_pyobj("NO")
+                self.send_pyobj(b'NO')
                 while not self.file_repository().file_arrived(*self.task.pch_file):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state

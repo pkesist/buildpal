@@ -226,7 +226,7 @@ class MSVCWrapper(CompilerWrapper):
         def run_compiler(command, compiler_environ):
             env = dict(os.environ)
             env.update(compiler_environ)
-            with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
+            with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         compiler_env = MSVCWrapper.get_compiler_environment(compiler_info)

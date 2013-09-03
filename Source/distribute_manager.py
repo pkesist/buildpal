@@ -223,9 +223,11 @@ class CompileSession:
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 6
     STATE_RECEIVE_RESULT_FILE = 7
     STATE_POSTPROCESS = 8
-    STATE_DONE = 9
+    STATE_WAIT_FOR_SESSION_DONE = 9
 
-    def __init__(self, compiler, executable, cwd, command, timer, client_conn, server_conn, preprocess_socket, node_info, node_index, compiler_info):
+    def __init__(self, compiler, executable, cwd, command, timer, client_conn,
+        server_conn, preprocess_socket, node_info, node_index, compiler_info):
+
         self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
@@ -235,15 +237,10 @@ class CompileSession:
         self.compiler_info = compiler_info
         self.executable = executable
 
-        self.node_info.connection_open(self.node_index)
-
         assert compiler == 'msvc'
         self.compiler = MSVCWrapper()
 
         self.create_tasks(self.compiler, cwd, command)
-
-    def __del__(self):
-        self.node_info.connection_closed(self.node_index)
 
     def create_tasks(self, compiler_wrapper, cwd, command):
         ctx = TaskCreator(compiler_wrapper, self.executable, cwd, command, self.timer)
@@ -298,7 +295,7 @@ class CompileSession:
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
-            assert task_ok == "OK"
+            assert msg == b'OK'
             self.server_conn.send_pyobj('HEADERS_ARCHIVE')
             with self.timer.timeit('send.tar'), open(self.task['tempfile'], 'rb') as file:
                 send_file(self.server_conn.send_pyobj, file)
@@ -316,11 +313,11 @@ class CompileSession:
 
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
             response = msg
-            if response == "YES":
+            if response == b'YES':
                 with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task['pch_file'][0]), 'rb') as pch_file:
                     send_compressed_file(self.server_conn.send_pyobj, pch_file)
             else:
-                assert response == "NO"
+                assert response == b'NO'
             self.server_timer = self.timer.scoped_timer('server_time')
             self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
@@ -329,15 +326,16 @@ class CompileSession:
             del self.server_timer
             del self.average_timer
             server_status = msg
-            if server_status == "SERVER_FAILED":
+            if server_status == b'SERVER_FAILED':
                 self.state = self.STATE_DONE
                 self.client_conn.send([b'EXIT', b'-1'])
-                return True
-            assert server_status == "SERVER_DONE"
-            self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
+                self.state = self.STATE_WAIT_FOR_SESSION_DONE
+            else:
+                assert server_status == b'SERVER_DONE'
+                self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
 
         elif self.state == self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT:
-            self.retcode, self.stdout, self.stderr = msg
+            self.retcode, self.stdout, self.stderr = pickle.loads(msg)
             if self.retcode == 0:
                 self.output = open(self.task['output'], "wb")
                 self.output_decompressor = zlib.decompressobj()
@@ -345,10 +343,10 @@ class CompileSession:
             else:
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed(self.node_index)
-                return True
+                self.state = self.STATE_WAIT_FOR_SESSION_DONE
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
-            more, data = msg
+            more, data = pickle.loads(msg)
             self.output.write(self.output_decompressor.decompress(data))
             if not more:
                 self.output.write(self.output_decompressor.flush())
@@ -357,9 +355,13 @@ class CompileSession:
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed(self.node_index)
-                if self.next_task():
+                if not self.next_task():
+                    self.state = self.STATE_WAIT_FOR_SESSION_DONE
+                else:
                     self.start_task()
-                return True
+        elif self.state == self.STATE_WAIT_FOR_SESSION_DONE:
+            assert msg == b'SESSION_DESTROYED'
+            return True
         return False
 
 class TaskProcessor:
@@ -369,7 +371,7 @@ class TaskProcessor:
 
         super(TaskProcessor, self).__init__()
 
-    def find_available_node(self, node_info, zmq_ctx):
+    def find_available_node(self, node_info, zmq_ctx, recycled_connections):
         def cmp(lhs, rhs):
             lhs_tasks_processing = node_info.tasks_processing(lhs)
             rhs_tasks_processing = node_info.tasks_processing(rhs)
@@ -385,20 +387,25 @@ class TaskProcessor:
         order = list(range(len(self.__nodes)))
         order.sort(key=compare_key)
         for node_index in order:
-            node = self.__nodes[node_index]
-            try:
-                socket = zmq_ctx.socket(zmq.DEALER)
-                identity = "{:x}-{:x}".format(
-                    random.randrange(0, 0x10000),
-                    random.randrange(0, 0x10000)).encode()
-                socket.setsockopt(zmq.IDENTITY, identity)
-                socket.connect('tcp://{}:{}'.format(node[0], node[1]))
-            except Exception:
-                print("Failed to connect to '{}'".format(node))
-                import traceback
-                traceback.print_exc()
-                continue
-            socket.send(b'GIMME')
+            recycled = recycled_connections.get(node_index)
+            if recycled:
+                socket = recycled[0]
+                del recycled[0]
+            else:
+                node = self.__nodes[node_index]
+                try:
+                    socket = zmq_ctx.socket(zmq.DEALER)
+                    identity = "{:x}-{:x}".format(
+                        random.randrange(0, 0x10000),
+                        random.randrange(0, 0x10000)).encode()
+                    socket.setsockopt(zmq.IDENTITY, identity)
+                    socket.connect('tcp://{}:{}'.format(node[0], node[1]))
+                except Exception:
+                    print("Failed to connect to '{}'".format(node))
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            socket.send(b'CREATE_SESSION')
             return socket, node_index
         return None
 
@@ -427,9 +434,21 @@ class TaskProcessor:
         preprocess_socket = zmq_ctx.socket(zmq.DEALER)
         preprocess_socket_port = preprocess_socket.bind_to_random_port('tcp://*')
 
+        registered_sockets = set()
         poller = zmq.Poller()
-        poller.register(client_socket, zmq.POLLIN)
-        poller.register(preprocess_socket, zmq.POLLIN)
+
+        def register_socket(socket):
+            assert socket not in registered_sockets
+            poller.register(socket, zmq.POLLIN)
+            registered_sockets.add(socket)
+
+        def unregister_socket(socket):
+            assert socket in registered_sockets
+            registered_sockets.remove(socket)
+            poller.unregister(socket)
+
+        register_socket(client_socket)
+        register_socket(preprocess_socket)
 
         compiler_info = {}
 
@@ -443,8 +462,11 @@ class TaskProcessor:
             for scan_worker in scan_workers:
                 scan_worker.start()
 
-            max_nodes_waiting = 4
+            max_nodes_waiting = 1
             nodes_requested = 0
+
+            # Connections to be re-used.
+            recycled_connections = {}
 
             # Server socket to session mapping.
             session_from_server = {}
@@ -457,10 +479,10 @@ class TaskProcessor:
             nodes_contacted = {}
 
             # Contains nodes which responded, but did not yet send whether they
-            # accept a task. Value is id.
+            # accept a task. Value is same as in nodes_contacted.
             node_ids = {}
 
-            # Nodes waiting for a task.
+            # Nodes waiting for a client.
             nodes_waiting = []
 
             # Clients waiting for a node.
@@ -468,12 +490,12 @@ class TaskProcessor:
 
             try:
                 while True:
-                    self.print_stats(node_info, timer.as_dict())
+                    self.print_stats(node_info, timer, recycled_connections)
                     for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
-                        result = self.find_available_node(node_info, zmq_ctx)
+                        result = self.find_available_node(node_info, zmq_ctx, recycled_connections)
                         if result is not None:
                             socket, node_index = result
-                            poller.register(socket, zmq.POLLIN)
+                            register_socket(socket)
                             nodes_contacted[socket] = node_index
                             nodes_requested += 1
 
@@ -487,7 +509,9 @@ class TaskProcessor:
                             assert client_id in session_from_client
                             session = session_from_client[client_id]
                             session.task['tempfile'] = pickle.loads(result)
-                            poller.register(session.server_conn.socket, zmq.POLLIN)
+                            register_socket(session.server_conn)
+                            assert session.server_conn in session_from_server
+                            assert session_from_server[session.server_conn] == session
 
                         elif socket is client_socket:
                             msg = client_socket.recv_multipart()
@@ -495,13 +519,18 @@ class TaskProcessor:
                             if client_id in session_from_client:
                                 # Session already exists.
                                 session = session_from_client[client_id]
-                                server_socket = session.server_conn.socket
+                                server_socket = session.server_conn
                                 assert server_socket in session_from_server
                                 session_done = session.got_data_from_client(msg)
+                                assert not session_done
                                 if session_done:
                                     del session_from_client[client_id]
                                     del session_from_server[server_socket]
-                                    poller.unregister(server_socket)
+                                    unregister_socket(server_socket)
+                                    recycled = recycled_connections.setdefault(
+                                        session.node_index, [])
+                                    assert server_socket not in recycled
+                                    recycled.append(server_socket)
                             else:
                                 # Create new session.
                                 compiler = msg[1].decode()
@@ -513,63 +542,66 @@ class TaskProcessor:
                                 if nodes_waiting:
                                     server_conn, node_index = nodes_waiting[0]
                                     del nodes_waiting[0]
-                                    poller.unregister(server_conn.socket)
                                     session = CompileSession(compiler, executable, cwd,
                                         command, timer, client_conn, server_conn,
-                                        preprocess_socket, node_info, node_index,
-                                        compiler_info)
+                                        preprocess_socket, node_info, node_index, compiler_info)
                                     session_from_client[client_conn.id] = session
-                                    session_from_server[server_conn.socket] = session
+                                    session_from_server[server_conn] = session
                                 else:
                                     clients_waiting.append((client_conn, compiler, executable, cwd, command))
 
                         elif socket in session_from_server:
                             session = session_from_server[socket]
-                            msg = socket.recv_pyobj()
+                            msg = socket.recv()
                             client_id = session.client_conn.id
                             assert client_id in session_from_client
                             session_done = session.got_data_from_server(msg)
                             if session_done:
                                 del session_from_client[client_id]
                                 del session_from_server[socket]
-                                poller.unregister(socket)
+                                unregister_socket(socket)
+                                recycled = recycled_connections.setdefault(
+                                    session.node_index, [])
+                                assert socket not in recycled
+                                recycled.append(socket)
                         else: # Server
                             if socket in node_ids:
                                 accept = socket.recv_pyobj()
-                                node_id = node_ids[socket][0]
-                                node_index = node_ids[socket][1]
+                                node_index = node_ids[socket]
                                 del node_ids[socket]
-                                server_conn = self.SendProxy(socket, node_id)
+                                # Temporarily unregister this socket. It will be
+                                # registered again when its preprocessing is
+                                # done.
+                                unregister_socket(socket)
                                 if accept == "ACCEPT":
                                     if clients_waiting:
                                         client_conn, compiler, executable, cwd, command = clients_waiting[0]
                                         del clients_waiting[0]
-                                        poller.unregister(socket)
                                         session = CompileSession(compiler, executable, cwd,
-                                            command, timer, client_conn, server_conn,
-                                            preprocess_socket, node_info, node_index,
-                                            compiler_info)
+                                            command, timer, client_conn, socket,
+                                            preprocess_socket, node_info, node_index, compiler_info)
                                         session_from_client[client_conn.id] = session
-                                        session_from_server[server_conn.socket] = session
+                                        session_from_server[socket] = session
                                     else:
-                                        nodes_waiting.append((server_conn, node_index))
+                                        nodes_waiting.append((socket, node_index))
                                 else:
                                     assert accept == "REJECT"
                                 nodes_requested -= 1
                             else:
                                 assert socket in nodes_contacted
-                                server_id = socket.recv()
+                                session_created = socket.recv()
                                 node_index = nodes_contacted[socket]
                                 del nodes_contacted[socket]
-                                node_ids[socket] = (server_id, node_index)
+                                node_ids[socket] = node_index
             finally:
                 for scan_worker in scan_workers:
                     scan_worker.terminate()
 
-    def print_stats(self, node_info, times):
+    def print_stats(self, node_info, timer, recycled_conections):
         current = time()
         if self.last_time and (current - self.last_time < 2):
             return
+        times = timer.as_dict()
         self.last_time = current
         sys.stdout.write("================\n")
         sys.stdout.write("Build nodes:\n")
@@ -611,12 +643,8 @@ class NodeInfoHolder:
         self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
 
     def average_task_time(self, index):
-        average_tasks = self.average_tasks(index)
-        if not average_tasks:
-            return 0
         tasks_completed = self.tasks_completed(index)
-        average_time_per_task = self.total_time(index) / tasks_completed if tasks_completed else 0
-        return average_time_per_task / average_tasks
+        return self.total_time(index) / tasks_completed if tasks_completed else 0
 
     def connection_open(self, index): self.__nodes[index]._open_connections += 1
 

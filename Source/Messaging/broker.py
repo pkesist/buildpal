@@ -36,12 +36,14 @@ class Broker:
 
     def run(self):
         workers = collections.deque()
+        server_from_client = {}
+        client_from_server = {}
 
         while True:
             socks = dict((self.poll_all if workers else self.poll_servers).poll())
 
             if socks.get(self.servers) == zmq.POLLIN:
-                msg = self.servers.recv_multipart()
+                msg = self.servers.recv_multipart(flags=zmq.NOBLOCK)
                 name = msg[0]
                 if len(msg) == 2 and msg[1] == b'READY':
                     if name in workers:
@@ -49,22 +51,39 @@ class Broker:
                     else:
                         workers.append(name)
                         self.servers.send_multipart([name, b'OK'])
+
+                elif len(msg) == 4 and msg[2] == b'SESSION_CREATED':
+                    server_id = msg[0]
+                    session_id = msg[1]
+                    client_id = msg[3]
+                    server_from_client[client_id] = (server_id, session_id)
+                    client_from_server[(server_id, session_id)] = client_id
+                    self.clients.send_multipart([client_id, b'SESSION_CREATED'])
+
+                elif len(msg) == 3 and msg[2] == b'SESSION_DESTROYED':
+                    server_id = msg[0]
+                    session_id = msg[1]
+                    client_id = client_from_server[(server_id, session_id)]
+                    self.clients.send_multipart([client_id, b'SESSION_DESTROYED'])
+                    del client_from_server[(server_id, session_id)]
+                    del server_from_client[client_id]
                 else:
-                    self.clients.send_multipart(msg[1:])
-            
+                    server_id = msg[0]
+                    session_id = msg[1]
+                    client_id = client_from_server[(server_id, session_id)]
+                    self.clients.send_multipart([client_id] + msg[2:])
+
             if socks.get(self.clients) == zmq.POLLIN:
-                msg = self.clients.recv_multipart()
-                name = msg[0]
+                msg = self.clients.recv_multipart(flags=zmq.NOBLOCK)
+                client_id = msg[0]
                 
-                if len(msg) == 2 and msg[1] == b'GIMME':
-                    server = workers[0]
+                if len(msg) == 2 and msg[1] == b'CREATE_SESSION':
                     workers.rotate(1)
-                    self.clients.send_multipart([name, server])
-                    self.servers.send_multipart([server, name, b'CREATE_SESSION'])
+                    server_id = workers[0]
+                    self.servers.send_multipart([server_id, client_id, b'CREATE_SESSION'])
                 else:
-                    assert len(msg) > 2
-                    payload = [msg[1], msg[0]] + msg[2:]
-                    self.servers.send_multipart(payload)
+                    server_id, session_id = server_from_client.get(client_id)
+                    self.servers.send_multipart([server_id, session_id] + msg[1:])
 
             if socks.get(self.control) == zmq.POLLIN:
                 msg = self.control.recv_multipart()

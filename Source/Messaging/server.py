@@ -9,15 +9,11 @@ class ServerSession:
     def process_msg(self):
         raise NotImplementedError()
     
-    def setup_communication(self, recv, send):
-        self.recv = recv
-        self.send = send
-
     def send_pyobj(self, obj):
-        self.send([pickle.dumps(obj)])
+        self.send(pickle.dumps(obj))
 
     def recv_pyobj(self):
-        return pickle.loads(self.recv()[0])
+        return pickle.loads(self.recv())
 
 class ServerWorker:
     def __init__(self, zmq_ctx, session_factory):
@@ -37,7 +33,7 @@ class ServerWorker:
         self.poller.register(self.sessions, zmq.POLLIN)
         self.poller.register(self.control, zmq.POLLIN)
 
-        self.client_id_to_session = {}
+        self.socket_to_session = {}
 
 
     def connect_broker(self, address):
@@ -53,49 +49,24 @@ class ServerWorker:
         self.control.bind(address)
 
     def __create_session(self, client_id):
-        incoming = self.zmq_ctx.socket(zmq.DEALER)
-        # Make the session socket have the same id as the client
-        # socket.
-        incoming.setsockopt(zmq.IDENTITY, client_id)
-        incoming.connect(self.sessions_addr)
-
-        class Recv:
-            def __init__(self, poller, incoming):
-                self.__poller = poller
-                self.__poller.register(incoming, zmq.POLLIN)
-                self.__incoming = incoming
-
-            def __del__(self):
-                self.__poller.unregister(self.__incoming)
-
-            def __call__(self):
-                return self.__incoming.recv_multipart()
-
-        class Send:
-            def __init__(self, outgoing, client_id):
-                self.__outgoing = outgoing
-                self.__client_id = client_id
-
-            def __call__(self, msg):
-                return self.__outgoing.send_multipart([self.__client_id] + msg)
-
-        recv = Recv(self.poller, incoming)
-        send = Send(self.broker, client_id)
+        socket = self.zmq_ctx.socket(zmq.DEALER)
+        socket.connect(self.sessions_addr)
 
         session = self.session_factory()
         assert issubclass(type(session), ServerSession)
-        session.setup_communication(recv, send)
+        session.socket = socket
+        session.recv = session.socket.recv
+        session.send = session.socket.send
 
-        if session.created():
-            self.client_id_to_session[client_id] = session
-            return session
-        return None
+        self.socket_to_session[socket] = session
+        self.poller.register(session.socket, zmq.POLLIN)
+        return session
 
-    def __get_session(self, client_id):
-        return self.client_id_to_session.get(client_id)
-
-    def __destroy_session(self, client_id):
-        del self.client_id_to_session[client_id]
+    def __destroy_session(self, session):
+        del self.socket_to_session[session.socket]
+        self.poller.unregister(session.socket)
+        session.socket.send(b'SESSION_DESTROYED')
+        session.socket.disconnect(self.sessions_addr)
 
     def run(self):
         self.broker.send(b'READY')
@@ -109,19 +80,19 @@ class ServerWorker:
                     continue
 
                 if sock is self.broker:
-                    msg = self.broker.recv_multipart()
+                    msg = self.broker.recv_multipart(flags=zmq.NOBLOCK)
+                    # FIXME: client_id should be removed totally if
+                    # broker is smarter.
+                    client_id = msg[0]
                     if msg[1] == b'CREATE_SESSION':
-                        client_id = msg[0]
                         session = self.__create_session(client_id)
+                        session.socket.send_multipart([b'SESSION_CREATED', client_id])
+                        session.created()
                     else:
-                        # Session socket has the same id as the client socket,
-                        # so there is no need to do the translation here.
                         self.sessions.send_multipart(msg)
                 
                 elif sock is self.sessions:
-                    msg = self.sessions.recv_multipart()
-                    # Session socket has the same id as the client socket,
-                    # so there is no need to do the translation here.
+                    msg = self.sessions.recv_multipart(flags=zmq.NOBLOCK)
                     self.broker.send_multipart(msg)
                 
                 elif sock is self.control:
@@ -130,9 +101,6 @@ class ServerWorker:
                         return
                 else:
                     # Must be a session socket.
-                    client_id = sock.getsockopt(zmq.IDENTITY)
-                    session = self.__get_session(client_id)
-                    if session:
-                        close_session = session.process_msg()
-                        if close_session:
-                            self.__destroy_session(client_id)
+                    session = self.socket_to_session.get(sock)
+                    if session and session.process_msg():
+                        self.__destroy_session(session)

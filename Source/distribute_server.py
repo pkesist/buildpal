@@ -181,7 +181,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.pch_decompressor = zlib.decompressobj()
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
-                self.send_pyobj(b'NO')
+                self.send(b'NO')
                 while not self.file_repository().file_arrived(*self.task.pch_file):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state

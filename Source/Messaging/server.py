@@ -66,7 +66,8 @@ class ServerWorker:
         del self.socket_to_session[session.socket]
         self.poller.unregister(session.socket)
         session.socket.send(b'SESSION_DESTROYED')
-        session.socket.disconnect(self.sessions_addr)
+        # Throws resource temporarily unavailable.
+        #session.socket.disconnect(self.sessions_addr)
 
     def run(self):
         self.broker.send(b'READY')

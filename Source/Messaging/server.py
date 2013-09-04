@@ -1,6 +1,5 @@
 import zmq
 import pickle
-import random
 
 class ServerSession:
     def created(self):

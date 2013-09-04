@@ -18,7 +18,6 @@ import socket
 import sys
 import zmq
 import zlib
-import random
 
 from Messaging import Client as MsgClient
 
@@ -395,10 +394,6 @@ class TaskProcessor:
                 node = self.__nodes[node_index]
                 try:
                     socket = zmq_ctx.socket(zmq.DEALER)
-                    identity = "{:x}-{:x}".format(
-                        random.randrange(0, 0x10000),
-                        random.randrange(0, 0x10000)).encode()
-                    socket.setsockopt(zmq.IDENTITY, identity)
                     socket.connect('tcp://{}:{}'.format(node[0], node[1]))
                 except Exception:
                     print("Failed to connect to '{}'".format(node))

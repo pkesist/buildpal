@@ -55,12 +55,12 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
-    STATE_SH_GET_ARCHIVE_TAG = 4
-    STATE_SH_GET_ARCHIVE_DATA = 5
-    STATE_SH_GET_SOURCE_TAG = 6
-    STATE_SH_GET_SOURCE_DATA = 7
-    STATE_SH_CHECK_PCH_TAG = 8
-    STATE_SH_GET_PCH_DATA = 9
+    STATE_SH_GET_ARCHIVE_TAG = 3
+    STATE_SH_GET_ARCHIVE_DATA = 4
+    STATE_SH_GET_SOURCE_TAG = 5
+    STATE_SH_GET_SOURCE_DATA = 6
+    STATE_SH_CHECK_PCH_TAG = 7
+    STATE_SH_GET_PCH_DATA = 8
 
     def __init__(self, file_repository, cpu_usage_hwm, task_counter):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)

@@ -68,9 +68,6 @@ class CompileSession(ServerSession, ServerCompiler):
         self.task_counter = task_counter
         self.task_counter.inc()
 
-    def __del__(self):
-        self.task_counter.dec()
-
     def created(self):
         assert self.state == self.STATE_START
         accept = self.accept()
@@ -127,7 +124,7 @@ class CompileSession(ServerSession, ServerCompiler):
         finally:
             shutil.rmtree(self.include_path, ignore_errors=True)
 
-    def process_msg(self):
+    def process_msg_worker(self):
         if self.state == self.STATE_GET_TASK:
             self.task = Task(self.recv_pyobj())
             self.compiler = self.setup_compiler(self.task.compiler_info)
@@ -202,6 +199,13 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.run_compiler_with_source_and_headers()
                 return True
         return False
+
+    def process_msg(self):
+        result = self.process_msg_worker()
+        if result:
+            self.task_counter.dec()
+        return result
+
 
 class ServerManager(SyncManager):
     pass

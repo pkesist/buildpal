@@ -61,8 +61,9 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             assert( directive );
 
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
+            
             MacroState::const_iterator const iter( macroState().find( macroName ) );
-            llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->second );
+            llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->getValue() );
             headerCtxStack().back().macroUsed( macroName, macroDef );
         }
         headerCtxStack().back().addHeader( header );
@@ -190,17 +191,18 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
         return;
     //assert( macroState()[ name ] == macroDefFromSourceLocation( preprocessor_, def ) );
     MacroState::const_iterator const iter( macroState().find( name ) );
-    llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->second );
+    llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->getValue() );
     headerCtxStack().back().macroUsed( name, macroDef );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
     llvm::StringRef const macroDef( macroDefFromSourceLocation( preprocessor_, def ) );
-    std::pair<MacroState::iterator, bool> insertResult = macroState().insert( std::make_pair( name, macroDef ) );
+    llvm::StringMapEntry<llvm::StringRef> * const entry( llvm::StringMapEntry<llvm::StringRef>::Create( name.data(), name.data() + name.size(), macroState().getAllocator(), macroDef ) );
+    bool const insertSuccess = macroState().insert( entry );
     // It is OK to #define macro to its current value.
     // If this assertion fires, you most likely messed up the header cache.
-    assert( insertResult.second || insertResult.first->second == macroDef );
+    assert( insertSuccess || macroState()[ name ] == macroDef );
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroDefined( name, macroDef );

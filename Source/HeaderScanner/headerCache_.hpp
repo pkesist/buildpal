@@ -14,6 +14,8 @@
 #include <boost/thread/lock_types.hpp> 
 #include <boost/thread/recursive_mutex.hpp>
 
+#include <llvm/ADT/StringMap.h>
+
 #include <list>
 #include <set>
 #include <string>
@@ -42,15 +44,7 @@ typedef boost::variant<HeaderName, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;
 typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
-
-struct HashStringRef
-{
-    std::size_t operator()( llvm::StringRef value ) const
-    {
-        return boost::hash_range( value.data(), value.data() + value.size() );
-    }
-};
-typedef std::unordered_map<std::string, llvm::StringRef, HashStringRef> MacroState;
+typedef llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocator> MacroState;
 
 void intrusive_ptr_add_ref( CacheEntry * );
 void intrusive_ptr_release( CacheEntry * );

@@ -123,7 +123,7 @@ CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
                     MacroState::const_iterator const iter( macroState.find( macro.first ) );
                     if ( iter == macroState.end() )
                         return !macro.second.empty();
-                    return iter->second != macro.second;
+                    return iter->getValue() != macro.second;
                 }
             ) == (*headerInfoIter)->usedMacros().end()
         )

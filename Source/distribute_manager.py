@@ -37,7 +37,7 @@ class ScopedTimer:
         self.__callable = callable
         self.__start = time()
 
-    def __del__(self):
+    def stop(self):
         self.__callable(time() - self.__start)
 
 
@@ -322,7 +322,9 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
+            self.server_timer.stop()
             del self.server_timer
+            self.average_timer.stop()
             del self.average_timer
             server_status = msg
             if server_status == b'SERVER_FAILED':

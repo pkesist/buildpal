@@ -15,7 +15,11 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
     clang::MacroInfo const * macroInfo( def->getMacroInfo() );
     assert( macroInfo );
 
+    if ( macroInfo->isBuiltinMacro() )
+        return llvm::StringRef();
+
     clang::SourceLocation const startLoc( macroInfo->getDefinitionLoc() );
+    assert( !startLoc.isInvalid() );
     std::pair<clang::FileID, unsigned> startSpellingLoc( sourceManager.getDecomposedSpellingLoc( startLoc ) );
     bool invalid;
     llvm::StringRef const buffer( sourceManager.getBufferData( startSpellingLoc.first, &invalid ) );

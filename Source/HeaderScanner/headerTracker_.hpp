@@ -12,7 +12,6 @@
 #include "boost/bind.hpp"
 
 #include <string>
-#include <map>
 #include <set>
 #include <vector>
 //------------------------------------------------------------------------------
@@ -62,7 +61,7 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( HeaderName const & header, std::shared_ptr<Cache::CacheEntry> const & cacheHit, clang::Preprocessor const & preprocessor )
+        explicit HeaderCtx( HeaderName const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor )
             :
             header_( header ),
             cacheHit_( cacheHit ),
@@ -72,18 +71,18 @@ private:
                 includedHeaders_.push_back( cacheHit );
         }
 
-        void macroUsed( llvm::StringRef macroName, clang::MacroDirective const * macroDef )
+        void macroUsed( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, macroDef ) ) );
+            Macro const macro( std::make_pair( macroName, macroDef ) );
             if ( definedMacros_.find( macro ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
         }
 
-        void macroDefined( llvm::StringRef macroName, clang::MacroDirective const * macroDef )
+        void macroDefined( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, macroDef ) ) );
+            Macro const macro( std::make_pair( macroName, macroDef ) );
             headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
             definedMacros_.insert( macro );
         }
@@ -91,7 +90,7 @@ private:
         void macroUndefined( llvm::StringRef macroName )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, macroDefFromSourceLocation( preprocessor_, 0 ) ) );
+            Macro const macro( std::make_pair( macroName, llvm::StringRef() ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
@@ -101,7 +100,7 @@ private:
             includedHeaders_.push_back( header );
         }
 
-        void addStuff( std::shared_ptr<Cache::CacheEntry> const & cacheEntry, bool ignoreHeaders )
+        void addStuff( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
         {
             std::set_difference( cacheEntry->usedMacros().begin(), cacheEntry->usedMacros().end(),
                 definedMacros_.begin(), definedMacros_.end(),
@@ -123,16 +122,16 @@ private:
         Headers const & includedHeaders() const { return includedHeaders_; }
         HeaderName const & header() { return header_; }
 
-        std::shared_ptr<Cache::CacheEntry> addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
+        CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
-        std::shared_ptr<Cache::CacheEntry> const & cacheHit() const { return cacheHit_; }
+        CacheEntryPtr const & cacheHit() const { return cacheHit_; }
 
         bool fromCache() const { return cacheHit_; }
 
     private:
         clang::Preprocessor const & preprocessor_;
         HeaderName header_;
-        std::shared_ptr<Cache::CacheEntry> cacheHit_;
+        CacheEntryPtr cacheHit_;
         Macros usedMacros_;
         Macros definedMacros_;
         HeaderContent headerContent_;
@@ -144,8 +143,10 @@ private:
     HeaderCtxStack       & headerCtxStack()       { return headerCtxStack_; }
 
     bool cacheDisabled() const { return cache_ == 0; }
-    Cache const & cache() const { return *cache_; }
-    Cache       & cache()       { return *cache_; }
+    Cache      const & cache() const { return *cache_; }
+    Cache            & cache()       { return *cache_; }
+    MacroState const & macroState() const { return macroState_; }
+    MacroState       & macroState()       { return macroState_; }
 
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
@@ -155,9 +156,10 @@ private:
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
-    std::shared_ptr<Cache::CacheEntry> cacheHit_;
-    std::vector<std::shared_ptr<Cache::CacheEntry> > cacheEntriesUsed_;
+    CacheEntryPtr cacheHit_;
+    std::vector<CacheEntryPtr> cacheEntriesUsed_;
     std::vector<clang::FileEntry const *> fileStack_;
+    MacroState macroState_;
 };
 
 

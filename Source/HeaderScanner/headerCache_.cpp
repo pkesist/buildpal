@@ -10,7 +10,7 @@
 #include <iostream>
 //------------------------------------------------------------------------------
 
-clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
+clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
 
@@ -19,7 +19,7 @@ clang::FileEntry const * Cache::CacheEntry::getFileEntry( clang::SourceManager &
     return result;
 }
 
-void Cache::CacheEntry::generateContent()
+void CacheEntry::generateContent()
 {
     if ( buffer_.get() )
         return;
@@ -51,7 +51,7 @@ void Cache::CacheEntry::generateContent()
             }
         }
 
-        void operator()( std::shared_ptr<CacheEntry> const & ce )
+        void operator()( CacheEntryPtr const & ce )
         {
             if ( !ce->buffer_ )
                 ce->generateContent();
@@ -76,20 +76,20 @@ std::string Cache::uniqueFileName()
 }
 
 
-void Cache::CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
+void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
     assert( result );
     sourceManager.disableFileContentsOverride( result );
 }
 
-std::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName, clang::Preprocessor const & preprocessor )
+CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & macroState )
 {
     boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
     if ( iter == headersInfo().end() )
-        return std::shared_ptr<Cache::CacheEntry>();
-    std::shared_ptr<Cache::CacheEntry> result( iter->second->find( preprocessor ) );
+        return CacheEntryPtr();
+    CacheEntryPtr result( iter->second->findCacheEntry( macroState ) );
     if ( result )
     {
         headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
@@ -98,7 +98,7 @@ std::shared_ptr<Cache::CacheEntry> Cache::findEntry( llvm::StringRef fileName, c
     return result;
 }
 
-std::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocessor const & preprocessor )
+CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
 {
     for
     (
@@ -107,44 +107,26 @@ std::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::find( clang::Preprocessor 
         ++headerInfoIter
     )
     {
-        Macros const & inputMacros( (*headerInfoIter)->usedMacros() );
-        bool isMatch( true );
-
-        struct MacroIsNotCurrent
-        {
-            clang::Preprocessor const & pp_;
-            
-            explicit MacroIsNotCurrent( clang::Preprocessor const & pp ) : pp_( pp ) {}
-
-            bool operator()( Macro const & macro )
-            {
-                return macro.second != macroDefFromSourceLocation( pp_,
-                    pp_.getMacroDirective( pp_.getIdentifierInfo( macro.first ) ) );
-            }
-        } macroIsNotCurrent( preprocessor );
-        
-        if
-        (
+        if (
             std::find_if
             (
-                inputMacros.begin(), inputMacros.end(),
-                macroIsNotCurrent
-            ) != inputMacros.end()
+                (*headerInfoIter)->usedMacros().begin(),
+                (*headerInfoIter)->usedMacros().end(),
+                [&]( Macro const & macro )
+                {
+                    MacroState::const_iterator const iter( macroState.find( macro.first ) );
+                    if ( iter == macroState.end() )
+                        return !macro.second.empty();
+                    return iter->second != macro.second;
+                }
+            ) == (*headerInfoIter)->usedMacros().end()
         )
-            continue;
-
-        cacheList_.splice( cacheList_.begin(), cacheList_, headerInfoIter );
-        return *headerInfoIter;
+        {
+            cacheList_.splice( cacheList_.begin(), cacheList_, headerInfoIter );
+            return *headerInfoIter;
+        }
     }
-    return std::shared_ptr<Cache::CacheEntry>();
-}
-
-std::shared_ptr<Cache::CacheEntry> Cache::HeaderInfo::insert( CacheEntry && value )
-{
-    std::shared_ptr<Cache::CacheEntry> const result(
-        std::make_shared<CacheEntry>( std::move( value ) ) );
-    cacheList_.push_front( result );
-    return result;
+    return CacheEntryPtr();
 }
 
 

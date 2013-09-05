@@ -27,7 +27,7 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         return;
     }
 
-    std::shared_ptr<Cache::CacheEntry> const cacheHit( cache().findEntry( entry->getName(), preprocessor() ) );
+    CacheEntryPtr const cacheHit( cache().findEntry( entry->getName(), macroState() ) );
     if ( !cacheHit )
     {
         fileEntry = entry;
@@ -61,11 +61,8 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
                 clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
                 assert( directive );
 
-                headerCtxStack().back().macroUsed
-                (
-                    headerInfo.ControllingMacro->getName(),
-                    directive
-                );
+                llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
+                headerCtxStack().back().macroUsed( macroName, macroState()[ macroName ] );
             }
         }
         headerCtxStack().back().addHeader( header );
@@ -81,7 +78,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), std::shared_ptr<Cache::CacheEntry>(), preprocessor_ ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
     fileStack_.push_back( mainFileEntry );
 }
 
@@ -119,7 +116,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     // their contents is a part of the PCH file.
     bool const ignoreHeaders( ignoredHeaders.find( headerCtxStack().back().header().first ) != ignoredHeaders.end() );
 
-    std::shared_ptr<Cache::CacheEntry> cacheEntry;
+    CacheEntryPtr cacheEntry;
 
     if ( !cacheDisabled() )
     {
@@ -140,7 +137,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 }
 
 
-std::shared_ptr<Cache::CacheEntry> HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
+CacheEntryPtr HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
     return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders() );
 }
@@ -172,7 +169,7 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
             assert( buffer );
             result_.insert( HeaderRef( sp.first, buffer->getBufferStart(), buffer->getBufferSize() ) );
         }
-        void operator()( std::shared_ptr<Cache::CacheEntry> const & ce )
+        void operator()( CacheEntryPtr const & ce )
         {
             std::for_each( ce->headers().begin(), ce->headers().end(),
                 [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
@@ -191,18 +188,22 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroUsed( name, def );
+    //assert( macroState()[ name ] == macroDefFromSourceLocation( preprocessor_, def ) );
+    headerCtxStack().back().macroUsed( name, macroState()[ name ] );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
+    llvm::StringRef const macroDef( macroDefFromSourceLocation( preprocessor_, def ) );
+    macroState()[ name ] = macroDef;
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroDefined( name, def );
+    headerCtxStack().back().macroDefined( name, macroDef );
 }
 
-void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * )
+void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
+    macroState().erase( name );
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroUndefined( name );

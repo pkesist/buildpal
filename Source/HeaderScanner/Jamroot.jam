@@ -1,6 +1,16 @@
 using winlibs ;
 
-local release-variants = profile release ;
+local release-variants = profile release releaseWithAssert profileWithAssert ;
+
+variant releaseWithAssert
+:
+    <optimization>speed
+    <debug-symbols>off
+    <inlining>full
+    <runtime-debugging>off
+;
+variant profileWithAssert : releaseWithAssert : <profiling>on <debug-symbols>on ;
+
 
 project HeaderScanner : requirements <warnings>off
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL "
@@ -8,24 +18,24 @@ project HeaderScanner : requirements <warnings>off
 ;
 
 alias clangLibs :
-    /clang//clangRewriteCore    
+    /clang//clangRewriteCore
     /clang//clangRewriteFrontend
-    /clang//clangFrontend       
-    /clang//clangDriver         
-    /clang//clangEdit           
+    /clang//clangFrontend
+    /clang//clangDriver
+    /clang//clangEdit
     /clang//clangSerialization  
-    /clang//clangParse          
-    /clang//clangSema           
-    /clang//clangAnalysis       
-    /clang//clangAST            
-    /clang//clangLex            
-    /clang//clangBasic          
-    /clang//LLVMMC              
-    /clang//LLVMOption          
-    /clang//LLVMSupport         
-    /clang//LLVMCore            
-    /clang//LLVMBitReader       
-    /clang//LLVMMCParser        
+    /clang//clangParse
+    /clang//clangSema
+    /clang//clangAnalysis
+    /clang//clangAST
+    /clang//clangLex
+    /clang//clangBasic
+    /clang//LLVMMC
+    /clang//LLVMOption
+    /clang//LLVMSupport
+    /clang//LLVMCore
+    /clang//LLVMBitReader
+    /clang//LLVMMCParser
 ;
 
 alias preprocessing_stuff
@@ -50,7 +60,7 @@ pyd preprocessing_d : preprocessing_stuff : <variant>debug ;
 explicit preprocessing ;
 explicit preprocessing_d ;
 
-install ppinstall : preprocessing : <variant>profile <location>C:\\Python33\\DLLs ;
-install ppinstall2 : preprocessing : <variant>profile <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\Lib\\site-packages ;
+install ppinstall : preprocessing : <variant>profileWithAssert <location>C:\\Python33\\DLLs ;
+install ppinstall2 : preprocessing : <variant>profileWithAssert <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\Lib\\site-packages ;
 
 install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild <variant>debug ;

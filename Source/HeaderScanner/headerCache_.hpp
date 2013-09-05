@@ -6,18 +6,19 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#include <boost/intrusive_ptr.hpp>
 #include <boost/variant.hpp>
 #include <boost/container/list.hpp>
+#include <boost/functional/hash.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 #include <boost/thread/recursive_mutex.hpp>
 
 #include <list>
-#include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 //------------------------------------------------------------------------------
 
@@ -26,26 +27,35 @@ namespace clang
     class FileEntry;
 }
 
-typedef std::pair<std::string, std::string> StringPair;
-typedef StringPair Macro;
-typedef std::pair<std::string, clang::FileEntry const *> HeaderName;
-typedef std::set<StringPair> StringPairSet;
-typedef StringPairSet Macros;
-typedef std::map<std::string, std::string> MacroMap;
+typedef std::pair<std::string, std::string> Macro;
+typedef std::set<Macro> Macros;
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
-typedef boost::variant<HeaderName, std::shared_ptr<CacheEntry> > Header;
+typedef std::pair<std::string, clang::FileEntry const *> HeaderName;
+typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
+typedef boost::variant<HeaderName, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;
-typedef boost::variant<MacroWithUsage, std::shared_ptr<CacheEntry> > HeaderEntry;
+typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
+
+
+struct HashStringRef
+{
+    std::size_t operator()( llvm::StringRef value )
+    {
+        return boost::hash_range( value.data(), value.data() + value.size() );
+    }
+};
+
+typedef std::unordered_map<llvm::StringRef, llvm::StringRef, HashStringRef> MacroState;
+
+void intrusive_ptr_add_ref( CacheEntry * );
+void intrusive_ptr_release( CacheEntry * );
 
 class CacheEntry
 {
 private:
-    BOOST_MOVABLE_BUT_NOT_COPYABLE(CacheEntry)
-
-public:
     CacheEntry
     (
         std::string const & uniqueVirtualFileName,
@@ -56,24 +66,28 @@ public:
         fileName_( uniqueVirtualFileName ),
         usedMacros_( usedMacros ),
         headerContent_( headerContent ),
-        headers_( headers )
+        headers_( headers ),
+        refCount_( 0 )
     {
     }
 
-    CacheEntry( CacheEntry && other )
+public:
+    static CacheEntryPtr create
+    (
+        std::string const & uniqueVirtualFileName,
+        Macros const & usedMacros,
+        HeaderContent const & headerContent,
+        Headers const & headers
+    )
     {
-        this->operator=( std::move( other ) );
-    }
-            
-    CacheEntry & operator=( CacheEntry && other )
-    {
-        fileName_.swap( other.fileName_ );
-        usedMacros_.swap( other.usedMacros_ );
-        headerContent_.swap( other.headerContent_ );
-        headers_.swap( other.headers_ );
-
-        buffer_.reset( other.buffer_.take() );
-        return *this;
+        CacheEntry * result = new CacheEntry
+        (
+            uniqueVirtualFileName,
+            usedMacros,
+            headerContent,
+            headers
+        );
+        return CacheEntryPtr( result );
     }
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
@@ -86,13 +100,28 @@ public:
     Headers       const & headers      () const { return headers_; }
 
 private:
+    friend void intrusive_ptr_add_ref( CacheEntry * );
+    friend void intrusive_ptr_release( CacheEntry * );
+
+    void addRef() { ++refCount_; }
+    void decRef()
+    {
+        refCount_--;
+        if ( refCount_ == 0 )
+            delete this;
+    }
+
+private:
     std::string fileName_;
     llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
     Macros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
+    std::size_t refCount_;
 };
 
+inline void intrusive_ptr_add_ref( CacheEntry * c ) { c->addRef(); }
+inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
 
 class Cache
 {
@@ -108,7 +137,7 @@ public:
         HeaderInfo & operator=( HeaderInfo & );
 
     public:
-        typedef boost::container::list<std::shared_ptr<CacheEntry> > CacheList;
+        typedef boost::container::list<CacheEntryPtr> CacheList;
 
         HeaderInfo( std::string const & header, std::size_t const size )
             :
@@ -129,8 +158,8 @@ public:
             return *this;
         }
 
-        std::shared_ptr<Cache::CacheEntry> find( clang::Preprocessor const & );
-        std::shared_ptr<Cache::CacheEntry> insert( CacheEntry && );
+        CacheEntryPtr findCacheEntry( MacroState const & );
+        void insert( CacheEntryPtr c ) { cacheList_.push_front( c ); }
 
         std::string const & header() const { return header_; }
 
@@ -139,7 +168,7 @@ public:
         CacheList cacheList_;
     };
 
-    std::shared_ptr<Cache::CacheEntry> addEntry
+    CacheEntryPtr addEntry
     (
         clang::FileEntry const * file,
         Macros const & macros,
@@ -163,14 +192,15 @@ public:
             iter = insertResult.first;
         }
 
-        return iter->second->insert(
-            CacheEntry( uniqueFileName(), macros, headerContent, headers ) );
+        CacheEntryPtr result = CacheEntry::create( uniqueFileName(), macros, headerContent, headers );
+        iter->second->insert( result );
+        return result;
     }
 
-    std::shared_ptr<CacheEntry> findEntry
+    CacheEntryPtr findEntry
     ( 
         llvm::StringRef fileName,
-        clang::Preprocessor const &
+        MacroState const & macroState
     );
 
 private:

@@ -56,14 +56,14 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             assert( !headerInfo.isImport );
             assert( !headerInfo.ControllingMacroID );
             assert( !headerInfo.isPragmaOnce );
-            if ( headerInfo.ControllingMacro )
-            {
-                clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
-                assert( directive );
+            assert( headerInfo.ControllingMacro );
+            clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
+            assert( directive );
 
-                llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
-                headerCtxStack().back().macroUsed( macroName, macroState()[ macroName ] );
-            }
+            llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
+            MacroState::const_iterator const iter( macroState().find( macroName ) );
+            llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->second );
+            headerCtxStack().back().macroUsed( macroName, macroDef );
         }
         headerCtxStack().back().addHeader( header );
     }
@@ -189,13 +189,18 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     //assert( macroState()[ name ] == macroDefFromSourceLocation( preprocessor_, def ) );
-    headerCtxStack().back().macroUsed( name, macroState()[ name ] );
+    MacroState::const_iterator const iter( macroState().find( name ) );
+    llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->second );
+    headerCtxStack().back().macroUsed( name, macroDef );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
     llvm::StringRef const macroDef( macroDefFromSourceLocation( preprocessor_, def ) );
-    macroState()[ name ] = macroDef;
+    std::pair<MacroState::iterator, bool> insertResult = macroState().insert( std::make_pair( name, macroDef ) );
+    // It is OK to #define macro to its current value.
+    // If this assertion fires, you most likely messed up the header cache.
+    assert( insertResult.second || insertResult.first->second == macroDef );
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroDefined( name, macroDef );

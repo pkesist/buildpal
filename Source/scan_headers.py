@@ -102,6 +102,9 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
         archive = TempFile(suffix='.tar')
         with open(archive.filename(), 'wb') as file:
             file.write(tarBuffer.read())
+        hits, misses = cache.getStats()
+        total = hits + misses
+        print("{} hits, {} misses, hit ratio {:0>1.2f}".format(hits, misses, 0 if total == 0 else hits/total))
         return archive.filename()
     except Exception:
         import traceback

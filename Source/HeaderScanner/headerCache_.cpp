@@ -92,11 +92,17 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & mac
     CacheEntryPtr result( iter->second->findCacheEntry( macroState ) );
     if ( result )
     {
+        ++hits_;
         headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
         result->generateContent();
     }
+    else
+    {
+        ++misses_;
+    }
     return result;
 }
+
 
 CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
 {

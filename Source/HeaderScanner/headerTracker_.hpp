@@ -74,23 +74,23 @@ private:
         void macroUsed( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, macroDef ) );
-            if ( definedMacros_.find( macro ) == definedMacros_.end() )
+            MacroRef const macro( std::make_pair( macroName, macroDef ) );
+            if ( definedMacros_.find( macro.first ) == definedMacros_.end() )
                 usedMacros_.insert( macro );
         }
 
         void macroDefined( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, macroDef ) );
+            MacroRef const macro( std::make_pair( macroName, macroDef ) );
             headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
-            definedMacros_.insert( macro );
+            definedMacros_.insert( macroName );
         }
 
         void macroUndefined( llvm::StringRef macroName )
         {
             assert ( !fromCache() );
-            Macro const macro( std::make_pair( macroName, llvm::StringRef() ) );
+            MacroRef const macro( std::make_pair( macroName, llvm::StringRef() ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
         }
 
@@ -102,9 +102,28 @@ private:
 
         void addStuff( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
         {
-            std::set_difference( cacheEntry->usedMacros().begin(), cacheEntry->usedMacros().end(),
-                definedMacros_.begin(), definedMacros_.end(),
-                std::inserter( usedMacros_, usedMacros_.end() ) );
+            Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
+            Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
+            DefinedMacros::const_iterator       definedIter = definedMacros_.begin();
+            DefinedMacros::const_iterator const definedEnd = definedMacros_.end();
+            while ( cacheIter != cacheEnd && definedIter != definedEnd )
+            {
+                if ( cacheIter->first < *definedIter )
+                {
+                    usedMacros_.insert( MacroRefs::value_type( cacheIter->first, cacheIter->second ) );
+                    ++cacheIter;
+                }
+                else if ( cacheIter->first > *definedIter )
+                {
+                    ++definedIter;
+                }
+                else
+                {
+                    ++cacheIter;
+                    ++definedIter;
+                }
+            }
+            std::copy( cacheIter, cacheEnd, std::inserter( usedMacros_, usedMacros_.begin() ) );
 
             headerContent_.push_back( cacheEntry );
             if ( !ignoreHeaders )
@@ -117,7 +136,7 @@ private:
                 std::inserter( includedHeaders_, includedHeaders_.begin() ) );
         }
 
-        Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }
+        MacroRefs const & usedMacros() const { assert( !fromCache() ); return usedMacros_; }
         HeaderContent const & headerContent() const { return cacheHit_ ? cacheHit_->headerContent() : headerContent_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         HeaderName const & header() { return header_; }
@@ -129,11 +148,14 @@ private:
         bool fromCache() const { return cacheHit_; }
 
     private:
+        typedef std::set<llvm::StringRef> DefinedMacros;
+
+    private:
         clang::Preprocessor const & preprocessor_;
         HeaderName header_;
         CacheEntryPtr cacheHit_;
-        Macros usedMacros_;
-        Macros definedMacros_;
+        MacroRefs usedMacros_;
+        DefinedMacros definedMacros_;
         HeaderContent headerContent_;
         Headers includedHeaders_;
     };

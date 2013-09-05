@@ -201,6 +201,23 @@ int PyCache_init( PyCache * self, PyObject * args, PyObject * kwds )
 }
 
 
+PyObject * PyCache_getStats( PyCache * self, PyObject * args, PyObject * kwds )
+{
+    assert( self->cache );
+    PyObject * result = PyTuple_New( 2 );
+    PyTuple_SET_ITEM( result, 0, PyLong_FromSize_t( self->cache->hits() ) );
+    PyTuple_SET_ITEM( result, 1, PyLong_FromSize_t( self->cache->misses() ) );
+    return result;
+}
+
+
+PyMethodDef PyCache_methods[] =
+{
+    {"getStats", (PyCFunction)PyCache_getStats, METH_VARARGS | METH_KEYWORDS, "Get cache statistics."},
+    {NULL}
+};
+
+
 PyTypeObject PyCacheType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "Preprocessor",             /* tp_name */
@@ -229,7 +246,7 @@ PyTypeObject PyCacheType = {
     0,                          /* tp_weaklistoffset */
     0,                          /* tp_iter */
     0,                          /* tp_iternext */
-    0,                          /* tp_methods */
+    PyCache_methods,            /* tp_methods */
     0,                          /* tp_members */
     0,                          /* tp_getset */
     0,                          /* tp_base */

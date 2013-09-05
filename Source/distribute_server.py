@@ -66,7 +66,6 @@ class CompileSession(ServerSession, ServerCompiler):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
         self.state = self.STATE_START
         self.task_counter = task_counter
-        self.task_counter.inc()
 
     def created(self):
         assert self.state == self.STATE_START
@@ -133,6 +132,7 @@ class CompileSession(ServerSession, ServerCompiler):
             else:
                 self.send_pyobj("FAIL")
                 return False
+            self.task_counter.inc()
             self.state = self.STATE_SH_GET_ARCHIVE_TAG
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()

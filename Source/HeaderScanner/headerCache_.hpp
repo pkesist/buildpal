@@ -28,7 +28,11 @@ namespace clang
 }
 
 typedef std::pair<std::string, std::string> Macro;
-typedef std::set<Macro> Macros;
+typedef std::map<std::string, std::string> Macros;
+
+typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
+typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
+
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
@@ -39,16 +43,14 @@ typedef std::vector<Header> Headers;
 typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
-
 struct HashStringRef
 {
-    std::size_t operator()( llvm::StringRef value )
+    std::size_t operator()( llvm::StringRef value ) const
     {
         return boost::hash_range( value.data(), value.data() + value.size() );
     }
 };
-
-typedef std::unordered_map<llvm::StringRef, llvm::StringRef, HashStringRef> MacroState;
+typedef std::unordered_map<std::string, llvm::StringRef, HashStringRef> MacroState;
 
 void intrusive_ptr_add_ref( CacheEntry * );
 void intrusive_ptr_release( CacheEntry * );
@@ -59,23 +61,24 @@ private:
     CacheEntry
     (
         std::string const & uniqueVirtualFileName,
-        Macros const & usedMacros,
+        MacroRefs const & usedMacros,
         HeaderContent const & headerContent,
         Headers const & headers
     ) : 
         fileName_( uniqueVirtualFileName ),
-        usedMacros_( usedMacros ),
         headerContent_( headerContent ),
         headers_( headers ),
         refCount_( 0 )
     {
+        std::copy( usedMacros.begin(), usedMacros.end(),
+            std::inserter( usedMacros_, usedMacros_.begin() ) );
     }
 
 public:
     static CacheEntryPtr create
     (
         std::string const & uniqueVirtualFileName,
-        Macros const & usedMacros,
+        MacroRefs const & usedMacros,
         HeaderContent const & headerContent,
         Headers const & headers
     )
@@ -126,7 +129,7 @@ inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
 class Cache
 {
 public:
-    Cache() : counter_( 0 ) {}
+    Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
 
     typedef CacheEntry CacheEntry;
 
@@ -171,7 +174,7 @@ public:
     CacheEntryPtr addEntry
     (
         clang::FileEntry const * file,
-        Macros const & macros,
+        MacroRefs const & macros,
         HeaderContent const & headerContent,
         Headers const & headers
     )
@@ -203,6 +206,9 @@ public:
         MacroState const & macroState
     );
 
+    std::size_t hits() const { return hits_; }
+    std::size_t misses() const { return misses_; }
+
 private:
     std::string uniqueFileName();
 
@@ -216,7 +222,9 @@ private:
 private:
     HeadersInfoList headersInfoList_;
     HeadersInfo headersInfo_;
-    unsigned counter_;
+    std::size_t counter_;
+    std::size_t hits_;
+    std::size_t misses_;
     boost::recursive_mutex mutex_;
 };
 

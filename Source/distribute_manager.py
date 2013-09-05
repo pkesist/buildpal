@@ -459,7 +459,7 @@ class TaskProcessor:
             for scan_worker in scan_workers:
                 scan_worker.start()
 
-            max_nodes_waiting = 1
+            max_nodes_waiting = 8
             nodes_requested = 0
 
             # Connections to be re-used.
@@ -597,7 +597,7 @@ class TaskProcessor:
     def print_stats(self, node_info, timer, recycled_conections):
         current = time()
         if self.last_time and (current - self.last_time < 2):
-            return
+            return False
         times = timer.as_dict()
         self.last_time = current
         sys.stdout.write("================\n")
@@ -624,6 +624,7 @@ class TaskProcessor:
         sorted_times.sort(key=operator.itemgetter(1), reverse=True)
         for name, tm, count, average in sorted_times:
             print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, tm, count, average))
+        return True
 
 class NodeInfoHolder:
     class NodeInfo:

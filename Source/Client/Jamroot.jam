@@ -1,12 +1,14 @@
 project distribute_client ;
 
+local release-variants = release profile ;
+
 exe db_cl
 :
     db_cl.cpp
-    /zmq//libzmq/<link>static
+    /zmq//libzmq/<link>shared
 :
-    <toolset>msvc,<variant>release:<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL"
-    <toolset>msvc,<variant>release:<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
+    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
+    <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
 ;
 
 explicit db_cl ;

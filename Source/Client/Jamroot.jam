@@ -5,7 +5,7 @@ local release-variants = release profile ;
 exe db_cl
 :
     db_cl.cpp
-    /zmq//libzmq/<link>shared
+    /zmq//libzmq/<link>static
 :
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
     <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"

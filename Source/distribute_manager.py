@@ -6,6 +6,7 @@ from multiprocessing.managers import SyncManager, BaseProxy
 from time import sleep, time
 from msvc import MSVCWrapper
 from subprocess import list2cmdline
+#import cProfile
 
 from scan_headers import collect_headers
 from utils import send_file, send_compressed_file
@@ -87,7 +88,7 @@ class ScanHeaders(Process):
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
         # hardcode this knowledge here.
-        with self.__timer.timeit('prepare'):
+        with self.__timer.timeit('preprocess.internal'):
             macros = task['macros'] + task['builtin_macros']
             macros += task['compiler_info'].macros()
             if '_DEBUG' in macros:
@@ -215,24 +216,22 @@ class TaskCreator:
 class CompileSession:
     STATE_START = 0
     STATE_WAIT_FOR_OK = 1
-    STATE_WAIT_FOR_RETCODE = 2
-    STATE_WAIT_FOR_PCH_RESPONSE = 3
-    STATE_WAIT_FOR_SERVER_RESPONSE = 4
-    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 5
-    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 6
-    STATE_RECEIVE_RESULT_FILE = 7
-    STATE_POSTPROCESS = 8
-    STATE_WAIT_FOR_SESSION_DONE = 9
+    STATE_WAIT_FOR_PCH_RESPONSE = 2
+    STATE_WAIT_FOR_SERVER_RESPONSE = 3
+    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 4
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 5
+    STATE_RECEIVE_RESULT_FILE = 6
+    STATE_POSTPROCESS = 7
+    STATE_WAIT_FOR_SESSION_DONE = 8
 
     def __init__(self, compiler, executable, cwd, command, timer, client_conn,
-        server_conn, preprocess_socket, node_info, node_index, compiler_info):
+        server_conn, preprocess_socket, node_info, compiler_info):
 
         self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
         self.preprocess_socket = preprocess_socket
         self.node_info = node_info
-        self.node_index = node_index
         self.compiler_info = compiler_info
         self.executable = executable
 
@@ -266,9 +265,10 @@ class CompileSession:
         if self.executable in self.compiler_info:
             self.task['compiler_info'] = self.compiler_info[self.executable]
             self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+            self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
-            self.node_info.add_tasks_sent(self.node_index)
+            self.node_info.add_tasks_sent()
             self.state = self.STATE_WAIT_FOR_OK
         else:
             self.test_source = self.compiler.prepare_test_source(self.executable)
@@ -285,20 +285,21 @@ class CompileSession:
         self.compiler_info[self.executable] = info
         self.task['compiler_info'] = self.compiler_info[self.executable]
         self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+        self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
         with self.timer.timeit('send'):
             self.server_conn.send_pyobj(self.task)
-        self.node_info.add_tasks_sent(self.node_index)
+        self.node_info.add_tasks_sent()
         self.state = self.STATE_WAIT_FOR_OK
-        return False
 
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
             assert msg == b'OK'
             self.server_conn.send_pyobj('HEADERS_ARCHIVE')
-            with self.timer.timeit('send.tar'), open(self.task['tempfile'], 'rb') as file:
+            with self.timer.timeit('send.tar'), open(self.tempfile, 'rb') as file:
                 send_file(self.server_conn.send_pyobj, file)
-            os.remove(self.task['tempfile'])
+            os.remove(self.tempfile)
+            del self.tempfile
             self.server_conn.send_pyobj('SOURCE_FILE')
             with self.timer.timeit('send.source'), open(os.path.join(self.task['cwd'], self.task['source']), 'rb') as cpp:
                 send_compressed_file(self.server_conn.send_pyobj, cpp)
@@ -307,7 +308,7 @@ class CompileSession:
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
             else:
                 self.server_timer = self.timer.scoped_timer('server_time')
-                self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
+                self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
                 self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
@@ -318,7 +319,7 @@ class CompileSession:
             else:
                 assert response == b'NO'
             self.server_timer = self.timer.scoped_timer('server_time')
-            self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(self.node_index, value))
+            self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
@@ -343,7 +344,7 @@ class CompileSession:
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
-                self.node_info.add_tasks_completed(self.node_index)
+                self.node_info.add_tasks_completed()
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
@@ -355,7 +356,7 @@ class CompileSession:
                 self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
-                self.node_info.add_tasks_completed(self.node_index)
+                self.node_info.add_tasks_completed()
                 if not self.next_task():
                     self.state = self.STATE_WAIT_FOR_SESSION_DONE
                 else:
@@ -374,10 +375,10 @@ class TaskProcessor:
 
     def find_available_node(self, node_info, zmq_ctx, recycled_connections):
         def cmp(lhs, rhs):
-            lhs_tasks_processing = node_info.tasks_processing(lhs)
-            rhs_tasks_processing = node_info.tasks_processing(rhs)
-            lhs_time_per_task = node_info.average_task_time(lhs)
-            rhs_time_per_task = node_info.average_task_time(rhs)
+            lhs_tasks_processing = node_info[lhs].tasks_processing()
+            rhs_tasks_processing = node_info[rhs].tasks_processing()
+            lhs_time_per_task = node_info[lhs].average_task_time()
+            rhs_time_per_task = node_info[rhs].average_task_time()
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
                 return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
             if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
@@ -452,8 +453,9 @@ class TaskProcessor:
         self.last_time = None
 
         with BookKeepingManager() as book_keeper:
-            node_info = book_keeper.NodeInfoHolder(len(self.__nodes))
             timer = book_keeper.Timer()
+
+            node_info = [NodeInfo() for x in range(len(self.__nodes))]
 
             scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
             for scan_worker in scan_workers:
@@ -485,7 +487,9 @@ class TaskProcessor:
             # Clients waiting for a node.
             clients_waiting = []
 
+            #profile = cProfile.Profile()
             try:
+                #profile.enable()
                 while True:
                     self.print_stats(node_info, timer, recycled_connections)
                     for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
@@ -505,10 +509,10 @@ class TaskProcessor:
                             client_id, result = preprocess_socket.recv_multipart()
                             assert client_id in session_from_client
                             session = session_from_client[client_id]
-                            session.task['tempfile'] = pickle.loads(result)
+                            session.preprocess_timer.stop()
+                            del session.preprocess_timer
+                            session.tempfile = pickle.loads(result)
                             register_socket(session.server_conn)
-                            assert session.server_conn in session_from_server
-                            assert session_from_server[session.server_conn] == session
 
                         elif socket is client_socket:
                             msg = client_socket.recv_multipart()
@@ -518,16 +522,7 @@ class TaskProcessor:
                                 session = session_from_client[client_id]
                                 server_socket = session.server_conn
                                 assert server_socket in session_from_server
-                                session_done = session.got_data_from_client(msg)
-                                assert not session_done
-                                if session_done:
-                                    del session_from_client[client_id]
-                                    del session_from_server[server_socket]
-                                    unregister_socket(server_socket)
-                                    recycled = recycled_connections.setdefault(
-                                        session.node_index, [])
-                                    assert server_socket not in recycled
-                                    recycled.append(server_socket)
+                                session.got_data_from_client(msg)
                             else:
                                 # Create new session.
                                 compiler = msg[1].decode()
@@ -541,14 +536,14 @@ class TaskProcessor:
                                     del nodes_waiting[0]
                                     session = CompileSession(compiler, executable, cwd,
                                         command, timer, client_conn, server_conn,
-                                        preprocess_socket, node_info, node_index, compiler_info)
+                                        preprocess_socket, node_info[node_index], compiler_info)
                                     session_from_client[client_conn.id] = session
-                                    session_from_server[server_conn] = session
+                                    session_from_server[server_conn] = session, node_index
                                 else:
                                     clients_waiting.append((client_conn, compiler, executable, cwd, command))
 
                         elif socket in session_from_server:
-                            session = session_from_server[socket]
+                            session, node_index = session_from_server[socket]
                             msg = socket.recv()
                             client_id = session.client_conn.id
                             assert client_id in session_from_client
@@ -558,7 +553,7 @@ class TaskProcessor:
                                 del session_from_server[socket]
                                 unregister_socket(socket)
                                 recycled = recycled_connections.setdefault(
-                                    session.node_index, [])
+                                    node_index, [])
                                 assert socket not in recycled
                                 recycled.append(socket)
                         else: # Server
@@ -576,9 +571,9 @@ class TaskProcessor:
                                         del clients_waiting[0]
                                         session = CompileSession(compiler, executable, cwd,
                                             command, timer, client_conn, socket,
-                                            preprocess_socket, node_info, node_index, compiler_info)
+                                            preprocess_socket, node_info[node_index], compiler_info)
                                         session_from_client[client_conn.id] = session
-                                        session_from_server[socket] = session
+                                        session_from_server[socket] = session, node_index
                                     else:
                                         nodes_waiting.append((socket, node_index))
                                 else:
@@ -591,8 +586,10 @@ class TaskProcessor:
                                 del nodes_contacted[socket]
                                 node_ids[socket] = node_index
             finally:
+                #profile.disable()
                 for scan_worker in scan_workers:
                     scan_worker.terminate()
+                #profile.print_stats()
 
     def print_stats(self, node_info, timer, recycled_conections):
         current = time()
@@ -611,13 +608,13 @@ class TaskProcessor:
                 'Avg. Time {:<3.2f}\n'
             .format(
                 node[0], node[1],
-                node_info.tasks_sent       (index),
-                node_info.connections      (index),
-                node_info.tasks_completed  (index),
-                node_info.tasks_failed     (index),
-                node_info.tasks_processing (index),
-                node_info.average_tasks    (index),
-                node_info.average_task_time(index)))
+                node_info[index].tasks_sent       (),
+                node_info[index].connections      (),
+                node_info[index].tasks_completed  (),
+                node_info[index].tasks_failed     (),
+                node_info[index].tasks_processing (),
+                node_info[index].average_tasks    (),
+                node_info[index].average_task_time()))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
@@ -626,76 +623,70 @@ class TaskProcessor:
             print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, tm, count, average))
         return True
 
-class NodeInfoHolder:
-    class NodeInfo:
-        def __init__(self):
-            self._tasks_completed  = 0
-            self._tasks_failed     = 0
-            self._tasks_sent       = 0
-            self._total_time       = 0
-            self._open_connections = 0
-            self._tasks_change     = None
-            self._avg_tasks = {}
+class NodeInfo:
+    def __init__(self):
+        self._tasks_completed  = 0
+        self._tasks_failed     = 0
+        self._tasks_sent       = 0
+        self._total_time       = 0
+        self._open_connections = 0
+        self._tasks_change     = None
+        self._avg_tasks = {}
 
-    def __init__(self, size):
-        self.__nodes = tuple((NodeInfoHolder.NodeInfo() for i in range(size)))
+    def average_task_time(self):
+        tasks_completed = self.tasks_completed()
+        return self.total_time() / tasks_completed if tasks_completed else 0
 
-    def average_task_time(self, index):
-        tasks_completed = self.tasks_completed(index)
-        return self.total_time(index) / tasks_completed if tasks_completed else 0
+    def connection_open(self): self._open_connections += 1
 
-    def connection_open(self, index): self.__nodes[index]._open_connections += 1
+    def connection_closed(self): self._open_connections -= 1
 
-    def connection_closed(self, index): self.__nodes[index]._open_connections -= 1
+    def connections(self): return self._open_connections
 
-    def connections(self, index): return self.__nodes[index]._open_connections
+    def tasks_sent(self): return self._tasks_sent
 
-    def tasks_sent(self, index): return self.__nodes[index]._tasks_sent
+    def tasks_completed(self): return self._tasks_completed
 
-    def tasks_completed(self, index): return self.__nodes[index]._tasks_completed
+    def tasks_failed(self): return self._tasks_failed
 
-    def tasks_failed(self, index): return self.__nodes[index]._tasks_failed
+    def tasks_processing(self): return self.tasks_sent() - self.tasks_completed() - self.tasks_failed()
 
-    def tasks_processing(self, index): return self.tasks_sent(index) - self.tasks_completed(index) - self.tasks_failed(index)
+    def total_time(self): return self._total_time
 
-    def total_time(self, index): return self.__nodes[index]._total_time
-
-    def average_tasks(self, index):
-        avg_tasks = self.__nodes[index]._avg_tasks
+    def average_tasks(self):
+        avg_tasks = self._avg_tasks
         regular_duration = sum((duration for duration in avg_tasks.values()))
         weighted_duration = sum((duration * tasks for tasks, duration in avg_tasks.items()))
         return (weighted_duration / regular_duration) if regular_duration else 0
 
-    def __tasks_processing_about_to_change(self, index):
-        node_info = self.__nodes[index]
-        tasks_processing = self.tasks_processing(index)
+    def __tasks_processing_about_to_change(self):
+        tasks_processing = self.tasks_processing()
         if tasks_processing > 0:
             current_time = time()
-            duration = current_time - node_info._tasks_change
-            node_info._tasks_change = current_time
-            node_info._avg_tasks.setdefault(tasks_processing, 0)
-            node_info._avg_tasks[tasks_processing] += duration
+            duration = current_time - self._tasks_change
+            self._tasks_change = current_time
+            self._avg_tasks.setdefault(tasks_processing, 0)
+            self._avg_tasks[tasks_processing] += duration
         else:
-            node_info._tasks_change = time()
+            self._tasks_change = time()
 
-    def add_tasks_sent(self, index):
-        self.__tasks_processing_about_to_change(index)
-        self.__nodes[index]._tasks_sent += 1
+    def add_tasks_sent(self):
+        self.__tasks_processing_about_to_change()
+        self._tasks_sent += 1
 
-    def add_tasks_completed(self, index):
-        self.__tasks_processing_about_to_change(index)
-        self.__nodes[index]._tasks_completed += 1
+    def add_tasks_completed(self):
+        self.__tasks_processing_about_to_change()
+        self._tasks_completed += 1
 
-    def add_tasks_failed(self, index): self.__nodes[index]._add_tasks_failed += 1
+    def add_tasks_failed(self): self._add_tasks_failed += 1
 
-    def add_total_time(self, index, value): self.__nodes[index]._total_time += value
+    def add_total_time(self, value): self._total_time += value
 
 
 class BookKeepingManager(SyncManager):
     pass
 
 BookKeepingManager.register('Timer', Timer, TimerProxy)
-BookKeepingManager.register('NodeInfoHolder', NodeInfoHolder)
 
 default_script = 'distribute_manager.ini'
 

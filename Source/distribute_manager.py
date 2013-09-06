@@ -1,8 +1,7 @@
 #! python3.3
 from cmdline_processing import *
 from functools import cmp_to_key
-from multiprocessing import Process, Pool, cpu_count
-from multiprocessing.managers import SyncManager, BaseProxy
+from multiprocessing import Process, cpu_count
 from time import sleep, time
 from msvc import MSVCWrapper
 from subprocess import list2cmdline
@@ -41,6 +40,13 @@ class ScopedTimer:
     def stop(self):
         self.__callable(time() - self.__start)
 
+class SimpleTimer:
+    def __init__(self):
+        self.__start = time()
+
+    def get(self):
+        return time() - self.__start
+
 
 class Timer:
     def __init__(self):
@@ -53,19 +59,11 @@ class Timer:
     def as_dict(self):
         return self.__times
 
-class TimerProxy(BaseProxy):
-    _exposed_ = ('add_time', 'as_dict', 'timeit')
-    def add_time(self, type, value):
-        return self._callmethod('add_time', (type, value))
-
-    def as_dict(self):
-        return self._callmethod('as_dict')
+    def scoped_timer(self, name):
+        return ScopedTimer(lambda value : self.add_time(name, value))
 
     def timeit(self, name):
         return ContextManagerTimer(lambda value : self.add_time(name, value))
-
-    def scoped_timer(self, name):
-        return ScopedTimer(lambda value : self.add_time(name, value))
 
 class ScanHeaders(Process):
     def __init__(self, port, timer):
@@ -80,26 +78,26 @@ class ScanHeaders(Process):
 
         while True:
             client_id, task = socket.recv_multipart()
+            timer = SimpleTimer()
             result = self.prepare_task(pickle.loads(task))
-            socket.send_multipart([client_id, pickle.dumps(result)])
+            socket.send_multipart([client_id, pickle.dumps(timer.get()), pickle.dumps(result)])
 
     def prepare_task(self, task):
-        # TODO: This does not belong here. Move this to msvc.py.
+        # FIXME: This does not belong here. Move this to msvc.py.
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
         # hardcode this knowledge here.
-        with self.__timer.timeit('preprocess.internal'):
-            macros = task['macros'] + task['builtin_macros']
-            macros += task['compiler_info'].macros()
-            if '_DEBUG' in macros:
-                if not any(('_SECURE_SCL' in x for x in macros)):
-                    macros.append('_SECURE_SCL=1')
-                if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
-                    macros.append('_HAS_ITERATOR_DEBUGGING=1')
+        macros = task['macros'] + task['builtin_macros']
+        macros += task['compiler_info'].macros()
+        if '_DEBUG' in macros:
+            if not any(('_SECURE_SCL' in x for x in macros)):
+                macros.append('_SECURE_SCL=1')
+            if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
+                macros.append('_HAS_ITERATOR_DEBUGGING=1')
 
-            return collect_headers(os.path.join(task['cwd'], task['source']),
-                task['includes'], [], macros,
-                [task['pch_header']] if task['pch_header'] else [])
+        return collect_headers(os.path.join(task['cwd'], task['source']),
+            task['includes'], [], macros,
+            [task['pch_header']] if task['pch_header'] else [])
 
 class TaskCreator:
     def __init__(self, compiler_wrapper, executable, cwd, command, timer):
@@ -452,144 +450,144 @@ class TaskProcessor:
 
         self.last_time = None
 
-        with BookKeepingManager() as book_keeper:
-            timer = book_keeper.Timer()
+        timer = Timer()
 
-            node_info = [NodeInfo() for x in range(len(self.__nodes))]
+        node_info = [NodeInfo() for x in range(len(self.__nodes))]
 
-            scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
-            for scan_worker in scan_workers:
-                scan_worker.start()
+        scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
+        for scan_worker in scan_workers:
+            scan_worker.start()
 
-            max_nodes_waiting = 8
-            nodes_requested = 0
+        max_nodes_waiting = 8
+        nodes_requested = 0
 
-            # Connections to be re-used.
-            recycled_connections = {}
+        # Connections to be re-used.
+        recycled_connections = {}
 
-            # Server socket to session mapping.
-            session_from_server = {}
+        # Server socket to session mapping.
+        session_from_server = {}
 
-            # Client id to session mapping.
-            session_from_client = {}
+        # Client id to session mapping.
+        session_from_client = {}
 
-            # Contains nodes which were contacted, but have not yet responded.
-            # Value is node_index which is used in local statistics.
-            nodes_contacted = {}
+        # Contains nodes which were contacted, but have not yet responded.
+        # Value is node_index which is used in local statistics.
+        nodes_contacted = {}
 
-            # Contains nodes which responded, but did not yet send whether they
-            # accept a task. Value is same as in nodes_contacted.
-            node_ids = {}
+        # Contains nodes which responded, but did not yet send whether they
+        # accept a task. Value is same as in nodes_contacted.
+        node_ids = {}
 
-            # Nodes waiting for a client.
-            nodes_waiting = []
+        # Nodes waiting for a client.
+        nodes_waiting = []
 
-            # Clients waiting for a node.
-            clients_waiting = []
+        # Clients waiting for a node.
+        clients_waiting = []
 
-            #profile = cProfile.Profile()
-            try:
-                #profile.enable()
-                while True:
-                    self.print_stats(node_info, timer, recycled_connections)
-                    for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
-                        result = self.find_available_node(node_info, zmq_ctx, recycled_connections)
-                        if result is not None:
-                            socket, node_index = result
-                            register_socket(socket)
-                            nodes_contacted[socket] = node_index
-                            nodes_requested += 1
+        #profile = cProfile.Profile()
+        try:
+            #profile.enable()
+            while True:
+                self.print_stats(node_info, timer, recycled_connections)
+                for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
+                    result = self.find_available_node(node_info, zmq_ctx, recycled_connections)
+                    if result is not None:
+                        socket, node_index = result
+                        register_socket(socket)
+                        nodes_contacted[socket] = node_index
+                        nodes_requested += 1
 
-                    sockets = dict(poller.poll(1000))
-                    for socket, flags in sockets.items():
-                        if flags != zmq.POLLIN:
-                            continue
+                sockets = dict(poller.poll(1000))
+                for socket, flags in sockets.items():
+                    if flags != zmq.POLLIN:
+                        continue
 
-                        if socket is preprocess_socket:
-                            client_id, result = preprocess_socket.recv_multipart()
-                            assert client_id in session_from_client
+                    if socket is preprocess_socket:
+                        client_id, duration, result = preprocess_socket.recv_multipart()
+                        timer.add_time('preprocess.internal', pickle.loads(duration))
+                        assert client_id in session_from_client
+                        session = session_from_client[client_id]
+                        session.preprocess_timer.stop()
+                        del session.preprocess_timer
+                        session.tempfile = pickle.loads(result)
+                        register_socket(session.server_conn)
+
+                    elif socket is client_socket:
+                        msg = client_socket.recv_multipart()
+                        client_id = msg[0]
+                        if client_id in session_from_client:
+                            # Session already exists.
                             session = session_from_client[client_id]
-                            session.preprocess_timer.stop()
-                            del session.preprocess_timer
-                            session.tempfile = pickle.loads(result)
-                            register_socket(session.server_conn)
-
-                        elif socket is client_socket:
-                            msg = client_socket.recv_multipart()
-                            client_id = msg[0]
-                            if client_id in session_from_client:
-                                # Session already exists.
-                                session = session_from_client[client_id]
-                                server_socket = session.server_conn
-                                assert server_socket in session_from_server
-                                session.got_data_from_client(msg)
+                            server_socket = session.server_conn
+                            assert server_socket in session_from_server
+                            session.got_data_from_client(msg)
+                        else:
+                            # Create new session.
+                            compiler = msg[1].decode()
+                            executable = msg[2].decode()
+                            cwd = msg[3].decode()
+                            command = [x.decode() for x in msg[4:]]
+                            client_conn = self.SendProxy(client_socket, client_id)
+                            client_conn.send([b"TASK_RECEIVED"])
+                            if nodes_waiting:
+                                server_conn, node_index = nodes_waiting[0]
+                                del nodes_waiting[0]
+                                session = CompileSession(compiler, executable, cwd,
+                                    command, timer, client_conn, server_conn,
+                                    preprocess_socket, node_info[node_index], compiler_info)
+                                session_from_client[client_conn.id] = session
+                                session_from_server[server_conn] = session, node_index
                             else:
-                                # Create new session.
-                                compiler = msg[1].decode()
-                                executable = msg[2].decode()
-                                cwd = msg[3].decode()
-                                command = [x.decode() for x in msg[4:]]
-                                client_conn = self.SendProxy(client_socket, client_id)
-                                client_conn.send([b"TASK_RECEIVED"])
-                                if nodes_waiting:
-                                    server_conn, node_index = nodes_waiting[0]
-                                    del nodes_waiting[0]
+                                clients_waiting.append((client_conn, compiler, executable, cwd, command))
+
+                    elif socket in session_from_server:
+                        session, node_index = session_from_server[socket]
+                        msg = socket.recv()
+                        client_id = session.client_conn.id
+                        assert client_id in session_from_client
+                        session_done = session.got_data_from_server(msg)
+                        if session_done:
+                            del session_from_client[client_id]
+                            del session_from_server[socket]
+                            unregister_socket(socket)
+                            recycled = recycled_connections.setdefault(
+                                node_index, [])
+                            assert socket not in recycled
+                            recycled.append(socket)
+                    else: # Server
+                        if socket in node_ids:
+                            accept = socket.recv_pyobj()
+                            node_index = node_ids[socket]
+                            del node_ids[socket]
+                            # Temporarily unregister this socket. It will be
+                            # registered again when its preprocessing is
+                            # done.
+                            unregister_socket(socket)
+                            if accept == "ACCEPT":
+                                if clients_waiting:
+                                    client_conn, compiler, executable, cwd, command = clients_waiting[0]
+                                    del clients_waiting[0]
                                     session = CompileSession(compiler, executable, cwd,
-                                        command, timer, client_conn, server_conn,
+                                        command, timer, client_conn, socket,
                                         preprocess_socket, node_info[node_index], compiler_info)
                                     session_from_client[client_conn.id] = session
-                                    session_from_server[server_conn] = session, node_index
+                                    session_from_server[socket] = session, node_index
                                 else:
-                                    clients_waiting.append((client_conn, compiler, executable, cwd, command))
-
-                        elif socket in session_from_server:
-                            session, node_index = session_from_server[socket]
-                            msg = socket.recv()
-                            client_id = session.client_conn.id
-                            assert client_id in session_from_client
-                            session_done = session.got_data_from_server(msg)
-                            if session_done:
-                                del session_from_client[client_id]
-                                del session_from_server[socket]
-                                unregister_socket(socket)
-                                recycled = recycled_connections.setdefault(
-                                    node_index, [])
-                                assert socket not in recycled
-                                recycled.append(socket)
-                        else: # Server
-                            if socket in node_ids:
-                                accept = socket.recv_pyobj()
-                                node_index = node_ids[socket]
-                                del node_ids[socket]
-                                # Temporarily unregister this socket. It will be
-                                # registered again when its preprocessing is
-                                # done.
-                                unregister_socket(socket)
-                                if accept == "ACCEPT":
-                                    if clients_waiting:
-                                        client_conn, compiler, executable, cwd, command = clients_waiting[0]
-                                        del clients_waiting[0]
-                                        session = CompileSession(compiler, executable, cwd,
-                                            command, timer, client_conn, socket,
-                                            preprocess_socket, node_info[node_index], compiler_info)
-                                        session_from_client[client_conn.id] = session
-                                        session_from_server[socket] = session, node_index
-                                    else:
-                                        nodes_waiting.append((socket, node_index))
-                                else:
-                                    assert accept == "REJECT"
-                                nodes_requested -= 1
+                                    nodes_waiting.append((socket, node_index))
                             else:
-                                assert socket in nodes_contacted
-                                session_created = socket.recv()
-                                node_index = nodes_contacted[socket]
-                                del nodes_contacted[socket]
-                                node_ids[socket] = node_index
-            finally:
-                #profile.disable()
-                for scan_worker in scan_workers:
-                    scan_worker.terminate()
-                #profile.print_stats()
+                                assert accept == "REJECT"
+                            nodes_requested -= 1
+                        else:
+                            assert socket in nodes_contacted
+                            session_created = socket.recv()
+                            node_index = nodes_contacted[socket]
+                            del nodes_contacted[socket]
+                            node_ids[socket] = node_index
+        finally:
+            #profile.disable()
+            for scan_worker in scan_workers:
+                scan_worker.terminate()
+            #profile.print_stats()
 
     def print_stats(self, node_info, timer, recycled_conections):
         current = time()
@@ -682,11 +680,6 @@ class NodeInfo:
 
     def add_total_time(self, value): self._total_time += value
 
-
-class BookKeepingManager(SyncManager):
-    pass
-
-BookKeepingManager.register('Timer', Timer, TimerProxy)
 
 default_script = 'distribute_manager.ini'
 

@@ -18,6 +18,7 @@ import socket
 import sys
 import zmq
 import zlib
+import tarfile
 
 from Messaging import Client as MsgClient
 
@@ -293,14 +294,17 @@ class CompileSession:
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg
             assert msg == b'OK'
-            self.server_conn.send_pyobj('HEADERS_ARCHIVE')
+            self.server_conn.send_pyobj('TASK_FILES')
+            # Add source file to the tar archive.
+            source_file = self.task['source']
+            full_path = os.path.join(self.task['cwd'], source_file)
+            with tarfile.open(mode='a', name=self.tempfile) as tar:
+                tar.add(full_path, source_file)
             with self.timer.timeit('send.tar'), open(self.tempfile, 'rb') as file:
                 send_file(self.server_conn.send_pyobj, file)
             os.remove(self.tempfile)
             del self.tempfile
-            self.server_conn.send_pyobj('SOURCE_FILE')
-            with self.timer.timeit('send.source'), open(os.path.join(self.task['cwd'], self.task['source']), 'rb') as cpp:
-                send_compressed_file(self.server_conn.send_pyobj, cpp)
+            self.server_conn.send_pyobj(('SOURCE_FILE', source_file))
             if self.task['pch_file']:
                 self.server_conn.send_pyobj('NEED_PCH_FILE')
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
@@ -327,7 +331,6 @@ class CompileSession:
             del self.average_timer
             server_status = msg
             if server_status == b'SERVER_FAILED':
-                self.state = self.STATE_DONE
                 self.client_conn.send([b'EXIT', b'-1'])
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
             else:

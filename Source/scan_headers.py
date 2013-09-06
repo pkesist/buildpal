@@ -45,13 +45,6 @@ def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     return preprocessor.scanHeaders(ppc, cpp_file)
 
 def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
-    def write_str_to_tar(tar, name, content):
-        info = tarfile.TarInfo(name=name)
-        info.size = len(content)
-        data = BytesIO(content.encode())
-        data.seek(0)
-        tar.addfile(tarinfo=info, fileobj=data)
-
     def write_file_to_tar(tar, name, content):
         class MemViewAsFileInput(RawIOBase):
             def __init__(self, membuf):
@@ -94,10 +87,10 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
                         # Add a dummy file which will create this structure.
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
-                        write_str_to_tar(tar, relative_paths[depth] + 'dummy', "Dummy file needed to create directory structure")
+                        write_file_to_tar(tar, relative_paths[depth] + 'dummy', b"Dummy file needed to create directory structure")
                 write_file_to_tar(tar, '/'.join(path_elements), content)
             if paths_to_include:
-                write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include))
+                write_file_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
         tarBuffer.seek(0)
         archive = TempFile(suffix='.tar')
         with open(archive.filename(), 'wb') as file:

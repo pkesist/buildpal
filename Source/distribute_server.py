@@ -57,10 +57,9 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_DONE = 2
     STATE_SH_GET_ARCHIVE_TAG = 3
     STATE_SH_GET_ARCHIVE_DATA = 4
-    STATE_SH_GET_SOURCE_TAG = 5
-    STATE_SH_GET_SOURCE_DATA = 6
-    STATE_SH_CHECK_PCH_TAG = 7
-    STATE_SH_GET_PCH_DATA = 8
+    STATE_SH_GET_SOURCE_FILE_NAME = 5
+    STATE_SH_CHECK_PCH_TAG = 6
+    STATE_SH_GET_PCH_DATA = 7
 
     def __init__(self, file_repository, cpu_usage_hwm, task_counter):
         ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
@@ -108,7 +107,7 @@ class CompileSession(ServerSession, ServerCompiler):
                         [noLink, output] +
                         [compiler_info.include_option.make_value(incpath).make_str()
                             for incpath in self.include_dirs] +
-                        [self.source_file.filename()])
+                        [self.source_file])
                     retcode, stdout, stderr = self.compiler(command)
                 except Exception:
                     self.send(b'SERVER_FAILED')
@@ -136,7 +135,7 @@ class CompileSession(ServerSession, ServerCompiler):
             self.state = self.STATE_SH_GET_ARCHIVE_TAG
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()
-            assert archive_tag == 'HEADERS_ARCHIVE'
+            assert archive_tag == 'TASK_FILES'
             self.archivefile = TempFile()
             self.archivedesc = open(self.archivefile.filename(), 'wb')
             self.state = self.STATE_SH_GET_ARCHIVE_DATA
@@ -147,27 +146,16 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.archivedesc.close()
                 del self.archivedesc
                 self.setup_include_dirs()
-                self.state = self.STATE_SH_GET_SOURCE_TAG
-        elif self.state == self.STATE_SH_GET_SOURCE_TAG:
-            tag = self.recv_pyobj()
+                self.state = self.STATE_SH_GET_SOURCE_FILE_NAME
+        elif self.state == self.STATE_SH_GET_SOURCE_FILE_NAME:
+            tag, source_file = self.recv_pyobj()
             assert tag == 'SOURCE_FILE'
-            self.source_file = TempFile(suffix=self.task.source_type)
-            self.source_desc = open(self.source_file.filename(), 'wb')
-            self.source_decompressor = zlib.decompressobj()
-            self.state = self.STATE_SH_GET_SOURCE_DATA
-        elif self.state == self.STATE_SH_GET_SOURCE_DATA:
-            more, data = self.recv_pyobj()
-            self.source_desc.write(self.source_decompressor.decompress(data))
-            if not more:
-                self.source_desc.write(self.source_decompressor.flush())
-                self.source_desc.close()
-                del self.source_desc
-                del self.source_decompressor
-                if self.task.pch_file is None:
-                    self.run_compiler_with_source_and_headers()
-                    return True
-                else:
-                    self.state = self.STATE_SH_CHECK_PCH_TAG
+            self.source_file = os.path.join(self.include_path, source_file)
+            if self.task.pch_file is None:
+                self.run_compiler_with_source_and_headers()
+                return True
+            else:
+                self.state = self.STATE_SH_CHECK_PCH_TAG
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = self.recv_pyobj()
             assert tag == 'NEED_PCH_FILE'

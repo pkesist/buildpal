@@ -8,7 +8,7 @@ from subprocess import list2cmdline
 import cProfile
 
 from scan_headers import collect_headers
-from utils import send_file
+from utils import send_file, send_compressed_file
 
 import configparser
 import io
@@ -318,7 +318,7 @@ class CompileSession:
             response = msg[0]
             if response == b'YES':
                 with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task['pch_file'][0]), 'rb') as pch_file:
-                    send_file(self.server_conn.send_multipart, pch_file, copy=False)
+                    send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
             else:
                 assert response == b'NO'
             self.server_timer = self.timer.scoped_timer('server_time')
@@ -342,6 +342,7 @@ class CompileSession:
             self.retcode, self.stdout, self.stderr = pickle.loads(msg[0])
             if self.retcode == 0:
                 self.output = open(self.task['output'], "wb")
+                self.output_decompressor = zlib.decompressobj()
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
@@ -350,8 +351,10 @@ class CompileSession:
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg
-            self.output.write(data)
+            self.output.write(self.output_decompressor.decompress(data))
             if more == b'\x00':
+                self.output.write(self.output_decompressor.flush())
+                del self.output_decompressor
                 self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])

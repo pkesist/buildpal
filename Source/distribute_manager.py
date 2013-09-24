@@ -8,7 +8,7 @@ from subprocess import list2cmdline
 import cProfile
 
 from scan_headers import collect_headers
-from utils import send_file, send_compressed_file
+from utils import send_file
 
 import configparser
 import io

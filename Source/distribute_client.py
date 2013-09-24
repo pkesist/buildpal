@@ -28,7 +28,7 @@ def execute(command):
         return -1
     task = [compiler, exe, os.getcwd().encode()]
     task.extend(x.encode() for x in command)
-    conn.send_multipart(task)
+    conn.send_multipart(task, copy=False)
     response = conn.recv()
     assert response == b"TASK_RECEIVED"
     while True:
@@ -40,7 +40,7 @@ def execute(command):
             cmd = request[1].decode()
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 stdout, stderr = proc.communicate()
-            conn.send_multipart([str(proc.returncode).encode(), stdout, stderr])
+            conn.send_multipart([str(proc.returncode).encode(), stdout, stderr], copy=False)
         elif request[0] == b'EXIT':
             return int(request[1])
         elif request[0] == b'COMPLETED':
@@ -54,7 +54,7 @@ def execute(command):
                 sys.stderr.write("----------------------------------------------------------------\n")
             return retcode
         elif request[0] == b'GETENV':
-            conn.send_multipart([os.environ.get(request[1].decode(), '').encode()])
+            conn.send_multipart([os.environ.get(request[1].decode(), '').encode()], copy=False)
         else:
             print("ERROR: GOT {}".format(request[0]))
             return -1

@@ -13,7 +13,6 @@ import os
 import zmq
 import tarfile
 import shutil
-import zlib
 
 from Messaging import ServerSession, ServerWorker, Broker
 
@@ -118,7 +117,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.send_pyobj((retcode, stdout, stderr))
                 if retcode == 0:
                     with object_file.open('rb') as obj:
-                        send_compressed_file(self.send_multipart, obj, copy=False)
+                        send_file(self.send_multipart, obj, copy=False)
         finally:
             shutil.rmtree(self.include_path, ignore_errors=True)
 
@@ -163,7 +162,6 @@ class CompileSession(ServerSession, ServerCompiler):
             if required:
                 self.send(b'YES')
                 self.pch_desc = open(self.pch_file, 'wb')
-                self.pch_decompressor = zlib.decompressobj()
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
                 self.send(b'NO')
@@ -177,12 +175,10 @@ class CompileSession(ServerSession, ServerCompiler):
                 return True
         elif self.state == self.STATE_SH_GET_PCH_DATA:
             more, data = self.recv_multipart()
-            self.pch_desc.write(self.pch_decompressor.decompress(data))
+            self.pch_desc.write(data)
             if more == b'\x00':
-                self.pch_desc.write(self.pch_decompressor.flush())
                 self.pch_desc.close()
                 del self.pch_desc
-                del self.pch_decompressor
                 self.file_repository().file_completed(*self.task.pch_file)
                 self.run_compiler_with_source_and_headers()
                 return True

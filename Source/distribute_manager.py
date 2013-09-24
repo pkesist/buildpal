@@ -5,7 +5,7 @@ from multiprocessing import Process, cpu_count
 from time import sleep, time
 from msvc import MSVCWrapper
 from subprocess import list2cmdline
-#import cProfile
+import cProfile
 
 from scan_headers import collect_headers
 from utils import send_file, send_compressed_file
@@ -18,7 +18,6 @@ import pickle
 import socket
 import sys
 import zmq
-import zlib
 
 from Messaging import Client as MsgClient
 
@@ -266,7 +265,7 @@ class CompileSession:
     def start_task(self):
         if self.executable in self.compiler_info:
             self.task['compiler_info'] = self.compiler_info[self.executable]
-            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)], copy=False)
             self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task)
@@ -286,7 +285,7 @@ class CompileSession:
         info = self.compiler.compiler_info(self.executable, stdout, stderr)
         self.compiler_info[self.executable] = info
         self.task['compiler_info'] = self.compiler_info[self.executable]
-        self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)])
+        self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task)], copy=False)
         self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
         with self.timer.timeit('send'):
             self.server_conn.send_pyobj(self.task)
@@ -319,7 +318,7 @@ class CompileSession:
             response = msg[0]
             if response == b'YES':
                 with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task['pch_file'][0]), 'rb') as pch_file:
-                    send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
+                    send_file(self.server_conn.send_multipart, pch_file, copy=False)
             else:
                 assert response == b'NO'
             self.server_timer = self.timer.scoped_timer('server_time')
@@ -343,7 +342,6 @@ class CompileSession:
             self.retcode, self.stdout, self.stderr = pickle.loads(msg[0])
             if self.retcode == 0:
                 self.output = open(self.task['output'], "wb")
-                self.output_decompressor = zlib.decompressobj()
                 self.state = self.STATE_RECEIVE_RESULT_FILE
             else:
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
@@ -352,10 +350,8 @@ class CompileSession:
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg
-            self.output.write(self.output_decompressor.decompress(data))
+            self.output.write(data)
             if more == b'\x00':
-                self.output.write(self.output_decompressor.flush())
-                del self.output_decompressor
                 self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
@@ -378,8 +374,8 @@ class TaskProcessor:
 
     def find_available_node(self, node_info, zmq_ctx, recycled_connections):
         def cmp(lhs, rhs):
-            lhs_tasks_processing = node_info[lhs].tasks_processing()
-            rhs_tasks_processing = node_info[rhs].tasks_processing()
+            lhs_tasks_processing = node_info[lhs].tasks_processing() + node_info[lhs].reserved_connections()
+            rhs_tasks_processing = node_info[rhs].tasks_processing() + node_info[rhs].reserved_connections()
             lhs_time_per_task = node_info[lhs].average_task_time()
             rhs_time_per_task = node_info[rhs].average_task_time()
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
@@ -407,6 +403,7 @@ class TaskProcessor:
                     traceback.print_exc()
                     continue
             socket.send(b'CREATE_SESSION')
+            node_info[node_index].inc_reserved_connections()
             return socket, node_index
         return None
 
@@ -416,13 +413,13 @@ class TaskProcessor:
             self.id = id
 
         def send(self, data):
-            self.socket.send_multipart([self.id] + data)
+            self.socket.send_multipart([self.id] + data, copy=False)
 
         def recv(self):
             self.socket.recv_multipart()
 
-        def send_pyobj(self, obj, copy=False):
-            self.send([pickle.dumps(obj)], copy=copy)
+        def send_pyobj(self, obj):
+            self.send([pickle.dumps(obj)])
 
         def recv_pyobj(self):
             return pickle.loads(self.recv()[0])
@@ -489,7 +486,7 @@ class TaskProcessor:
         # Clients waiting for a node.
         clients_waiting = []
 
-        #profile = cProfile.Profile()
+        profile = cProfile.Profile()
         try:
             #profile.enable()
             while True:
@@ -553,6 +550,7 @@ class TaskProcessor:
 
                     elif socket in session_from_server:
                         with timer.timeit("poller.server_w_session"):
+                            profile.enable()
                             session, node_index = session_from_server[socket]
                             msg = socket.recv_multipart()
                             client_id = session.client_conn.id
@@ -566,6 +564,7 @@ class TaskProcessor:
                                     node_index, [])
                                 assert socket not in recycled
                                 recycled.append(socket)
+                            profile.disable()
                     else: # Server
                         with timer.timeit("poller.server_wo_session"):
                             if socket in node_ids:
@@ -589,6 +588,7 @@ class TaskProcessor:
                                         nodes_waiting.append((socket, node_index))
                                 else:
                                     assert accept == "REJECT"
+                                    node_info[node_index].dec_reserved_connections()
                                 nodes_requested -= 1
                             else:
                                 assert socket in nodes_contacted
@@ -600,7 +600,7 @@ class TaskProcessor:
             #profile.disable()
             for scan_worker in scan_workers:
                 scan_worker.terminate()
-            #profile.print_stats()
+            profile.print_stats()
 
     def print_stats(self, node_info, timer, recycled_conections):
         current = time()
@@ -615,17 +615,18 @@ class TaskProcessor:
             node = self.__nodes[index]
             sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
-                'Avg. Time {:<3.2f}\n'
+                '{:<3} Running {:<3} Reserved {:<3} '
+                'Avg. Tasks {:<3.2f} Avg. Time {:<3.2f}\n'
             .format(
                 node[0], node[1],
-                node_info[index].tasks_sent       (),
-                node_info[index].connections      (),
-                node_info[index].tasks_completed  (),
-                node_info[index].tasks_failed     (),
-                node_info[index].tasks_processing (),
-                node_info[index].average_tasks    (),
-                node_info[index].average_task_time()))
+                node_info[index].tasks_sent          (),
+                node_info[index].connections         (),
+                node_info[index].tasks_completed     (),
+                node_info[index].tasks_failed        (),
+                node_info[index].tasks_processing    (),
+                node_info[index].reserved_connections(),
+                node_info[index].average_tasks       (),
+                node_info[index].average_task_time   ()))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
@@ -636,12 +637,13 @@ class TaskProcessor:
 
 class NodeInfo:
     def __init__(self):
-        self._tasks_completed  = 0
-        self._tasks_failed     = 0
-        self._tasks_sent       = 0
-        self._total_time       = 0
-        self._open_connections = 0
-        self._tasks_change     = None
+        self._tasks_completed      = 0
+        self._tasks_failed         = 0
+        self._tasks_sent           = 0
+        self._total_time           = 0
+        self._open_connections     = 0
+        self._reserved_connections = 0
+        self._tasks_change         = None
         self._avg_tasks = {}
 
     def average_task_time(self):
@@ -653,6 +655,8 @@ class NodeInfo:
     def connection_closed(self): self._open_connections -= 1
 
     def connections(self): return self._open_connections
+
+    def reserved_connections(self): return self._reserved_connections
 
     def tasks_sent(self): return self._tasks_sent
 
@@ -681,8 +685,16 @@ class NodeInfo:
         else:
             self._tasks_change = time()
 
+    def inc_reserved_connections(self):
+        self._reserved_connections += 1
+
+    def dec_reserved_connections(self):
+        self._reserved_connections -= 1
+
     def add_tasks_sent(self):
         self.__tasks_processing_about_to_change()
+        assert self.reserved_connections() > 0
+        self._reserved_connections -= 1
         self._tasks_sent += 1
 
     def add_tasks_completed(self):

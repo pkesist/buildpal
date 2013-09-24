@@ -88,14 +88,14 @@ class ServerWorker:
                     client_id = msg[0]
                     if msg[1] == b'CREATE_SESSION':
                         session = self.__create_session(client_id)
-                        session.socket.send_multipart([b'SESSION_CREATED', client_id])
+                        session.socket.send_multipart([b'SESSION_CREATED', client_id], copy=False)
                         session.created()
                     else:
-                        self.sessions.send_multipart(msg)
+                        self.sessions.send_multipart(msg, copy=False)
                 
                 elif sock is self.sessions:
                     msg = self.sessions.recv_multipart(flags=zmq.NOBLOCK)
-                    self.broker.send_multipart(msg)
+                    self.broker.send_multipart(msg, copy=False)
                 
                 elif sock is self.control:
                     msg = self.control.recv_multipart()

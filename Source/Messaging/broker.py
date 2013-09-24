@@ -71,7 +71,7 @@ class Broker:
                     server_id = msg[0]
                     session_id = msg[1]
                     client_id = client_from_server[(server_id, session_id)]
-                    self.clients.send_multipart([client_id] + msg[2:])
+                    self.clients.send_multipart([client_id] + msg[2:], copy=False)
 
             if socks.get(self.clients) == zmq.POLLIN:
                 msg = self.clients.recv_multipart(flags=zmq.NOBLOCK)
@@ -80,10 +80,10 @@ class Broker:
                 if len(msg) == 2 and msg[1] == b'CREATE_SESSION':
                     workers.rotate(1)
                     server_id = workers[0]
-                    self.servers.send_multipart([server_id, client_id, b'CREATE_SESSION'])
+                    self.servers.send_multipart([server_id, client_id, b'CREATE_SESSION'], copy=False)
                 else:
                     server_id, session_id = server_from_client.get(client_id)
-                    self.servers.send_multipart([server_id, session_id] + msg[1:])
+                    self.servers.send_multipart([server_id, session_id] + msg[1:], copy=False)
 
             if socks.get(self.control) == zmq.POLLIN:
                 msg = self.control.recv_multipart()

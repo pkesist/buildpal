@@ -173,6 +173,9 @@ class TaskCreator:
             pch_file = None
 
         def create_task(source):
+            if os.path.isabs(source):
+                source = os.path.relpath(source, self.__cwd)
+
             return {
                 'compiler_executable' : self.executable(),
                 'call' : compile_call,

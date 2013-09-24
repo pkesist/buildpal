@@ -118,7 +118,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.send_pyobj((retcode, stdout, stderr))
                 if retcode == 0:
                     with object_file.open('rb') as obj:
-                        send_compressed_file(self.send_pyobj, obj)
+                        send_compressed_file(self.send_multipart, obj, copy=False)
         finally:
             shutil.rmtree(self.include_path, ignore_errors=True)
 
@@ -140,9 +140,9 @@ class CompileSession(ServerSession, ServerCompiler):
             self.archivedesc = open(self.archivefile.filename(), 'wb')
             self.state = self.STATE_SH_GET_ARCHIVE_DATA
         elif self.state == self.STATE_SH_GET_ARCHIVE_DATA:
-            more, data = self.recv_pyobj()
+            more, data = self.recv_multipart()
             self.archivedesc.write(data)
-            if not more:
+            if more == b'\x00':
                 self.archivedesc.close()
                 del self.archivedesc
                 self.setup_include_dirs()
@@ -176,9 +176,9 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.run_compiler_with_source_and_headers()
                 return True
         elif self.state == self.STATE_SH_GET_PCH_DATA:
-            more, data = self.recv_pyobj()
+            more, data = self.recv_multipart()
             self.pch_desc.write(self.pch_decompressor.decompress(data))
-            if not more:
+            if more == b'\x00':
                 self.pch_desc.write(self.pch_decompressor.flush())
                 self.pch_desc.close()
                 del self.pch_desc

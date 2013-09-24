@@ -41,8 +41,10 @@ def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
     preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
     return preprocessor.scanHeaders(ppc, cpp_file)
 
-def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
-    def write_file_to_tar(tar, name, content):
+def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_headers=[]):
+    cpp_file = os.path.join(cwd, rel_file)
+
+    def write_str_to_tar(tar, name, content):
         class MemViewAsFileInput(RawIOBase):
             def __init__(self, membuf):
                 self.membuf = membuf
@@ -84,18 +86,16 @@ def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]
                         # Add a dummy file which will create this structure.
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
-                        write_file_to_tar(tar, relative_paths[depth] + 'dummy', b"Dummy file needed to create directory structure")
-                write_file_to_tar(tar, '/'.join(path_elements), content)
+                        write_str_to_tar(tar, relative_paths[depth] + 'dummy', b"Dummy file needed to create directory structure")
+                write_str_to_tar(tar, '/'.join(path_elements), content)
             if paths_to_include:
-                write_file_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
-        tarBuffer.seek(0)
-        archive = TempFile(suffix='.tar')
-        with open(archive.filename(), 'wb') as file:
-            file.write(tarBuffer.read())
+                write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
+            tar.add(cpp_file, rel_file)
         hits, misses = cache.getStats()
         total = hits + misses
         print("{} hits, {} misses, hit ratio {:0>1.2f}".format(hits, misses, 0 if total == 0 else hits/total))
-        return archive.filename()
+        tarBuffer.seek(0)
+        return tarBuffer
     except Exception:
         import traceback
         traceback.print_exc()
@@ -164,7 +164,7 @@ def test2():
 
 def test_boost_header(header, boostdir):
     from time import time
-    start = time()    
+    start = time()
     all_headers(header, [boostdir], [], [], "")
     first_done = time()
     all_headers(header, [boostdir], [], [], "")

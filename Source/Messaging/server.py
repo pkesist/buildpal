@@ -56,6 +56,8 @@ class ServerWorker:
         session.socket = socket
         session.recv = session.socket.recv
         session.send = session.socket.send
+        session.recv_multipart = session.socket.recv_multipart
+        session.send_multipart = session.socket.send_multipart
 
         self.socket_to_session[socket] = session
         self.poller.register(session.socket, zmq.POLLIN)

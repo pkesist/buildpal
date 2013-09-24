@@ -85,7 +85,6 @@ void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 
 CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & macroState )
 {
-    boost::unique_lock<boost::recursive_mutex> lock( mutex_ );
     HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
     if ( iter == headersInfo().end() )
         return CacheEntryPtr();

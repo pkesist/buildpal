@@ -12,7 +12,6 @@
 #include <boost/functional/hash.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
-#include <boost/thread/recursive_mutex.hpp>
 
 #include <llvm/ADT/StringMap.h>
 
@@ -173,8 +172,6 @@ public:
         Headers const & headers
     )
     {
-        boost::unique_lock<boost::recursive_mutex> const lock( mutex_ );
-
         HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );
         if ( iter == headersInfo().end() )
         {
@@ -219,7 +216,6 @@ private:
     std::size_t counter_;
     std::size_t hits_;
     std::size_t misses_;
-    boost::recursive_mutex mutex_;
 };
 
 

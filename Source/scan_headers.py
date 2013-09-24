@@ -17,12 +17,9 @@ from tempfile import mkdtemp
 from shutil import rmtree
 
 cache = preprocessing.Cache()
-thread_local = threading.local()
+preprocessor = preprocessing.Preprocessor(cache)
 
 def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
-    if not hasattr(thread_local, 'preprocessor'):
-        thread_local.preprocessor = preprocessing.Preprocessor(cache)
-    preprocessor = thread_local.preprocessor
     preprocessor.setMicrosoftMode(True) # If MSVC.
     preprocessor.setMicrosoftExt(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()

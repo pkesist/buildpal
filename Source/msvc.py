@@ -223,15 +223,15 @@ class MSVCWrapper(CompilerWrapper):
 
     @classmethod
     def setup_compiler(cls, compiler_info):
-        def run_compiler(command, compiler_environ):
+        def run_compiler(command, cwd, compiler_environ):
             env = dict(os.environ)
             env.update(compiler_environ)
-            with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            with subprocess.Popen(command, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         compiler_env = MSVCWrapper.get_compiler_environment(compiler_info)
         if compiler_env:
-            return lambda command : run_compiler(command, compiler_env)
+            return lambda command, cwd : run_compiler(command, cwd, compiler_env)
         return None
 
     def compiler_option_macros(self, tokens):

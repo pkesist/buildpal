@@ -17,6 +17,7 @@ import os
 import pickle
 import socket
 import sys
+import zlib
 import zmq
 
 from Messaging import Client as MsgClient

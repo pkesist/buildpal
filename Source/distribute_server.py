@@ -108,7 +108,7 @@ class CompileSession(ServerSession, ServerCompiler):
                         [compiler_info.include_option.make_value(incpath).make_str()
                             for incpath in self.include_dirs] +
                         [self.source_file])
-                    retcode, stdout, stderr = self.compiler(command)
+                    retcode, stdout, stderr = self.compiler(command, self.include_path)
                 except Exception:
                     self.send(b'SERVER_FAILED')
                     import traceback

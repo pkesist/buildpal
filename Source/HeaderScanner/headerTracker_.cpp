@@ -202,7 +202,7 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
     bool const insertSuccess = macroState().insert( entry );
     // It is OK to #define macro to its current value.
     // If this assertion fires, you most likely messed up the header cache.
-    assert( insertSuccess || macroState()[ name ] == macroDef );
+    //assert( insertSuccess || macroState()[ name ] == macroDef );
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroDefined( name, macroDef );

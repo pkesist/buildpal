@@ -229,7 +229,6 @@ class MSVCWrapper(CompilerWrapper):
         # Store debug info in the obj file itself.
         if option_values.filter_options('Zi'):
             compile_call.append('/Z7')
-        print(compile_call)
         return compile_call, self.compiler_option_macros(option_values.all())
 
     @classmethod

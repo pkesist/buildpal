@@ -229,9 +229,16 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
-clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
+std::pair<clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
 {
-    clang::HeaderSearch * headerSearch( new clang::HeaderSearch(
+    clang::HeaderSearch * userHeaderSearch( new clang::HeaderSearch(
+        &compiler().getHeaderSearchOpts(),
+        compiler().getFileManager(),
+        compiler().getDiagnostics(),
+        compiler().getLangOpts(),
+        &compiler().getTarget()));
+
+    clang::HeaderSearch * systemHeaderSearch( new clang::HeaderSearch(
         &compiler().getHeaderSearchOpts(),
         compiler().getFileManager(),
         compiler().getDiagnostics(),
@@ -245,10 +252,13 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
         bool const sysinclude = iter->second;
         clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
         clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
-        headerSearch->AddSearchPath( lookup, true );
+        if ( sysinclude )
+            systemHeaderSearch->AddSearchPath( lookup, true );
+        else
+            userHeaderSearch->AddSearchPath( lookup, true );
     }
 
-    return headerSearch;
+    return std::make_pair( userHeaderSearch, systemHeaderSearch );
 }
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
@@ -280,7 +290,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
-    HeaderTracker headerTracker( preprocessor(), *getHeaderSearch( ppc.searchPath() ), cache_ );
+    HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 

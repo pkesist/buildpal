@@ -13,14 +13,22 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
 {
     // Find the actual file being used.
     assert( !fileStack_.empty() );
-    clang::FileEntry const * currentFile( fileStack_.back() );
+    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
+    clang::FileEntry const * currentFile = currentEntry.first;
     clang::DirectoryLookup const * dontCare;
-    clang::FileEntry const * entry = headerSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
+    bool system = false;
+    clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
+    if ( !entry )
+    {
+        system = true;
+        entry = systemHeaderSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
+    }
+
     if ( !entry )
         return;
 
-    fileStack_.push_back( entry );
-    if ( cacheDisabled() || !headerSearch_->ShouldEnterIncludeFile( entry, false ) )
+    fileStack_.push_back( std::make_pair( entry, system ) );
+    if ( cacheDisabled() || !( system ? systemHeaderSearch_ : userHeaderSearch_ )->ShouldEnterIncludeFile( entry, false ) )
     {
         // File will be skipped anyway. Do not search cache.
         fileEntry = entry;
@@ -34,15 +42,17 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         return;
     }
     cacheHit_ = cacheHit;
-    cacheEntriesUsed_.push_back( cacheHit );
     fileEntry = cacheHit->getFileEntry( preprocessor().getSourceManager() );
 }
 
 void HeaderTracker::headerSkipped( llvm::StringRef const relative )
 {
-    clang::FileEntry const * file( fileStack_.back() );
-    fileStack_.pop_back();
+    assert( !fileStack_.empty() );
+    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( currentEntry.first );
     assert( file );
+    bool const system( currentEntry.second );
+    fileStack_.pop_back();
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
@@ -66,7 +76,8 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->getValue() );
             headerCtxStack().back().macroUsed( macroName, macroDef );
         }
-        headerCtxStack().back().addHeader( header );
+        if ( !system )
+            headerCtxStack().back().addHeader( header );
     }
 }
 
@@ -80,16 +91,21 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
     headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
-    fileStack_.push_back( mainFileEntry );
+    fileStack_.push_back( std::make_pair( mainFileEntry, false ) );
 }
 
 void HeaderTracker::enterHeader( llvm::StringRef relative )
 {
-    clang::FileEntry const * file( fileStack_.back() );
+    assert( !fileStack_.empty() );
+    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( currentEntry.first );
+    assert( file );
+    bool const system( currentEntry.second );
     if ( file )
     {
         HeaderName header( std::make_pair( relative, file ) );
-        headerCtxStack().back().addHeader( header );
+        if ( !system )
+            headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_ ) );
         cacheHit_.reset();
     }
@@ -99,7 +115,9 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 {
     assert( headerCtxStack().size() > 1 );
 
-    clang::FileEntry const * file( fileStack_.back() );
+    assert( !fileStack_.empty() );
+    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( currentEntry.first );
     fileStack_.pop_back();
     assert( file );
     struct Cleanup
@@ -152,7 +170,6 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
 
-    cacheEntriesUsed_.clear();
     Preprocessor::HeaderRefs result;
     struct Inserter
     {

@@ -30,8 +30,8 @@ class HeaderTracker
 public:
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch & headerSearch, Cache * cache )
-        : headerSearch_( &headerSearch ), preprocessor_( preprocessor ), cache_( cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::pair<clang::HeaderSearch *, clang::HeaderSearch *> headerSearch, Cache * cache )
+        : userHeaderSearch_( headerSearch.first ), systemHeaderSearch_( headerSearch.second ), preprocessor_( preprocessor ), cache_( cache )
     {
     }
 
@@ -46,11 +46,6 @@ public:
     void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
-
-    void setHeaderSearch( clang::HeaderSearch * headerSearch )
-    {
-        headerSearch_.reset( headerSearch );
-    }
 
     bool inOverriddenFile() const
     {
@@ -174,13 +169,13 @@ private:
     clang::SourceManager & sourceManager() const;
 
 private:
-    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
+    llvm::OwningPtr<clang::HeaderSearch> userHeaderSearch_;
+    llvm::OwningPtr<clang::HeaderSearch> systemHeaderSearch_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
     CacheEntryPtr cacheHit_;
-    std::vector<CacheEntryPtr> cacheEntriesUsed_;
-    std::vector<clang::FileEntry const *> fileStack_;
+    std::vector<std::pair<clang::FileEntry const *, bool> > fileStack_;
     MacroState macroState_;
 };
 

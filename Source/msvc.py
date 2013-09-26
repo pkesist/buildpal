@@ -123,6 +123,10 @@ class MSVCWrapper(CompilerWrapper):
         for option in self.compilation_options:
             option.add_category(CompilationCategory)
             self.add_option(option)
+        # Options requiring special handling.
+        for option in self.special_handling:
+            option.add_category(SpecialHandlingCategory)
+            self.add_option(option)
         # Always.
         for option in self.always:
             option.add_category(PreprocessingCategory)
@@ -197,6 +201,37 @@ class MSVCWrapper(CompilerWrapper):
         result.compile_no_link_option = self.compile_no_link_option()
         return result
 
+    def compiler_option_macros(self, tokens):
+        result = []
+        add_extensions = True
+        for token in (token for token in tokens
+            if type(token.option) == CompilerOption and
+            token.option.test_category(PreprocessingCategory)):
+            option = token.option
+            if not option:
+                continue
+            if option.name() == 'Za':
+                add_extensions = False
+            if option.name() == 'Ze':
+                add_extensions = True
+            result += token.option.get_macros(token.val)
+        if add_extensions:
+            result.append('_MSC_EXTENSIONS=1')
+        return result
+
+    def create_call(self, executable, option_values):
+        compile_call = [executable]
+        compile_call.extend(option.make_str() for option in
+            option_values.filter_options(CompilationCategory))
+        macros = [token.val for token in option_values.filter_options(self.define_option())]
+        compile_call.extend(self.define_option().make_value(define).make_str() for define in macros)
+        # Disable generating PDB files when compiling cpp into obj.
+        # Store debug info in the obj file itself.
+        if option_values.filter_options('Zi'):
+            compile_call.append('/Z7')
+        print(compile_call)
+        return compile_call, self.compiler_option_macros(option_values.all())
+
     @classmethod
     def get_compiler_environment(cls, compiler_info):
         compiler_id = compiler_info.id()
@@ -233,24 +268,6 @@ class MSVCWrapper(CompilerWrapper):
         if compiler_env:
             return lambda command, cwd : run_compiler(command, cwd, compiler_env)
         return None
-
-    def compiler_option_macros(self, tokens):
-        result = []
-        add_extensions = True
-        for token in (token for token in tokens
-            if type(token.option) == CompilerOption and
-            token.option.test_category(PreprocessingCategory)):
-            option = token.option
-            if not option:
-                continue
-            if option.name() == 'Za':
-                add_extensions = False
-            if option.name() == 'Zi':
-                add_extensions = True
-            result += token.option.get_macros(token.val)
-        if add_extensions:
-            result.append('_MSC_EXTENSIONS=1')
-        return result
 
     compiler_versions = {
         (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
@@ -303,6 +320,10 @@ class MSVCWrapper(CompilerWrapper):
 
     always = [ simple('nologo') ]
 
+    special_handling = [
+        simple      ('Zi'),
+        with_param  ('Fd')]
+
     compilation_options = [
         simple        ('O1'), simple        ('O2'), with_param    ('Ob'), simple      ('Od'),
         simple        ('Og'), simple_w_minus('Oi'), simple        ('Os'), simple      ('Ot'),
@@ -313,9 +334,9 @@ class MSVCWrapper(CompilerWrapper):
         simple        ('GT'), simple        ('Gd'), simple        ('Gr'), simple      ('Gz'),
         simple        ('GZ'), simple_w_minus('QIfist'), simple('hotpatch'), with_param('arch'),
         simple        ('Qimprecise_fwaits')       , with_param    ('Fa'), with_param  ('FA'),
-        with_param    ('Fd'), with_param    ('Fe'), with_param    ('Fm'), with_param  ('Fr'),
-        with_param    ('FR'), with_param   ('doc'), simple        ('Zi'), simple      ('Z7'),
-        with_param    ('Zp'), with_param    ('vd'), with_param    ('vm'), simple      ('ZI'),
+        with_param    ('Fe'), with_param    ('Fm'), with_param    ('Fr'), with_param  ('FR'),
+        with_param   ('doc'), simple        ('Zi'), simple      ('Z7'),
+        with_param    ('Zp'), with_param    ('vd'), with_param    ('vm'), 
         simple        ('?'),  simple      ('help'), simple    ('bigobj'), with_param  ('errorReport'),
         simple        ('FC'), with_param    ('H') , simple         ('J'), with_param  ('MP'),
         simple        ('showIncludes')            , with_param    ('Tc'), with_param  ('Tp'),

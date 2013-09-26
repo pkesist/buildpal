@@ -143,6 +143,7 @@ class PCHCategory(Category): pass
 class PreprocessingCategory(Category): pass
 class CompilationCategory(Category): pass
 class LinkingCategory(Category): pass
+class SpecialHandlingCategory(Category): pass
 
 class CompilerOption(CmdLineOption):
     def __init__(self, name, suff=None, has_arg=True, allow_spaces=True):

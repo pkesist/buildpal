@@ -47,10 +47,6 @@ class ServerCompiler:
         else:
             raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
 
-class Task:
-    def __init__(self, dict):
-        self.__dict__.update(dict)
-
 class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
     STATE_GET_TASK = 1
@@ -90,20 +86,18 @@ class CompileSession(ServerSession, ServerCompiler):
     def run_compiler_with_source_and_headers(self):
         try:
             with TempFile(suffix='.obj') as object_file:
-                compiler_info = self.task.compiler_info
+                compiler_info = self.task['compiler_info']
                 noLink = compiler_info.compile_no_link_option.make_value().make_str()
                 output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
-                defines = [compiler_info.define_option.make_value(define).make_str()
-                    for define in self.task.macros]
                 pch_switch = []
-                if self.task.pch_file:
+                if self.task['pch_file']:
                     assert self.pch_file is not None
                     assert os.path.exists(self.pch_file)
                     pch_switch.append(
                         compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
                 try:
-                    command = (self.task.call + defines + pch_switch +
+                    command = (self.task['call'] + pch_switch +
                         [noLink, output] +
                         [compiler_info.include_option.make_value(incpath).make_str()
                             for incpath in self.include_dirs] +
@@ -124,8 +118,8 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_msg_worker(self):
         if self.state == self.STATE_GET_TASK:
-            self.task = Task(self.recv_pyobj())
-            self.compiler = self.setup_compiler(self.task.compiler_info)
+            self.task = self.recv_pyobj()
+            self.compiler = self.setup_compiler(self.task['compiler_info'])
             if self.compiler:
                 self.send(b'OK')
             else:
@@ -151,7 +145,7 @@ class CompileSession(ServerSession, ServerCompiler):
             tag, source_file = self.recv_pyobj()
             assert tag == 'SOURCE_FILE'
             self.source_file = os.path.join(self.include_path, source_file)
-            if self.task.pch_file is None:
+            if self.task['pch_file'] is None:
                 self.run_compiler_with_source_and_headers()
                 return True
             else:
@@ -159,7 +153,7 @@ class CompileSession(ServerSession, ServerCompiler):
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = self.recv_pyobj()
             assert tag == 'NEED_PCH_FILE'
-            self.pch_file, required = self.file_repository().register_file(*self.task.pch_file)
+            self.pch_file, required = self.file_repository().register_file(*self.task['pch_file'])
             if required:
                 self.send(b'YES')
                 self.pch_desc = open(self.pch_file, 'wb')
@@ -167,7 +161,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
                 self.send(b'NO')
-                while not self.file_repository().file_arrived(*self.task.pch_file):
+                while not self.file_repository().file_arrived(*self.task['pch_file']):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state
                     # in this state machine. However, wake-up event for that
@@ -183,7 +177,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.pch_desc.close()
                 del self.pch_desc
                 del self.pch_decompressor
-                self.file_repository().file_completed(*self.task.pch_file)
+                self.file_repository().file_completed(*self.task['pch_file'])
                 self.run_compiler_with_source_and_headers()
                 return True
         return False

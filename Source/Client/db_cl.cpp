@@ -223,6 +223,13 @@ int main( int argc, char * argv[] )
     ZmqContext context;
     ZmqSocket socket = context.socket( ZMQ_DEALER );
 
+    std::string executable;
+    if ( !locateExecutable( executable ) )
+    {
+        std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
+        return -1;
+    }
+
     DWORD size = GetEnvironmentVariable("DB_MGR_PORT", NULL, 0 );
     if ( size == 0 )
     {
@@ -239,13 +246,6 @@ int main( int argc, char * argv[] )
         return -1;
     }
 
-    std::string executable;
-    if ( !locateExecutable( executable ) )
-    {
-        std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
-        return -1;
-    }
-
     char * buffer = static_cast<char *>( alloca( size ) );
     GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
 
@@ -255,11 +255,23 @@ int main( int argc, char * argv[] )
     socket.connect( endpoint );
     socket.sendData( compiler, compilerSize, ZMQ_SNDMORE );
 
+    socket.sendData( executable, ZMQ_SNDMORE );
+
+    DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
+    if ( includeSize == 0 )
+        socket.sendData( "", 0, ZMQ_SNDMORE );
+    else
+    {
+        char * includeBuffer = static_cast<char *>( _alloca( includeSize ) );
+        GetEnvironmentVariable( "INCLUDE", includeBuffer, includeSize );
+        socket.sendData( includeBuffer, includeSize - 1, ZMQ_SNDMORE );
+    }
+
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
     std::unique_ptr<char []> currentPathBuffer( new char[ currentPathSize ] );
     GetCurrentDirectory( currentPathSize, currentPathBuffer.get() );
-    socket.sendData( executable, ZMQ_SNDMORE );
     socket.sendData( currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
+
     for ( int arg( 1 ); arg < argc; ++arg )
     {
         socket.sendData( argv[arg], strlen( argv[arg] ), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
@@ -440,7 +452,26 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 6 ) && strncmp( request, "GETENV", 6 ) == 0 )
         {
-            // TODO
+            assert( requestReceiver.parts() == 2 );
+            char const * var;
+            std::size_t varSize;
+            requestReceiver.getPart( 1, &var, &varSize );
+            char * ztVar = static_cast<char *>( _alloca( varSize + 1 ) );
+            std::memcpy( ztVar, var, varSize );
+            ztVar[ varSize ] = 0;
+
+            DWORD size = GetEnvironmentVariable( ztVar, NULL, 0 );
+
+            if ( size > 1024 )
+            {
+                std::cerr << "Invalid environment variable value.\n";
+                return -1;
+            }
+
+            char * buffer = static_cast<char *>( alloca( size ) );
+            GetEnvironmentVariable( ztVar, buffer, size );
+
+            socket.sendData( buffer, size, 0 );
         }
         else
         {

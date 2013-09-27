@@ -16,7 +16,8 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
     clang::FileEntry const * currentFile = currentEntry.first;
     clang::DirectoryLookup const * dontCare;
-    bool system = false;
+    // If including header is system header, then so are we.
+    bool system = currentEntry.second;
     clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
     if ( !entry )
     {

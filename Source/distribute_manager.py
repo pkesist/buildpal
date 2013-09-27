@@ -266,7 +266,7 @@ class CompileSession:
                           command, self.client_conn, self.timer)
         if ctx.build_local():
             call = [ctx.executable()]
-            call.extend(option.make_str() for option in ctx.option_values())
+            call.extend(option.make_str() for option in ctx.option_values().all())
             self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
         else:
             self.tasks = ctx.create_tasks()

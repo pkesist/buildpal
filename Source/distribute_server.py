@@ -3,6 +3,7 @@ from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
 from time import sleep
 from threading import Lock as ThreadLock
+from io import BytesIO
 
 import configparser
 import psutil
@@ -14,15 +15,16 @@ import zmq
 import tarfile
 import shutil
 import zlib
+#import cProfile
 
 from Messaging import ServerSession, ServerWorker, Broker
 
 from utils import TempFile, send_compressed_file
 
 class ServerCompiler:
-    def __init__(self, file_repository, cpu_usage_hwm):
+    def __init__(self, file_repository, compiler_setup, cpu_usage_hwm):
         self.__hwm = cpu_usage_hwm
-        self.__compiler_setup = {}
+        self.__compiler_setup = compiler_setup
         self.__file_repository = file_repository
 
     def accept(self):
@@ -34,7 +36,8 @@ class ServerCompiler:
         return self.__file_repository
 
     def setup_compiler(self, compiler_info):
-        setup = self.__compiler_setup.get(compiler_info)
+        key = (compiler_info.toolset(), compiler_info.id())
+        setup = self.__compiler_setup.get(key)
         if setup:
             return setup
 
@@ -42,7 +45,7 @@ class ServerCompiler:
             import msvc
             setup = msvc.MSVCWrapper.setup_compiler(compiler_info)
             if setup:
-                self.__compiler_setup[compiler_info] = setup
+                self.__compiler_setup[key] = setup
             return setup
         else:
             raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
@@ -57,10 +60,13 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_SH_CHECK_PCH_TAG = 6
     STATE_SH_GET_PCH_DATA = 7
 
-    def __init__(self, file_repository, cpu_usage_hwm, task_counter):
-        ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
+    def __init__(self, file_repository, cpu_usage_hwm, task_counter, compiler_setup):
+        ServerCompiler.__init__(self, file_repository, compiler_setup, cpu_usage_hwm)
         self.state = self.STATE_START
         self.task_counter = task_counter
+        self.compiler_setup = compiler_setup
+        self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
+        self.include_dirs = [self.include_path]
 
     def created(self):
         assert self.state == self.STATE_START
@@ -69,13 +75,9 @@ class CompileSession(ServerSession, ServerCompiler):
         self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
         return accept
 
-    def setup_include_dirs(self):
-        self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
-        with tarfile.open(self.archivefile.filename()) as tar:
+    def setup_include_dirs(self, fileobj):
+        with tarfile.open(fileobj=fileobj, mode='r') as tar:
             tar.extractall(path=self.include_path)
-        os.remove(self.archivefile.filename())
-        del self.archivefile
-        self.include_dirs = [self.include_path]
 
         include_list = os.path.join(self.include_path, 'include_paths.txt')
         if os.path.exists(include_list):
@@ -130,16 +132,15 @@ class CompileSession(ServerSession, ServerCompiler):
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()
             assert archive_tag == 'TASK_FILES'
-            self.archivefile = TempFile()
-            self.archivedesc = open(self.archivefile.filename(), 'wb')
+            self.archivedesc = BytesIO()
             self.state = self.STATE_SH_GET_ARCHIVE_DATA
         elif self.state == self.STATE_SH_GET_ARCHIVE_DATA:
             more, data = self.recv_multipart()
             self.archivedesc.write(data)
             if more == b'\x00':
-                self.archivedesc.close()
+                self.archivedesc.seek(0)
+                self.setup_include_dirs(self.archivedesc)
                 del self.archivedesc
-                self.setup_include_dirs()
                 self.state = self.STATE_SH_GET_SOURCE_FILE_NAME
         elif self.state == self.STATE_SH_GET_SOURCE_FILE_NAME:
             tag, source_file = self.recv_pyobj()
@@ -246,20 +247,29 @@ class CompileWorker(Process):
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
 
+    class SessionMaker:
+        def __init__(self, file_repository, cpu_usage_hwm, task_counter, compiler_setup):
+            self.__file_repository = file_repository
+            self.__cpu_usage_hwm = cpu_usage_hwm
+            self.__task_counter = task_counter
+            self.__compiler_setup = compiler_setup
+
+        def __call__(self):
+            return CompileSession(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter, self.__compiler_setup)
+
     def run(self):
-        class SessionMaker:
-            def __init__(self, file_repository, cpu_usage_hwm, task_counter):
-                self.__file_repository = file_repository
-                self.__cpu_usage_hwm = cpu_usage_hwm
-                self.__task_counter = task_counter
-
-            def __call__(self):
-                return CompileSession(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter)
-
-        worker = ServerWorker(zmq.Context(), SessionMaker(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter))
-        worker.connect_broker(self.__address)
-        worker.connect_control(self.__control_address)
-        worker.run()
+        #profile = cProfile.Profile()
+        #profile.enable()
+        compiler_setup = {}
+        try:
+            worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter, compiler_setup))
+            worker.connect_broker(self.__address)
+            worker.connect_control(self.__control_address)
+            worker.run()
+        finally:
+            pass
+            #profile.disable()
+            #profile.print_stats()
 
 class ServerRunner(Process):
     def __init__(self, port, control_port, processes, file_repository, cpu_usage_hwm, task_counter):

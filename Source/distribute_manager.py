@@ -5,7 +5,6 @@ from multiprocessing import Process, cpu_count
 from time import sleep, time
 from msvc import MSVCWrapper
 from subprocess import list2cmdline
-import cProfile
 
 from scan_headers import collect_headers
 from utils import send_file, send_compressed_file
@@ -514,9 +513,7 @@ class TaskProcessor:
         # Clients waiting for a node.
         clients_waiting = []
 
-        profile = cProfile.Profile()
         try:
-            #profile.enable()
             while True:
                 self.print_stats(node_info, timer, recycled_connections)
                 for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
@@ -579,7 +576,6 @@ class TaskProcessor:
 
                     elif socket in session_from_server:
                         with timer.timeit("poller.server_w_session"):
-                            profile.enable()
                             session, node_index = session_from_server[socket]
                             msg = socket.recv_multipart()
                             client_id = session.client_conn.id
@@ -593,7 +589,6 @@ class TaskProcessor:
                                     node_index, [])
                                 assert socket not in recycled
                                 recycled.append(socket)
-                            profile.disable()
                     else: # Server
                         with timer.timeit("poller.server_wo_session"):
                             if socket in node_ids:
@@ -626,10 +621,8 @@ class TaskProcessor:
                                 del nodes_contacted[socket]
                                 node_ids[socket] = node_index
         finally:
-            #profile.disable()
             for scan_worker in scan_workers:
                 scan_worker.terminate()
-            profile.print_stats()
 
     def print_stats(self, node_info, timer, recycled_conections):
         current = time()

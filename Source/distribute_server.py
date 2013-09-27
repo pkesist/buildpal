@@ -1,20 +1,21 @@
 #! python3.3
 from multiprocessing import Manager, Pool, Lock, Process, Event
 from multiprocessing.managers import SyncManager
-from time import sleep
+from time import sleep, time
 from threading import Lock as ThreadLock
 from io import BytesIO
 
 import configparser
+import os
+import pickle
 import psutil
+import sys
 import tempfile
 import traceback
-import sys
-import os
-import zmq
 import tarfile
 import shutil
 import zlib
+import zmq
 #import cProfile
 
 from Messaging import ServerSession, ServerWorker, Broker
@@ -85,7 +86,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 assert not os.path.isabs(path)
                 self.include_dirs.append(os.path.normpath(os.path.join(self.include_path, path)))
 
-    def run_compiler_with_source_and_headers(self):
+    def run_compiler(self):
         try:
             with TempFile(suffix='.obj') as object_file:
                 compiler_info = self.task['compiler_info']
@@ -99,6 +100,7 @@ class CompileSession(ServerSession, ServerCompiler):
                         compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
                 try:
+                    start = time()
                     command = (self.task['call'] + pch_switch +
                         [noLink, output] +
                         [compiler_info.include_option.make_value(incpath).make_str()
@@ -110,8 +112,8 @@ class CompileSession(ServerSession, ServerCompiler):
                     import traceback
                     traceback.print_exc()
                     return
-                self.send(b'SERVER_DONE')
-                self.send_pyobj((retcode, stdout, stderr))
+                done = time()
+                self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode, stdout, stderr, done - start))])
                 if retcode == 0:
                     with object_file.open('rb') as obj:
                         send_compressed_file(self.send_multipart, obj, copy=False)
@@ -128,7 +130,32 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.send_pyobj("FAIL")
                 return False
             self.task_counter.inc()
-            self.state = self.STATE_SH_GET_ARCHIVE_TAG
+            if self.task['pch_file'] is None:
+                self.state = self.STATE_SH_GET_ARCHIVE_TAG
+            else:
+                self.state = self.STATE_SH_CHECK_PCH_TAG
+        elif self.state == self.STATE_SH_CHECK_PCH_TAG:
+            tag = self.recv_pyobj()
+            assert tag == 'NEED_PCH_FILE'
+            self.pch_file, required = self.file_repository().register_file(*self.task['pch_file'])
+            if required:
+                self.send(b'YES')
+                self.pch_desc = open(self.pch_file, 'wb')
+                self.pch_decompressor = zlib.decompressobj()
+                self.state = self.STATE_SH_GET_PCH_DATA
+            else:
+                self.send(b'NO')
+                self.state = self.STATE_SH_GET_ARCHIVE_TAG
+        elif self.state == self.STATE_SH_GET_PCH_DATA:
+            more, data = self.recv_multipart()
+            self.pch_desc.write(self.pch_decompressor.decompress(data))
+            if more == b'\x00':
+                self.pch_desc.write(self.pch_decompressor.flush())
+                self.pch_desc.close()
+                del self.pch_desc
+                del self.pch_decompressor
+                self.file_repository().file_completed(*self.task['pch_file'])
+                self.state = self.STATE_SH_GET_ARCHIVE_TAG
         elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
             archive_tag = self.recv_pyobj()
             assert archive_tag == 'TASK_FILES'
@@ -146,41 +173,15 @@ class CompileSession(ServerSession, ServerCompiler):
             tag, source_file = self.recv_pyobj()
             assert tag == 'SOURCE_FILE'
             self.source_file = os.path.join(self.include_path, source_file)
-            if self.task['pch_file'] is None:
-                self.run_compiler_with_source_and_headers()
-                return True
-            else:
-                self.state = self.STATE_SH_CHECK_PCH_TAG
-        elif self.state == self.STATE_SH_CHECK_PCH_TAG:
-            tag = self.recv_pyobj()
-            assert tag == 'NEED_PCH_FILE'
-            self.pch_file, required = self.file_repository().register_file(*self.task['pch_file'])
-            if required:
-                self.send(b'YES')
-                self.pch_desc = open(self.pch_file, 'wb')
-                self.pch_decompressor = zlib.decompressobj()
-                self.state = self.STATE_SH_GET_PCH_DATA
-            else:
-                self.send(b'NO')
+            if self.task['pch_file'] is not None:
                 while not self.file_repository().file_arrived(*self.task['pch_file']):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state
                     # in this state machine. However, wake-up event for that
                     # state would require inter-session communication.
                     sleep(1)
-                self.run_compiler_with_source_and_headers()
-                return True
-        elif self.state == self.STATE_SH_GET_PCH_DATA:
-            more, data = self.recv_multipart()
-            self.pch_desc.write(self.pch_decompressor.decompress(data))
-            if more == b'\x00':
-                self.pch_desc.write(self.pch_decompressor.flush())
-                self.pch_desc.close()
-                del self.pch_desc
-                del self.pch_decompressor
-                self.file_repository().file_completed(*self.task['pch_file'])
-                self.run_compiler_with_source_and_headers()
-                return True
+            self.run_compiler()
+            return True
         return False
 
     def process_msg(self):

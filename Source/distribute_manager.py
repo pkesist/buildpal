@@ -238,11 +238,10 @@ class CompileSession:
     STATE_WAIT_FOR_OK = 1
     STATE_WAIT_FOR_PCH_RESPONSE = 2
     STATE_WAIT_FOR_SERVER_RESPONSE = 3
-    STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT = 4
-    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 5
-    STATE_RECEIVE_RESULT_FILE = 6
-    STATE_POSTPROCESS = 7
-    STATE_WAIT_FOR_SESSION_DONE = 8
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 4
+    STATE_RECEIVE_RESULT_FILE = 5
+    STATE_POSTPROCESS = 6
+    STATE_WAIT_FOR_SESSION_DONE = 7
 
     def __init__(self, compiler, executable, cwd, sysincludes, command, timer,
         client_conn, server_conn, preprocess_socket, node_info, compiler_info):
@@ -316,27 +315,30 @@ class CompileSession:
         self.node_info.add_tasks_sent()
         self.state = self.STATE_WAIT_FOR_OK
 
+    def send_task_files(self):
+        self.server_conn.send_pyobj('TASK_FILES')
+        # Source file is already inside the tar archive.
+        tar_obj = io.BytesIO(self.tempfile)
+        tar_obj.seek(0)
+        self.server_timer = self.timer.scoped_timer('server_time.external')
+        self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
+        with self.timer.timeit('send.tar'):
+            send_file(self.server_conn.send_multipart, tar_obj, copy=False)
+        del tar_obj
+        del self.tempfile
+        source_file = self.task.source
+        self.server_conn.send_pyobj(('SOURCE_FILE', source_file))
+        self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg[0]
             assert msg[0] == b'OK'
-            self.server_conn.send_pyobj('TASK_FILES')
-            # Source file is already inside the tar archive.
-            tar_obj = io.BytesIO(self.tempfile)
-            tar_obj.seek(0)
-            with self.timer.timeit('send.tar'):
-                send_file(self.server_conn.send_multipart, tar_obj, copy=False)
-            del tar_obj
-            del self.tempfile
-            source_file = self.task.source
-            self.server_conn.send_pyobj(('SOURCE_FILE', source_file))
             if self.task.pch_file:
                 self.server_conn.send_pyobj('NEED_PCH_FILE')
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
             else:
-                self.server_timer = self.timer.scoped_timer('server_time')
-                self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
-                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+                self.send_task_files()
 
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
             response = msg[0]
@@ -345,9 +347,7 @@ class CompileSession:
                     send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
             else:
                 assert response == b'NO'
-            self.server_timer = self.timer.scoped_timer('server_time')
-            self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
-            self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
+            self.send_task_files()
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
             self.server_timer.stop()
@@ -360,18 +360,16 @@ class CompileSession:
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
             else:
                 assert server_status == b'SERVER_DONE'
-                self.state = self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT
-
-        elif self.state == self.STATE_COLLECT_SERVER_RETCODE_AND_OUTPUT:
-            self.retcode, self.stdout, self.stderr = pickle.loads(msg[0])
-            if self.retcode == 0:
-                self.output = open(self.task.output, "wb")
-                self.output_decompressor = zlib.decompressobj()
-                self.state = self.STATE_RECEIVE_RESULT_FILE
-            else:
-                self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
-                self.node_info.add_tasks_completed()
-                self.state = self.STATE_WAIT_FOR_SESSION_DONE
+                self.retcode, self.stdout, self.stderr, compile_time = pickle.loads(msg[1])
+                self.timer.add_time('server_time.compiler', compile_time)
+                if self.retcode == 0:
+                    self.output = open(self.task.output, "wb")
+                    self.output_decompressor = zlib.decompressobj()
+                    self.state = self.STATE_RECEIVE_RESULT_FILE
+                else:
+                    self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
+                    self.node_info.add_tasks_completed()
+                    self.state = self.STATE_WAIT_FOR_SESSION_DONE
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg

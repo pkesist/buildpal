@@ -185,7 +185,7 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
             if ( invalid )
                 buffer = sourceManager_.getFileManager().getBufferForFile( sp.second, &error );
             assert( buffer );
-            result_.insert( HeaderRef( sp.first, buffer->getBufferStart(), buffer->getBufferSize() ) );
+            result_.insert( HeaderRef( sp.first, sp.second->getName(), buffer->getBufferStart(), buffer->getBufferSize() ) );
         }
         void operator()( CacheEntryPtr const & ce )
         {

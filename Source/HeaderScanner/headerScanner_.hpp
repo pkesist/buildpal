@@ -3,7 +3,7 @@
 #define headerScanner_HPP__343F36C2_0715_4B15_865A_D86ABF67EF5B
 //------------------------------------------------------------------------------
 #include "clang/Frontend/CompilerInstance.h"
-#include "llvm/ADT/OwningPtr.h"
+#include <llvm/ADT/StringRef.h>
 
 #include <set>
 #include <string>
@@ -53,11 +53,12 @@ private:
 
 struct HeaderRef
 {
-    HeaderRef( std::string const & rel, char const * d, std::size_t s )
-        : relative( rel ), data( d ), size( s )
+    HeaderRef( std::string const & rel, llvm::StringRef abs, char const * d, std::size_t s )
+        : relative( rel ), absolute( abs ), data( d ), size( s )
     {}
 
     std::string relative;
+    llvm::StringRef absolute;
     char const * data;
     std::size_t size;
 

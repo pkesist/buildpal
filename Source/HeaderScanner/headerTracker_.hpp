@@ -47,11 +47,6 @@ public:
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
-    bool inOverriddenFile() const
-    {
-        return cacheHit_.get() != 0;
-    }
-
 private:
     struct HeaderCtx
     {

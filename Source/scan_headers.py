@@ -44,22 +44,19 @@ def all_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
 def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_headers=[]):
     cpp_file = os.path.join(cwd, rel_file)
 
-    def write_str_to_tar(tar, name, content):
-        class MemViewAsFileInput(RawIOBase):
-            def __init__(self, membuf):
-                self.membuf = membuf
-                self.offset = 0
-                self.remaining = len(membuf)
-
-            def read(self, n=-1):
-                if n is None or n < 0 or self.remaining < n:
-                    n = self.remaining
-                self.remaining -= n
-                self.offset += n
-                return self.membuf[self.offset - n : self.offset]
+    def write_str_to_tar(tar, name, content, header=b''):
         info = tarfile.TarInfo(name=name)
         info.size = len(content)
-        tar.addfile(info, fileobj=MemViewAsFileInput(content))
+        if header:
+            info.size += len(header)
+        tar.addfile(info)
+        tar.fileobj.write(header)
+        tar.fileobj.write(content)
+        blocks, remainder = divmod(info.size, tarfile.BLOCKSIZE)
+        if remainder:
+            tar.fileobj.write(tarfile.NUL * (tarfile.BLOCKSIZE - remainder))
+            blocks += 1
+        tar.offset += blocks * tarfile.BLOCKSIZE
 
     try:
         preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
@@ -67,7 +64,7 @@ def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_heade
         relative_paths = {}
         tarBuffer = BytesIO()
         with tarfile.open(mode='w', fileobj=tarBuffer) as tar:
-            for file, content in preprocessor.scanHeaders(ppc, cpp_file):
+            for file, abs, content in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')
                 # Handle '.' in include directive.
@@ -87,10 +84,10 @@ def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_heade
                         relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
                         paths_to_include.append(relative_paths[depth])
                         write_str_to_tar(tar, relative_paths[depth] + 'dummy', b"Dummy file needed to create directory structure")
-                write_str_to_tar(tar, '/'.join(path_elements), content)
+                write_str_to_tar(tar, '/'.join(path_elements), content, '#line 1 "{}"\r\n'.format(os.path.normpath(abs)).replace('\\', '\\\\').encode())
             if paths_to_include:
                 write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
-            tar.add(cpp_file, rel_file)
+            tar.add(cpp_file, rel_file, '#line 1 "{}"\r\n'.format(os.path.normpath(cpp_file).replace('\\', '\\\\').encode()))
         hits, misses = cache.getStats()
         total = hits + misses
         print("{} hits, {} misses, hit ratio {:0>1.2f}".format(hits, misses, 0 if total == 0 else hits/total))
@@ -122,7 +119,7 @@ def test1():
         result = all_headers(f1.filename(), [include], [], [], "")
         rmtree(include)
         assert len(result) == 1
-        assert (f2rel, f2.filename()) in result
+        assert result[:2] == (f2rel, f2.filename()) in result
 
 def test2():
     include = mkdtemp()
@@ -153,12 +150,12 @@ def test2():
 """)
         result = all_headers(f1.filename(), [include], [], [], "")
         assert len(result) == 2
-        assert (f2rel, f2.filename()) in result
-        assert (f3rel, f3.filename()) in result
+        assert result[0][:2] == (f2rel, f2.filename())
+        assert result[1][:2] == (f3rel, f3.filename())
         result = all_headers(f1.filename(), [include], [], [], "")
         assert len(result) == 2
-        assert (f2rel, f2.filename()) in result
-        assert (f3rel, f3.filename()) in result
+        assert result[0][:2] == (f2rel, f2.filename())
+        assert result[1][:2] == (f3rel, f3.filename())
         rmtree(include)
 
 

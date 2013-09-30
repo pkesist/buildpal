@@ -113,5 +113,7 @@ def relay_file(source_read, target_send):
 def bind_to_random_port(socket):
     socket.bind('tcp://*:*')
     address = socket.getsockopt(zmq.LAST_ENDPOINT)
+    while address[-1] == 0:
+        address = address[:-1]
     return int(address[address.index(b':', 4) + 1:])
 

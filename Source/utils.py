@@ -4,6 +4,8 @@ import tempfile
 import zlib
 import zmq
 
+from time import time
+
 class TempFile:
     """
         A more useful tempfile object which allows multiple open/close calls.
@@ -116,4 +118,11 @@ def bind_to_random_port(socket):
     while address[-1] == 0:
         address = address[:-1]
     return int(address[address.index(b':', 4) + 1:])
+
+class SimpleTimer:
+    def __init__(self):
+        self.__start = time()
+
+    def get(self):
+        return time() - self.__start
 

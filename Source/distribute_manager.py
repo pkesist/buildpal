@@ -8,7 +8,7 @@ from msvc import MSVCWrapper
 from subprocess import list2cmdline
 
 from scan_headers import collect_headers
-from utils import send_file, send_compressed_file, bind_to_random_port
+from utils import send_file, send_compressed_file, bind_to_random_port, SimpleTimer
 
 import configparser
 import io
@@ -40,14 +40,6 @@ class ScopedTimer:
 
     def stop(self):
         self.__callable(time() - self.__start)
-
-class SimpleTimer:
-    def __init__(self):
-        self.__start = time()
-
-    def get(self):
-        return time() - self.__start
-
 
 class Timer:
     def __init__(self):
@@ -82,6 +74,7 @@ class ScanHeaders(Process):
         while True:
             server_id, task, node_index = socket.recv_multipart()
             node_index = pickle.loads(node_index)
+            timer = SimpleTimer()
             buffer = self.prepare_task(pickle.loads(task))
             if node_index not in nodes:
                 server_sock = zmq_ctx.socket(zmq.DEALER)
@@ -89,7 +82,9 @@ class ScanHeaders(Process):
                 nodes[node_index] = server_sock
             nodes[node_index].send_multipart([b'DATA_FOR_SESSION',
                                              server_id, b'TASK_FILES',
-                                             buffer.read()], copy=False)
+                                             buffer.read(),
+                                             pickle.dumps(timer.get())],
+                                             copy=False)
 
     def prepare_task(self, task):
         # FIXME: This does not belong here. Move this to msvc.py.
@@ -298,6 +293,7 @@ class CompileSession:
             self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
             server_id = self.server_conn.getsockopt(zmq.IDENTITY)
             assert server_id
+            self.average_timer = SimpleTimer()
             self.preprocess_socket.send_multipart([server_id,
                 pickle.dumps(self.task.preprocess_task_info),
                 pickle.dumps(self.node_info.index())], copy=False)
@@ -323,6 +319,7 @@ class CompileSession:
         self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
         server_id = self.server_conn.getsockopt(zmq.IDENTITY)
         assert server_id
+        self.average_timer = SimpleTimer()
         self.preprocess_socket.send_multipart([server_id,
             pickle.dumps(self.task.preprocess_task_info),
             pickle.dumps(self.node_info.index())], copy=False)
@@ -351,14 +348,19 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
+            server_time = self.average_timer.get()
+            del self.average_timer
+            self.timer.add_time('server_time', server_time)
+            self.node_info.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
                 self.client_conn.send([b'EXIT', b'-1'])
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
             else:
                 assert server_status == b'SERVER_DONE'
-                self.retcode, self.stdout, self.stderr, compile_time = pickle.loads(msg[1])
-                self.timer.add_time('server_time.compiler', compile_time)
+                self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
+                for name, duration in server_times.items():
+                    self.timer.add_time("server." + name, duration)
                 if self.retcode == 0:
                     self.output = open(self.task.output, "wb")
                     self.output_decompressor = zlib.decompressobj()

@@ -63,7 +63,7 @@ def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_heade
         paths_to_include = []
         relative_paths = {}
         tarBuffer = BytesIO()
-        with tarfile.open(mode='w:xz', fileobj=tarBuffer) as tar:
+        with tarfile.open(mode='w', fileobj=tarBuffer) as tar:
             for file, abs, content in preprocessor.scanHeaders(ppc, cpp_file):
                 depth = 0
                 path_elements = file.split('/')

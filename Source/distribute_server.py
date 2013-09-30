@@ -80,7 +80,7 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def setup_include_dirs(self, fileobj):
         dir_setup_timer = SimpleTimer()
-        with tarfile.open(fileobj=fileobj, mode='r:xz') as tar:
+        with tarfile.open(fileobj=fileobj, mode='r') as tar:
             tar.extractall(path=self.include_path)
         self.times['tar_extract'] = dir_setup_timer.get()
 

@@ -79,15 +79,16 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def setup_include_dirs(self, fileobj):
         dir_setup_timer = SimpleTimer()
-        with tarfile.open(fileobj=fileobj, mode='r') as tar:
+        with tarfile.open(fileobj=fileobj, mode='r:bz2') as tar:
             tar.extractall(path=self.include_path)
+        self.times['tar_extract'] = dir_setup_timer.get()
 
         include_list = os.path.join(self.include_path, 'include_paths.txt')
         if os.path.exists(include_list):
             for path in open(include_list, 'rt'):
                 assert not os.path.isabs(path)
                 self.include_dirs.append(os.path.normpath(os.path.join(self.include_path, path)))
-        self.dir_setup_time = dir_setup_timer.get()
+        self.times['setup_include_dir'] = dir_setup_timer.get()
 
     def run_compiler(self):
         self.source_file = os.path.join(self.include_path, self.task['source'])
@@ -125,12 +126,8 @@ class CompileSession(ServerSession, ServerCompiler):
                     traceback.print_exc()
                     return
                 done = time()
-                times = {
-                    "compiler" : done - start,
-                    "preprocessing.internal" : self.preprocessing_time_internal,
-                    "preprocessing.external" : self.preprocessing_time,
-                    "setup_include_dir" : self.dir_setup_time }
-                self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode, stdout, stderr, times))])
+                self.times['compiler'] = done - start
+                self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode, stdout, stderr, self.times))])
                 if retcode == 0:
                     with object_file.open('rb') as obj:
                         send_compressed_file(self.send_multipart, obj, copy=False)
@@ -140,11 +137,10 @@ class CompileSession(ServerSession, ServerCompiler):
     def process_msg_worker(self):
         msg = self.recv_multipart()
         if not self.has_task_data and msg[0] == b'TASK_FILES':
-            self.preprocessing_time = self.wait_task_data_timer.get()
+            self.times['preprocessing.external'] = self.wait_task_data_timer.get()
             del self.wait_task_data_timer
             tar_data = msg[1]
-            self.preprocessing_time_internal = pickle.loads(msg[2])
-            print(self.preprocessing_time_internal)
+            self.times['preprocessing.internal'] = pickle.loads(msg[2])
             archive_desc = BytesIO(tar_data)
             archive_desc.seek(0)
             self.setup_include_dirs(archive_desc)

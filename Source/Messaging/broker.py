@@ -81,6 +81,10 @@ class Broker:
                     workers.rotate(1)
                     server_id = workers[0]
                     self.servers.send_multipart([server_id, client_id, b'CREATE_SESSION'], copy=False)
+                elif len(msg) > 2 and msg[1] == b'DATA_FOR_SESSION':
+                    client_id = msg[2]
+                    server_id, session_id = server_from_client.get(client_id)
+                    self.servers.send_multipart([server_id, session_id] + msg[3:], copy=False)
                 else:
                     server_id, session_id = server_from_client.get(client_id)
                     self.servers.send_multipart([server_id, session_id] + msg[1:], copy=False)

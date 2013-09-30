@@ -2,12 +2,13 @@
 from cmdline_processing import *
 from functools import cmp_to_key
 from multiprocessing import Process, cpu_count
+from struct import pack
 from time import sleep, time
 from msvc import MSVCWrapper
 from subprocess import list2cmdline
 
 from scan_headers import collect_headers
-from utils import send_file, send_compressed_file
+from utils import send_file, send_compressed_file, bind_to_random_port
 
 import configparser
 import io
@@ -66,21 +67,29 @@ class Timer:
         return ContextManagerTimer(lambda value : self.add_time(name, value))
 
 class ScanHeaders(Process):
-    def __init__(self, port, timer):
+    def __init__(self, port, timer, nodes):
         self.__port = port
         self.__timer = timer
+        self.__nodes = nodes
         return super().__init__()
 
     def run(self):
         zmq_ctx = zmq.Context()
         socket = zmq_ctx.socket(zmq.DEALER)
         socket.connect('tcp://localhost:{}'.format(self.__port))
+        nodes = {}
 
         while True:
-            client_id, task = socket.recv_multipart()
-            timer = SimpleTimer()
+            server_id, task, node_index = socket.recv_multipart()
+            node_index = pickle.loads(node_index)
             buffer = self.prepare_task(pickle.loads(task))
-            socket.send_multipart([client_id, pickle.dumps(timer.get()), buffer.read()], copy=False)
+            if node_index not in nodes:
+                server_sock = zmq_ctx.socket(zmq.DEALER)
+                server_sock.connect(self.__nodes[node_index])
+                nodes[node_index] = server_sock
+            nodes[node_index].send_multipart([b'DATA_FOR_SESSION',
+                                             server_id, b'TASK_FILES',
+                                             buffer.read()], copy=False)
 
     def prepare_task(self, task):
         # FIXME: This does not belong here. Move this to msvc.py.
@@ -192,6 +201,7 @@ class TaskCreator:
             {
                 'server_task_info' : {
                     'call' : compile_call,
+                    'source' : source,
                     'pch_file' : pch_file,
                 },
                 'preprocess_task_info' : {
@@ -207,7 +217,6 @@ class TaskCreator:
                 'source' : source,
             })
             return task
-
         return [create_task(source) for source in sources]
 
     def should_invoke_linker(self):
@@ -242,6 +251,7 @@ class CompileSession:
     STATE_RECEIVE_RESULT_FILE = 5
     STATE_POSTPROCESS = 6
     STATE_WAIT_FOR_SESSION_DONE = 7
+    STATE_WAIT_FOR_SEND_TAR_DONE = 9999
 
     def __init__(self, compiler, executable, cwd, sysincludes, command, timer,
         client_conn, server_conn, preprocess_socket, node_info, compiler_info):
@@ -265,7 +275,7 @@ class CompileSession:
         if ctx.build_local():
             call = [ctx.executable()]
             call.extend(option.make_str() for option in ctx.option_values().all())
-            self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
+            self.client_conn.send([b'EXECUTE_AND_EXIT\x00' + list2cmdline(call).encode() + b'\x00\x01'])
         else:
             self.tasks = ctx.create_tasks()
             self.task_index = 0
@@ -284,10 +294,13 @@ class CompileSession:
     def start_task(self):
         if self.executable in self.compiler_info:
             self.task.compiler_info = self.compiler_info[self.executable]
-            self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
-            self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task.preprocess_task_info)], copy=False)
-            self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
             self.task.server_task_info['compiler_info'] = self.task.compiler_info
+            self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
+            server_id = self.server_conn.getsockopt(zmq.IDENTITY)
+            assert server_id
+            self.preprocess_socket.send_multipart([server_id,
+                pickle.dumps(self.task.preprocess_task_info),
+                pickle.dumps(self.node_info.index())], copy=False)
             with self.timer.timeit('send'):
                 self.server_conn.send_pyobj(self.task.server_task_info)
             self.node_info.add_tasks_sent()
@@ -300,45 +313,33 @@ class CompileSession:
     def got_data_from_client(self, msg):
         assert self.state in [self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
         del self.test_source
-        retcode = int(msg[1])
-        stdout = msg[2]
-        stderr = msg[3]
+        retcode = int(msg[0])
+        stdout = msg[1]
+        stderr = msg[2]
         info = self.compiler.compiler_info(self.executable, stdout, stderr)
         self.compiler_info[self.executable] = info
         self.task.compiler_info = self.compiler_info[self.executable]
-        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
-        self.preprocess_socket.send_multipart([self.client_conn.id, pickle.dumps(self.task.preprocess_task_info)], copy=False)
-        self.preprocess_timer = self.timer.scoped_timer('preprocess.external')
         self.task.server_task_info['compiler_info'] = self.task.compiler_info
+        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
+        server_id = self.server_conn.getsockopt(zmq.IDENTITY)
+        assert server_id
+        self.preprocess_socket.send_multipart([server_id,
+            pickle.dumps(self.task.preprocess_task_info),
+            pickle.dumps(self.node_info.index())], copy=False)
         with self.timer.timeit('send'):
             self.server_conn.send_pyobj(self.task.server_task_info)
         self.node_info.add_tasks_sent()
         self.state = self.STATE_WAIT_FOR_OK
-
-    def send_task_files(self):
-        self.server_conn.send_pyobj('TASK_FILES')
-        # Source file is already inside the tar archive.
-        tar_obj = io.BytesIO(self.tempfile)
-        tar_obj.seek(0)
-        self.server_timer = self.timer.scoped_timer('server_time.external')
-        self.average_timer = ScopedTimer(lambda value : self.node_info.add_total_time(value))
-        with self.timer.timeit('send.tar'):
-            send_file(self.server_conn.send_multipart, tar_obj, copy=False)
-        del tar_obj
-        del self.tempfile
-        source_file = self.task.source
-        self.server_conn.send_pyobj(('SOURCE_FILE', source_file))
-        self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_OK:
             task_ok = msg[0]
             assert msg[0] == b'OK'
             if self.task.pch_file:
-                self.server_conn.send_pyobj('NEED_PCH_FILE')
+                self.server_conn.send(b'NEED_PCH_FILE')
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
             else:
-                self.send_task_files()
+                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
             response = msg[0]
@@ -347,13 +348,9 @@ class CompileSession:
                     send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
             else:
                 assert response == b'NO'
-            self.send_task_files()
+            self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
-            self.server_timer.stop()
-            del self.server_timer
-            self.average_timer.stop()
-            del self.average_timer
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
                 self.client_conn.send([b'EXIT', b'-1'])
@@ -394,43 +391,51 @@ class TaskProcessor:
     def __init__(self, nodes, port):
         self.__port = port
         self.__nodes = nodes
+        self.__unique_id = 0
 
         super(TaskProcessor, self).__init__()
 
-    def find_available_node(self, node_info, zmq_ctx, recycled_connections):
+    def set_unique_id(self, socket):
+        socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
+        self.__unique_id += 1
+
+    def best_node(self, node_info):
         def cmp(lhs, rhs):
-            lhs_tasks_processing = node_info[lhs].tasks_processing() + node_info[lhs].reserved_connections()
-            rhs_tasks_processing = node_info[rhs].tasks_processing() + node_info[rhs].reserved_connections()
+            lhs_tasks_processing = node_info[lhs].tasks_processing()
+            rhs_tasks_processing = node_info[rhs].tasks_processing()
             lhs_time_per_task = node_info[lhs].average_task_time()
             rhs_time_per_task = node_info[rhs].average_task_time()
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
                 return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
             if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
                 return -1 if lhs_time_per_task < rhs_time_per_task else 1
+            # In case we don't yet have average time per task for a node, do
+            # not allow that node to be flooded.
+            if lhs_time_per_task == 0 and lhs_tasks_processing >= 5:
+                return 1
             return -1 if lhs_tasks_processing * lhs_time_per_task <= rhs_tasks_processing * rhs_time_per_task else 1
         compare_key = cmp_to_key(cmp)
 
-        order = list(range(len(self.__nodes)))
-        order.sort(key=compare_key)
-        for node_index in order:
-            recycled = recycled_connections.get(node_index)
-            if recycled:
-                socket = recycled[0]
-                del recycled[0]
-            else:
-                node = self.__nodes[node_index]
-                try:
-                    socket = zmq_ctx.socket(zmq.DEALER)
-                    socket.connect('tcp://{}:{}'.format(node[0], node[1]))
-                except Exception:
-                    print("Failed to connect to '{}'".format(node))
-                    import traceback
-                    traceback.print_exc()
-                    continue
-            socket.send(b'CREATE_SESSION')
-            node_info[node_index].inc_reserved_connections()
-            return socket, node_index
-        return None
+        return min(range(len(self.__nodes)), key=compare_key)
+
+    def connect_to_node(self, zmq_ctx, node_index, recycled_connections):
+        recycled = recycled_connections.get(node_index)
+        if recycled:
+            socket = recycled[0]
+            del recycled[0]
+        else:
+            node = self.__nodes[node_index]
+            try:
+                socket = zmq_ctx.socket(zmq.DEALER)
+                self.set_unique_id(socket)
+                socket.connect(node)
+            except Exception:
+                print("Failed to connect to '{}'".format(node))
+                import traceback
+                traceback.print_exc()
+                return None
+        socket.send(b'CREATE_SESSION')
+        return socket
 
     class SendProxy:
         def __init__(self, socket, id):
@@ -438,7 +443,7 @@ class TaskProcessor:
             self.id = id
 
         def send(self, data):
-            self.socket.send_multipart([self.id] + data, copy=False)
+            self.socket.send_multipart([self.id, b'\x00'.join(data) + b'\x00\x01'], copy=False)
 
         def recv(self):
             return self.socket.recv_multipart()
@@ -451,11 +456,11 @@ class TaskProcessor:
 
     def run(self):
         zmq_ctx = zmq.Context()
-        client_socket = zmq_ctx.socket(zmq.ROUTER)
+        client_socket = zmq_ctx.socket(zmq.STREAM)
         client_socket.bind('tcp://*:{}'.format(self.__port))
 
         preprocess_socket = zmq_ctx.socket(zmq.DEALER)
-        preprocess_socket_port = preprocess_socket.bind_to_random_port('tcp://*')
+        preprocess_socket_port = bind_to_random_port(preprocess_socket)
 
         registered_sockets = set()
         poller = zmq.Poller()
@@ -471,7 +476,6 @@ class TaskProcessor:
             poller.unregister(socket)
 
         register_socket(client_socket)
-        register_socket(preprocess_socket)
 
         compiler_info = {}
 
@@ -479,14 +483,14 @@ class TaskProcessor:
 
         timer = Timer()
 
-        node_info = [NodeInfo() for x in range(len(self.__nodes))]
+        node_info = [NodeInfo(x) for x in range(len(self.__nodes))]
 
-        scan_workers = [ScanHeaders(preprocess_socket_port, timer) for i in range(cpu_count() + 2)]
+        scan_workers = [ScanHeaders(preprocess_socket_port, timer, self.__nodes) for i in range(cpu_count() * 2)]
         for scan_worker in scan_workers:
             scan_worker.start()
 
-        max_nodes_waiting = 8
-        nodes_requested = 0
+        connections_per_node = 4
+        nodes_requested = {}
 
         # Connections to be re-used.
         recycled_connections = {}
@@ -506,7 +510,7 @@ class TaskProcessor:
         node_ids = {}
 
         # Nodes waiting for a client.
-        nodes_waiting = []
+        nodes_waiting = {}
 
         # Clients waiting for a node.
         clients_waiting = []
@@ -514,56 +518,45 @@ class TaskProcessor:
         try:
             while True:
                 self.print_stats(node_info, timer, recycled_connections)
-                for x in range(max_nodes_waiting - len(nodes_waiting) - nodes_requested):
-                    result = self.find_available_node(node_info, zmq_ctx, recycled_connections)
-                    if result is not None:
-                        socket, node_index = result
+                for node_index in range(len(node_info)):
+                    for x in range(connections_per_node - nodes_requested.get(node_index, 0) - len(nodes_waiting.get(node_index, []))):
+                        socket = self.connect_to_node(zmq_ctx, node_index, recycled_connections)
+                        assert socket
                         register_socket(socket)
                         nodes_contacted[socket] = node_index
-                        nodes_requested += 1
+                        nodes_requested[node_index] = nodes_requested.get(node_index, 0) + 1
 
                 sockets = dict(poller.poll(1000))
                 for socket, flags in sockets.items():
                     if flags != zmq.POLLIN:
                         continue
 
-                    if socket is preprocess_socket:
-                        with timer.timeit("poller.preprocess"):
-                            try:
-                                while True:
-                                    client_id, duration, buffer = preprocess_socket.recv_multipart(flags=zmq.NOBLOCK)
-                                    timer.add_time('preprocess.internal', pickle.loads(duration))
-                                    assert client_id in session_from_client
-                                    session = session_from_client[client_id]
-                                    session.preprocess_timer.stop()
-                                    del session.preprocess_timer
-                                    session.tempfile = buffer
-                                    register_socket(session.server_conn)
-                            except zmq.ZMQError:
-                                pass
-
                     elif socket is client_socket:
                         with timer.timeit("poller.client"):
                             msg = client_socket.recv_multipart()
                             client_id = msg[0]
+                            assert len(msg) == 2
+                            assert msg[1][-2:] == b'\x00\x01'
+                            parts = msg[1][:-2].split(b'\x00')
                             if client_id in session_from_client:
                                 # Session already exists.
                                 session = session_from_client[client_id]
                                 server_socket = session.server_conn
                                 assert server_socket in session_from_server
-                                session.got_data_from_client(msg)
+                                session.got_data_from_client(parts)
                             else:
                                 # Create new session.
-                                compiler = msg[1].decode()
-                                executable = msg[2].decode()
-                                sysincludes = msg[3].decode()
-                                cwd = msg[4].decode()
-                                command = [x.decode() for x in msg[4:]]
+                                compiler = parts[0].decode()
+                                executable = parts[1].decode()
+                                sysincludes = parts[2].decode()
+                                cwd = parts[3].decode()
+                                command = [x.decode() for x in parts[4:]]
                                 client_conn = self.SendProxy(client_socket, client_id)
                                 client_conn.send([b"TASK_RECEIVED"])
-                                if nodes_waiting:
-                                    server_conn, node_index = nodes_waiting[0]
-                                    del nodes_waiting[0]
+                                node_index = self.best_node(node_info)
+                                if nodes_waiting[node_index]:
+                                    server_conn = nodes_waiting[node_index][0]
+                                    del nodes_waiting[node_index][0]
                                     session = CompileSession(compiler, executable, cwd, sysincludes,
                                         command, timer, client_conn, server_conn,
                                         preprocess_socket, node_info[node_index], compiler_info)
@@ -593,10 +586,6 @@ class TaskProcessor:
                                 accept = socket.recv_pyobj()
                                 node_index = node_ids[socket]
                                 del node_ids[socket]
-                                # Temporarily unregister this socket. It will be
-                                # registered again when its preprocessing is
-                                # done.
-                                unregister_socket(socket)
                                 if accept == "ACCEPT":
                                     if clients_waiting:
                                         client_conn, compiler, executable, sysincludes, cwd, command = clients_waiting[0]
@@ -607,14 +596,14 @@ class TaskProcessor:
                                         session_from_client[client_conn.id] = session
                                         session_from_server[socket] = session, node_index
                                     else:
-                                        nodes_waiting.append((socket, node_index))
+                                        nodes_waiting.setdefault(node_index, []).append(socket)
                                 else:
                                     assert accept == "REJECT"
-                                    node_info[node_index].dec_reserved_connections()
-                                nodes_requested -= 1
+                                nodes_requested[node_index] -= 1
                             else:
                                 assert socket in nodes_contacted
                                 session_created = socket.recv()
+                                assert session_created == b'SESSION_CREATED'
                                 node_index = nodes_contacted[socket]
                                 del nodes_contacted[socket]
                                 node_ids[socket] = node_index
@@ -633,38 +622,40 @@ class TaskProcessor:
         sys.stdout.write("================\n")
         for index in range(len(self.__nodes)):
             node = self.__nodes[index]
-            sys.stdout.write('{:15}:{:5} - Tasks sent {:<3} '
+            sys.stdout.write('{:30} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Reserved {:<3} '
-                'Avg. Tasks {:<3.2f} Avg. Time {:<3.2f}\n'
+                '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
+                'Avg. Time {:<3.2f}\n'
             .format(
-                node[0], node[1],
-                node_info[index].tasks_sent          (),
-                node_info[index].connections         (),
-                node_info[index].tasks_completed     (),
-                node_info[index].tasks_failed        (),
-                node_info[index].tasks_processing    (),
-                node_info[index].reserved_connections(),
-                node_info[index].average_tasks       (),
-                node_info[index].average_task_time   ()))
+                node,
+                node_info[index].tasks_sent       (),
+                node_info[index].connections      (),
+                node_info[index].tasks_completed  (),
+                node_info[index].tasks_failed     (),
+                node_info[index].tasks_processing (),
+                node_info[index].average_tasks    (),
+                node_info[index].average_task_time()))
         sys.stdout.write("================\n")
         sys.stdout.write("\r" * (len(self.__nodes) + 4))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
         sorted_times.sort(key=operator.itemgetter(1), reverse=True)
         for name, tm, count, average in sorted_times:
-            print('{:-<30} Total {:->10.2f} Num {:->5} Average {:->10.2f}'.format(name, tm, count, average))
+            print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
         return True
 
 class NodeInfo:
-    def __init__(self):
-        self._tasks_completed      = 0
-        self._tasks_failed         = 0
-        self._tasks_sent           = 0
-        self._total_time           = 0
-        self._open_connections     = 0
-        self._reserved_connections = 0
-        self._tasks_change         = None
+    def __init__(self, index):
+        self._index = index
+        self._tasks_completed  = 0
+        self._tasks_failed     = 0
+        self._tasks_sent       = 0
+        self._total_time       = 0
+        self._open_connections = 0
+        self._tasks_change     = None
         self._avg_tasks = {}
+
+    def index(self):
+        return self._index
 
     def average_task_time(self):
         tasks_completed = self.tasks_completed()
@@ -675,8 +666,6 @@ class NodeInfo:
     def connection_closed(self): self._open_connections -= 1
 
     def connections(self): return self._open_connections
-
-    def reserved_connections(self): return self._reserved_connections
 
     def tasks_sent(self): return self._tasks_sent
 
@@ -705,16 +694,8 @@ class NodeInfo:
         else:
             self._tasks_change = time()
 
-    def inc_reserved_connections(self):
-        self._reserved_connections += 1
-
-    def dec_reserved_connections(self):
-        self._reserved_connections -= 1
-
     def add_tasks_sent(self):
         self.__tasks_processing_about_to_change()
-        assert self.reserved_connections() > 0
-        self._reserved_connections -= 1
         self._tasks_sent += 1
 
     def add_tasks_completed(self):
@@ -724,7 +705,6 @@ class NodeInfo:
     def add_tasks_failed(self): self._add_tasks_failed += 1
 
     def add_total_time(self, value): self._total_time += value
-
 
 default_script = 'distribute_manager.ini'
 
@@ -767,7 +747,7 @@ Usage:
             if not delim in value:
                 raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>")
             index = value.index(delim)
-            nodes.append((value[:index], int(value[index+1:])))
+            nodes.append('tcp://{}:{}'.format(value[:index], int(value[index+1:])))
         else:
             done = True
     if not nodes:

@@ -1,8 +1,8 @@
 // This is a rewrite of the distribute_client.py script.
 // We need these processes to have a small footprint as
-// usually dosens of them concurrently.
+// usually dozens of them run concurrently.
 
-#include <zmq.h>
+#include "boost/asio.hpp"
 
 #include <cassert>
 #include <deque>
@@ -45,151 +45,62 @@ bool locateExecutable( std::string & executable )
     return false;
 }
 
-class ZmqSocket
-{
-private:
-    ZmqSocket( ZmqSocket const & );
-    ZmqSocket & operator=( ZmqSocket const & );
-
-public:
-    explicit ZmqSocket( void * socket ) : socket_( socket ), connected_( false ) {}
-
-    ZmqSocket( ZmqSocket && other )
-    {
-        socket_ = other.socket_;
-        connected_ = other.connected_;
-        endpoint_.swap( other.endpoint_ );
-        other.socket_ = 0;
-        other.connected_ = false;
-    }
-
-    ZmqSocket & operator=( ZmqSocket && other )
-    {
-        std::swap( socket_, other.socket_ );
-        std::swap( connected_, other.connected_ );
-        endpoint_.swap( other.endpoint_ );
-    }
-
-    ~ZmqSocket()
-    {
-        disconnect();
-        zmq_close( socket_ );
-    }
-
-    void connect( std::string const & endpoint )
-    {
-        disconnect();
-
-        connected_ = true;
-        endpoint_ = endpoint;
-        zmq_connect( socket_, endpoint_.c_str() );
-    }
-
-    void disconnect()
-    {
-        if ( !connected_ )
-            return;
-        zmq_disconnect( socket_, endpoint_.c_str() );
-        endpoint_.clear();
-        connected_ = false;
-    }
-
-    void sendData( std::unique_ptr<char []> & buffer, std::size_t size, int sendFlags )
-    {
-        zmq_msg_t outputMsg;
-        zmq_msg_init_data( &outputMsg, buffer.release(), size, &freeBuffer, 0 );
-        zmq_msg_send( &outputMsg, socket_, sendFlags | ZMQ_DONTWAIT );
-        zmq_msg_close( &outputMsg );
-    }
-
-    void sendData( char const * buffer, std::size_t size, int sendFlags )
-    {
-        zmq_msg_t msg;
-        zmq_msg_init_size( &msg, size );
-        std::memcpy( zmq_msg_data( &msg ), buffer, size );
-        zmq_msg_send( &msg, socket_, sendFlags );
-        zmq_msg_close( &msg );
-    }
-
-    void sendData( std::string const & data, int sendFlags )
-    {
-        sendData( data.data(), data.size(), sendFlags );
-    }
-
-    void * handle() const { return socket_; }
-
-private:
-    static void freeBuffer( void * buffer, void * hint )
-    {
-        assert( buffer );
-        assert( !hint );
-        delete[] buffer;
-    }
-
-private:
-    void * socket_;
-    std::string endpoint_;
-    bool connected_;
-};
-
-void pipeToSocket( HANDLE pipe, ZmqSocket & socket, int sendFlags )
+std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
 {
     DWORD available = 0;
-    DWORD inBuffer = 0;
     if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
         available = 0;
 
     std::unique_ptr<char []> buffer;
+    buffer.reset( new char[ available + 1 ] );
     if ( available )
-    {
-        buffer.reset( new char[ available ] );
-        ReadFile( pipe, buffer.get(), available, &inBuffer, NULL );
-    }
+        ReadFile( pipe, buffer.get(), available, &size, NULL );
+    buffer[ available ] = '\0';
 
-    if ( inBuffer )
-        socket.sendData( buffer, inBuffer, sendFlags );
-    else
-        socket.sendData( std::string(), sendFlags );
+    return buffer;
 }
 
 class MsgReceiver
 {
 public:
-    typedef std::deque<zmq_msg_t> Msgs;
-
-    explicit MsgReceiver( ZmqSocket & socket )
-        : msgs_( 2 ), parts_( 0 )
+    explicit MsgReceiver( boost::asio::ip::tcp::socket & socket )
+        :
+        socket_( socket ),
+        currentSize_( 0 )
     {
-        int64_t more = 0;
-        size_t more_size = sizeof(more);
-        do
-        {
-            if ( msgs_.size() <= parts_ )
-                msgs_.resize( 2 * msgs_.size() );
-            zmq_msg_t & msg( msgs_[ parts_ ] );
-            zmq_msg_init( &msg );
-            zmq_msg_recv( &msg, socket.handle(), 0 );
-            parts_++;
-
-            int const rc = zmq_getsockopt( socket.handle(), ZMQ_RCVMORE, &more, &more_size );
-        } while ( more );
     }
 
-    ~MsgReceiver()
+    void getMessage()
     {
-        for ( std::size_t msgIndex( 0 ); msgIndex < parts_; ++msgIndex )
-            zmq_msg_close( &msgs_[ msgIndex ] );
+        if ( currentSize_ )
+        {
+            parts_.clear();
+            buf_.consume( currentSize_ );
+            currentSize_ = 0;
+        }
+        boost::system::error_code readError;
+        char const * start;
+        currentSize_ = boost::asio::read_until( socket_, buf_, std::string( "\0\1", 2 ), readError );
+        if ( readError )
+        {
+            std::cerr << "FATAL: Read failure (" << readError.message() << ")\n";
+            exit( 1 );
+        }
+        boost::asio::streambuf::const_buffers_type bufs = buf_.data();
+        start = boost::asio::buffer_cast<char const *>( bufs );
+        for ( std::size_t stride( 0 ); stride < currentSize_ - 1; )
+        {
+            std::size_t const partLen( strlen( start + stride ) );
+            parts_.push_back( std::make_pair( start + stride, partLen ) );
+            stride += partLen + 1;
+        }
     }
 
     std::pair<char const *, std::size_t> getPart( std::size_t index )
     {
-        if ( index >= parts_ )
+        if ( index >= parts_.size() )
             return std::make_pair<char const *, std::size_t>( 0, 0 );
-
-        zmq_msg_t & msg( msgs_[ index ] );
-        char const * const data = static_cast<char *>( zmq_msg_data( &msg ) );
-        std::size_t const size = zmq_msg_size( &msg );
-        return std::make_pair( data, size );
+        return parts_[ index ];
     }
 
     void getPart( std::size_t index, char const * * buff, std::size_t * size )
@@ -199,30 +110,17 @@ public:
         if ( size ) *size = result.second;
     }
 
-    std::size_t parts() const { return parts_; }
+    std::size_t parts() const { return parts_.size(); }
 
 private:
-    Msgs msgs_;
-    std::size_t parts_;
-};
-
-class ZmqContext
-{
-public:
-    ZmqContext() : context_( zmq_ctx_new() ) {}
-    ~ZmqContext() { zmq_ctx_destroy( context_ ); }
-
-    ZmqSocket socket( int type ) const { return ZmqSocket( zmq_socket( context_, type ) ); }
-
-private:
-    void * context_;
+    boost::asio::ip::tcp::socket & socket_;
+    boost::asio::streambuf buf_;
+    std::vector<std::pair<char const *, std::size_t> > parts_;
+    std::size_t currentSize_;
 };
 
 int main( int argc, char * argv[] )
 {
-    ZmqContext context;
-    ZmqSocket socket = context.socket( ZMQ_DEALER );
-
     std::string executable;
     if ( !locateExecutable( executable ) )
     {
@@ -248,59 +146,77 @@ int main( int argc, char * argv[] )
 
     char * buffer = static_cast<char *>( alloca( size ) );
     GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
+    unsigned short port = atoi( buffer );
 
-    std::string endpoint( "tcp://localhost:" );
-    endpoint.append( buffer );
-    
-    socket.connect( endpoint );
-    socket.sendData( compiler, compilerSize, ZMQ_SNDMORE );
+    boost::asio::ip::address localhost = boost::asio::ip::address::from_string("127.0.0.1");
+    boost::asio::ip::tcp::endpoint endpoint;
+    endpoint.address( localhost );
+    endpoint.port( port );
 
-    socket.sendData( executable, ZMQ_SNDMORE );
+    boost::asio::io_service ioService;
+    boost::asio::ip::tcp::socket socket( ioService );
+    boost::system::error_code connectError;
+    socket.connect( endpoint, connectError );
+    if ( connectError )
+    {
+        std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
+        return -1;
+    }
+
+    std::vector<boost::asio::const_buffer> req;
+
+    req.push_back( boost::asio::buffer( compiler, compilerSize + 1 ) );
+    req.push_back( boost::asio::buffer( executable.c_str(), executable.size() + 1 ) );
 
     DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
     if ( includeSize == 0 )
-        socket.sendData( "", 0, ZMQ_SNDMORE );
+        req.push_back( boost::asio::buffer( "\0", 1 ) );
     else
     {
         char * includeBuffer = static_cast<char *>( _alloca( includeSize ) );
         GetEnvironmentVariable( "INCLUDE", includeBuffer, includeSize );
-        socket.sendData( includeBuffer, includeSize - 1, ZMQ_SNDMORE );
+        includeBuffer[ includeSize ] = '\0';
+        req.push_back( boost::asio::buffer( includeBuffer, includeSize ) );
     }
 
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
-    std::unique_ptr<char []> currentPathBuffer( new char[ currentPathSize ] );
-    GetCurrentDirectory( currentPathSize, currentPathBuffer.get() );
-    socket.sendData( currentPathBuffer, currentPathSize - 1, ZMQ_SNDMORE );
+    char * currentPathBuffer = static_cast<char *>( _alloca( currentPathSize ) );
+    GetCurrentDirectory( currentPathSize, currentPathBuffer );
+    req.push_back( boost::asio::buffer( currentPathBuffer, currentPathSize ) );
 
     for ( int arg( 1 ); arg < argc; ++arg )
     {
-        socket.sendData( argv[arg], strlen( argv[arg] ), arg < argc - 1 ? ZMQ_SNDMORE : 0 );
+        req.push_back( boost::asio::buffer( argv[arg], strlen( argv[arg] ) + 1 ) );
     }
+    req.push_back( boost::asio::buffer( "\1", 1 ) );
+    boost::system::error_code writeError;
+    boost::asio::write( socket, req, writeError );
 
+    MsgReceiver receiver( socket );
     {
-        MsgReceiver reply( socket );
-        assert( reply.parts() == 1 );
-        std::pair<char const *, std::size_t> data( reply.getPart( 0 ) );
+        receiver.getMessage();
+        assert( receiver.parts() == 1 );
+        std::pair<char const *, std::size_t> data( receiver.getPart( 0 ) );
         assert( data.second == 13 );
         assert( memcmp( data.first, "TASK_RECEIVED", data.second ) == 0 );
     }
 
     while ( true )
     {
-        MsgReceiver requestReceiver( socket );
+        receiver.getMessage();
 
-        assert( requestReceiver.parts() >= 1 );
+        assert( receiver.parts() >= 1 );
 
         char const * request;
         std::size_t requestSize;
-        requestReceiver.getPart( 0, &request, &requestSize );
+        receiver.getPart( 0, &request, &requestSize );
 
         if ( ( requestSize == 16 ) && strncmp( request, "EXECUTE_AND_EXIT", 16 ) == 0 )
         {
-            assert( requestReceiver.parts() == 2 );
+            assert( receiver.parts() == 2 );
             char const * commandLine;
             std::size_t commandLineSize;
-            requestReceiver.getPart( 1, &commandLine, &commandLineSize );
+            receiver.getPart( 1, &commandLine, &commandLineSize );
 
             // Create a copy on the stack as required by CreateProcess.
             char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
@@ -340,10 +256,10 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 18 ) && strncmp( request, "EXECUTE_GET_OUTPUT", 18 ) == 0 )
         {
-            assert( requestReceiver.parts() == 2 );
+            assert( receiver.parts() == 2 );
             char const * commandLine;
             std::size_t commandLineSize;
-            requestReceiver.getPart( 1, &commandLine, &commandLineSize );
+            receiver.getPart( 1, &commandLine, &commandLineSize );
 
             // Create a copy on the stack as required by CreateProcess.
             char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
@@ -385,6 +301,7 @@ int main( int argc, char * argv[] )
                 &processInfo
             );
 
+            std::vector<boost::asio::const_buffer> res;
             if ( apiResult )
             {
                 ::WaitForSingleObject( processInfo.hProcess, INFINITE );
@@ -394,12 +311,22 @@ int main( int argc, char * argv[] )
                     char buffer[20];
                     _itoa( result, buffer, 10 );
                     std::size_t const size( strlen( buffer ) );
-                    socket.sendData( buffer, strlen( buffer ), ZMQ_SNDMORE );
+                    res.push_back( boost::asio::buffer( buffer, strlen( buffer ) + 1 ) );
                 }
-
-                pipeToSocket( stdOutRead, socket, ZMQ_SNDMORE );
-                pipeToSocket( stdErrRead, socket, 0 );
-
+                DWORD stdOutSize;
+                std::unique_ptr<char []> stdOut( getPipeData( stdOutRead, stdOutSize ) );
+                res.push_back( boost::asio::buffer( stdOut.get(), stdOutSize + 1 ) );
+                DWORD stdErrSize;
+                std::unique_ptr<char []> stdErr( getPipeData( stdErrRead, stdErrSize ) );
+                res.push_back( boost::asio::buffer( stdErr.get(), stdErrSize + 1 ) );
+                res.push_back( boost::asio::buffer( "\1", 1 ) );
+                boost::system::error_code writeError;
+                boost::asio::write( socket, res, writeError );
+                if ( writeError )
+                {
+                    std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
+                    exit( 1 );
+                }
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );
                 CloseHandle( stdOutRead );
@@ -415,10 +342,10 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 4 ) && strncmp( request, "EXIT", 4 ) == 0 )
         {
-            assert( requestReceiver.parts() == 2 );
+            assert( receiver.parts() == 2 );
             char const * exitCode;
             std::size_t exitCodeSize;
-            requestReceiver.getPart( 1, &exitCode, &exitCodeSize );
+            receiver.getPart( 1, &exitCode, &exitCodeSize );
 
             char * buffer = static_cast<char *>( _alloca( exitCodeSize + 1 ) );
             std::memcpy( buffer, exitCode, exitCodeSize );
@@ -427,10 +354,10 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 9 ) && strncmp( request, "COMPLETED", 9 ) == 0 )
         {
-            assert( requestReceiver.parts() == 4 );
+            assert( receiver.parts() == 4 );
             char const * retcode;
             std::size_t retcodeSize;
-            requestReceiver.getPart( 1, &retcode, &retcodeSize );
+            receiver.getPart( 1, &retcode, &retcodeSize );
 
             char * buffer = static_cast<char *>( _alloca( retcodeSize + 1 ) );
             std::memcpy( buffer, retcode, retcodeSize );
@@ -439,11 +366,11 @@ int main( int argc, char * argv[] )
 
             char const * stdOut;
             std::size_t stdOutSize;
-            requestReceiver.getPart( 2, &stdOut, &stdOutSize );
+            receiver.getPart( 2, &stdOut, &stdOutSize );
 
             char const * stdErr;
             std::size_t stdErrSize;
-            requestReceiver.getPart( 3, &stdErr, &stdErrSize );
+            receiver.getPart( 3, &stdErr, &stdErrSize );
 
             std::cout << std::string( stdOut, stdOutSize );
             if ( stdErrSize )
@@ -452,10 +379,10 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 6 ) && strncmp( request, "GETENV", 6 ) == 0 )
         {
-            assert( requestReceiver.parts() == 2 );
+            assert( receiver.parts() == 2 );
             char const * var;
             std::size_t varSize;
-            requestReceiver.getPart( 1, &var, &varSize );
+            receiver.getPart( 1, &var, &varSize );
             char * ztVar = static_cast<char *>( _alloca( varSize + 1 ) );
             std::memcpy( ztVar, var, varSize );
             ztVar[ varSize ] = 0;
@@ -471,7 +398,16 @@ int main( int argc, char * argv[] )
             char * buffer = static_cast<char *>( alloca( size ) );
             GetEnvironmentVariable( ztVar, buffer, size );
 
-            socket.sendData( buffer, size, 0 );
+            std::vector<boost::asio::const_buffer> res;
+            res.push_back( boost::asio::buffer( buffer, size + 1 ) );
+            res.push_back( boost::asio::buffer( "\1", 1 ) );
+            boost::system::error_code writeError;
+            boost::asio::write( socket, res, writeError );
+            if ( writeError )
+            {
+                std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
+                exit( 1 );
+            }
         }
         else
         {

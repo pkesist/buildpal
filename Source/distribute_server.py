@@ -4,6 +4,7 @@ from multiprocessing.managers import SyncManager
 from time import sleep, time
 from threading import Lock as ThreadLock
 from io import BytesIO
+from utils import bind_to_random_port
 
 import configparser
 import os
@@ -55,11 +56,10 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
-    STATE_SH_GET_ARCHIVE_TAG = 3
-    STATE_SH_GET_ARCHIVE_DATA = 4
-    STATE_SH_GET_SOURCE_FILE_NAME = 5
-    STATE_SH_CHECK_PCH_TAG = 6
-    STATE_SH_GET_PCH_DATA = 7
+    STATE_SH_WAIT_FOR_TASK_DATA = 3
+    STATE_SH_GET_SOURCE_FILE_NAME = 4
+    STATE_SH_CHECK_PCH_TAG = 5
+    STATE_SH_GET_PCH_DATA = 6
 
     def __init__(self, file_repository, cpu_usage_hwm, task_counter, compiler_setup):
         ServerCompiler.__init__(self, file_repository, compiler_setup, cpu_usage_hwm)
@@ -68,6 +68,7 @@ class CompileSession(ServerSession, ServerCompiler):
         self.compiler_setup = compiler_setup
         self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
         self.include_dirs = [self.include_path]
+        self.has_task_data = False
 
     def created(self):
         assert self.state == self.STATE_START
@@ -87,6 +88,15 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.include_dirs.append(os.path.normpath(os.path.join(self.include_path, path)))
 
     def run_compiler(self):
+        self.source_file = os.path.join(self.include_path, self.task['source'])
+        if self.task['pch_file'] is not None:
+            while not self.file_repository().file_arrived(*self.task['pch_file']):
+                # The PCH file is being downloaded by another session.
+                # This could be made prettier by introducing another state
+                # in this state machine. However, wake-up event for that
+                # state would require inter-session communication.
+                sleep(1)
+
         try:
             with TempFile(suffix='.obj') as object_file:
                 compiler_info = self.task['compiler_info']
@@ -121,22 +131,38 @@ class CompileSession(ServerSession, ServerCompiler):
             shutil.rmtree(self.include_path, ignore_errors=True)
 
     def process_msg_worker(self):
-        if self.state == self.STATE_GET_TASK:
-            self.task = self.recv_pyobj()
+        msg = self.recv_multipart()
+        if not self.has_task_data and msg[0] == b'TASK_FILES':
+            tar_data = msg[1]
+            archive_desc = BytesIO(tar_data)
+            archive_desc.seek(0)
+            self.setup_include_dirs(archive_desc)
+            del archive_desc
+            self.has_task_data = True
+            if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
+                self.run_compiler()
+                return True
+
+        elif self.state == self.STATE_GET_TASK:
+            self.task = pickle.loads(msg[0])
             self.compiler = self.setup_compiler(self.task['compiler_info'])
             if self.compiler:
                 self.send(b'OK')
             else:
-                self.send_pyobj("FAIL")
+                self.send(b'FAIL')
                 return False
             self.task_counter.inc()
             if self.task['pch_file'] is None:
-                self.state = self.STATE_SH_GET_ARCHIVE_TAG
+                if self.has_task_data:
+                    self.run_compiler()
+                    return True
+                else:
+                    self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
             else:
                 self.state = self.STATE_SH_CHECK_PCH_TAG
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
-            tag = self.recv_pyobj()
-            assert tag == 'NEED_PCH_FILE'
+            tag = msg[0]
+            assert tag == b'NEED_PCH_FILE'
             self.pch_file, required = self.file_repository().register_file(*self.task['pch_file'])
             if required:
                 self.send(b'YES')
@@ -145,9 +171,13 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
                 self.send(b'NO')
-                self.state = self.STATE_SH_GET_ARCHIVE_TAG
+                if self.has_task_data:
+                    self.run_compiler()
+                    return True
+                else:
+                    self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
         elif self.state == self.STATE_SH_GET_PCH_DATA:
-            more, data = self.recv_multipart()
+            more, data = msg
             self.pch_desc.write(self.pch_decompressor.decompress(data))
             if more == b'\x00':
                 self.pch_desc.write(self.pch_decompressor.flush())
@@ -155,33 +185,13 @@ class CompileSession(ServerSession, ServerCompiler):
                 del self.pch_desc
                 del self.pch_decompressor
                 self.file_repository().file_completed(*self.task['pch_file'])
-                self.state = self.STATE_SH_GET_ARCHIVE_TAG
-        elif self.state == self.STATE_SH_GET_ARCHIVE_TAG:
-            archive_tag = self.recv_pyobj()
-            assert archive_tag == 'TASK_FILES'
-            self.archivedesc = BytesIO()
-            self.state = self.STATE_SH_GET_ARCHIVE_DATA
-        elif self.state == self.STATE_SH_GET_ARCHIVE_DATA:
-            more, data = self.recv_multipart()
-            self.archivedesc.write(data)
-            if more == b'\x00':
-                self.archivedesc.seek(0)
-                self.setup_include_dirs(self.archivedesc)
-                del self.archivedesc
-                self.state = self.STATE_SH_GET_SOURCE_FILE_NAME
-        elif self.state == self.STATE_SH_GET_SOURCE_FILE_NAME:
-            tag, source_file = self.recv_pyobj()
-            assert tag == 'SOURCE_FILE'
-            self.source_file = os.path.join(self.include_path, source_file)
-            if self.task['pch_file'] is not None:
-                while not self.file_repository().file_arrived(*self.task['pch_file']):
-                    # The PCH file is being downloaded by another session.
-                    # This could be made prettier by introducing another state
-                    # in this state machine. However, wake-up event for that
-                    # state would require inter-session communication.
-                    sleep(1)
-            self.run_compiler()
-            return True
+                if self.has_task_data:
+                    self.run_compiler()
+                    return True
+                else:
+                    self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
+        else:
+            assert not "Invalid state"
         return False
 
     def process_msg(self):
@@ -290,7 +300,7 @@ class ServerRunner(Process):
         broker = Broker(zmq.Context())
         broker.bind_clients('tcp://*:{}'.format(self.__port))
         broker.connect_control(self.__control_address)
-        worker_address = 'tcp://localhost:{}'.format(broker.servers.bind_to_random_port('tcp://*'))
+        worker_address = 'tcp://localhost:{}'.format(bind_to_random_port(broker.servers))
         workers = list((CompileWorker(worker_address, self.__control_address,
             self.__file_repository, self.__cpu_usage_hwm, self.__task_counter)
             for proc in range(self.__processes)))
@@ -337,7 +347,7 @@ Usage:
 
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)
-        control_port = control.bind_to_random_port('tcp://*')
+        control_port = bind_to_random_port(control)
         server_runner = ServerRunner(port, control_port,
             processes, file_repository, cpu_usage_hwm, task_counter)
         server_runner.start()

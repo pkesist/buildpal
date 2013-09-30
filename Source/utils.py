@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import zlib
+import zmq
 
 class TempFile:
     """
@@ -86,7 +87,7 @@ def receive_file(receiver, fileobj):
 
 def send_compressed_file(sender, fileobj, *args, **kwargs):
     compressor = zlib.compressobj(1)
-    for data in iter(lambda : fileobj.read(32 * 1024), b''):
+    for data in iter(lambda : fileobj.read(256 * 1024), b''):
         sender((b'\x01', compressor.compress(data)), *args, **kwargs)
     sender((b'\x00', compressor.flush(zlib.Z_FINISH)), *args, **kwargs)
 
@@ -99,7 +100,7 @@ def receive_compressed_file(receiver, fileobj):
     fileobj.write(decompressor.flush())
 
 def send_file(sender, file, *args, **kwargs):
-    for data in iter(lambda : file.read(32 * 1024), b''):
+    for data in iter(lambda : file.read(256 * 1024), b''):
         sender((b'\x01', data), *args, **kwargs)
     sender((b'\x00', b''), *args, **kwargs)
 
@@ -108,3 +109,9 @@ def relay_file(source_read, target_send):
     while more == b'\x01':
         more, data = source_read()
         target_send((more, data))
+
+def bind_to_random_port(socket):
+    socket.bind('tcp://*:*')
+    address = socket.getsockopt(zmq.LAST_ENDPOINT)
+    return int(address[address.index(b':', 4) + 1:])
+

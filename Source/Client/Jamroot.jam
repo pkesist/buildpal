@@ -5,10 +5,11 @@ local release-variants = release profile ;
 exe db_cl
 :
     db_cl.cpp
-    /zmq//libzmq/<link>static
+    /boost//system/<link>static
 :
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
     <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
+    <target-os>windows:<define>_WIN32_WINNT=0x0501
 ;
 
 explicit db_cl ;

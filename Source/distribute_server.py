@@ -69,6 +69,7 @@ class CompileSession(ServerSession, ServerCompiler):
         self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
         self.include_dirs = [self.include_path]
         self.has_task_data = False
+        self.times = {}
 
     def created(self):
         assert self.state == self.STATE_START

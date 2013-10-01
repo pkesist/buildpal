@@ -50,7 +50,8 @@ class ServerCompiler:
                 self.__compiler_setup[key] = setup
             return setup
         else:
-            raise RuntimeError("Unknown toolset '{}'".format(self.__compiler_info.toolset()))
+            raise RuntimeError("Unknown toolset '{}'".format(
+                                  self.__compiler_info.toolset()))
 
 class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
@@ -61,79 +62,93 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_SH_CHECK_PCH_TAG = 5
     STATE_SH_GET_PCH_DATA = 6
 
-    def __init__(self, file_repository, cpu_usage_hwm, task_counter, compiler_setup):
-        ServerCompiler.__init__(self, file_repository, compiler_setup, cpu_usage_hwm)
+    def __init__(self, file_repository, cpu_usage_hwm, task_counter,
+                 compiler_setup, include_path, headers):
+        ServerCompiler.__init__(self, file_repository, compiler_setup,
+                                cpu_usage_hwm)
         self.state = self.STATE_START
         self.task_counter = task_counter
         self.compiler_setup = compiler_setup
-        self.include_path = tempfile.mkdtemp(suffix='', prefix='tmp', dir=None)
+        self.include_path = include_path
         self.include_dirs = [self.include_path]
         self.has_task_data = False
         self.times = {}
+        self.headers = headers
 
     def created(self):
         assert self.state == self.STATE_START
         accept = self.accept()
         self.send_pyobj('ACCEPT' if accept else 'REJECT')
         self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
+        self.wait_task_data_timer = SimpleTimer()
         return accept
 
     def setup_include_dirs(self, fileobj):
         dir_setup_timer = SimpleTimer()
-        with tarfile.open(fileobj=fileobj, mode='r') as tar:
-            tar.extractall(path=self.include_path)
         self.times['tar_extract'] = dir_setup_timer.get()
-
-        include_list = os.path.join(self.include_path, 'include_paths.txt')
-        if os.path.exists(include_list):
-            for path in open(include_list, 'rt'):
-                assert not os.path.isabs(path)
-                self.include_dirs.append(os.path.normpath(os.path.join(self.include_path, path)))
+        with tarfile.open(fileobj=fileobj, mode='r') as tar:
+            for tarinfo in tar.getmembers():
+                # Additional dirs are needed on the path.
+                if tarinfo.name == 'include_paths.txt':
+                    include_path_reader = tar.extractfile(tarinfo)
+                    include_paths = include_path_reader.read().split(b'\n')
+                    for include_path in include_paths:
+                        assert not os.path.isabs(include_path)
+                        self.include_paths.append(
+                            os.path.normpath(os.path.join(self.include_path,
+                                                          path)))
+                elif tarinfo.name in self.headers and \
+                    self.headers[tarinfo.name] == tarinfo.size:
+                    continue
+                self.headers[tarinfo.name] = tarinfo.size
+                tar.extract(tarinfo, path=self.include_path)
         self.times['setup_include_dir'] = dir_setup_timer.get()
 
     def run_compiler(self):
         self.source_file = os.path.join(self.include_path, self.task['source'])
         if self.task['pch_file'] is not None:
-            while not self.file_repository().file_arrived(*self.task['pch_file']):
+            while not self.file_repository().file_arrived(
+                *self.task['pch_file']):
                 # The PCH file is being downloaded by another session.
                 # This could be made prettier by introducing another state
                 # in this state machine. However, wake-up event for that
                 # state would require inter-session communication.
+                # Just not worth the additional complexity.
                 sleep(1)
 
-        try:
-            with TempFile(suffix='.obj') as object_file:
-                compiler_info = self.task['compiler_info']
-                noLink = compiler_info.compile_no_link_option.make_value().make_str()
-                output = compiler_info.object_name_option.make_value(object_file.filename()).make_str()
-                pch_switch = []
-                if self.task['pch_file']:
-                    assert self.pch_file is not None
-                    assert os.path.exists(self.pch_file)
-                    pch_switch.append(
-                        compiler_info.pch_file_option.make_value(self.pch_file).make_str())
+        with TempFile(suffix='.obj') as object_file:
+            compiler_info = self.task['compiler_info']
+            noLink = compiler_info.compile_no_link_option.make_value().make_str()
+            output = compiler_info.object_name_option.make_value(
+                object_file.filename()).make_str()
+            pch_switch = []
+            if self.task['pch_file']:
+                assert self.pch_file is not None
+                assert os.path.exists(self.pch_file)
+                pch_switch.append(
+                    compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
-                try:
-                    start = time()
-                    command = (self.task['call'] + pch_switch +
-                        [noLink, output] +
-                        [compiler_info.include_option.make_value(incpath).make_str()
-                            for incpath in self.include_dirs] +
-                        [self.source_file])
-                    retcode, stdout, stderr = self.compiler(command, self.include_path)
-                except Exception:
-                    self.send(b'SERVER_FAILED')
-                    import traceback
-                    traceback.print_exc()
-                    return
-                done = time()
-                self.times['compiler'] = done - start
-                self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode, stdout, stderr, self.times))])
-                if retcode == 0:
-                    with object_file.open('rb') as obj:
-                        send_compressed_file(self.send_multipart, obj, copy=False)
-        finally:
-            shutil.rmtree(self.include_path, ignore_errors=True)
+            try:
+                start = time()
+                command = (self.task['call'] + pch_switch +
+                    [noLink, output] +
+                    [compiler_info.include_option.make_value(incpath).make_str()
+                        for incpath in self.include_dirs] +
+                    [self.source_file])
+                retcode, stdout, stderr = self.compiler(command,
+                                                        self.include_path)
+            except Exception:
+                self.send(b'SERVER_FAILED')
+                import traceback
+                traceback.print_exc()
+                return
+            done = time()
+            self.times['compiler'] = done - start
+            self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
+                stdout, stderr, self.times))])
+            if retcode == 0:
+                with object_file.open('rb') as obj:
+                    send_compressed_file(self.send_multipart, obj, copy=False)
 
     def process_msg_worker(self):
         msg = self.recv_multipart()
@@ -153,7 +168,6 @@ class CompileSession(ServerSession, ServerCompiler):
 
         elif self.state == self.STATE_GET_TASK:
             self.task = pickle.loads(msg[0])
-            self.wait_task_data_timer = SimpleTimer()
             self.compiler = self.setup_compiler(self.task['compiler_info'])
             if self.compiler:
                 self.send(b'OK')
@@ -172,7 +186,8 @@ class CompileSession(ServerSession, ServerCompiler):
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = msg[0]
             assert tag == b'NEED_PCH_FILE'
-            self.pch_file, required = self.file_repository().register_file(*self.task['pch_file'])
+            self.pch_file, required = self.file_repository().register_file(
+                *self.task['pch_file'])
             if required:
                 self.send(b'YES')
                 self.pch_desc = open(self.pch_file, 'wb')
@@ -259,40 +274,57 @@ ServerManager.register('FileRepository', FileRepository)
 ServerManager.register('Counter', Counter)
 
 class CompileWorker(Process):
-    def __init__(self, address, control_address, file_repository, cpu_usage_hwm, task_counter):
+    def __init__(self, address, control_address, file_repository, cpu_usage_hwm,
+                 task_counter):
         Process.__init__(self)
         self.__address = address
         self.__control_address = control_address
         self.__file_repository = file_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
+        self.__include_path = tempfile.mkdtemp(suffix='', prefix='tmp',
+                                               dir=None)
+        self.__headers = {}
 
     class SessionMaker:
-        def __init__(self, file_repository, cpu_usage_hwm, task_counter, compiler_setup):
+        def __init__(self, file_repository, cpu_usage_hwm, task_counter,
+                     compiler_setup, include_path, headers):
             self.__file_repository = file_repository
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
             self.__compiler_setup = compiler_setup
+            self.__include_path = include_path
+            self.__headers = headers
 
         def __call__(self):
-            return CompileSession(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter, self.__compiler_setup)
+            return CompileSession(self.__file_repository, self.__cpu_usage_hwm,
+                                  self.__task_counter, self.__compiler_setup,
+                                  self.__include_path, self.__headers)
 
     def run(self):
         #profile = cProfile.Profile()
         #profile.enable()
         compiler_setup = {}
         try:
-            worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(self.__file_repository, self.__cpu_usage_hwm, self.__task_counter, compiler_setup))
+            worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
+                                    self.__file_repository,
+                                    self.__cpu_usage_hwm,
+                                    self.__task_counter,
+                                    compiler_setup,
+                                    self.__include_path,
+                                    self.__headers
+                                    ))
             worker.connect_broker(self.__address)
             worker.connect_control(self.__control_address)
             worker.run()
         finally:
-            pass
+            shutil.rmtree(self.__include_path)
             #profile.disable()
             #profile.print_stats()
 
 class ServerRunner(Process):
-    def __init__(self, port, control_port, processes, file_repository, cpu_usage_hwm, task_counter):
+    def __init__(self, port, control_port, processes, file_repository,
+                 cpu_usage_hwm, task_counter):
         super(ServerRunner, self).__init__()
         print("Starting server on port {} with {} worker processes.".format(
             port, processes))
@@ -309,7 +341,8 @@ class ServerRunner(Process):
         broker = Broker(zmq.Context())
         broker.bind_clients('tcp://*:{}'.format(self.__port))
         broker.connect_control(self.__control_address)
-        worker_address = 'tcp://localhost:{}'.format(bind_to_random_port(broker.servers))
+        worker_address = 'tcp://localhost:{}'.format(
+            bind_to_random_port(broker.servers))
         workers = list((CompileWorker(worker_address, self.__control_address,
             self.__file_repository, self.__cpu_usage_hwm, self.__task_counter)
             for proc in range(self.__processes)))

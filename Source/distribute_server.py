@@ -91,7 +91,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 # Additional dirs are needed on the path.
                 if tarinfo.name == 'include_paths.txt':
                     include_dir_reader = tar.extractfile(tarinfo)
-                    include_paths = include_dir_reader.read().split(b'\n')
+                    include_dirs = include_dir_reader.read().split(b'\n')
                     for include_dir in include_dirs:
                         assert not os.path.isabs(include_dir)
                         self.include_dirs.append(

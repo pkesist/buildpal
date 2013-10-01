@@ -96,7 +96,7 @@ class CompileSession(ServerSession, ServerCompiler):
                         assert not os.path.isabs(include_dir)
                         self.include_dirs.append(
                             os.path.normpath(os.path.join(self.include_path,
-                                                          include_dir)))
+                                                          include_dir.decode())))
                 elif tarinfo.name in self.headers and \
                     self.headers[tarinfo.name] == tarinfo.size:
                     continue

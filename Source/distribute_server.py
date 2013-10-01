@@ -94,7 +94,7 @@ class CompileSession(ServerSession, ServerCompiler):
                     include_paths = include_path_reader.read().split(b'\n')
                     for include_path in include_paths:
                         assert not os.path.isabs(include_path)
-                        self.include_paths.append(
+                        self.include_dirs.append(
                             os.path.normpath(os.path.join(self.include_path,
                                                           path)))
                 elif tarinfo.name in self.headers and \

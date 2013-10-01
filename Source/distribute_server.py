@@ -90,13 +90,13 @@ class CompileSession(ServerSession, ServerCompiler):
             for tarinfo in tar.getmembers():
                 # Additional dirs are needed on the path.
                 if tarinfo.name == 'include_paths.txt':
-                    include_path_reader = tar.extractfile(tarinfo)
-                    include_paths = include_path_reader.read().split(b'\n')
-                    for include_path in include_paths:
-                        assert not os.path.isabs(include_path)
+                    include_dir_reader = tar.extractfile(tarinfo)
+                    include_paths = include_dir_reader.read().split(b'\n')
+                    for include_dir in include_dirs:
+                        assert not os.path.isabs(include_dir)
                         self.include_dirs.append(
                             os.path.normpath(os.path.join(self.include_path,
-                                                          path)))
+                                                          include_dir)))
                 elif tarinfo.name in self.headers and \
                     self.headers[tarinfo.name] == tarinfo.size:
                     continue

@@ -170,9 +170,13 @@ namespace
     };
 }  // anonymous namespace
 
-Preprocessor::Preprocessor( Cache * cache )
-    : cache_( cache )
+Preprocessor::Preprocessor( bool useCache )
 {
+    if ( useCache )
+    {
+        cache_.reset( new Cache() );
+    }
+
     // Create diagnostics.
     compiler().createDiagnostics( new DiagnosticConsumer() );
 
@@ -290,7 +294,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
-    HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_ );
+    HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_.get() );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 

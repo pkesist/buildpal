@@ -78,7 +78,7 @@ struct HeaderRef
 class Preprocessor
 {
 public:
-    explicit Preprocessor( Cache * );
+    explicit Preprocessor( bool useCache );
 
     typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
@@ -101,7 +101,7 @@ private:
 
 private:
     clang::CompilerInstance compiler_;
-    Cache * cache_;
+    llvm::OwningPtr<Cache> cache_;
 };
 
 

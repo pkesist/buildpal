@@ -97,7 +97,10 @@ class ScanHeaders(Process):
                 macros.append('_SECURE_SCL=1')
             if not any(('_HAS_ITERATOR_DEBUGGING' in x for x in macros)):
                 macros.append('_HAS_ITERATOR_DEBUGGING=1')
-
+        # FIXME:
+        # Usually we don't need sysincludes and including them is really slow.
+        # See what to do about this.
+        task['sysincludes'] = []
         return collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], macros,
             [task['pch_header']] if task['pch_header'] else [])
@@ -365,6 +368,7 @@ class CompileSession:
                     self.output = open(self.task.output, "wb")
                     self.output_decompressor = zlib.decompressobj()
                     self.state = self.STATE_RECEIVE_RESULT_FILE
+                    self.receive_result_time = SimpleTimer()
                 else:
                     self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                     self.node_info.add_tasks_completed()
@@ -376,6 +380,8 @@ class CompileSession:
             if more == b'\x00':
                 self.output.write(self.output_decompressor.flush())
                 del self.output_decompressor
+                self.timer.add_time('receive_result', self.receive_result_time.get())
+                del self.receive_result_time
                 self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])

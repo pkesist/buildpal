@@ -16,8 +16,7 @@ import threading
 from tempfile import mkdtemp
 from shutil import rmtree
 
-cache = preprocessing.Cache()
-preprocessor = preprocessing.Preprocessor(cache)
+preprocessor = preprocessing.Preprocessor(True)
 
 def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
     preprocessor.setMicrosoftMode(True) # If MSVC.
@@ -88,9 +87,10 @@ def collect_headers(cwd, rel_file, includes, sysincludes, defines, ignored_heade
             if paths_to_include:
                 write_str_to_tar(tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
             tar.add(cpp_file, rel_file, '#line 1 "{}"\r\n'.format(os.path.normpath(cpp_file).replace('\\', '\\\\').encode()))
-        hits, misses = cache.getStats()
-        total = hits + misses
-        print("{} hits, {} misses, hit ratio {:0>1.2f}".format(hits, misses, 0 if total == 0 else hits/total))
+        #FIXME
+        #hits, misses = cache.getStats()
+        #total = hits + misses
+        #print("{} hits, {} misses, hit ratio {:0>1.2f}".format(hits, misses, 0 if total == 0 else hits/total))
         tarBuffer.seek(0)
         return tarBuffer
     except Exception:

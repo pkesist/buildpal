@@ -1,4 +1,4 @@
-from Common import MSVCWrapper, Category, BuildLocalCategory, CompilerOption, FreeOption, SimpleTimer
+from Common import MSVCWrapper, Category, BuildLocalCategory, CompilerOption, FreeOption, SimpleTimer, send_compressed_file
 
 import os
 import pickle

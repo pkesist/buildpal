@@ -1,6 +1,6 @@
 from .compile_worker import CompileWorker
 
-from Messaging import Broker
+from .Messaging import Broker
 
 from multiprocessing import Process
 

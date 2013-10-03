@@ -1,6 +1,7 @@
 from multiprocessing.managers import SyncManager
 from threading import Lock
 
+import os
 import tempfile
 
 class Counter:

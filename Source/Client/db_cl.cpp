@@ -1,7 +1,3 @@
-// This is a rewrite of the distribute_client.py script.
-// We need these processes to have a small footprint as
-// usually dozens of them run concurrently.
-
 #include "boost/asio.hpp"
 
 #include <cassert>

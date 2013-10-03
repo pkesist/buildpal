@@ -4,7 +4,9 @@ from multiprocessing.managers import SyncManager
 from time import sleep, time
 from threading import Lock as ThreadLock
 from io import BytesIO
-from utils import bind_to_random_port, SimpleTimer
+
+from Common import MSVCWrapper, TempFile, bind_to_random_port, \
+    send_compressed_file, SimpleTimer
 
 import configparser
 import os
@@ -20,8 +22,6 @@ import zmq
 #import cProfile
 
 from Messaging import ServerSession, ServerWorker, Broker
-
-from utils import TempFile, send_compressed_file
 
 class ServerCompiler:
     def __init__(self, file_repository, compiler_setup, cpu_usage_hwm):
@@ -44,8 +44,7 @@ class ServerCompiler:
             return setup
 
         if compiler_info.toolset() == 'msvc':
-            import msvc
-            setup = msvc.MSVCWrapper.setup_compiler(compiler_info)
+            setup = MSVCWrapper.setup_compiler(compiler_info)
             if setup:
                 self.__compiler_setup[key] = setup
             return setup

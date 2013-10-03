@@ -5,7 +5,8 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>Source\scan_headers.py</StartupFile>
+    <StartupFile>
+    </StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -25,18 +26,25 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Source\cmdline_processing.py" />
-    <Compile Include="Source\distribute_client.py" />
+    <Compile Include="Source\Common\cmdline_processing.py" />
+    <Compile Include="Source\Common\msvc.py" />
+    <Compile Include="Source\Common\__init__.py" />
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
+    <Compile Include="Source\Manager\compile_session.py" />
+    <Compile Include="Source\Manager\node_info.py" />
+    <Compile Include="Source\Manager\scan_headers.py" />
+    <Compile Include="Source\Manager\timer.py" />
+    <Compile Include="Source\Manager\source_scanner.py" />
+    <Compile Include="Source\Manager\task_processor.py" />
+    <Compile Include="Source\Manager\__init__.py" />
     <Compile Include="Source\Messaging\client.py" />
     <Compile Include="Source\Messaging\broker.py" />
     <Compile Include="Source\Messaging\server.py" />
     <Compile Include="Source\Messaging\test.py" />
     <Compile Include="Source\Messaging\__init__.py" />
-    <Compile Include="Source\msvc.py" />
-    <Compile Include="Source\scan_headers.py" />
-    <Compile Include="Source\utils.py" />
+    <Compile Include="Source\Common\utils.py" />
+    <Compile Include="Source\Server\__init__.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
@@ -44,6 +52,9 @@
     <Folder Include="Source\HeaderScanner\" />
     <Folder Include="Source\Messaging\" />
     <Folder Include="Source\Client\" />
+    <Folder Include="Source\Manager\" />
+    <Folder Include="Source\Common" />
+    <Folder Include="Source\Server\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />

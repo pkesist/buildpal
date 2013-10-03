@@ -62,11 +62,16 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_SH_CHECK_PCH_TAG = 5
     STATE_SH_GET_PCH_DATA = 6
 
+    STATE_WAITING_FOR_HEADER_LIST = 0
+    STATE_WAITING_FOR_HEADERS = 1
+    STATE_HEADERS_ARRIVED = 2
+
     def __init__(self, file_repository, cpu_usage_hwm, task_counter,
                  compiler_setup, include_path, headers):
         ServerCompiler.__init__(self, file_repository, compiler_setup,
                                 cpu_usage_hwm)
         self.state = self.STATE_START
+        self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
         self.compiler_setup = compiler_setup
         self.include_path = include_path
@@ -80,7 +85,6 @@ class CompileSession(ServerSession, ServerCompiler):
         accept = self.accept()
         self.send_pyobj('ACCEPT' if accept else 'REJECT')
         self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
-        self.wait_task_data_timer = SimpleTimer()
         return accept
 
     def setup_include_dirs(self, fileobj):
@@ -150,23 +154,8 @@ class CompileSession(ServerSession, ServerCompiler):
                 with object_file.open('rb') as obj:
                     send_compressed_file(self.send_multipart, obj, copy=False)
 
-    def process_msg_worker(self):
-        msg = self.recv_multipart()
-        if not self.has_task_data and msg[0] == b'TASK_FILES':
-            self.times['preprocessing.external'] = self.wait_task_data_timer.get()
-            del self.wait_task_data_timer
-            tar_data = msg[1]
-            self.times['preprocessing.internal'] = pickle.loads(msg[2])
-            archive_desc = BytesIO(tar_data)
-            archive_desc.seek(0)
-            self.setup_include_dirs(archive_desc)
-            del archive_desc
-            self.has_task_data = True
-            if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
-                self.run_compiler()
-                return True
-
-        elif self.state == self.STATE_GET_TASK:
+    def process_msg_worker(self, msg):
+        if self.state == self.STATE_GET_TASK:
             self.task = pickle.loads(msg[0])
             self.compiler = self.setup_compiler(self.task['compiler_info'])
             if self.compiler:
@@ -195,7 +184,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.state = self.STATE_SH_GET_PCH_DATA
             else:
                 self.send(b'NO')
-                if self.has_task_data:
+                if self.header_state == self.STATE_HEADERS_ARRIVED:
                     self.run_compiler()
                     return True
                 else:
@@ -209,20 +198,54 @@ class CompileSession(ServerSession, ServerCompiler):
                 del self.pch_desc
                 del self.pch_decompressor
                 self.file_repository().file_completed(*self.task['pch_file'])
-                if self.has_task_data:
+                if self.header_state == self.STATE_HEADERS_ARRIVED:
                     self.run_compiler()
                     return True
                 else:
                     self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
         else:
+            print(self.state, msg)
             assert not "Invalid state"
         return False
 
-    def process_msg(self):
-        result = self.process_msg_worker()
+    def process_msg(self, msg):
+        result = self.process_msg_worker(msg)
         if result:
             self.task_counter.dec()
         return result
+
+    def process_attached_msg(self, socket, msg):
+        if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
+            assert msg[0] == b'TASK_FILE_LIST'
+            in_tar_buf = BytesIO(msg[1])
+            self.times['preprocessing.internal'] = pickle.loads(msg[2])
+            out_tar_buf = BytesIO()
+            with tarfile.open(mode='r', fileobj=in_tar_buf) as in_tar, \
+                tarfile.open(mode='w', fileobj=out_tar_buf) as out_tar:
+                for tar_info in in_tar.getmembers():
+                    if not tar_info.name in self.headers:
+                        out_tar.addfile(tar_info)
+                    elif self.headers[tar_info.name] != tar_info.size:
+                        out_tar.addfile(tar_info)
+            out_tar_buf.seek(0)
+            socket.send_multipart([b'REQUIRED_FILES', out_tar_buf.read()])
+            self.header_state = self.STATE_WAITING_FOR_HEADERS
+            return False, False
+        elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
+            assert msg[0] == b'TASK_FILES'
+            tar_data = msg[1]
+            archive_desc = BytesIO(tar_data)
+            archive_desc.seek(0)
+            self.setup_include_dirs(archive_desc)
+            del archive_desc
+            self.header_state = self.STATE_HEADERS_ARRIVED
+            if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
+                self.run_compiler()
+                self.task_counter.dec()
+                return True, True
+            return True, False
+
+
 
 
 class ServerManager(SyncManager):

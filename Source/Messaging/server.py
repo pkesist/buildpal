@@ -5,9 +5,15 @@ class ServerSession:
     def created(self):
         return True
 
-    def process_msg(self):
-        raise NotImplementedError()
+    def attached(self, attacher_id):
+        pass
     
+    def process_msg(self, msg):
+        raise NotImplementedError()
+
+    def process_attached_msg(self, socket, msg):
+        raise NotImplementedError()
+
     def send_pyobj(self, obj):
         self.send(pickle.dumps(obj))
 
@@ -47,13 +53,14 @@ class ServerWorker:
     def bind_control(self, address):
         self.control.bind(address)
 
-    def __create_session(self, client_id):
+    def __create_session(self):
         socket = self.zmq_ctx.socket(zmq.DEALER)
         socket.connect(self.sessions_addr)
 
         session = self.session_factory()
         assert issubclass(type(session), ServerSession)
         session.socket = socket
+        session.attached_sockets = set()
         session.recv = session.socket.recv
         session.send = session.socket.send
         session.recv_multipart = session.socket.recv_multipart
@@ -62,6 +69,21 @@ class ServerWorker:
         self.socket_to_session[socket] = session
         self.poller.register(session.socket, zmq.POLLIN)
         return session
+
+    def __attach_to_session(self, session):
+        socket = self.zmq_ctx.socket(zmq.DEALER)
+        socket.connect(self.sessions_addr)
+        session.attached_sockets.add(socket)
+        self.socket_to_session[socket] = session
+        self.poller.register(socket, zmq.POLLIN)
+        return socket
+
+    def __detach_from_session(self, session, socket):
+        assert socket in session.attached_sockets
+        self.poller.unregister(socket)
+        session.attached_sockets.remove(socket)
+        # Throws resource temporarily unavailable.
+        #session.socket.disconnect(self.sessions_addr)
 
     def __destroy_session(self, session):
         del self.socket_to_session[session.socket]
@@ -83,13 +105,14 @@ class ServerWorker:
 
                 if sock is self.broker:
                     msg = self.broker.recv_multipart(flags=zmq.NOBLOCK)
-                    # FIXME: client_id should be removed totally if
-                    # broker is smarter.
-                    client_id = msg[0]
-                    if msg[1] == b'CREATE_SESSION':
-                        session = self.__create_session(client_id)
-                        session.socket.send_multipart([b'SESSION_CREATED', client_id], copy=False)
+                    if msg[0] == b'CREATE_SESSION':
+                        session = self.__create_session()
+                        session.socket.send_multipart([b'SESSION_CREATED'], copy=False)
                         session.created()
+                    elif msg[0] == b'ATTACH_TO_SESSION':
+                        session_id = msg[1]
+                        attacher_id = msg[2]
+                        self.sessions.send_multipart([session_id, b'ATTACH', attacher_id])
                     else:
                         self.sessions.send_multipart(msg, copy=False)
                 
@@ -103,6 +126,26 @@ class ServerWorker:
                         return
                 else:
                     # Must be a session socket.
+                    msg = sock.recv_multipart()
                     session = self.socket_to_session.get(sock)
-                    if session and session.process_msg():
-                        self.__destroy_session(session)
+                    if msg[0] == b'ATTACH':
+                        assert session
+                        attacher_id = msg[1]
+                        socket = self.__attach_to_session(session)
+                        session.attached(attacher_id)
+                        socket.send_multipart([b'SESSION_ATTACHED', attacher_id])
+                    else:
+                        if not session:
+                            continue
+                        if sock is session.socket and session.process_msg(msg):
+                            self.__destroy_session(session)
+                        elif sock in session.attached_sockets:
+                            detach, destroy_session = session.process_attached_msg(sock, msg)
+                            # assert destroy_session ==> detach
+                            assert not destroy_session or detach
+                            if detach:
+                                self.__detach_from_session(session, sock)
+                            if destroy_session:
+                                self.__destroy_session(session)
+
+

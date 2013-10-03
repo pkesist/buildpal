@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import zlib
 import zmq
+import tarfile
 
 from time import time
 
@@ -126,3 +127,17 @@ class SimpleTimer:
     def get(self):
         return time() - self.__start
 
+
+def write_str_to_tar(tar, name, content, header=b''):
+    info = tarfile.TarInfo(name=name)
+    info.size = len(content)
+    if header:
+        info.size += len(header)
+    tar.addfile(info)
+    tar.fileobj.write(header)
+    tar.fileobj.write(content)
+    blocks, remainder = divmod(info.size, tarfile.BLOCKSIZE)
+    if remainder:
+        tar.fileobj.write(tarfile.NUL * (tarfile.BLOCKSIZE - remainder))
+        blocks += 1
+    tar.offset += blocks * tarfile.BLOCKSIZE

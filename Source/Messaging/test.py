@@ -12,14 +12,13 @@ class EchoSession(ServerSession):
     def created(self):
         return True
 
-    def process_msg(self):
+    def process_msg(self, msg):
         if self.counter == 0:
-            self.message = self.recv()
+            self.message = msg[0]
             self.send_pyobj("I REMEMBERED!")
             self.counter += 1
             return False
         if self.counter == 1:
-            self.recv()
             self.send(self.message)
         return True
 

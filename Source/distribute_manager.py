@@ -4,19 +4,21 @@ from functools import cmp_to_key
 from multiprocessing import Process, cpu_count
 from struct import pack
 from time import sleep, time
-from msvc import MSVCWrapper
 from subprocess import list2cmdline
+from io import BytesIO
 
+from msvc import MSVCWrapper
 from scan_headers import collect_headers
-from utils import send_file, send_compressed_file, bind_to_random_port, SimpleTimer
+from utils import send_file, send_compressed_file, bind_to_random_port, \
+    SimpleTimer, write_str_to_tar
 
 import configparser
-import io
 import operator
 import os
 import pickle
 import socket
 import sys
+import tarfile
 import zlib
 import zmq
 
@@ -67,26 +69,105 @@ class ScanHeaders(Process):
 
     def run(self):
         zmq_ctx = zmq.Context()
-        socket = zmq_ctx.socket(zmq.DEALER)
-        socket.connect('tcp://localhost:{}'.format(self.__port))
-        nodes = {}
+        mgr_socket = zmq_ctx.socket(zmq.DEALER)
+        mgr_socket.connect('tcp://localhost:{}'.format(self.__port))
+        sockets = {}
 
         while True:
-            server_id, task, node_index = socket.recv_multipart()
+            server_id, task, node_index = mgr_socket.recv_multipart()
+            task = pickle.loads(task)
             node_index = pickle.loads(node_index)
             timer = SimpleTimer()
-            buffer = self.prepare_task(pickle.loads(task))
-            if node_index not in nodes:
-                server_sock = zmq_ctx.socket(zmq.DEALER)
-                server_sock.connect(self.__nodes[node_index])
-                nodes[node_index] = server_sock
-            nodes[node_index].send_multipart([b'DATA_FOR_SESSION',
-                                             server_id, b'TASK_FILES',
-                                             buffer.read(),
-                                             pickle.dumps(timer.get())],
-                                             copy=False)
+            header_info = self.header_info(task)
+            header_info = list(h + (self.header_beginning(h[1]),) for h in header_info)
+            tar_with_filelist = self.tar_with_filelist(header_info)
 
-    def prepare_task(self, task):
+            socket = sockets.get(node_index)
+            if not socket:
+                socket = zmq_ctx.socket(zmq.DEALER)
+                socket.connect(self.__nodes[node_index])
+                sockets[node_index] = socket
+
+            socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
+            msg = socket.recv_multipart()
+            assert len(msg) == 1 and msg[0] == b'SESSION_ATTACHED'
+
+            socket.send_multipart([b'TASK_FILE_LIST', tar_with_filelist.read(), pickle.dumps(timer.get())])
+            resp = socket.recv_multipart()
+            assert len(resp) == 2 and resp[0] == b'REQUIRED_FILES'
+            req_tar = BytesIO(resp[1])
+
+            new_tar = self.tar_with_new_headers(task, req_tar, header_info)
+            socket.send_multipart([b'TASK_FILES', new_tar.read()])
+
+    def tar_with_filelist(self, header_info):
+        tar_buffer = BytesIO()
+        with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
+            for file, abs, content, header in header_info:
+                tar_info = tarfile.TarInfo()
+                tar_info.name = file
+                stat = os.stat(abs)
+                tar_info.size = stat.st_size + len(header)
+                tar_info.mtime = stat.st_mtime
+                tar_info.type = tarfile.SYMTYPE
+                tar_info.linkname = abs
+                tar.addfile(tar_info)
+        tar_buffer.seek(0)
+        return tar_buffer
+
+    @classmethod
+    def header_beginning(cls, filename):
+        pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
+        return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
+
+    def tar_with_new_headers(self, task, tar_with_filelist, header_info):
+        paths_to_include = []
+        relative_paths = {}
+        tar_buffer = BytesIO()
+        with tarfile.open(mode='r', fileobj=tar_with_filelist) as in_tar, \
+            tarfile.open(mode='w', fileobj=tar_buffer) as out_tar:
+            header_info_iter = iter(header_info)
+            for tar_info in in_tar.getmembers():
+                found = False
+                while not found:
+                    try:
+                        file, abs, content, header = next(header_info_iter)
+                        if file == tar_info.name:
+                            found = True
+                            break
+                    except StopIteration:
+                        print("Could not find information for", tar_info.name)
+                        raise
+                assert found
+                depth = 0
+                path_elements = file.split('/')
+                # Handle '.' in include directive.
+                path_elements = [p for p in path_elements if p != '.']
+                # Handle '..' in include directive.
+                while '..' in path_elements:
+                    index = path_elements.index('..')
+                    if index == 0:
+                        depth += 1
+                        del path_elements[index]
+                    else:
+                        del path_element[index - 1:index + 1]
+                if depth:
+                    path_elements = ['_rel_includes'] + path_elements
+                    if not depth in relative_paths:
+                        # Add a dummy file which will create this structure.
+                        relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
+                        paths_to_include.append(relative_paths[depth])
+                        write_str_to_tar(out_tar, relative_paths[depth] + 'dummy', b'')
+                write_str_to_tar(out_tar, '/'.join(path_elements), content, header)
+            if paths_to_include:
+                write_str_to_tar(out_tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
+            rel_file = task['source']
+            cpp_file = os.path.join(task['cwd'], rel_file)
+            out_tar.add(cpp_file, rel_file, self.header_beginning(cpp_file))
+        tar_buffer.seek(0)
+        return tar_buffer
+
+    def header_info(self, task):
         # FIXME: This does not belong here. Move this to msvc.py.
         # We would like to avoid scanning system headers here if possible.
         # If we do so, we lose any preprocessor side-effects. We try to
@@ -101,7 +182,10 @@ class ScanHeaders(Process):
         # Usually we don't need sysincludes and including them is really slow.
         # See what to do about this.
         task['sysincludes'] = []
-        return collect_headers(task['cwd'], task['source'],
+
+        rel_file = task['source']
+        cpp_file = os.path.join(task['cwd'], rel_file)
+        return collect_headers(cpp_file,
             task['includes'], task['sysincludes'], macros,
             [task['pch_header']] if task['pch_header'] else [])
 
@@ -451,10 +535,18 @@ class TaskProcessor:
             self.id = id
 
         def send(self, data):
-            self.socket.send_multipart([self.id, b'\x00'.join(data) + b'\x00\x01'], copy=False)
+            try:
+                self.socket.send_multipart([self.id, b'\x00'.join(data) + b'\x00\x01'], copy=False)
+            except zmq.error.ZMQError:
+                # In case connection gets broken ZMQ raises an error.
+                pass
 
         def recv(self):
-            return self.socket.recv_multipart()
+            try:
+                return self.socket.recv_multipart()
+            except zmq.error.ZMQError:
+                # In case connection gets broken ZMQ raises an error.
+                pass
 
         def send_pyobj(self, obj):
             self.send([pickle.dumps(obj)])
@@ -562,7 +654,7 @@ class TaskProcessor:
                                 client_conn = self.SendProxy(client_socket, client_id)
                                 client_conn.send([b"TASK_RECEIVED"])
                                 node_index = self.best_node(node_info)
-                                if nodes_waiting[node_index]:
+                                if nodes_waiting.get(node_index):
                                     server_conn = nodes_waiting[node_index][0]
                                     del nodes_waiting[node_index][0]
                                     session = CompileSession(compiler, executable, cwd, sysincludes,

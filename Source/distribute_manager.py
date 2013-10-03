@@ -523,8 +523,6 @@ class TaskProcessor:
                 socket.connect(node)
             except Exception:
                 print("Failed to connect to '{}'".format(node))
-                import traceback
-                traceback.print_exc()
                 return None
         socket.send(b'CREATE_SESSION')
         return socket
@@ -621,7 +619,8 @@ class TaskProcessor:
                 for node_index in range(len(node_info)):
                     for x in range(connections_per_node - nodes_requested.get(node_index, 0) - len(nodes_waiting.get(node_index, []))):
                         socket = self.connect_to_node(zmq_ctx, node_index, recycled_connections)
-                        assert socket
+                        if not socket:
+                            break
                         register_socket(socket)
                         nodes_contacted[socket] = node_index
                         nodes_requested[node_index] = nodes_requested.get(node_index, 0) + 1

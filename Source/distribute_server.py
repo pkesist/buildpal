@@ -245,9 +245,6 @@ class CompileSession(ServerSession, ServerCompiler):
                 return True, True
             return True, False
 
-
-
-
 class ServerManager(SyncManager):
     pass
 

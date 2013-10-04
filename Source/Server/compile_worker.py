@@ -56,7 +56,7 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
-    def __init__(self, file_repository, cpu_usage_hwm, task_counter,
+    def __init__(self, file_repository, header_repository, cpu_usage_hwm, task_counter,
                  compiler_setup, include_path, headers):
         ServerCompiler.__init__(self, file_repository, compiler_setup,
                                 cpu_usage_hwm)
@@ -64,6 +64,7 @@ class CompileSession(ServerSession, ServerCompiler):
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
         self.compiler_setup = compiler_setup
+        self.header_repository = header_repository
         self.include_path = include_path
         self.include_dirs = [self.include_path]
         self.has_task_data = False
@@ -76,26 +77,6 @@ class CompileSession(ServerSession, ServerCompiler):
         self.send_pyobj('ACCEPT' if accept else 'REJECT')
         self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
         return accept
-
-    def setup_include_dirs(self, fileobj):
-        dir_setup_timer = SimpleTimer()
-        with tarfile.open(fileobj=fileobj, mode='r') as tar:
-            for tarinfo in tar.getmembers():
-                # Additional dirs are needed on the path.
-                if tarinfo.name == 'include_paths.txt':
-                    include_dir_reader = tar.extractfile(tarinfo)
-                    include_dirs = include_dir_reader.read().split(b'\n')
-                    for include_dir in include_dirs:
-                        assert not os.path.isabs(include_dir)
-                        self.include_dirs.append(
-                            os.path.normpath(os.path.join(self.include_path,
-                                                          include_dir.decode())))
-                elif tarinfo.name in self.headers and \
-                    self.headers[tarinfo.name] == tarinfo.size:
-                    continue
-                self.headers[tarinfo.name] = tarinfo.size
-                tar.extract(tarinfo, path=self.include_path)
-        self.times['tar_extract'] = dir_setup_timer.get()
 
     def run_compiler(self):
         self.source_file = os.path.join(self.include_path, self.task['source'])
@@ -206,27 +187,19 @@ class CompileSession(ServerSession, ServerCompiler):
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             assert msg[0] == b'TASK_FILE_LIST'
-            in_tar_buf = BytesIO(msg[1])
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
-            out_tar_buf = BytesIO()
-            with tarfile.open(mode='r', fileobj=in_tar_buf) as in_tar, \
-                tarfile.open(mode='w', fileobj=out_tar_buf) as out_tar:
-                for tar_info in in_tar.getmembers():
-                    if not tar_info.name in self.headers:
-                        out_tar.addfile(tar_info)
-                    elif self.headers[tar_info.name] != tar_info.size:
-                        out_tar.addfile(tar_info)
-            out_tar_buf.seek(0)
-            socket.send_multipart([b'REQUIRED_FILES', out_tar_buf.read()])
+            self.filelist = msg[1]
+            missing_files = self.header_repository.missing_files(self.filelist)
+            socket.send_multipart([b'MISSING_FILES', missing_files])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
-            archive_desc = BytesIO(tar_data)
-            archive_desc.seek(0)
-            self.setup_include_dirs(archive_desc)
-            del archive_desc
+            setup_timer = SimpleTimer()
+            self.include_dirs = self.header_repository.prepare_dir(tar_data, self.filelist, self.include_path)
+            self.times['setup_include_dir'] = setup_timer.get()
+            del self.filelist
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.run_compiler()
@@ -235,12 +208,13 @@ class CompileSession(ServerSession, ServerCompiler):
             return True, False
 
 class CompileWorker(Process):
-    def __init__(self, address, control_address, file_repository, cpu_usage_hwm,
-                 task_counter):
+    def __init__(self, address, control_address, file_repository,
+                 header_repository, cpu_usage_hwm, task_counter):
         Process.__init__(self)
         self.__address = address
         self.__control_address = control_address
         self.__file_repository = file_repository
+        self.__header_repository = header_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
         self.__include_path = tempfile.mkdtemp(suffix='', prefix='tmp',
@@ -248,9 +222,10 @@ class CompileWorker(Process):
         self.__headers = {}
 
     class SessionMaker:
-        def __init__(self, file_repository, cpu_usage_hwm, task_counter,
-                     compiler_setup, include_path, headers):
+        def __init__(self, file_repository, header_repository, cpu_usage_hwm,
+                     task_counter, compiler_setup, include_path, headers):
             self.__file_repository = file_repository
+            self.__header_repository = header_repository
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
             self.__compiler_setup = compiler_setup
@@ -258,7 +233,9 @@ class CompileWorker(Process):
             self.__headers = headers
 
         def __call__(self):
-            return CompileSession(self.__file_repository, self.__cpu_usage_hwm,
+            return CompileSession(self.__file_repository,
+                                  self.__header_repository,
+                                  self.__cpu_usage_hwm,
                                   self.__task_counter, self.__compiler_setup,
                                   self.__include_path, self.__headers)
 
@@ -267,6 +244,7 @@ class CompileWorker(Process):
         try:
             worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
                                     self.__file_repository,
+                                    self.__header_repository,
                                     self.__cpu_usage_hwm,
                                     self.__task_counter,
                                     compiler_setup,

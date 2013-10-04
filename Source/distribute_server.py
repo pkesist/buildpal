@@ -43,12 +43,14 @@ Usage:
     with ServerManager() as manager:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
+        header_repository = manager.HeaderRepository()
 
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)
         control_port = bind_to_random_port(control)
-        server_runner = ServerRunner(port, control_port,
-            processes, file_repository, cpu_usage_hwm, task_counter)
+        server_runner = ServerRunner(port, control_port, processes,
+                                     file_repository, header_repository,
+                                     cpu_usage_hwm, task_counter)
         server_runner.start()
 
         import signal

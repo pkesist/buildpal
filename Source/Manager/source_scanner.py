@@ -44,7 +44,7 @@ class SourceScanner(Process):
 
             socket.send_multipart([b'TASK_FILE_LIST', tar_with_filelist.read(), pickle.dumps(timer.get())])
             resp = socket.recv_multipart()
-            assert len(resp) == 2 and resp[0] == b'REQUIRED_FILES'
+            assert len(resp) == 2 and resp[0] == b'MISSING_FILES'
             req_tar = BytesIO(resp[1])
 
             new_tar = self.tar_with_new_headers(task, req_tar, header_info)

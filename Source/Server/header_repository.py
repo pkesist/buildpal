@@ -55,7 +55,7 @@ class HeaderRepository:
 
             for tar_info in new_files_tar.getmembers():
                 if tar_info.name == 'include_paths.txt':
-                    include_dir_reader = tar.extractfile(tar_info)
+                    include_dir_reader = new_files_tar.extractfile(tar_info)
                     include_dirs = include_dir_reader.read().split(b'\n')
                     for include_dir in include_dirs:
                         assert not os.path.isabs(include_dir)

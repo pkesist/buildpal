@@ -10,6 +10,7 @@ import pickle
 import shutil
 import tarfile
 import tempfile
+import zlib
 import zmq
 
 class ServerCompiler:
@@ -77,7 +78,6 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def setup_include_dirs(self, fileobj):
         dir_setup_timer = SimpleTimer()
-        self.times['tar_extract'] = dir_setup_timer.get()
         with tarfile.open(fileobj=fileobj, mode='r') as tar:
             for tarinfo in tar.getmembers():
                 # Additional dirs are needed on the path.
@@ -94,7 +94,7 @@ class CompileSession(ServerSession, ServerCompiler):
                     continue
                 self.headers[tarinfo.name] = tarinfo.size
                 tar.extract(tarinfo, path=self.include_path)
-        self.times['setup_include_dir'] = dir_setup_timer.get()
+        self.times['tar_extract'] = dir_setup_timer.get()
 
     def run_compiler(self):
         self.source_file = os.path.join(self.include_path, self.task['source'])

@@ -72,8 +72,12 @@ class HeaderRepository:
                     self.headers[tar_info.name] = Header(tar_info.name, content.read(-1))
 
             for tar_info in filelist:
-                assert tar_info.name in self.headers
-                assert tar_info.size == self.headers[tar_info.name].size()
-                self.headers[tar_info.name].write_to_dir(dir)
+                if tar_info.name in self.headers:
+                    self.headers[tar_info.name].write_to_dir(dir)
+                else:
+                    # FIXME
+                    # Here we get all files which have relative paths, e.g.
+                    # "../header.h".
+                    pass
         return include_paths
         

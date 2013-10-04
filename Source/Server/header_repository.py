@@ -53,6 +53,7 @@ class HeaderRepository:
             filelist = filelist_tar.getmembers()
             filenames = list(tar_info.name for tar_info in filelist)
 
+            include_paths = [dir]
             for tar_info in new_files_tar.getmembers():
                 if tar_info.name == 'include_paths.txt':
                     include_dir_reader = new_files_tar.extractfile(tar_info)
@@ -70,7 +71,6 @@ class HeaderRepository:
                     content = new_files_tar.extractfile(tar_info)
                     self.headers[tar_info.name] = Header(tar_info.name, content.read(-1))
 
-            include_paths = [dir]
             for tar_info in filelist:
                 assert tar_info.name in self.headers
                 assert tar_info.size == self.headers[tar_info.name].size()

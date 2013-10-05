@@ -38,23 +38,28 @@
     <Compile Include="Source\Manager\source_scanner.py" />
     <Compile Include="Source\Manager\task_processor.py" />
     <Compile Include="Source\Manager\__init__.py" />
-    <Compile Include="Source\Messaging\client.py" />
-    <Compile Include="Source\Messaging\broker.py" />
-    <Compile Include="Source\Messaging\server.py" />
-    <Compile Include="Source\Messaging\test.py" />
-    <Compile Include="Source\Messaging\__init__.py" />
     <Compile Include="Source\Common\utils.py" />
+    <Compile Include="Source\Server\compile_worker.py" />
+    <Compile Include="Source\Server\file_repository.py" />
+    <Compile Include="Source\Server\header_repository.py" />
+    <Compile Include="Source\Server\Messaging\broker.py" />
+    <Compile Include="Source\Server\Messaging\client.py" />
+    <Compile Include="Source\Server\Messaging\server.py" />
+    <Compile Include="Source\Server\Messaging\test.py" />
+    <Compile Include="Source\Server\Messaging\__init__.py" />
+    <Compile Include="Source\Server\server_manager.py" />
+    <Compile Include="Source\Server\server_runner.py" />
     <Compile Include="Source\Server\__init__.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
     <Folder Include="Source\" />
     <Folder Include="Source\HeaderScanner\" />
-    <Folder Include="Source\Messaging\" />
     <Folder Include="Source\Client\" />
     <Folder Include="Source\Manager\" />
     <Folder Include="Source\Common" />
     <Folder Include="Source\Server\" />
+    <Folder Include="Source\Server\Messaging\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.txt" />

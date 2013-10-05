@@ -197,7 +197,14 @@ class CompileSession(ServerSession, ServerCompiler):
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             setup_timer = SimpleTimer()
-            self.include_dirs = self.header_repository.prepare_dir(tar_data, self.filelist, self.include_path)
+            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(tar_data, self.filelist, self.include_path)
+            for src, target in files_to_copy:
+                full_target = os.path.join(self.include_path, target)
+                try:
+                    shutil.copy(src, full_target)
+                except FileNotFoundError:
+                    os.makedirs(os.path.dirname(full_target), exist_ok=True)
+                    shutil.copy(src, full_target)
             self.times['setup_include_dir'] = setup_timer.get()
             del self.filelist
             self.header_state = self.STATE_HEADERS_ARRIVED

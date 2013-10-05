@@ -1,34 +1,32 @@
 from io import BytesIO
-import os
 
+import os
+import shutil
+import tempfile
 import tarfile
 
 class Header:
-    def __init__(self, name, content):
-        self.name = name
-        self.content = content
+    def __init__(self, name, dir, reader):
+        self._name = name
+        handle, self.filename = tempfile.mkstemp(dir=dir)
+        with os.fdopen(handle, 'wb') as tmp:
+            for data in iter(reader.read, b''):
+                tmp.write(data)
+            self._size = tmp.tell()
 
     def size(self):
-        return len(self.content)
+        return self._size
 
     def name(self):
-        return self.name
+        return self._name
 
-    def write_to_dir(self, dirname):
-        full_name = os.path.join(dirname, self.name)
-        try:
-            with open(full_name, 'wb') as file:
-                file.write(self.content)
-        except FileNotFoundError:
-            # Probably a missing directory.
-            folder, file = os.path.split(full_name)
-            os.makedirs(folder, exist_ok=True)
-            with open(full_name, 'wb') as file:
-                file.write(self.content)
+    def location(self):
+        return self.filename
 
 class HeaderRepository:
     def __init__(self):
         self.headers = {}
+        self.dir = tempfile.mkdtemp()
 
     def missing_files(self, in_tar_buffer):
         in_tar_stream = BytesIO(in_tar_buffer)
@@ -69,15 +67,15 @@ class HeaderRepository:
                     new_files_tar.extract(tar_info, dir)
                 else:
                     content = new_files_tar.extractfile(tar_info)
-                    self.headers[tar_info.name] = Header(tar_info.name, content.read(-1))
-
-            for tar_info in filelist:
-                if tar_info.name in self.headers:
-                    self.headers[tar_info.name].write_to_dir(dir)
-                else:
-                    # FIXME
-                    # Here we get all files which have relative paths, e.g.
-                    # "../header.h".
-                    pass
-        return include_paths
+                    try:
+                        self.headers[tar_info.name] = Header(tar_info.name, self.dir, content)
+                    except:
+                        import traceback
+                        traceback.print_exc()
+                        raise
+            # Do not copy the files here. This is a shared resource and we want
+            # to be as fast as possible. Let the caller worry about copying.
+            files_to_copy = list((self.headers[tar_info.name].location(), tar_info.name)
+                                 for tar_info in filelist if tar_info.name in self.headers)
+        return include_paths, files_to_copy
         

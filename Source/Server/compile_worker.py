@@ -1,5 +1,6 @@
 from .Messaging import ServerSession, ServerWorker
-from Common import MSVCWrapper, send_compressed_file, SimpleTimer, TempFile
+from Compilers import MSVCWrapper
+from Common import send_compressed_file, SimpleTimer, TempFile
 
 from io import BytesIO
 from multiprocessing import Process

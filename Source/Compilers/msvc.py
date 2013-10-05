@@ -1,6 +1,6 @@
 from .cmdline_processing import *
 
-from .utils import get_batch_file_environment_side_effects, TempFile
+from Common import get_batch_file_environment_side_effects, TempFile
 
 import subprocess
 

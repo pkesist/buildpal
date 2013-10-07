@@ -26,9 +26,10 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Source\Common\cmdline_processing.py" />
-    <Compile Include="Source\Common\msvc.py" />
     <Compile Include="Source\Common\__init__.py" />
+    <Compile Include="Source\Compilers\cmdline_processing.py" />
+    <Compile Include="Source\Compilers\msvc.py" />
+    <Compile Include="Source\Compilers\__init__.py" />
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
     <Compile Include="Source\Manager\compile_session.py" />
@@ -58,6 +59,7 @@
     <Folder Include="Source\Client\" />
     <Folder Include="Source\Manager\" />
     <Folder Include="Source\Common" />
+    <Folder Include="Source\Compilers\" />
     <Folder Include="Source\Server\" />
     <Folder Include="Source\Server\Messaging\" />
   </ItemGroup>

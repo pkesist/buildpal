@@ -13,23 +13,23 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
 {
     // Find the actual file being used.
     assert( !fileStack_.empty() );
-    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
-    clang::FileEntry const * currentFile = currentEntry.first;
-    clang::DirectoryLookup const * dontCare;
+    std::tuple<clang::FileEntry const *, bool, bool> currentEntry( fileStack_.back() );
+    clang::FileEntry const * currentFile = std::get<0>( currentEntry );
+    clang::DirectoryLookup const * curDir( 0 );
     // If including header is system header, then so are we.
-    bool system = currentEntry.second;
-    clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
+    bool isSystem = std::get<1>( currentEntry );
+    clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
     if ( !entry )
     {
-        system = true;
-        entry = systemHeaderSearch_->LookupFile( relative, isAngled, 0, dontCare, currentFile, 0, 0, 0, false );
+        isSystem = true;
+        entry = systemHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
     }
 
     if ( !entry )
         return;
 
-    fileStack_.push_back( std::make_pair( entry, system ) );
-    if ( cacheDisabled() || !( system ? systemHeaderSearch_ : userHeaderSearch_ )->ShouldEnterIncludeFile( entry, false ) )
+    fileStack_.push_back( std::make_tuple( entry, isSystem, !curDir ) );
+    if ( cacheDisabled() || !( isSystem ? systemHeaderSearch_ : userHeaderSearch_ )->ShouldEnterIncludeFile( entry, false ) )
     {
         // File will be skipped anyway. Do not search cache.
         fileEntry = entry;
@@ -49,15 +49,14 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
 void HeaderTracker::headerSkipped( llvm::StringRef const relative )
 {
     assert( !fileStack_.empty() );
-    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( currentEntry.first );
-    assert( file );
-    bool const system( currentEntry.second );
+    IncludeStackEntry const & currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( std::get<0>( currentEntry ) );
+    bool const isSystem( std::get<1>( currentEntry ) );
+    bool const isRelative( std::get<2>( currentEntry ) );
     fileStack_.pop_back();
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
-    HeaderName header( std::make_pair( relative, file ) );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
@@ -77,8 +76,11 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->getValue() );
             headerCtxStack().back().macroUsed( macroName, macroDef );
         }
-        if ( !system )
+        if ( !isSystem )
+        {
+            HeaderName header( std::make_tuple( relative, file, isRelative ) );
             headerCtxStack().back().addHeader( header );
+        }
     }
 }
 
@@ -91,21 +93,22 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_pair( "<<<MAIN FILE>>>", mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
-    fileStack_.push_back( std::make_pair( mainFileEntry, false ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_tuple( "<<<MAIN FILE>>>", mainFileEntry, false ), CacheEntryPtr(), preprocessor_ ) );
+    fileStack_.push_back( std::make_tuple( mainFileEntry, false, false ) );
 }
 
 void HeaderTracker::enterHeader( llvm::StringRef relative )
 {
     assert( !fileStack_.empty() );
-    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( currentEntry.first );
+    IncludeStackEntry const & currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( std::get<0>( currentEntry ) );
     assert( file );
-    bool const system( currentEntry.second );
+    bool const isSystem( std::get<1>( currentEntry ) );
+    bool const isRelative( std::get<2>( currentEntry ) );
+    HeaderName header( std::make_tuple( relative, file, isRelative ) );
     if ( file )
     {
-        HeaderName header( std::make_pair( relative, file ) );
-        if ( !system )
+        if ( !isSystem )
             headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_ ) );
         cacheHit_.reset();
@@ -117,8 +120,8 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     assert( headerCtxStack().size() > 1 );
 
     assert( !fileStack_.empty() );
-    std::pair<clang::FileEntry const *, bool> currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( currentEntry.first );
+    IncludeStackEntry const & currentEntry( fileStack_.back() );
+    clang::FileEntry const * file( std::get<0>( currentEntry ) );
     fileStack_.pop_back();
     assert( file );
     struct Cleanup
@@ -134,7 +137,10 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     // Sometimes we do not want to propagate headers upwards. More specifically,
     // if we are in a PCH source header, headers it includes are not needed as
     // their contents is a part of the PCH file.
-    bool const ignoreHeaders( ignoredHeaders.find( headerCtxStack().back().header().first ) != ignoredHeaders.end() );
+    bool const ignoreHeaders
+    (
+        ignoredHeaders.find( std::get<0>( headerCtxStack().back().header() ) ) != ignoredHeaders.end()
+    );
 
     CacheEntryPtr cacheEntry;
 
@@ -182,11 +188,15 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         {
             std::string error;
             bool invalid;
-            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( sp.second, &invalid );
+            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( std::get<1>( sp ), &invalid );
             if ( invalid )
-                buffer = sourceManager_.getFileManager().getBufferForFile( sp.second, &error );
+                buffer = sourceManager_.getFileManager().getBufferForFile( std::get<1>( sp ), &error );
             assert( buffer );
-            result_.insert( HeaderRef( sp.first, sp.second->getName(), buffer->getBufferStart(), buffer->getBufferSize() ) );
+            result_.insert(
+                HeaderRef(
+                    sp,
+                    buffer->getBufferStart(),
+                    buffer->getBufferSize() ) );
         }
         void operator()( CacheEntryPtr const & ce )
         {

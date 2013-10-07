@@ -7,6 +7,7 @@
 
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace clang
@@ -16,6 +17,8 @@ namespace clang
 
 class Cache;
 class HeaderTracker;
+
+typedef std::tuple<std::string, clang::FileEntry const *, bool> HeaderName;
 
 class PreprocessingContext
 {
@@ -53,12 +56,21 @@ private:
 
 struct HeaderRef
 {
-    HeaderRef( std::string const & rel, llvm::StringRef abs, char const * d, std::size_t s )
-        : relative( rel ), absolute( abs ), data( d ), size( s )
-    {}
+    HeaderRef(
+        HeaderName const & hn,
+        char const * d,
+        std::size_t s ) :
+        relative( std::get<0>( hn ) ),
+        absolute( std::get<1>( hn )->getName() ),
+        isRelative( std::get<2>( hn ) ),
+        data( d ),
+        size( s )
+    {
+    }
 
     std::string relative;
     llvm::StringRef absolute;
+    bool isRelative;
     char const * data;
     std::size_t size;
 

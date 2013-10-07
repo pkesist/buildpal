@@ -22,7 +22,7 @@ def simple_w_minus(name, macros=[]):
     return result
 
 def with_param(name, macros=[]):
-    result = CompilerOption(name, suff=None, has_arg=True, allow_spaces=False)
+    result = CompilerOption(name, suff=None, has_arg=True, separate_arg_with_space=False)
     for macro in macros:
         result.add_macro(macro)
     return result

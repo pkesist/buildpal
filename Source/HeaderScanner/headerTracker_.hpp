@@ -165,13 +165,17 @@ private:
     clang::SourceManager & sourceManager() const;
 
 private:
+    typedef std::tuple<clang::FileEntry const *, bool, bool> IncludeStackEntry;
+    typedef std::vector<IncludeStackEntry> IncludeStack;
+
+private:
     llvm::OwningPtr<clang::HeaderSearch> userHeaderSearch_;
     llvm::OwningPtr<clang::HeaderSearch> systemHeaderSearch_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
     CacheEntryPtr cacheHit_;
-    std::vector<std::pair<clang::FileEntry const *, bool> > fileStack_;
+    IncludeStack fileStack_;
     MacroState macroState_;
 };
 

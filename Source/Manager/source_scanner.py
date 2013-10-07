@@ -53,7 +53,7 @@ class SourceScanner(Process):
     def tar_with_filelist(self, header_info):
         tar_buffer = BytesIO()
         with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
-            for file, abs, content, header in header_info:
+            for file, abs, content, is_relative, header in header_info:
                 tar_info = tarfile.TarInfo()
                 tar_info.name = file
                 stat = os.stat(abs)
@@ -74,6 +74,7 @@ class SourceScanner(Process):
         paths_to_include = []
         relative_paths = {}
         tar_buffer = BytesIO()
+        rel_counter = 0
         with tarfile.open(mode='r', fileobj=tar_with_filelist) as in_tar, \
             tarfile.open(mode='w', fileobj=tar_buffer) as out_tar:
             header_info_iter = iter(header_info)
@@ -81,7 +82,7 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        file, abs, content, header = next(header_info_iter)
+                        file, abs, content, is_relative, header = next(header_info_iter)
                         if file == tar_info.name:
                             found = True
                             break
@@ -101,7 +102,17 @@ class SourceScanner(Process):
                         del path_elements[index]
                     else:
                         del path_element[index - 1:index + 1]
-                if depth:
+                # FIXME: This is not correct. Header which is found via lookup
+                # relative to the current file must also be found the same way
+                # on the server. Current implementation may include incorrect
+                # header in case of same names. E.g.
+                # A/header.h
+                # A/h1.h // #include "header.h"
+                # B/header.h
+                # B/h1.h // #include "header.h"
+                # This will fail in current implementation as it will prefer
+                # either A/header.h or B/header.h to the other one.
+                if is_relative:
                     path_elements = ['_rel_includes'] + path_elements
                     if not depth in relative_paths:
                         # Add a dummy file which will create this structure.
@@ -113,7 +124,8 @@ class SourceScanner(Process):
                 write_str_to_tar(out_tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
             rel_file = task['source']
             cpp_file = os.path.join(task['cwd'], rel_file)
-            out_tar.add(cpp_file, rel_file, self.header_beginning(cpp_file))
+            with open(cpp_file, 'rb') as src:
+                write_str_to_tar(out_tar, rel_file, src.read(), self.header_beginning(cpp_file))
         tar_buffer.seek(0)
         return tar_buffer
 

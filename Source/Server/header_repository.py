@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import tarfile
+from threading import Lock
 
 class Header:
     def __init__(self, name, dir, reader):
@@ -27,6 +28,7 @@ class HeaderRepository:
     def __init__(self):
         self.headers = {}
         self.dir = tempfile.mkdtemp()
+        self.make_header_lock = Lock()
 
     def missing_files(self, in_tar_buffer):
         in_tar_stream = BytesIO(in_tar_buffer)
@@ -66,13 +68,10 @@ class HeaderRepository:
                     # do not remember it.
                     new_files_tar.extract(tar_info, dir)
                 else:
-                    content = new_files_tar.extractfile(tar_info)
-                    try:
-                        self.headers[tar_info.name] = Header(tar_info.name, self.dir, content)
-                    except:
-                        import traceback
-                        traceback.print_exc()
-                        raise
+                    with self.make_header_lock:
+                        if not tar_info.name in self.headers:
+                            content = new_files_tar.extractfile(tar_info)
+                            self.headers[tar_info.name] = Header(tar_info.name, self.dir, content)
             # Do not copy the files here. This is a shared resource and we want
             # to be as fast as possible. Let the caller worry about copying.
             files_to_copy = list((self.headers[tar_info.name].location(), tar_info.name)

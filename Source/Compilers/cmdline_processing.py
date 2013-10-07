@@ -23,11 +23,11 @@ class CmdLineOption:
                 self.sep or '',
                 self.val or '')
 
-    def __init__(self, name, suff=None, has_arg=True, allow_spaces=True):
+    def __init__(self, name, suff=None, has_arg=True, separate_arg_with_space=True):
         self.__name = name
         self.__has_arg = has_arg
-        self.__allow_spaces = allow_spaces
-        self.__def_sep = '' if not self.__has_arg or not allow_spaces else ' '
+        self.__separate_arg_with_space = separate_arg_with_space
+        self.__def_sep = '' if not self.__has_arg or not separate_arg_with_space else ' '
 
         val_regex = "(?P<suf>{})?{}$".format(
             re.escape(suff if suff else ''),
@@ -65,7 +65,7 @@ class CmdLineOption:
         if val is not None:
             return self.__make_match(esc, suf, '', val)
 
-        if self.__allow_spaces:
+        if self.__separate_arg_with_space:
             try:
                 x = next(iter)
                 return self.__make_match(esc, suf, ' ', x)
@@ -146,8 +146,8 @@ class LinkingCategory(Category): pass
 class SpecialHandlingCategory(Category): pass
 
 class CompilerOption(CmdLineOption):
-    def __init__(self, name, suff=None, has_arg=True, allow_spaces=True):
-        super().__init__(name, suff, has_arg, allow_spaces)
+    def __init__(self, name, suff=None, has_arg=True, separate_arg_with_space=True):
+        super().__init__(name, suff, has_arg, separate_arg_with_space)
         self.__categories = set()
         self.__macros = set()
 

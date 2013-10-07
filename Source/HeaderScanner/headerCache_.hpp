@@ -18,6 +18,7 @@
 #include <list>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -37,7 +38,6 @@ typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
-typedef std::pair<std::string, clang::FileEntry const *> HeaderName;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 typedef boost::variant<HeaderName, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;

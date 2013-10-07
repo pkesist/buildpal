@@ -202,10 +202,14 @@ class CompileSession(ServerSession, ServerCompiler):
             for src, target in files_to_copy:
                 full_target = os.path.join(self.include_path, target)
                 try:
-                    shutil.copy(src, full_target)
+                    os.symlink(src, full_target)
                 except FileNotFoundError:
                     os.makedirs(os.path.dirname(full_target), exist_ok=True)
-                    shutil.copy(src, full_target)
+                    os.symlink(src, full_target)
+                except FileExistsError:
+                    # TODO
+                    # make sure this is the file we expect
+                    pass
             self.times['setup_include_dir'] = setup_timer.get()
             del self.filelist
             self.header_state = self.STATE_HEADERS_ARRIVED

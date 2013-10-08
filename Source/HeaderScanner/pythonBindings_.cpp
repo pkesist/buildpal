@@ -181,14 +181,15 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "filename", NULL };
+    static char * kwlist[] = { "pp_ctx", "dir", "filename", NULL };
 
     PyObject * pObject = 0;
+    PyObject * dir = 0;
     PyObject * filename = 0;
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OO", kwlist, &pObject, &filename ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OOO", kwlist, &pObject, &dir, &filename ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -199,28 +200,31 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
 
+    if ( dir && !PyUnicode_Check( dir ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Expected a string as 'dir' parameter." );
+        return NULL;
+    }
+
     if ( filename && !PyUnicode_Check( filename ) )
     {
         PyErr_SetString( PyExc_Exception, "Expected a string as 'filename' parameter." );
         return NULL;
     }
 
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ) );
+    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( dir ), PyUnicode_AsUTF8( filename ) );
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
     for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
-        PyObject * tuple = PyTuple_New( 4 );
+        PyObject * tuple = PyTuple_New( 3 );
         PyObject * first = PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() );
         PyObject * second = PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() );
         PyObject * third =  PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ );
-        PyObject * fourth =  iter->isRelative ? Py_True : Py_False;
-        Py_INCREF( fourth );
         PyTuple_SET_ITEM( tuple, 0, first );
         PyTuple_SET_ITEM( tuple, 1, second );
         PyTuple_SET_ITEM( tuple, 2, third );
-        PyTuple_SET_ITEM( tuple, 3, fourth );
 
         PyTuple_SET_ITEM( result, index++, tuple );
     }

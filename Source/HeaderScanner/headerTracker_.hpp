@@ -35,7 +35,7 @@ public:
     {
     }
 
-    void enterSourceFile( clang::FileEntry const * );
+    void enterSourceFile( clang::FileEntry const *, llvm::StringRef relFilename );
     Preprocessor::HeaderRefs exitSourceFile();
 
     void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
@@ -165,7 +165,8 @@ private:
     clang::SourceManager & sourceManager() const;
 
 private:
-    typedef std::tuple<clang::FileEntry const *, bool, bool> IncludeStackEntry;
+    typedef llvm::SmallVector<char, 100> IncludePath;
+    typedef std::tuple<clang::FileEntry const *, bool, IncludePath> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
 
 private:

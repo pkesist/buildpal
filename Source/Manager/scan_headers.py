@@ -31,9 +31,9 @@ def setup_preprocessor(includes, sysincludes, defines, ignored_headers=[]):
         ppc.add_ignored_header(ignored_header)
     return preprocessor, ppc
 
-def collect_headers(cpp_file, includes, sysincludes, defines, ignored_headers=[]):
+def collect_headers(dir, filename, includes, sysincludes, defines, ignored_headers=[]):
     preprocessor, ppc = setup_preprocessor(includes, sysincludes, defines, ignored_headers)
-    return preprocessor.scanHeaders(ppc, cpp_file)
+    return preprocessor.scanHeaders(ppc, dir, filename)
 
     # We failed to collect headers.
     return None

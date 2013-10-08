@@ -21,6 +21,7 @@
 #include "clang/Rewrite/Frontend/Rewriters.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/ADT/SmallString.h"
 
@@ -34,6 +35,7 @@ namespace
         explicit HeaderScanner
         (
             HeaderTracker & headerTracker,
+            llvm::StringRef relFilename,
             clang::Preprocessor & preprocessor,
             PreprocessingContext::IgnoredHeaders const & ignoredHeaders,
             Preprocessor::HeaderRefs & includedHeaders
@@ -42,13 +44,14 @@ namespace
             headerTracker_ ( headerTracker   ),
             preprocessor_  ( preprocessor    ),
             headers_       ( includedHeaders ),
-            ignoredHeaders_( ignoredHeaders  )
+            ignoredHeaders_( ignoredHeaders  ),
+            relFilename_   ( relFilename     )
         {
         }
 
         virtual ~HeaderScanner() {}
 
-        virtual void FileStillNotFound(clang::SourceLocation FilenameLoc,
+        virtual void FileStillNotFound( clang::SourceLocation FilenameLoc,
             llvm::StringRef filename, bool isAngled,
             clang::DirectoryLookup const * fromDir,
             clang::DirectoryLookup const * & curDir,
@@ -69,7 +72,7 @@ namespace
                 if ( !fileEntry )
                     return;
                 if ( fileId == preprocessor_.getSourceManager().getMainFileID() )
-                    headerTracker_.enterSourceFile( fileEntry );
+                    headerTracker_.enterSourceFile( fileEntry, relFilename_ );
                 else
                     headerTracker_.enterHeader( includeFilename_ );
             }
@@ -131,6 +134,7 @@ namespace
     private:
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
+        llvm::StringRef relFilename_;
         Preprocessor::HeaderRefs & headers_;
         PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
         clang::StringRef includeFilename_;
@@ -265,8 +269,12 @@ std::pair<clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderS
     return std::make_pair( userHeaderSearch, systemHeaderSearch );
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & filename )
+Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )
 {
+    llvm::SmallVector<char, 100> buffer;
+    llvm::sys::path::append( buffer, dir );
+    llvm::sys::path::append( buffer, relFilename );
+    llvm::StringRef filename( buffer.data(), buffer.size() );
     clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
     setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
@@ -295,7 +303,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_.get() );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker,
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, relFilename,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 
     preprocessor().EnterMainSourceFile();

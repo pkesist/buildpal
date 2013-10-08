@@ -18,7 +18,7 @@ namespace clang
 class Cache;
 class HeaderTracker;
 
-typedef std::tuple<std::string, clang::FileEntry const *, bool> HeaderName;
+typedef std::tuple<std::string, clang::FileEntry const *> HeaderName;
 
 class PreprocessingContext
 {
@@ -62,7 +62,6 @@ struct HeaderRef
         std::size_t s ) :
         relative( std::get<0>( hn ) ),
         absolute( std::get<1>( hn )->getName() ),
-        isRelative( std::get<2>( hn ) ),
         data( d ),
         size( s )
     {
@@ -70,7 +69,6 @@ struct HeaderRef
 
     std::string relative;
     llvm::StringRef absolute;
-    bool isRelative;
     char const * data;
     std::size_t size;
 
@@ -94,7 +92,7 @@ public:
 
     typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & filename );
+    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
     std::pair<clang::HeaderSearch *, clang::HeaderSearch *> getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }

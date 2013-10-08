@@ -4,6 +4,7 @@
 
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/HeaderSearch.h"
+#include "llvm/Support/Path.h"
 
 #include <algorithm>
 #include <iostream>
@@ -13,11 +14,12 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
 {
     // Find the actual file being used.
     assert( !fileStack_.empty() );
-    std::tuple<clang::FileEntry const *, bool, bool> currentEntry( fileStack_.back() );
+    IncludeStackEntry currentEntry( fileStack_.back() );
     clang::FileEntry const * currentFile = std::get<0>( currentEntry );
     clang::DirectoryLookup const * curDir( 0 );
     // If including header is system header, then so are we.
     bool isSystem = std::get<1>( currentEntry );
+    IncludePath const & parentRelative = std::get<2>( currentEntry );
     clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
     if ( !entry )
     {
@@ -28,7 +30,19 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     if ( !entry )
         return;
 
-    fileStack_.push_back( std::make_tuple( entry, isSystem, !curDir ) );
+    IncludePath relPath;
+    if ( curDir )
+    {
+        relPath.append( relative.data(), relative.data() + relative.size() );
+    }
+    else
+    {
+        relPath = parentRelative;
+        llvm::sys::path::remove_filename( relPath );
+        llvm::sys::path::append( relPath, relative );
+    }
+
+    fileStack_.push_back( std::make_tuple( entry, isSystem, relPath ) );
     if ( cacheDisabled() || !( isSystem ? systemHeaderSearch_ : userHeaderSearch_ )->ShouldEnterIncludeFile( entry, false ) )
     {
         // File will be skipped anyway. Do not search cache.
@@ -52,7 +66,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     IncludeStackEntry const & currentEntry( fileStack_.back() );
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
     bool const isSystem( std::get<1>( currentEntry ) );
-    bool const isRelative( std::get<2>( currentEntry ) );
+    IncludePath const & relativeInc( std::get<2>( currentEntry ) );
     fileStack_.pop_back();
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
@@ -78,7 +92,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
         }
         if ( !isSystem )
         {
-            HeaderName header( std::make_tuple( relative, file, isRelative ) );
+            HeaderName header( std::make_tuple( std::string( relativeInc.data(), relativeInc.size() ), file ) );
             headerCtxStack().back().addHeader( header );
         }
     }
@@ -89,12 +103,14 @@ clang::SourceManager & HeaderTracker::sourceManager() const
     return preprocessor_.getSourceManager();
 }
 
-void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry )
+void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llvm::StringRef relFilename )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_tuple( "<<<MAIN FILE>>>", mainFileEntry, false ), CacheEntryPtr(), preprocessor_ ) );
-    fileStack_.push_back( std::make_tuple( mainFileEntry, false, false ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_tuple( "<<<MAIN FILE>>>", mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
+    IncludePath buffer;
+    buffer.append( relFilename.data(), relFilename.data() + relFilename.size() );
+    fileStack_.push_back( std::make_tuple( mainFileEntry, false, buffer ) );
 }
 
 void HeaderTracker::enterHeader( llvm::StringRef relative )
@@ -104,8 +120,8 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
     assert( file );
     bool const isSystem( std::get<1>( currentEntry ) );
-    bool const isRelative( std::get<2>( currentEntry ) );
-    HeaderName header( std::make_tuple( relative, file, isRelative ) );
+    IncludePath const & relName( std::get<2>( currentEntry ) );
+    HeaderName header( std::make_tuple( std::string( relName.data(), relName.size() ), file ) );
     if ( file )
     {
         if ( !isSystem )

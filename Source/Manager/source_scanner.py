@@ -53,7 +53,7 @@ class SourceScanner(Process):
     def tar_with_filelist(self, header_info):
         tar_buffer = BytesIO()
         with tarfile.open(mode='w', fileobj=tar_buffer) as tar:
-            for file, abs, content, is_relative, header in header_info:
+            for file, abs, content, header in header_info:
                 tar_info = tarfile.TarInfo()
                 tar_info.name = file
                 stat = os.stat(abs)
@@ -82,7 +82,7 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        file, abs, content, is_relative, header = next(header_info_iter)
+                        file, abs, content, header = next(header_info_iter)
                         if file == tar_info.name:
                             found = True
                             break
@@ -102,17 +102,7 @@ class SourceScanner(Process):
                         del path_elements[index]
                     else:
                         del path_element[index - 1:index + 1]
-                # FIXME: This is not correct. Header which is found via lookup
-                # relative to the current file must also be found the same way
-                # on the server. Current implementation may include incorrect
-                # header in case of same names. E.g.
-                # A/header.h
-                # A/h1.h // #include "header.h"
-                # B/header.h
-                # B/h1.h // #include "header.h"
-                # This will fail in current implementation as it will prefer
-                # either A/header.h or B/header.h to the other one.
-                if is_relative:
+                if depth:
                     path_elements = ['_rel_includes'] + path_elements
                     if not depth in relative_paths:
                         # Add a dummy file which will create this structure.
@@ -145,8 +135,6 @@ class SourceScanner(Process):
         # See what to do about this.
         task['sysincludes'] = []
 
-        rel_file = task['source']
-        cpp_file = os.path.join(task['cwd'], rel_file)
-        return collect_headers(cpp_file,
+        return collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], macros,
             [task['pch_header']] if task['pch_header'] else [])

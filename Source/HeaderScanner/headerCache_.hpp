@@ -181,12 +181,15 @@ public:
                 headersInfoList_.pop_back();
             }
             headersInfoList_.push_front( HeaderInfo( file->getName(), 20 ) );
-            std::pair<HeadersInfo::iterator, bool> const insertResult( headersInfo().insert( std::make_pair( file->getName(), headersInfoList_.begin() ) ) );
+            std::pair<HeadersInfo::iterator, bool> const insertResult(
+                headersInfo().insert( std::make_pair( file->getName(),
+                headersInfoList_.begin() ) ) );
             assert( insertResult.second );
             iter = insertResult.first;
         }
 
-        CacheEntryPtr result = CacheEntry::create( uniqueFileName(), macros, headerContent, headers );
+        CacheEntryPtr result = CacheEntry::create( uniqueFileName(),
+            macros, headerContent, headers );
         iter->second->insert( result );
         return result;
     }

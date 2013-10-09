@@ -5,6 +5,7 @@ from Common import send_compressed_file, SimpleTimer, TempFile
 from io import BytesIO
 from multiprocessing import Process
 from time import sleep, time
+from socket import getfqdn
 
 import os
 import pickle
@@ -189,8 +190,8 @@ class CompileSession(ServerSession, ServerCompiler):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             assert msg[0] == b'TASK_FILE_LIST'
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
-            self.filelist = msg[1]
-            missing_files = self.header_repository.missing_files(self.filelist)
+            filelist = msg[1]
+            missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
             socket.send_multipart([b'MISSING_FILES', missing_files])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
@@ -198,7 +199,7 @@ class CompileSession(ServerSession, ServerCompiler):
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             setup_timer = SimpleTimer()
-            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(tar_data, self.filelist, self.include_path)
+            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
             for src, target in files_to_copy:
                 full_target = os.path.join(self.include_path, target)
                 try:
@@ -211,7 +212,6 @@ class CompileSession(ServerSession, ServerCompiler):
                     # make sure this is the file we expect
                     pass
             self.times['setup_include_dir'] = setup_timer.get()
-            del self.filelist
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.run_compiler()

@@ -1,6 +1,6 @@
 from .Messaging import ServerSession, ServerWorker
 from Compilers import MSVCWrapper
-from Common import send_compressed_file, SimpleTimer, TempFile
+from Common import send_compressed_file, SimpleTimer
 
 from io import BytesIO
 from multiprocessing import Process
@@ -93,39 +93,40 @@ class CompileSession(ServerSession, ServerCompiler):
                 # Just not worth the additional complexity.
                 sleep(1)
 
-        with TempFile(suffix='.obj') as object_file:
-            compiler_info = self.task['compiler_info']
-            noLink = compiler_info.compile_no_link_option.make_value().make_str()
-            output = compiler_info.object_name_option.make_value(
-                object_file.filename()).make_str()
-            pch_switch = []
-            if self.task['pch_file']:
-                assert self.pch_file is not None
-                assert os.path.exists(self.pch_file)
-                pch_switch.append(
-                    compiler_info.pch_file_option.make_value(self.pch_file).make_str())
+        object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
+        os.close(object_file_handle)
+        compiler_info = self.task['compiler_info']
+        noLink = compiler_info.compile_no_link_option.make_value().make_str()
+        output = compiler_info.object_name_option.make_value(
+            object_file_name).make_str()
+        pch_switch = []
+        if self.task['pch_file']:
+            assert self.pch_file is not None
+            assert os.path.exists(self.pch_file)
+            pch_switch.append(
+                compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
-            try:
-                start = time()
-                command = (self.task['call'] + pch_switch +
-                    [noLink, output] +
-                    [compiler_info.include_option.make_value(incpath).make_str()
-                        for incpath in self.include_dirs] +
-                    [self.source_file])
-                retcode, stdout, stderr = self.compiler(command,
-                                                        self.include_path)
-            except Exception:
-                self.send(b'SERVER_FAILED')
-                import traceback
-                traceback.print_exc()
-                return
-            done = time()
-            self.times['compiler'] = done - start
-            self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
-                stdout, stderr, self.times))])
-            if retcode == 0:
-                with object_file.open('rb') as obj:
-                    send_compressed_file(self.send_multipart, obj, copy=False)
+        try:
+            start = time()
+            command = (self.task['call'] + pch_switch +
+                [noLink, output] +
+                [compiler_info.include_option.make_value(incpath).make_str()
+                    for incpath in self.include_dirs] +
+                [self.source_file])
+            retcode, stdout, stderr = self.compiler(command,
+                                                    self.include_path)
+        except Exception:
+            self.send(b'SERVER_FAILED')
+            import traceback
+            traceback.print_exc()
+            return
+        done = time()
+        self.times['compiler'] = done - start
+        self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
+            stdout, stderr, self.times))])
+        if retcode == 0:
+            with open(object_file_name, 'rb') as obj:
+                send_compressed_file(self.send_multipart, obj, copy=False)
 
     def process_msg_worker(self, msg):
         if self.state == self.STATE_GET_TASK:

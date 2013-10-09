@@ -1,12 +1,13 @@
 from .cmdline_processing import *
 
-from Common import get_batch_file_environment_side_effects, TempFile
+from Common import get_batch_file_environment_side_effects
 
 import subprocess
 
 import os
 import re
 import sys
+import tempfile
 import winreg
 
 def simple(name, macros=[]): 
@@ -145,9 +146,10 @@ class MSVCWrapper(CompilerWrapper):
     class TestSource:
         def __init__(self, executable, macros, placeholder_string):
             self.executable = executable
-            self.cpp = TempFile(suffix='.cpp')
-            self.obj = TempFile(suffix='.obj')
-            with self.cpp.open("wt") as file:
+            cpp_handle, self.cpp_filename = tempfile.mkstemp(suffix='.cpp')
+            obj_handle, self.obj_filename = tempfile.mkstemp(suffix='.obj')
+            os.close(obj_handle)
+            with os.fdopen(cpp_handle, 'wt') as file:
                 lines = []
                 # For _CPPLIB_VER and _HAS_ITERATOR_DEBUGGING
                 lines.append("#include <yvals.h>\n")
@@ -164,11 +166,11 @@ class MSVCWrapper(CompilerWrapper):
                 file.writelines(lines)
 
         def __del__(self):
-            self.cpp.__exit__(None, None, None)
-            self.obj.__exit__(None, None, None)
+            os.remove(self.cpp_filename)
+            os.remove(self.obj_filename)
 
         def command(self):
-            return [self.executable, '/Fo{}'.format(self.obj.filename()), '-c', self.cpp.filename()]
+            return [self.executable, '/Fo{}'.format(self.obj_filename), '-c', self.cpp_filename]
 
     def prepare_test_source(self, executable):
         #   Here we should test only for macros which do not change depending on

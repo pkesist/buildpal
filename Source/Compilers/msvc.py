@@ -219,8 +219,8 @@ class MSVCWrapper(CompilerWrapper):
             result.append('_MSC_EXTENSIONS=1')
         return result
 
-    def create_call(self, executable, option_values):
-        compile_call = [executable]
+    def create_call(self, option_values):
+        compile_call = ['cl.exe']
         compile_call.extend(option.make_str() for option in
             option_values.filter_options(CompilationCategory))
         macros = [token.val for token in option_values.filter_options(self.define_option())]
@@ -260,7 +260,7 @@ class MSVCWrapper(CompilerWrapper):
         def run_compiler(command, cwd, compiler_environ):
             env = dict(os.environ)
             env.update(compiler_environ)
-            with subprocess.Popen(command, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            with subprocess.Popen(command, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         compiler_env = MSVCWrapper.get_compiler_environment(compiler_info)

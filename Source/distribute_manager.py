@@ -50,7 +50,7 @@ Usage:
         else:
             done = True
     if not nodes:
-        raise RuntimeErrors("No build nodes configured.")
+        raise RuntimeError("No build nodes configured.")
 
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)

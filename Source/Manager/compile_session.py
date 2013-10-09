@@ -65,7 +65,7 @@ class TaskCreator:
             raise RuntimeError("Cannot use {}{} with multiple sources."
                 .format(self.__compiler.object_name_option.esc(), self.__compiler.object_name_option.name()))
 
-        compile_call, builtin_macros = self.__compiler.create_call(self.executable(), self.option_values())
+        compile_call, builtin_macros = self.__compiler.create_call(self.option_values())
 
         includes = [os.path.join(self.__cwd, token.val) for token in self.option_values().filter_options(self.__compiler.include_option())]
         macros = [token.val for token in self.option_values().filter_options(self.__compiler.define_option())]

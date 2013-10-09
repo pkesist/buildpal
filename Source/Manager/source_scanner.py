@@ -60,7 +60,7 @@ class SourceScanner(Process):
                 tar_info.size = stat.st_size + len(header)
                 tar_info.mtime = stat.st_mtime
                 tar_info.type = tarfile.SYMTYPE
-                tar_info.linkname = abs
+                tar_info.linkname = os.path.normpath(abs)
                 tar.addfile(tar_info)
         tar_buffer.seek(0)
         return tar_buffer

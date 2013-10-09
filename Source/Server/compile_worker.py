@@ -1,10 +1,11 @@
 from .Messaging import ServerSession, ServerWorker
 from Compilers import MSVCWrapper
-from Common import send_compressed_file, SimpleTimer, TempFile
+from Common import send_compressed_file, SimpleTimer
 
 from io import BytesIO
 from multiprocessing import Process
 from time import sleep, time
+from socket import getfqdn
 
 import os
 import pickle
@@ -92,39 +93,40 @@ class CompileSession(ServerSession, ServerCompiler):
                 # Just not worth the additional complexity.
                 sleep(1)
 
-        with TempFile(suffix='.obj') as object_file:
-            compiler_info = self.task['compiler_info']
-            noLink = compiler_info.compile_no_link_option.make_value().make_str()
-            output = compiler_info.object_name_option.make_value(
-                object_file.filename()).make_str()
-            pch_switch = []
-            if self.task['pch_file']:
-                assert self.pch_file is not None
-                assert os.path.exists(self.pch_file)
-                pch_switch.append(
-                    compiler_info.pch_file_option.make_value(self.pch_file).make_str())
+        object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
+        os.close(object_file_handle)
+        compiler_info = self.task['compiler_info']
+        noLink = compiler_info.compile_no_link_option.make_value().make_str()
+        output = compiler_info.object_name_option.make_value(
+            object_file_name).make_str()
+        pch_switch = []
+        if self.task['pch_file']:
+            assert self.pch_file is not None
+            assert os.path.exists(self.pch_file)
+            pch_switch.append(
+                compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
-            try:
-                start = time()
-                command = (self.task['call'] + pch_switch +
-                    [noLink, output] +
-                    [compiler_info.include_option.make_value(incpath).make_str()
-                        for incpath in self.include_dirs] +
-                    [self.source_file])
-                retcode, stdout, stderr = self.compiler(command,
-                                                        self.include_path)
-            except Exception:
-                self.send(b'SERVER_FAILED')
-                import traceback
-                traceback.print_exc()
-                return
-            done = time()
-            self.times['compiler'] = done - start
-            self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
-                stdout, stderr, self.times))])
-            if retcode == 0:
-                with object_file.open('rb') as obj:
-                    send_compressed_file(self.send_multipart, obj, copy=False)
+        try:
+            start = time()
+            command = (self.task['call'] + pch_switch +
+                [noLink, output] +
+                [compiler_info.include_option.make_value(incpath).make_str()
+                    for incpath in self.include_dirs] +
+                [self.source_file])
+            retcode, stdout, stderr = self.compiler(command,
+                                                    self.include_path)
+        except Exception:
+            self.send(b'SERVER_FAILED')
+            import traceback
+            traceback.print_exc()
+            return
+        done = time()
+        self.times['compiler'] = done - start
+        self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
+            stdout, stderr, self.times))])
+        if retcode == 0:
+            with open(object_file_name, 'rb') as obj:
+                send_compressed_file(self.send_multipart, obj, copy=False)
 
     def process_msg_worker(self, msg):
         if self.state == self.STATE_GET_TASK:
@@ -197,8 +199,8 @@ class CompileSession(ServerSession, ServerCompiler):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             assert msg[0] == b'TASK_FILE_LIST'
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
-            self.filelist = msg[1]
-            missing_files = self.header_repository.missing_files(self.filelist)
+            filelist = msg[1]
+            missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
             socket.send_multipart([b'MISSING_FILES', missing_files])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
@@ -206,7 +208,7 @@ class CompileSession(ServerSession, ServerCompiler):
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             setup_timer = SimpleTimer()
-            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(tar_data, self.filelist, self.include_path)
+            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
             for src, target in files_to_copy:
                 full_target = os.path.join(self.include_path, target)
                 make_link = self.get_link_func()
@@ -220,7 +222,6 @@ class CompileSession(ServerSession, ServerCompiler):
                     # make sure this is the file we expect
                     pass
             self.times['setup_include_dir'] = setup_timer.get()
-            del self.filelist
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.run_compiler()

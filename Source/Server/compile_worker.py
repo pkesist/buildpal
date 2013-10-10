@@ -79,7 +79,6 @@ class CompileSession(ServerSession, ServerCompiler):
         self.header_repository = header_repository
         self.include_path = include_path
         self.include_dirs = [self.include_path]
-        self.has_task_data = False
         self.times = {}
         self.headers = headers
 
@@ -148,7 +147,7 @@ class CompileSession(ServerSession, ServerCompiler):
                 return False
             self.task_counter.inc()
             if self.task['pch_file'] is None:
-                if self.has_task_data:
+                if self.header_state == self.STATE_HEADERS_ARRIVED:
                     self.run_compiler()
                     return True
                 else:

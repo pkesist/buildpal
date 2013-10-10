@@ -35,7 +35,7 @@ class SourceScanner(Process):
             socket = sockets.get(node_index)
             if not socket:
                 socket = zmq_ctx.socket(zmq.DEALER)
-                socket.connect(self.__nodes[node_index])
+                socket.connect(self.__nodes[node_index]['address'])
                 sockets[node_index] = socket
 
             socket.send_multipart([b'ATTACH_TO_SESSION', server_id])

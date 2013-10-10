@@ -50,11 +50,11 @@ class TaskProcessor:
             socket = recycled[0]
             del recycled[0]
         else:
-            node = self.__nodes[node_index]
+            node_address = self.__nodes[node_index]['address']
             try:
                 socket = zmq_ctx.socket(zmq.DEALER)
                 self.set_unique_id(socket)
-                socket.connect(node)
+                socket.connect(node_address)
             except zmq.ZMQError:
                 print("Failed to connect to '{}'".format(node))
                 return None
@@ -127,11 +127,26 @@ class TaskProcessor:
         # Connections to be re-used.
         recycled_connections = {}
 
-        # Server socket to session mapping.
-        session_from_server = {}
+        class Sessions:
+            def __init__(self):
+                self.session_from_server = {}
+                self.session_from_client = {}
 
-        # Client id to session mapping.
-        session_from_client = {}
+            def register_session(self, session, node_index):
+                self.session_from_server[session.server_conn] = session, node_index
+                self.session_from_client[session.client_conn.id] = session
+
+            def unregister_session(self, session):
+                del self.session_from_server[session.server_conn]
+                del self.session_from_client[session.client_conn.id]
+
+            def get_session_for_server_conn(self, server_conn):
+                return self.session_from_server.get(server_conn)
+
+            def get_session_for_client_id(self, client_id):
+                return self.session_from_client.get(client_id)
+
+        sessions = Sessions()
 
         # Contains nodes which were contacted, but have not yet responded.
         # Value is node_index which is used in local statistics.
@@ -171,11 +186,8 @@ class TaskProcessor:
                             assert len(msg) == 2
                             assert msg[1][-2:] == b'\x00\x01'
                             parts = msg[1][:-2].split(b'\x00')
-                            if client_id in session_from_client:
-                                # Session already exists.
-                                session = session_from_client[client_id]
-                                server_socket = session.server_conn
-                                assert server_socket in session_from_server
+                            session = sessions.get_session_for_client_id(client_id)
+                            if session:
                                 session.got_data_from_client(parts)
                             else:
                                 # Create new session.
@@ -193,29 +205,26 @@ class TaskProcessor:
                                     session = CompileSession(compiler, executable, cwd, sysincludes,
                                         command, timer, client_conn, server_conn,
                                         preprocess_socket, node_info[node_index], compiler_info)
-                                    session_from_client[client_conn.id] = session
-                                    session_from_server[server_conn] = session, node_index
+                                    sessions.register_session(session, node_index)
                                 else:
                                     clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
 
-                    elif socket in session_from_server:
-                        with timer.timeit("poller.server_w_session"):
-                            session, node_index = session_from_server[socket]
+                    else:
+                        result = sessions.get_session_for_server_conn(socket)
+                        if result is not None:
+                            session, node_index = result
                             msg = socket.recv_multipart()
                             client_id = session.client_conn.id
-                            assert client_id in session_from_client
                             session_done = session.got_data_from_server(msg)
                             if session_done:
-                                del session_from_client[client_id]
-                                del session_from_server[socket]
+                                sessions.unregister_session(session)
                                 unregister_socket(socket)
                                 recycled = recycled_connections.setdefault(
                                     node_index, [])
                                 assert socket not in recycled
                                 recycled.append(socket)
-                    else: # Server
-                        with timer.timeit("poller.server_wo_session"):
-                            if socket in node_ids:
+                        elif socket in node_ids:
+                            with timer.timeit("poller.server_wo_session"):
                                 accept = socket.recv_pyobj()
                                 node_index = node_ids[socket]
                                 del node_ids[socket]
@@ -233,13 +242,13 @@ class TaskProcessor:
                                 else:
                                     assert accept == "REJECT"
                                 nodes_requested[node_index] -= 1
-                            else:
-                                assert socket in nodes_contacted
-                                session_created = socket.recv()
-                                assert session_created == b'SESSION_CREATED'
-                                node_index = nodes_contacted[socket]
-                                del nodes_contacted[socket]
-                                node_ids[socket] = node_index
+                        else:
+                            assert socket in nodes_contacted
+                            session_created = socket.recv()
+                            assert session_created == b'SESSION_CREATED'
+                            node_index = nodes_contacted[socket]
+                            del nodes_contacted[socket]
+                            node_ids[socket] = node_index
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()

@@ -44,9 +44,18 @@ Usage:
             value = section[option]
             delim = ':'
             if not delim in value:
-                raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>")
-            index = value.index(delim)
-            nodes.append('tcp://{}:{}'.format(value[:index], int(value[index+1:])))
+                raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>[:<max_tasks>]")
+            port_index = value.index(delim)
+            try:
+                max_tasks_index = value.index(':', port_index + 1)
+                server_port = int(value[port_index + 1 : max_tasks_index])
+                max_tasks = int(value[max_tasks_index + 1 : ])
+            except ValueError:
+                server_portport = int(value[port_index + 1:])
+                max_tasks = None
+            nodes.append({
+                'address' : 'tcp://{}:{}'.format(value[:port_index], server_port),
+                'max_tasks' : max_tasks })
         else:
             done = True
     if not nodes:

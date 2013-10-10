@@ -21,10 +21,6 @@ class TaskProcessor:
         self.__nodes = nodes
         self.__unique_id = 0
 
-    def set_unique_id(self, socket):
-        socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
-        self.__unique_id += 1
-
     def best_node(self, node_info):
         def cmp(lhs, rhs):
             lhs_tasks_processing = node_info[lhs].tasks_processing()
@@ -53,7 +49,8 @@ class TaskProcessor:
             node_address = self.__nodes[node_index]['address']
             try:
                 socket = zmq_ctx.socket(zmq.DEALER)
-                self.set_unique_id(socket)
+                socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
+                self.__unique_id += 1
                 socket.connect(node_address)
             except zmq.ZMQError:
                 print("Failed to connect to '{}'".format(node))
@@ -122,7 +119,6 @@ class TaskProcessor:
             scan_worker.start()
 
         connections_per_node = 4
-        nodes_requested = {}
 
         # Connections to be re-used.
         recycled_connections = {}
@@ -148,16 +144,54 @@ class TaskProcessor:
 
         sessions = Sessions()
 
-        # Contains nodes which were contacted, but have not yet responded.
-        # Value is node_index which is used in local statistics.
-        nodes_contacted = {}
+        class NodeManager:
+            STATE_SOCKET_OPEN = 0
+            STATE_SOCKET_RESPONDED = 1
+            STATE_SOCKET_READY = 2
 
-        # Contains nodes which responded, but did not yet send whether they
-        # accept a task. Value is same as in nodes_contacted.
-        node_ids = {}
+            def __init__(self):
+                self.sockets_registered = {}
+                self.sockets_ready = {}
+                self.sockets_requested = {}
 
-        # Nodes waiting for a client.
-        nodes_waiting = {}
+            def register(self, socket, node_index):
+                self.sockets_registered[socket] = (node_index, self.STATE_SOCKET_OPEN)
+                self.sockets_requested[node_index] = self.sockets_requested.get(node_index, 0) + 1
+
+            def get_server_conn(self, node_index):
+                node_sockets = self.sockets_ready.get(node_index)
+                if not node_sockets:
+                    return None
+                socket = node_sockets[0]
+                del node_sockets[0]
+                del self.sockets_registered[socket]
+                return socket 
+
+            def node_connections(self, node_index):
+                return self.sockets_requested.get(node_index, 0) + \
+                    len(self.sockets_ready.setdefault(node_index, []))
+
+            def handle_socket(self, socket):
+                node_index, state = self.sockets_registered[socket]
+                if state == self.STATE_SOCKET_OPEN:
+                    session_created = socket.recv()
+                    assert session_created == b'SESSION_CREATED'
+                    self.sockets_registered[socket] = node_index, self.STATE_SOCKET_RESPONDED
+                    return None
+                else:
+                    assert state == self.STATE_SOCKET_RESPONDED
+                    accept = socket.recv_pyobj()
+                    self.sockets_requested[node_index] -= 1
+                    if accept == "ACCEPT":
+                        self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY
+                        self.sockets_ready.setdefault(node_index, []).append(socket)
+                        return node_index
+                    else:
+                        assert accept == "REJECT"
+                        del self.sockets_registered[socket]
+                        return None
+
+        node_manager = NodeManager()
 
         # Clients waiting for a node.
         clients_waiting = []
@@ -166,13 +200,12 @@ class TaskProcessor:
             while True:
                 self.print_stats(node_info, timer, recycled_connections)
                 for node_index in range(len(node_info)):
-                    for x in range(connections_per_node - nodes_requested.get(node_index, 0) - len(nodes_waiting.get(node_index, []))):
+                    for x in range(connections_per_node - node_manager.node_connections(node_index)):
                         socket = self.connect_to_node(zmq_ctx, node_index, recycled_connections)
                         if not socket:
                             break
                         register_socket(socket)
-                        nodes_contacted[socket] = node_index
-                        nodes_requested[node_index] = nodes_requested.get(node_index, 0) + 1
+                        node_manager.register(socket, node_index)
 
                 sockets = dict(poller.poll(1000))
                 for socket, flags in sockets.items():
@@ -199,9 +232,8 @@ class TaskProcessor:
                                 client_conn = self.SendProxy(client_socket, client_id)
                                 client_conn.send([b"TASK_RECEIVED"])
                                 node_index = self.best_node(node_info)
-                                if nodes_waiting.get(node_index):
-                                    server_conn = nodes_waiting[node_index][0]
-                                    del nodes_waiting[node_index][0]
+                                server_conn = node_manager.get_server_conn(node_index)
+                                if server_conn:
                                     session = CompileSession(compiler, executable, cwd, sysincludes,
                                         command, timer, client_conn, server_conn,
                                         preprocess_socket, node_info[node_index], compiler_info)
@@ -210,8 +242,10 @@ class TaskProcessor:
                                     clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
 
                     else:
+                        # Connection to server node.
                         result = sessions.get_session_for_server_conn(socket)
                         if result is not None:
+                            # Part of a session.
                             session, node_index = result
                             msg = socket.recv_multipart()
                             client_id = session.client_conn.id
@@ -223,32 +257,18 @@ class TaskProcessor:
                                     node_index, [])
                                 assert socket not in recycled
                                 recycled.append(socket)
-                        elif socket in node_ids:
-                            with timer.timeit("poller.server_wo_session"):
-                                accept = socket.recv_pyobj()
-                                node_index = node_ids[socket]
-                                del node_ids[socket]
-                                if accept == "ACCEPT":
-                                    if clients_waiting:
-                                        client_conn, compiler, executable, sysincludes, cwd, command = clients_waiting[0]
-                                        del clients_waiting[0]
-                                        session = CompileSession(compiler, executable, cwd, sysincludes,
-                                            command, timer, client_conn, socket,
-                                            preprocess_socket, node_info[node_index], compiler_info)
-                                        session_from_client[client_conn.id] = session
-                                        session_from_server[socket] = session, node_index
-                                    else:
-                                        nodes_waiting.setdefault(node_index, []).append(socket)
-                                else:
-                                    assert accept == "REJECT"
-                                nodes_requested[node_index] -= 1
                         else:
-                            assert socket in nodes_contacted
-                            session_created = socket.recv()
-                            assert session_created == b'SESSION_CREATED'
-                            node_index = nodes_contacted[socket]
-                            del nodes_contacted[socket]
-                            node_ids[socket] = node_index
+                            # Not part of a session, handled by node_manager.
+                            ready_node_index = node_manager.handle_socket(socket)
+                            if ready_node_index is not None and clients_waiting:
+                                server_conn = node_manager.get_server_conn(ready_node_index)
+                                assert server_conn
+                                client_conn, compiler, executable, sysincludes, cwd, command = clients_waiting[0]
+                                del clients_waiting[0]
+                                session = CompileSession(compiler, executable, cwd, sysincludes,
+                                    command, timer, client_conn, server_conn,
+                                    preprocess_socket, node_info[ready_node_index], compiler_info)
+                                sessions.register_session(session, ready_node_index)
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()

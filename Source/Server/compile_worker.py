@@ -17,6 +17,15 @@ import tempfile
 import zlib
 import zmq
 
+try:
+    # Dummy call to test whether symlinks are supported.
+    make_link = os.symlink
+    make_link('', '')
+except NotImplementedError:
+    make_link = os.link
+except FileNotFoundError:
+    pass
+
 class ServerCompiler:
     def __init__(self, file_repository, compiler_setup, cpu_usage_hwm):
         self.__hwm = cpu_usage_hwm
@@ -188,13 +197,6 @@ class CompileSession(ServerSession, ServerCompiler):
             self.task_counter.dec()
         return result
 
-    @classmethod
-    def get_link_func(cls):
-        if sys.getwindowsversion()[0] == 6:
-            return os.symlink
-        else:
-            return os.link
-
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             assert msg[0] == b'TASK_FILE_LIST'
@@ -211,7 +213,6 @@ class CompileSession(ServerSession, ServerCompiler):
             self.include_dirs, files_to_copy = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
             for src, target in files_to_copy:
                 full_target = os.path.join(self.include_path, target)
-                make_link = self.get_link_func()
                 try:
                     make_link(src, full_target)
                 except FileNotFoundError:

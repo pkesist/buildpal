@@ -289,7 +289,7 @@ class TaskProcessor:
                 '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
                 'Avg. Time {:<3.2f}\n'
             .format(
-                node,
+                node['address'],
                 node_info[index].tasks_sent       (),
                 node_info[index].connections      (),
                 node_info[index].tasks_completed  (),

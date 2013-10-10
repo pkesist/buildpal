@@ -138,6 +138,7 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_msg_worker(self, msg):
         if self.state == self.STATE_GET_TASK:
+            self.waiting_for_header_list = SimpleTimer()
             self.task = pickle.loads(msg[0])
             self.compiler = self.setup_compiler(self.task['compiler_info'])
             if self.compiler:
@@ -198,6 +199,9 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
+            self.times['wait_for_header_list'] = self.waiting_for_header_list.get()
+            self.wait_for_headers = SimpleTimer()
+            del self.waiting_for_header_list
             assert msg[0] == b'TASK_FILE_LIST'
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
             filelist = msg[1]
@@ -206,6 +210,8 @@ class CompileSession(ServerSession, ServerCompiler):
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
+            self.times['wait_for_headers'] = self.wait_for_headers.get()
+            del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             setup_timer = SimpleTimer()

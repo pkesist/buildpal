@@ -199,10 +199,12 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
-            self.times['wait_for_header_list'] = self.waiting_for_header_list.get() \
-                if hasattr(self, 'waiting_for_header_list') else 0
+            if hasattr(self, 'waiting_for_header_list'):
+                self.times['wait_for_header_list'] = self.waiting_for_header_list.get()
+                del self.waiting_for_header_list
+            else:
+                self.times['wait_for_header_list'] = 0
             self.wait_for_headers = SimpleTimer()
-            del self.waiting_for_header_list
             assert msg[0] == b'TASK_FILE_LIST'
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
             filelist = msg[1]

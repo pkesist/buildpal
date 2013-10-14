@@ -108,8 +108,6 @@ class TaskProcessor:
 
         compiler_info = {}
 
-        self.last_time = None
-
         node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
 
         scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes) for i in range(cpu_count() * 2)]
@@ -272,7 +270,7 @@ class TaskProcessor:
 
     def print_stats(self, node_info, recycled_conections):
         current = time()
-        if self.last_time and (current - self.last_time < 2):
+        if hasattr(self, 'last_time') and (current - self.last_time < 2):
             return False
         self.last_time = current
         print("================")
@@ -299,7 +297,9 @@ class TaskProcessor:
             times = node.timer().as_dict()
             if not times:
                 continue
+            print("================")
             print("Statistics for '{}'".format(node.node_dict()['address']))
+            print("================")
             sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
             sorted_times.sort(key=operator.itemgetter(1), reverse=True)
             for name, tm, count, average in sorted_times:

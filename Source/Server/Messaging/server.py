@@ -40,7 +40,6 @@ class ServerWorker:
 
         self.socket_to_session = {}
 
-
     def connect_broker(self, address):
         self.broker.connect(address)
 
@@ -100,8 +99,7 @@ class ServerWorker:
             sockets = dict(self.poller.poll())
 
             for sock, event in sockets.items():
-                if event != zmq.POLLIN:
-                    continue
+                assert event == zmq.POLLIN
 
                 if sock is self.broker:
                     msg = self.broker.recv_multipart(flags=zmq.NOBLOCK)

@@ -207,9 +207,9 @@ class CompileSession(ServerSession, ServerCompiler):
             self.wait_for_headers = SimpleTimer()
             assert msg[0] == b'TASK_FILE_LIST'
             self.times['preprocessing.internal'] = pickle.loads(msg[2])
-            filelist = msg[1]
+            filelist = pickle.loads(msg[1])
             missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
-            socket.send_multipart([b'MISSING_FILES', missing_files])
+            socket.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:

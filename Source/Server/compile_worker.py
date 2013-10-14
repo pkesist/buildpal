@@ -199,7 +199,8 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
-            self.times['wait_for_header_list'] = self.waiting_for_header_list.get()
+            self.times['wait_for_header_list'] = self.waiting_for_header_list.get() \
+                if hasattr(self, 'waiting_for_header_list') else 0
             self.wait_for_headers = SimpleTimer()
             del self.waiting_for_header_list
             assert msg[0] == b'TASK_FILE_LIST'

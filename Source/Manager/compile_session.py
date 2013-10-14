@@ -34,13 +34,12 @@ class OptionValues:
 
 class TaskCreator:
     def __init__(self, compiler_wrapper, executable, cwd, sysincludes, command,
-                 client_conn, timer):
+                 client_conn):
         self.__compiler = compiler_wrapper
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
         self.__client_conn = client_conn
-        with timer.timeit('parse_options'):
-            self.__option_values = OptionValues(list(compiler_wrapper.parse_options(cwd, command[1:])))
+        self.__option_values = OptionValues(list(compiler_wrapper.parse_options(cwd, command[1:])))
         self.__cwd = cwd
 
     def executable(self):
@@ -154,10 +153,9 @@ class CompileSession:
     STATE_WAIT_FOR_SESSION_DONE = 7
     STATE_WAIT_FOR_SEND_TAR_DONE = 9999
 
-    def __init__(self, compiler, executable, cwd, sysincludes, command, timer,
+    def __init__(self, compiler, executable, cwd, sysincludes, command,
         client_conn, server_conn, preprocess_socket, node_info, compiler_info):
 
-        self.timer = timer
         self.client_conn = client_conn
         self.server_conn = server_conn
         self.preprocess_socket = preprocess_socket
@@ -170,9 +168,13 @@ class CompileSession:
 
         self.create_tasks(self.compiler, cwd, sysincludes, command)
 
+    @property
+    def timer(self):
+        return self.node_info.timer()
+
     def create_tasks(self, compiler_wrapper, cwd, sysincludes, command):
         ctx = TaskCreator(compiler_wrapper, self.executable, cwd, sysincludes,
-                          command, self.client_conn, self.timer)
+                          command, self.client_conn)
         if ctx.build_local():
             call = [ctx.executable()]
             call.extend(option.make_str() for option in ctx.option_values().all())
@@ -203,8 +205,7 @@ class CompileSession:
             self.preprocess_socket.send_multipart([server_id,
                 pickle.dumps(self.task.preprocess_task_info),
                 pickle.dumps(self.node_info.index())], copy=False)
-            with self.timer.timeit('send'):
-                self.server_conn.send_pyobj(self.task.server_task_info)
+            self.server_conn.send_pyobj(self.task.server_task_info)
             self.node_info.add_tasks_sent()
             self.state = self.STATE_WAIT_FOR_OK
         else:
@@ -229,8 +230,7 @@ class CompileSession:
         self.preprocess_socket.send_multipart([server_id,
             pickle.dumps(self.task.preprocess_task_info),
             pickle.dumps(self.node_info.index())], copy=False)
-        with self.timer.timeit('send'):
-            self.server_conn.send_pyobj(self.task.server_task_info)
+        self.server_conn.send_pyobj(self.task.server_task_info)
         self.node_info.add_tasks_sent()
         self.state = self.STATE_WAIT_FOR_OK
 

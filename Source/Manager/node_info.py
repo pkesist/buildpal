@@ -1,7 +1,10 @@
+from .timer import Timer
+
 from time import time
 
 class NodeInfo:
-    def __init__(self, index):
+    def __init__(self, node_dict, index):
+        self._node_dict = node_dict
         self._index = index
         self._tasks_completed  = 0
         self._tasks_failed     = 0
@@ -10,6 +13,7 @@ class NodeInfo:
         self._open_connections = 0
         self._tasks_change     = None
         self._avg_tasks = {}
+        self._timer = Timer()
 
     def index(self):
         return self._index
@@ -62,3 +66,9 @@ class NodeInfo:
     def add_tasks_failed(self): self._add_tasks_failed += 1
 
     def add_total_time(self, value): self._total_time += value
+
+    def timer(self):
+        return self._timer
+
+    def node_dict(self):
+        return self._node_dict

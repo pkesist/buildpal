@@ -110,11 +110,9 @@ class TaskProcessor:
 
         self.last_time = None
 
-        timer = Timer()
+        node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
 
-        node_info = [NodeInfo(x) for x in range(len(self.__nodes))]
-
-        scan_workers = [SourceScanner(preprocess_socket_port, timer, self.__nodes) for i in range(cpu_count() * 2)]
+        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes) for i in range(cpu_count() * 2)]
         for scan_worker in scan_workers:
             scan_worker.start()
 
@@ -198,7 +196,7 @@ class TaskProcessor:
 
         try:
             while True:
-                self.print_stats(node_info, timer, recycled_connections)
+                self.print_stats(node_info, recycled_connections)
                 for node_index in range(len(node_info)):
                     for x in range(connections_per_node - node_manager.node_connections(node_index)):
                         socket = self.connect_to_node(zmq_ctx, node_index, recycled_connections)
@@ -213,33 +211,32 @@ class TaskProcessor:
                         continue
 
                     elif socket is client_socket:
-                        with timer.timeit("poller.client"):
-                            msg = client_socket.recv_multipart()
-                            client_id = msg[0]
-                            assert len(msg) == 2
-                            assert msg[1][-2:] == b'\x00\x01'
-                            parts = msg[1][:-2].split(b'\x00')
-                            session = sessions.get_session_for_client_id(client_id)
-                            if session:
-                                session.got_data_from_client(parts)
+                        msg = client_socket.recv_multipart()
+                        client_id = msg[0]
+                        assert len(msg) == 2
+                        assert msg[1][-2:] == b'\x00\x01'
+                        parts = msg[1][:-2].split(b'\x00')
+                        session = sessions.get_session_for_client_id(client_id)
+                        if session:
+                            session.got_data_from_client(parts)
+                        else:
+                            # Create new session.
+                            compiler = parts[0].decode()
+                            executable = parts[1].decode()
+                            sysincludes = parts[2].decode()
+                            cwd = parts[3].decode()
+                            command = [x.decode() for x in parts[4:]]
+                            client_conn = self.SendProxy(client_socket, client_id)
+                            client_conn.send([b"TASK_RECEIVED"])
+                            node_index = self.best_node(node_info)
+                            server_conn = node_manager.get_server_conn(node_index)
+                            if server_conn:
+                                session = CompileSession(compiler, executable, cwd, sysincludes,
+                                    command, client_conn, server_conn,
+                                    preprocess_socket, node_info[node_index], compiler_info)
+                                sessions.register_session(session, node_index)
                             else:
-                                # Create new session.
-                                compiler = parts[0].decode()
-                                executable = parts[1].decode()
-                                sysincludes = parts[2].decode()
-                                cwd = parts[3].decode()
-                                command = [x.decode() for x in parts[4:]]
-                                client_conn = self.SendProxy(client_socket, client_id)
-                                client_conn.send([b"TASK_RECEIVED"])
-                                node_index = self.best_node(node_info)
-                                server_conn = node_manager.get_server_conn(node_index)
-                                if server_conn:
-                                    session = CompileSession(compiler, executable, cwd, sysincludes,
-                                        command, timer, client_conn, server_conn,
-                                        preprocess_socket, node_info[node_index], compiler_info)
-                                    sessions.register_session(session, node_index)
-                                else:
-                                    clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
+                                clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
 
                     else:
                         # Connection to server node.
@@ -266,41 +263,45 @@ class TaskProcessor:
                                 client_conn, compiler, executable, sysincludes, cwd, command = clients_waiting[0]
                                 del clients_waiting[0]
                                 session = CompileSession(compiler, executable, cwd, sysincludes,
-                                    command, timer, client_conn, server_conn,
+                                    command, client_conn, server_conn,
                                     preprocess_socket, node_info[ready_node_index], compiler_info)
                                 sessions.register_session(session, ready_node_index)
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()
 
-    def print_stats(self, node_info, timer, recycled_conections):
+    def print_stats(self, node_info, recycled_conections):
         current = time()
         if self.last_time and (current - self.last_time < 2):
             return False
-        times = timer.as_dict()
         self.last_time = current
-        sys.stdout.write("================\n")
-        sys.stdout.write("Build nodes:\n")
-        sys.stdout.write("================\n")
-        for index in range(len(self.__nodes)):
-            node = self.__nodes[index]
-            sys.stdout.write('{:30} - Tasks sent {:<3} '
+        print("================")
+        print("Build nodes:")
+        print("================")
+        for index in range(len(node_info)):
+            node = node_info[index]
+            print('{:30} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
                 '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
-                'Avg. Time {:<3.2f}\n'
+                'Avg. Time {:<3.2f}'
             .format(
-                node['address'],
-                node_info[index].tasks_sent       (),
-                node_info[index].connections      (),
-                node_info[index].tasks_completed  (),
-                node_info[index].tasks_failed     (),
-                node_info[index].tasks_processing (),
-                node_info[index].average_tasks    (),
-                node_info[index].average_task_time()))
-        sys.stdout.write("================\n")
-        sys.stdout.write("\r" * (len(self.__nodes) + 4))
-        sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
-        sorted_times.sort(key=operator.itemgetter(1), reverse=True)
-        for name, tm, count, average in sorted_times:
-            print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
+                node.node_dict()['address'],
+                node.tasks_sent       (),
+                node.connections      (),
+                node.tasks_completed  (),
+                node.tasks_failed     (),
+                node.tasks_processing (),
+                node.average_tasks    (),
+                node.average_task_time()))
+        print("================")
+        for index in range(len(node_info)):
+            node = node_info[index]
+            times = node.timer().as_dict()
+            if not times:
+                continue
+            print("Statistics for '{}'".format(node.node_dict()['address']))
+            sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
+            sorted_times.sort(key=operator.itemgetter(1), reverse=True)
+            for name, tm, count, average in sorted_times:
+                print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
         return True

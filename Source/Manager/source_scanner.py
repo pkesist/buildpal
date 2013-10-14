@@ -11,9 +11,8 @@ from io import BytesIO
 from multiprocessing import Process
 
 class SourceScanner(Process):
-    def __init__(self, port, timer, nodes):
+    def __init__(self, port, nodes):
         self.__port = port
-        self.__timer = timer
         self.__nodes = nodes
         return super().__init__()
 

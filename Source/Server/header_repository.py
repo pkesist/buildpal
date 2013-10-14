@@ -43,17 +43,19 @@ class HeaderRepository:
     def missing_files(self, machine_id, in_tar_buffer):
         in_tar_stream = BytesIO(in_tar_buffer)
         out_tar_stream = BytesIO()
+        filelist = {}
         with tarfile.open(mode='r', fileobj=in_tar_stream) as in_tar, \
             tarfile.open(mode='w', fileobj=out_tar_stream) as out_tar:
             files = list((tarinfo.linkname, tarinfo) for tarinfo in in_tar)
             machine_files = self.files.get(machine_id)
             for abs, tar_info in files:
+                filelist[tar_info.name] = tar_info
                 if abs not in machine_files or \
                     not machine_files[abs].matches(tar_info):
                     out_tar.addfile(tar_info)
         out_tar_stream.seek(0)
         self.counter += 1
-        self.filelists[self.counter] = dict(files)
+        self.filelists[self.counter] = filelist
         return out_tar_stream.read(), self.counter
 
     def prepare_dir(self, machine_id, new_files_tar_buffer, id, dir):

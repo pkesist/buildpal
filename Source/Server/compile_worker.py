@@ -217,8 +217,11 @@ class CompileSession(ServerSession, ServerCompiler):
             del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
-            setup_timer = SimpleTimer()
+            shared_prepare_dir_timer = SimpleTimer()
             self.include_dirs, files_to_copy = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
+            self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
+            del shared_prepare_dir_timer
+            copy_files_timer = SimpleTimer()
             for src, target in files_to_copy:
                 full_target = os.path.join(self.include_path, target)
                 try:
@@ -230,7 +233,7 @@ class CompileSession(ServerSession, ServerCompiler):
                     # TODO
                     # make sure this is the file we expect
                     pass
-            self.times['setup_include_dir'] = setup_timer.get()
+            self.times['copy_files'] = copy_files_timer.get()
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.run_compiler()

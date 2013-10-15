@@ -15,18 +15,15 @@ clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & source
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
 
     if ( !sourceManager.isFileOverridden( result ) )
-        sourceManager.overrideFileContents( result, buffer_.get(), true );
+        sourceManager.overrideFileContents( result, memoryBuffer_.get(), true );
     return result;
 }
 
 void CacheEntry::generateContent()
 {
-    if ( buffer_.get() )
+    if ( memoryBuffer_ )
         return;
 
-    // Cache the result.
-    std::string content;
-    llvm::raw_string_ostream defineStream( content );
     struct GenerateContent
     {
         typedef void result_type;
@@ -38,14 +35,14 @@ void CacheEntry::generateContent()
         {
             if ( mwu.first == MacroUsage::defined )
             {
-                Macro const & macro( mwu.second );
+                PooledMacro const & macro( mwu.second );
                 assert( macro.second.get().data() );
                 ostream_ << "#define " << macro.second.get() << '\n';
             }
 
             if ( mwu.first == MacroUsage::undefined )
             {
-                Macro const & macro( mwu.second );
+                PooledMacro const & macro( mwu.second );
                 assert( macro.first.get().data() );
                 ostream_ << "#undef " << macro.first.get() << '\n';
             }
@@ -53,19 +50,21 @@ void CacheEntry::generateContent()
 
         void operator()( CacheEntryPtr const & ce )
         {
-            if ( !ce->buffer_ )
+            if ( !ce->memoryBuffer_ )
                 ce->generateContent();
-            ostream_ << ce->buffer_->getBuffer();
+            ostream_ << ce->buffer_;
         }
 
         llvm::raw_string_ostream & ostream_;
-    } contentGenerator( defineStream );
-
+    };
+    
+    llvm::raw_string_ostream defineStream( buffer_ );
+    GenerateContent contentGenerator( defineStream );
     std::for_each( headerContent().begin(), headerContent().end(),
         [&]( HeaderEntry const & he ) { boost::apply_visitor( contentGenerator, he ); } );
-
     defineStream << '\0';
-    buffer_.reset( llvm::MemoryBuffer::getMemBufferCopy( defineStream.str(), "" ) );
+    defineStream.flush();
+    memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
 }
 
 std::string Cache::uniqueFileName()
@@ -117,7 +116,7 @@ CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
             (
                 (*headerInfoIter)->usedMacros().begin(),
                 (*headerInfoIter)->usedMacros().end(),
-                [&]( Macro const & macro )
+                [&]( PooledMacro const & macro )
                 {
                     MacroState::const_iterator const iter( macroState.find( macro.first.get() ) );
                     if ( iter == macroState.end() )

@@ -15,6 +15,7 @@
 #include <boost/flyweight.hpp>
 
 #include <llvm/ADT/StringMap.h>
+#include <llvm/Support/MemoryBuffer.h>
 
 #include <list>
 #include <set>
@@ -30,20 +31,25 @@ namespace clang
     class FileEntry;
 }
 
-typedef std::pair<boost::flyweight<std::string>, boost::flyweight<std::string> > Macro;
-typedef std::map<boost::flyweight<std::string>, boost::flyweight<std::string> > Macros;
+struct MacroNameTag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag> > PooledMacroName;
+struct MacroValueTag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag> > PooledMacroValue;
+
+typedef std::pair<PooledMacroName, PooledMacroValue> PooledMacro;
+typedef std::map<PooledMacroName, PooledMacroValue> PooledMacros;
 
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
-inline Macro macroFromMacroRef( MacroRef const & macroRef )
+inline PooledMacro pooledMacroFromMacroRef( MacroRef const & macroRef )
 {
     return std::make_pair(
-        boost::flyweight<std::string>( macroRef.first.data(), macroRef.first.size() ),
-        boost::flyweight<std::string>( macroRef.second.data(), macroRef.second.size() ) );
+        PooledMacroName( macroRef.first.data(), macroRef.first.size() ),
+        PooledMacroValue( macroRef.second.data(), macroRef.second.size() ) );
 }
 
-inline MacroRef macroRefFromMacro( Macro const & macro )
+inline MacroRef macroRefFromPooledMacro( PooledMacro const & macro )
 {
     return std::make_pair(
         llvm::StringRef( macro.first.get().data(), macro.first.get().size() ),
@@ -51,7 +57,7 @@ inline MacroRef macroRefFromMacro( Macro const & macro )
 }
 
 struct MacroUsage { enum Enum { defined, undefined }; };
-typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
+typedef std::pair<MacroUsage::Enum, PooledMacro> MacroWithUsage;
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 typedef boost::variant<HeaderName, CacheEntryPtr> Header;
@@ -80,7 +86,7 @@ private:
     {
         std::transform( usedMacros.begin(), usedMacros.end(),
             std::inserter( usedMacros_, usedMacros_.begin() ),
-            []( MacroRef macroRef ) { return macroFromMacroRef( macroRef ); } );
+            []( MacroRef macroRef ) { return pooledMacroFromMacroRef( macroRef ); } );
     }
 
 public:
@@ -106,7 +112,7 @@ public:
     void releaseFileEntry( clang::SourceManager & );
     void generateContent();
 
-    Macros        const & usedMacros   () const { return usedMacros_; }
+    PooledMacros  const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
@@ -125,11 +131,12 @@ private:
 
 private:
     std::string fileName_;
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer_;
-    Macros usedMacros_;
+    PooledMacros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t refCount_;
+    std::string buffer_;
+    llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
 
 inline void intrusive_ptr_add_ref( CacheEntry * c ) { c->addRef(); }

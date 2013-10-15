@@ -71,7 +71,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, macroDef ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::defined, pooledMacroFromMacroRef( macro ) ) );
             definedMacroNames_.insert( macroName );
         }
 
@@ -79,7 +79,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, llvm::StringRef() ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::undefined, pooledMacroFromMacroRef( macro ) ) );
         }
 
         void addHeader( HeaderName const & header )
@@ -90,8 +90,8 @@ private:
 
         void addStuff( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
         {
-            Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
-            Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
+            PooledMacros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
+            PooledMacros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
             DefinedMacroNames::const_iterator       definedIter = definedMacroNames_.begin();
             DefinedMacroNames::const_iterator const definedEnd = definedMacroNames_.end();
             while ( cacheIter != cacheEnd && definedIter != definedEnd )
@@ -114,9 +114,9 @@ private:
             }
             std::transform( cacheIter, cacheEnd,
                 std::inserter( usedMacros_, usedMacros_.begin() ),
-                []( Macro const & macro )
+                []( PooledMacro const & macro )
                 {
-                    return macroRefFromMacro( macro );
+                    return macroRefFromPooledMacro( macro );
                 }
             );
 

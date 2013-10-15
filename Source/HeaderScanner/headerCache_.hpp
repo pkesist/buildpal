@@ -6,13 +6,14 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
+#ifndef DONT_USE_POOLED_MACROS_IN_CACHE
+#include <boost/flyweight.hpp>
+#endif
 #include <boost/intrusive_ptr.hpp>
 #include <boost/variant.hpp>
 #include <boost/container/list.hpp>
-#include <boost/functional/hash.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
-#include <boost/flyweight.hpp>
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -31,33 +32,66 @@ namespace clang
     class FileEntry;
 }
 
-struct MacroNameTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag> > PooledMacroName;
-struct MacroValueTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag> > PooledMacroValue;
-
-typedef std::pair<PooledMacroName, PooledMacroValue> PooledMacro;
-typedef std::map<PooledMacroName, PooledMacroValue> PooledMacros;
-
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
-inline PooledMacro pooledMacroFromMacroRef( MacroRef const & macroRef )
+#ifndef DONT_USE_POOLED_MACROS_IN_CACHE
+struct MacroNameTag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag> > MacroName;
+struct MacroValueTag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag> > MacroValue;
+
+typedef std::pair<MacroName, MacroValue> Macro;
+typedef std::map<MacroName, MacroValue> Macros;
+
+inline Macro macroFromMacroRef( MacroRef const & macroRef )
 {
     return std::make_pair(
-        PooledMacroName( macroRef.first.data(), macroRef.first.size() ),
-        PooledMacroValue( macroRef.second.data(), macroRef.second.size() ) );
+        MacroName( macroRef.first.data(), macroRef.first.size() ),
+        MacroValue( macroRef.second.data(), macroRef.second.size() ) );
 }
 
-inline MacroRef macroRefFromPooledMacro( PooledMacro const & macro )
+inline llvm::StringRef macroName( Macro const & macro )
 {
-    return std::make_pair(
-        llvm::StringRef( macro.first.get().data(), macro.first.get().size() ),
-        llvm::StringRef( macro.second.get().data(), macro.second.get().size() ) );
+    return macro.first.get();
 }
+
+inline llvm::StringRef macroValue( Macro const & macro )
+{
+    return macro.second.get();
+}
+
+inline MacroRef macroRefFromMacro( Macro const & macro )
+{
+    return std::make_pair( macroName( macro ), macroValue( macro ) );
+}
+#else // DONT_USE_POOLED_MACROS_IN_CACHE
+typedef std::pair<std::string, std::string> Macro;
+typedef std::map<std::string, std::string> Macros;
+
+inline Macro macroFromMacroRef( MacroRef const & macroRef )
+{
+    return macroRef;
+}
+
+inline llvm::StringRef macroName( Macro const & macro )
+{
+    return macro.first;
+}
+
+inline llvm::StringRef macroValue( Macro const & macro )
+{
+    return macro.second;
+}
+
+inline MacroRef macroRefFromMacro( Macro const & macro )
+{
+    return macro;
+}
+#endif // DONT_USE_POOLED_MACROS_IN_CACHE
 
 struct MacroUsage { enum Enum { defined, undefined }; };
-typedef std::pair<MacroUsage::Enum, PooledMacro> MacroWithUsage;
+typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 typedef boost::variant<HeaderName, CacheEntryPtr> Header;
@@ -86,7 +120,7 @@ private:
     {
         std::transform( usedMacros.begin(), usedMacros.end(),
             std::inserter( usedMacros_, usedMacros_.begin() ),
-            []( MacroRef macroRef ) { return pooledMacroFromMacroRef( macroRef ); } );
+            []( MacroRef macroRef ) { return macroFromMacroRef( macroRef ); } );
     }
 
 public:
@@ -112,7 +146,7 @@ public:
     void releaseFileEntry( clang::SourceManager & );
     void generateContent();
 
-    PooledMacros  const & usedMacros   () const { return usedMacros_; }
+    Macros        const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
@@ -131,7 +165,7 @@ private:
 
 private:
     std::string fileName_;
-    PooledMacros usedMacros_;
+    Macros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t refCount_;

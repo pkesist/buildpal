@@ -71,7 +71,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, macroDef ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::defined, pooledMacroFromMacroRef( macro ) ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
             definedMacroNames_.insert( macroName );
         }
 
@@ -79,7 +79,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, llvm::StringRef() ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::undefined, pooledMacroFromMacroRef( macro ) ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
         }
 
         void addHeader( HeaderName const & header )
@@ -90,16 +90,16 @@ private:
 
         void addStuff( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
         {
-            PooledMacros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
-            PooledMacros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
+            Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
+            Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
             DefinedMacroNames::const_iterator       definedIter = definedMacroNames_.begin();
             DefinedMacroNames::const_iterator const definedEnd = definedMacroNames_.end();
             while ( cacheIter != cacheEnd && definedIter != definedEnd )
             {
-                int const compareResult = definedIter->compare( cacheIter->first.get() );
+                int const compareResult = definedIter->compare( macroName( *cacheIter ) );
                 if ( compareResult < 0 )
                 {
-                    usedMacros_.insert( MacroRefs::value_type( cacheIter->first.get(), cacheIter->second.get() ) );
+                    usedMacros_.insert( macroRefFromMacro( *cacheIter ) );
                     ++cacheIter;
                 }
                 else if ( compareResult > 0 )
@@ -114,9 +114,9 @@ private:
             }
             std::transform( cacheIter, cacheEnd,
                 std::inserter( usedMacros_, usedMacros_.begin() ),
-                []( PooledMacro const & macro )
+                []( Macro const & macro )
                 {
-                    return macroRefFromPooledMacro( macro );
+                    return macroRefFromMacro( macro );
                 }
             );
 

@@ -39,15 +39,15 @@ void CacheEntry::generateContent()
             if ( mwu.first == MacroUsage::defined )
             {
                 Macro const & macro( mwu.second );
-                assert( macro.second.data() );
-                ostream_ << "#define " << macro.second << '\n';
+                assert( macro.second.get().data() );
+                ostream_ << "#define " << macro.second.get() << '\n';
             }
 
             if ( mwu.first == MacroUsage::undefined )
             {
                 Macro const & macro( mwu.second );
-                assert( macro.second.data() );
-                ostream_ << "#undef " << macro.first << '\n';
+                assert( macro.first.get().data() );
+                ostream_ << "#undef " << macro.first.get() << '\n';
             }
         }
 
@@ -119,10 +119,10 @@ CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
                 (*headerInfoIter)->usedMacros().end(),
                 [&]( Macro const & macro )
                 {
-                    MacroState::const_iterator const iter( macroState.find( macro.first ) );
+                    MacroState::const_iterator const iter( macroState.find( macro.first.get() ) );
                     if ( iter == macroState.end() )
-                        return !macro.second.empty();
-                    return iter->getValue() != macro.second;
+                        return !macro.second.get().empty();
+                    return iter->getValue() != macro.second.get();
                 }
             ) == (*headerInfoIter)->usedMacros().end()
         )

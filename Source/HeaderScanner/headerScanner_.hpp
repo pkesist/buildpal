@@ -74,9 +74,7 @@ struct HeaderRef
 
     bool operator<( HeaderRef const & other ) const
     {
-        if ( relative < other.relative )
-            return true;
-        return false;
+        return relative < other.relative;
     }
 
     bool operator==( HeaderRef const & other ) const

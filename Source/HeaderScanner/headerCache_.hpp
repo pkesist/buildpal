@@ -12,6 +12,7 @@
 #include <boost/functional/hash.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
+#include <boost/flyweight.hpp>
 
 #include <llvm/ADT/StringMap.h>
 
@@ -29,11 +30,25 @@ namespace clang
     class FileEntry;
 }
 
-typedef std::pair<std::string, std::string> Macro;
-typedef std::map<std::string, std::string> Macros;
+typedef std::pair<boost::flyweight<std::string>, boost::flyweight<std::string> > Macro;
+typedef std::map<boost::flyweight<std::string>, boost::flyweight<std::string> > Macros;
 
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
 typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
+
+inline Macro macroFromMacroRef( MacroRef const & macroRef )
+{
+    return std::make_pair(
+        boost::flyweight<std::string>( macroRef.first.data(), macroRef.first.size() ),
+        boost::flyweight<std::string>( macroRef.second.data(), macroRef.second.size() ) );
+}
+
+inline MacroRef macroRefFromMacro( Macro const & macro )
+{
+    return std::make_pair(
+        llvm::StringRef( macro.first.get().data(), macro.first.get().size() ),
+        llvm::StringRef( macro.second.get().data(), macro.second.get().size() ) );
+}
 
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
@@ -63,8 +78,9 @@ private:
         headers_( headers ),
         refCount_( 0 )
     {
-        std::copy( usedMacros.begin(), usedMacros.end(),
-            std::inserter( usedMacros_, usedMacros_.begin() ) );
+        std::transform( usedMacros.begin(), usedMacros.end(),
+            std::inserter( usedMacros_, usedMacros_.begin() ),
+            []( MacroRef macroRef ) { return macroFromMacroRef( macroRef ); } );
     }
 
 public:
@@ -195,7 +211,7 @@ public:
     }
 
     CacheEntryPtr findEntry
-    ( 
+    (
         llvm::StringRef fileName,
         MacroState const & macroState
     );

@@ -9,8 +9,6 @@
 #include "headerCache_.hpp"
 #include "utility_.hpp"
 
-#include "boost/bind.hpp"
-
 #include <string>
 #include <set>
 #include <vector>
@@ -73,7 +71,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, macroDef ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
             definedMacroNames_.insert( macroName );
         }
 
@@ -81,7 +79,7 @@ private:
         {
             assert ( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, llvm::StringRef() ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
         }
 
         void addHeader( HeaderName const & header )
@@ -98,13 +96,13 @@ private:
             DefinedMacroNames::const_iterator const definedEnd = definedMacroNames_.end();
             while ( cacheIter != cacheEnd && definedIter != definedEnd )
             {
-                int const compareResult = cacheIter->first.compare( *definedIter );
-                if ( compareResult > 0 )
+                int const compareResult = definedIter->compare( cacheIter->first.get() );
+                if ( compareResult < 0 )
                 {
-                    usedMacros_.insert( MacroRefs::value_type( cacheIter->first, cacheIter->second ) );
+                    usedMacros_.insert( MacroRefs::value_type( cacheIter->first.get(), cacheIter->second.get() ) );
                     ++cacheIter;
                 }
-                else if ( compareResult < 0 )
+                else if ( compareResult > 0 )
                 {
                     ++definedIter;
                 }
@@ -114,7 +112,13 @@ private:
                     ++definedIter;
                 }
             }
-            std::copy( cacheIter, cacheEnd, std::inserter( usedMacros_, usedMacros_.begin() ) );
+            std::transform( cacheIter, cacheEnd,
+                std::inserter( usedMacros_, usedMacros_.begin() ),
+                []( Macro const & macro )
+                {
+                    return macroRefFromMacro( macro );
+                }
+            );
 
             headerContent_.push_back( cacheEntry );
             if ( !ignoreHeaders )

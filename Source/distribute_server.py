@@ -4,6 +4,8 @@ from time import sleep
 from Common import bind_to_random_port
 from Server import ServerManager, ServerRunner
     
+from multiprocessing import cpu_count
+
 import configparser
 import os
 import sys
@@ -44,13 +46,15 @@ Usage:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
         header_repository = manager.HeaderRepository()
+        run_compiler_sem = manager.Semaphore(cpu_count())
 
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)
         control_port = bind_to_random_port(control)
         server_runner = ServerRunner(port, control_port, processes,
-                                     file_repository, header_repository,
-                                     cpu_usage_hwm, task_counter)
+                                     run_compiler_sem, file_repository,
+                                     header_repository, cpu_usage_hwm,
+                                     task_counter)
         server_runner.start()
 
         import signal

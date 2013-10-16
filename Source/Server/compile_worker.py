@@ -68,8 +68,9 @@ class CompileSession(ServerSession, ServerCompiler):
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
-    def __init__(self, file_repository, header_repository, cpu_usage_hwm, task_counter,
-                 compiler_setup, include_path, headers):
+    def __init__(self, file_repository, header_repository, run_compiler_sem,
+                 cpu_usage_hwm, task_counter, compiler_setup, include_path,
+                 headers):
         ServerCompiler.__init__(self, file_repository, compiler_setup,
                                 cpu_usage_hwm)
         self.state = self.STATE_START
@@ -77,6 +78,7 @@ class CompileSession(ServerSession, ServerCompiler):
         self.task_counter = task_counter
         self.compiler_setup = compiler_setup
         self.header_repository = header_repository
+        self.run_compiler_sem = run_compiler_sem
         self.include_path = include_path
         self.include_dirs = [self.include_path]
         self.times = {}
@@ -121,8 +123,9 @@ class CompileSession(ServerSession, ServerCompiler):
                 [compiler_info.include_option.make_value(incpath).make_str()
                     for incpath in self.include_dirs] +
                 [self.source_file])
-            retcode, stdout, stderr = self.compiler(command,
-                                                    self.include_path)
+            with self.run_compiler_sem:
+                retcode, stdout, stderr = self.compiler(command,
+                                                        self.include_path)
         except Exception:
             self.send(b'SERVER_FAILED')
             import traceback
@@ -243,12 +246,14 @@ class CompileSession(ServerSession, ServerCompiler):
 
 class CompileWorker(Process):
     def __init__(self, address, control_address, file_repository,
-                 header_repository, cpu_usage_hwm, task_counter):
+                 header_repository, run_compiler_sem, cpu_usage_hwm,
+                 task_counter):
         Process.__init__(self)
         self.__address = address
         self.__control_address = control_address
         self.__file_repository = file_repository
         self.__header_repository = header_repository
+        self.__run_compiler_sem = run_compiler_sem
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
         self.__include_path = tempfile.mkdtemp(suffix='', prefix='tmp',
@@ -256,10 +261,12 @@ class CompileWorker(Process):
         self.__headers = {}
 
     class SessionMaker:
-        def __init__(self, file_repository, header_repository, cpu_usage_hwm,
-                     task_counter, compiler_setup, include_path, headers):
+        def __init__(self, file_repository, header_repository, run_compiler_sem,
+                     cpu_usage_hwm, task_counter, compiler_setup, include_path,
+                     headers):
             self.__file_repository = file_repository
             self.__header_repository = header_repository
+            self.__run_compiler_sem = run_compiler_sem
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
             self.__compiler_setup = compiler_setup
@@ -269,6 +276,7 @@ class CompileWorker(Process):
         def __call__(self):
             return CompileSession(self.__file_repository,
                                   self.__header_repository,
+                                  self.__run_compiler_sem,
                                   self.__cpu_usage_hwm,
                                   self.__task_counter, self.__compiler_setup,
                                   self.__include_path, self.__headers)
@@ -279,6 +287,7 @@ class CompileWorker(Process):
             worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
                                     self.__file_repository,
                                     self.__header_repository,
+                                    self.__run_compiler_sem,
                                     self.__cpu_usage_hwm,
                                     self.__task_counter,
                                     compiler_setup,

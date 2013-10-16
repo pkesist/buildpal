@@ -9,6 +9,8 @@
 #include "headerCache_.hpp"
 #include "utility_.hpp"
 
+#include <boost/container/flat_set.hpp>
+
 #include <string>
 #include <set>
 #include <vector>
@@ -49,7 +51,7 @@ private:
     struct HeaderCtx
     {
     public:
-        explicit HeaderCtx( HeaderName const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor )
+        explicit HeaderCtx( HeaderFile const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor )
             :
             header_( header ),
             cacheHit_( cacheHit ),
@@ -82,7 +84,7 @@ private:
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
         }
 
-        void addHeader( HeaderName const & header )
+        void addHeader( HeaderFile const & header )
         {
             assert ( !fromCache() );
             includedHeaders_.push_back( header );
@@ -134,7 +136,7 @@ private:
         MacroRefs const & usedMacros() const { assert( !fromCache() ); return usedMacros_; }
         HeaderContent const & headerContent() const { return cacheHit_ ? cacheHit_->headerContent() : headerContent_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
-        HeaderName const & header() { return header_; }
+        HeaderFile const & header() { return header_; }
 
         CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
@@ -143,11 +145,11 @@ private:
         bool fromCache() const { return cacheHit_; }
 
     private:
-        typedef std::set<llvm::StringRef> DefinedMacroNames;
+        typedef boost::container::flat_set<llvm::StringRef> DefinedMacroNames;
 
     private:
         clang::Preprocessor const & preprocessor_;
-        HeaderName header_;
+        HeaderFile header_;
         CacheEntryPtr cacheHit_;
         MacroRefs usedMacros_;
         DefinedMacroNames definedMacroNames_;

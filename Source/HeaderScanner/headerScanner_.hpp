@@ -18,8 +18,6 @@ namespace clang
 class Cache;
 class HeaderTracker;
 
-typedef std::tuple<std::string, clang::FileEntry const *> HeaderName;
-
 class PreprocessingContext
 {
 public:
@@ -57,11 +55,12 @@ private:
 struct HeaderRef
 {
     HeaderRef(
-        HeaderName const & hn,
+        llvm::StringRef rel,
+        llvm::StringRef abs,
         char const * d,
         std::size_t s ) :
-        relative( std::get<0>( hn ) ),
-        absolute( std::get<1>( hn )->getName() ),
+        relative( rel ),
+        absolute( abs ),
         data( d ),
         size( s )
     {

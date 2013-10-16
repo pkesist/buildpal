@@ -6,12 +6,10 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 
-#ifndef DONT_USE_POOLED_MACROS_IN_CACHE
-#include <boost/flyweight.hpp>
-#endif
 #include <boost/intrusive_ptr.hpp>
 #include <boost/variant.hpp>
 #include <boost/container/list.hpp>
+#include <boost/container/flat_map.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 
@@ -26,6 +24,19 @@
 #include <unordered_set>
 #include <vector>
 //------------------------------------------------------------------------------
+#define POOL_MACROS_USING_BOOST_FLYWEIGHT
+#ifdef POOL_MACROS_USING_BOOST_FLYWEIGHT
+#include <boost/flyweight/flyweight.hpp>
+#include <boost/flyweight/hashed_factory.hpp>
+#include <boost/flyweight/tag.hpp>
+#include <boost/flyweight/no_locking.hpp>
+#include <boost/flyweight/no_tracking.hpp>
+#include <boost/flyweight/static_holder.hpp>
+#include <boost/flyweight/refcounted.hpp>
+#elif defined(POOL_MACROS_USING_LLVM_STRINGPOOL)
+#include <llvm/Support/StringPool.h>
+#endif
+//------------------------------------------------------------------------------
 
 namespace clang
 {
@@ -33,16 +44,24 @@ namespace clang
 }
 
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
-typedef std::map<llvm::StringRef, llvm::StringRef> MacroRefs;
+typedef boost::container::flat_map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
-#ifndef DONT_USE_POOLED_MACROS_IN_CACHE
+#ifdef POOL_MACROS_USING_BOOST_FLYWEIGHT
+struct HeaderNameTag {};
+typedef boost::flyweight<std::string, boost::flyweights::tag<HeaderNameTag>, boost::flyweights::no_locking> HeaderName;
+typedef std::tuple<HeaderName, clang::FileEntry const *> HeaderFile;
 struct MacroNameTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag> > MacroName;
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag>, boost::flyweights::no_locking> MacroName;
 struct MacroValueTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag> > MacroValue;
+typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag>, boost::flyweights::no_locking> MacroValue;
 
-typedef std::pair<MacroName, MacroValue> Macro;
-typedef std::map<MacroName, MacroValue> Macros;
+typedef boost::container::flat_map<MacroName, MacroValue> Macros;
+typedef Macros::value_type Macro;
+
+inline HeaderName headerNameFromDataAndSize( char const * data, std::size_t size )
+{
+    return HeaderName( data, size );
+}
 
 inline Macro macroFromMacroRef( MacroRef const & macroRef )
 {
@@ -65,9 +84,12 @@ inline MacroRef macroRefFromMacro( Macro const & macro )
 {
     return std::make_pair( macroName( macro ), macroValue( macro ) );
 }
-#else // DONT_USE_POOLED_MACROS_IN_CACHE
-typedef std::pair<std::string, std::string> Macro;
-typedef std::map<std::string, std::string> Macros;
+#else
+typedef std::string MacroName;
+typedef std::string MacroValue;
+
+typedef boost::container::flat_map<MacroName, MacroValue> Macros;
+typedef Macros::value_type Macro;
 
 inline Macro macroFromMacroRef( MacroRef const & macroRef )
 {
@@ -94,7 +116,7 @@ struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
-typedef boost::variant<HeaderName, CacheEntryPtr> Header;
+typedef boost::variant<HeaderFile, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;
 typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;

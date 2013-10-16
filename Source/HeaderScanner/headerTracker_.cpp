@@ -92,7 +92,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
         }
         if ( !isSystem )
         {
-            HeaderName header( std::make_tuple( std::string( relativeInc.data(), relativeInc.size() ), file ) );
+            HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file ) );
             headerCtxStack().back().addHeader( header );
         }
     }
@@ -107,7 +107,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_tuple( "<<<MAIN FILE>>>", mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_tuple( headerNameFromDataAndSize( "<<<MAIN_FILE>>>", 15 ), mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
     IncludePath buffer;
     buffer.append( relFilename.data(), relFilename.data() + relFilename.size() );
     fileStack_.push_back( std::make_tuple( mainFileEntry, false, buffer ) );
@@ -121,7 +121,7 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     assert( file );
     bool const isSystem( std::get<1>( currentEntry ) );
     IncludePath const & relName( std::get<2>( currentEntry ) );
-    HeaderName header( std::make_tuple( std::string( relName.data(), relName.size() ), file ) );
+    HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file ) );
     if ( file )
     {
         if ( !isSystem )
@@ -200,17 +200,20 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         Inserter( Preprocessor::HeaderRefs & result, clang::SourceManager & sourceManager )
             : result_( result ), sourceManager_( sourceManager ) {}
 
-        void operator()( HeaderName const & sp )
+        void operator()( HeaderFile const & h )
         {
             std::string error;
             bool invalid;
-            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( std::get<1>( sp ), &invalid );
+            clang::FileEntry const * headerFile( std::get<1>( h ) );
+            assert( headerFile );
+            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( headerFile, &invalid );
             if ( invalid )
-                buffer = sourceManager_.getFileManager().getBufferForFile( std::get<1>( sp ), &error );
+                buffer = sourceManager_.getFileManager().getBufferForFile( headerFile, &error );
             assert( buffer );
             result_.insert(
                 HeaderRef(
-                    sp,
+                    std::get<0>( h ).get(),
+                    headerFile->getName(),
                     buffer->getBufferStart(),
                     buffer->getBufferSize() ) );
         }

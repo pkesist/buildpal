@@ -20,12 +20,13 @@ class SourceScanner(Process):
         STATE_ATTACHING_TO_SESSION = 0
         STATE_SENDING_FILE_LIST = 1
 
-        def __init__(self, task, header_info, time):
+        def __init__(self, task, header_info, time, node_index):
             self.state = self.STATE_ATTACHING_TO_SESSION
             self.task = task
             self.header_info = header_info
             self.filelist = self.create_filelist()
             self.time = time
+            self.node_index = node_index
 
         def create_filelist(self):
             filelist = []
@@ -38,6 +39,7 @@ class SourceScanner(Process):
         zmq_ctx = zmq.Context()
         mgr_socket = zmq_ctx.socket(zmq.DEALER)
         mgr_socket.connect('tcp://localhost:{}'.format(self.__port))
+        sockets = {}
         sessions = {}
 
         poller = zmq.Poller()
@@ -55,11 +57,16 @@ class SourceScanner(Process):
                     header_info = self.header_info(task)
                     time = timer.get()
 
-                    socket = zmq_ctx.socket(zmq.DEALER)
-                    socket.connect(self.__nodes[node_index]['address'])
+                    available_sockets = sockets.setdefault(node_index, [])
+                    if available_sockets:
+                        socket = available_sockets[0]
+                        del available_sockets[0]
+                    else:
+                        socket = zmq_ctx.socket(zmq.DEALER)
+                        socket.connect(self.__nodes[node_index]['address'])
                     socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
                     poller.register(socket, zmq.POLLIN)
-                    sessions[socket] = self.Session(task, header_info, time)
+                    sessions[socket] = self.Session(task, header_info, time, node_index)
                 else:
                     assert sock in sessions
                     session = sessions[sock]
@@ -75,6 +82,9 @@ class SourceScanner(Process):
                         new_tar = self.tar_with_new_headers(session.task, req_files, session.header_info)
                         sock.send_multipart([b'TASK_FILES', new_tar.read()])
                         poller.unregister(sock)
+                        node_index = session.node_index
+                        del sessions[sock]
+                        sockets[node_index].append(sock)
                     else:
                         assert not "Invalid state"
 

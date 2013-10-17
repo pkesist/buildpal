@@ -80,7 +80,7 @@ private:
         void macroUndefined( llvm::StringRef macroName )
         {
             assert ( !fromCache() );
-            MacroRef const macro( std::make_pair( macroName, llvm::StringRef() ) );
+            MacroRef const macro( std::make_pair( macroName, undefinedMacroValue() ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
         }
 

@@ -238,17 +238,22 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
         return;
     //assert( macroState()[ name ] == macroDefFromSourceLocation( preprocessor_, def ) );
     MacroState::const_iterator const iter( macroState().find( name ) );
-    llvm::StringRef const macroDef( iter == macroState().end() ? llvm::StringRef() : iter->getValue() );
+    llvm::StringRef const macroDef( iter == macroState().end() ? undefinedMacroValue() : iter->getValue() );
     headerCtxStack().back().macroUsed( name, macroDef );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    llvm::StringRef const macroDef( macroDefFromSourceLocation( preprocessor_, def ) );
+    llvm::StringRef macroDef( macroDefFromSourceLocation( preprocessor_, def ) );
+    // This value starts with the macro name, i.e. just after the #define token.
+    // Remove it, it is redundant.
+    macroDef = llvm::StringRef( macroDef.data() + name.size(), macroDef.size() - name.size() );
     llvm::StringMapEntry<llvm::StringRef> * const entry( llvm::StringMapEntry<llvm::StringRef>::Create( name.data(), name.data() + name.size(), macroState().getAllocator(), macroDef ) );
     bool const insertSuccess = macroState().insert( entry );
     // It is OK to #define macro to its current value.
     // If this assertion fires, you most likely messed up the header cache.
+    // UPDATE: Unfortunately, some libraries (e.g. OpenSSL) #define macros to
+    // the sytactically same value, but lexically different.
     //assert( insertSuccess || macroState()[ name ] == macroDef );
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;

@@ -235,7 +235,6 @@ class TaskProcessor:
                                 sessions.register_session(session, node_index)
                             else:
                                 clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
-
                     else:
                         # Connection to server node.
                         result = sessions.get_session_for_server_conn(socket)

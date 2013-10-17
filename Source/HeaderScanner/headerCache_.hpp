@@ -114,6 +114,16 @@ inline MacroRef macroRefFromMacro( Macro const & macro )
 }
 #endif // DONT_USE_POOLED_MACROS_IN_CACHE
 
+inline llvm::StringRef undefinedMacroValue()
+{
+    return llvm::StringRef( "", 1 );
+}
+
+inline bool isUndefinedMacroValue( llvm::StringRef value )
+{
+    return value.size() == 1 && *value.data() == '\0';
+}
+
 struct MacroUsage { enum Enum { defined, undefined }; };
 typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;

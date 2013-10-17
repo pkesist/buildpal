@@ -6,12 +6,7 @@
 
 llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
 {
-    if ( !def )
-        // Empty string means undefined macro. If defined it will at least
-        // contain its name.
-        return llvm::StringRef();
-
-    clang::SourceManager & sourceManager( preprocessor.getSourceManager() );
+    assert( def );
     clang::MacroInfo const * macroInfo( def->getMacroInfo() );
     assert( macroInfo );
 
@@ -20,6 +15,7 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
 
     clang::SourceLocation const startLoc( macroInfo->getDefinitionLoc() );
     assert( !startLoc.isInvalid() );
+    clang::SourceManager & sourceManager( preprocessor.getSourceManager() );
     std::pair<clang::FileID, unsigned> startSpellingLoc( sourceManager.getDecomposedSpellingLoc( startLoc ) );
     bool invalid;
     llvm::StringRef const buffer( sourceManager.getBufferData( startSpellingLoc.first, &invalid ) );

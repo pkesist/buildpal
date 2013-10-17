@@ -35,14 +35,12 @@ void CacheEntry::generateContent()
         {
             if ( mwu.first == MacroUsage::defined )
             {
-                Macro const & macro( mwu.second );
-                ostream_ << "#define " << macroValue( macro ) << '\n';
+                ostream_ << "#define " << macroName( mwu.second ) << macroValue( mwu.second ) << '\n';
             }
-
-            if ( mwu.first == MacroUsage::undefined )
+            else
             {
-                Macro const & macro( mwu.second );
-                ostream_ << "#undef " << macroName( macro ) << '\n';
+                assert( mwu.first == MacroUsage::undefined );
+                ostream_ << "#undef " << macroName( mwu.second ) << '\n';
             }
         }
 
@@ -110,16 +108,18 @@ CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
     )
     {
         if (
-            std::find_if
+            std::find_if_not
             (
                 (*headerInfoIter)->usedMacros().begin(),
                 (*headerInfoIter)->usedMacros().end(),
                 [&]( Macro const & macro )
                 {
                     MacroState::const_iterator const iter( macroState.find( macroName( macro ) ) );
-                    if ( iter == macroState.end() )
-                        return !macroValue( macro ).empty();
-                    return iter->getValue() != macroValue( macro );
+                    llvm::StringRef const value( macroValue( macro ) );
+                    return iter == macroState.end()
+                        ? isUndefinedMacroValue( value )
+                        : iter->getValue() == value
+                    ;
                 }
             ) == (*headerInfoIter)->usedMacros().end()
         )

@@ -48,12 +48,14 @@ typedef boost::container::flat_map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
 #ifdef POOL_MACROS_USING_BOOST_FLYWEIGHT
 struct HeaderNameTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<HeaderNameTag>, boost::flyweights::no_locking> HeaderName;
+
+namespace BF = boost::flyweights;
+typedef boost::flyweight<std::string, BF::tag<HeaderNameTag>, BF::no_locking, BF::no_tracking> HeaderName;
 typedef std::tuple<HeaderName, clang::FileEntry const *> HeaderFile;
 struct MacroNameTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroNameTag>, boost::flyweights::no_locking> MacroName;
+typedef boost::flyweight<std::string, BF::tag<MacroNameTag>, BF::no_locking, BF::no_tracking> MacroName;
 struct MacroValueTag {};
-typedef boost::flyweight<std::string, boost::flyweights::tag<MacroValueTag>, boost::flyweights::no_locking> MacroValue;
+typedef boost::flyweight<std::string, BF::tag<MacroValueTag>, BF::no_locking, BF::no_tracking> MacroValue;
 
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;

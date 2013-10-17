@@ -23,10 +23,20 @@ class TaskProcessor:
 
     def best_node(self, node_info):
         def cmp(lhs, rhs):
-            lhs_tasks_processing = node_info[lhs].tasks_processing()
-            rhs_tasks_processing = node_info[rhs].tasks_processing()
-            lhs_time_per_task = node_info[lhs].average_task_time()
-            rhs_time_per_task = node_info[rhs].average_task_time()
+            lhs_node = node_info[lhs]
+            rhs_node = node_info[rhs]
+            lhs_tasks_processing = lhs_node.tasks_processing()
+            rhs_tasks_processing = rhs_node.tasks_processing()
+
+            def time_per_task(node):
+                timer = node.timer().as_dict()
+                hl_total, hl_count = timer.get('server.wait_for_header_list', (0, 1))
+                h_total, h_count = timer.get('server.wait_for_headers', (0, 1))
+                return node.average_task_time() - hl_total / hl_count + h_total / h_count
+
+            lhs_time_per_task = time_per_task(lhs_node)
+            rhs_time_per_task = time_per_task(rhs_node)
+
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
                 return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
             if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
@@ -37,7 +47,6 @@ class TaskProcessor:
                 return 1
             return -1 if lhs_tasks_processing * lhs_time_per_task <= rhs_tasks_processing * rhs_time_per_task else 1
         compare_key = cmp_to_key(cmp)
-
         return min(range(len(self.__nodes)), key=compare_key)
 
     def connect_to_node(self, zmq_ctx, node_index, recycled_connections):

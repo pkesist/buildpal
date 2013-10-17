@@ -4,15 +4,12 @@
 #include <clang/Basic/FileManager.h>
 #include <clang/Lex/Preprocessor.h>
 
-llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def )
+llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocessor, llvm::StringRef const macroName, clang::MacroDirective const * def )
 {
     assert( def );
     clang::MacroInfo const * macroInfo( def->getMacroInfo() );
     assert( macroInfo );
-
-    if ( macroInfo->isBuiltinMacro() )
-        return llvm::StringRef();
-
+    assert( !macroInfo->isBuiltinMacro() );
     clang::SourceLocation const startLoc( macroInfo->getDefinitionLoc() );
     assert( !startLoc.isInvalid() );
     clang::SourceManager & sourceManager( preprocessor.getSourceManager() );
@@ -22,6 +19,7 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
     assert( !invalid );
     char const * const macroStart = buffer.data() + startSpellingLoc.second;
     unsigned int const tokCount( macroInfo->getNumTokens() );
+    llvm::StringRef result;
     if ( !tokCount )
     {
         // Macro does not have any tokens. I have no idea how to get the length
@@ -32,14 +30,18 @@ llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preproce
         while ( *end != '\n' ) ++end;
         --end;
         while ( ( *end == '\t' ) || ( *end == ' ' ) || ( *end == '\r' ) || ( *end == '\\' ) ) --end;
-        return llvm::StringRef( macroStart, end - macroStart + 1 );
+        result = llvm::StringRef( macroStart, end - macroStart + 1 );
     }
-
-    clang::Token const & lastToken( macroInfo->getReplacementToken( tokCount - 1 ) );
-    clang::SourceLocation const endLoc( lastToken.getLocation() );
-    std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( endLoc ) );
-    endSpellingLoc.second += lastToken.getLength();
-    assert( startSpellingLoc.first == endSpellingLoc.first );
-    assert( startSpellingLoc.second <= endSpellingLoc.second );
-    return llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second );
+    else
+    {
+        clang::Token const & lastToken( macroInfo->getReplacementToken( tokCount - 1 ) );
+        clang::SourceLocation const endLoc( lastToken.getLocation() );
+        std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( endLoc ) );
+        endSpellingLoc.second += lastToken.getLength();
+        assert( startSpellingLoc.first == endSpellingLoc.first );
+        assert( startSpellingLoc.second <= endSpellingLoc.second );
+        result = llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second );
+    }
+    assert( std::memcmp( result.data(), macroName.data(), macroName.size() ) == 0 );
+    return llvm::StringRef( result.data() + macroName.size(), result.size() - macroName.size() );
 }

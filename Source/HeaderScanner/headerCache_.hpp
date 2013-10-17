@@ -132,7 +132,34 @@ typedef boost::variant<HeaderFile, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;
 typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
-typedef llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocator> MacroState;
+
+struct MacroState : public llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocator>
+{
+    llvm::StringRef macroValue( llvm::StringRef macroName ) const
+    {
+        MacroState::const_iterator const iter( find( macroName ) );
+        return iter == end() ? undefinedMacroValue() : iter->getValue() ;
+    }
+
+    void defineMacro( llvm::StringRef name, llvm::StringRef value )
+    {
+        llvm::StringMapEntry<llvm::StringRef> * const entry(
+            llvm::StringMapEntry<llvm::StringRef>::Create(
+                name.data(), name.data() + name.size(),
+                getAllocator(), value ) );
+        bool const insertSuccess = insert( entry );
+        // It is OK to #define macro to its current value.
+        // If this assertion fires, you most likely messed up the header cache.
+        // UPDATE: Unfortunately, some libraries (e.g. OpenSSL) #define macros to
+        // the sytactically same value, but lexically different.
+        //assert( insertSuccess || macroState()[ name ] == macroDef );
+    }
+
+    void undefineMacro( llvm::StringRef name )
+    {
+        erase( name );
+    }
+};
 
 void intrusive_ptr_add_ref( CacheEntry * );
 void intrusive_ptr_release( CacheEntry * );

@@ -61,17 +61,16 @@ private:
                 includedHeaders_.push_back( cacheHit );
         }
 
-        void macroUsed( llvm::StringRef macroName, llvm::StringRef macroDef )
+        void macroUsed( llvm::StringRef macroName, MacroState const & macroState )
         {
-            assert ( !fromCache() );
-            MacroRef const macro( std::make_pair( macroName, macroDef ) );
-            if ( definedMacroNames_.find( macro.first ) == definedMacroNames_.end() )
-                usedMacros_.insert( macro );
+            assert( !fromCache() );
+            if ( definedMacroNames_.find( macroName ) == definedMacroNames_.end() )
+                usedMacros_.insert( std::make_pair( macroName, macroState.macroValue( macroName ) ) );
         }
 
         void macroDefined( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
-            assert ( !fromCache() );
+            assert( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, macroDef ) );
             headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
             definedMacroNames_.insert( macroName );
@@ -79,7 +78,7 @@ private:
 
         void macroUndefined( llvm::StringRef macroName )
         {
-            assert ( !fromCache() );
+            assert( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, undefinedMacroValue() ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
         }

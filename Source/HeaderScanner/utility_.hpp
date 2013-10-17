@@ -13,7 +13,7 @@ namespace clang
     class MacroDirective;
 }
 
-llvm::StringRef macroDefFromSourceLocation( clang::Preprocessor const & preprocessor, clang::MacroDirective const * def );
+llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocessor, llvm::StringRef const macroName, clang::MacroDirective const * def );
 
 
 //------------------------------------------------------------------------------

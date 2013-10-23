@@ -31,8 +31,7 @@ class SourceScanner(Process):
         def create_filelist(self):
             filelist = []
             for file, abs, content, header in self.header_info:
-                stat = os.stat(abs)
-                filelist.append((file, stat.st_size + len(header), stat.st_mtime, os.path.normpath(abs)))
+                filelist.append((file, len(content) + len(header), os.path.normpath(abs)))
             return filelist
 
     def run(self):

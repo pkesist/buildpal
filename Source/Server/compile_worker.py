@@ -283,6 +283,8 @@ class CompileWorker(Process):
 
     def run(self):
         compiler_setup = {}
+        import signal
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
         try:
             worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
                                     self.__file_repository,
@@ -297,5 +299,7 @@ class CompileWorker(Process):
             worker.connect_broker(self.__address)
             worker.connect_control(self.__control_address)
             worker.run()
+        except KeyboardInterrupt:
+            pass
         finally:
             shutil.rmtree(self.__include_path)

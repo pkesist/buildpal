@@ -27,18 +27,25 @@ class ServerRunner(Process):
         self.__task_counter = task_counter
 
     def run(self):
+        import signal
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+
         broker = Broker(zmq.Context())
         broker.bind_clients('tcp://*:{}'.format(self.__port))
         broker.connect_control(self.__control_address)
         worker_address = 'tcp://localhost:{}'.format(
             bind_to_random_port(broker.servers))
-        workers = list((CompileWorker(worker_address, self.__control_address,
-            self.__file_repository, self.__header_repository,
-            self.__run_compiler_sem, self.__cpu_usage_hwm,
-            self.__task_counter)
-            for proc in range(self.__processes)))
-        for worker in workers:
-            worker.start()
-        broker.run()
-        for worker in workers:
-            worker.join()
+        try:
+            workers = list((CompileWorker(worker_address, self.__control_address,
+                self.__file_repository, self.__header_repository,
+                self.__run_compiler_sem, self.__cpu_usage_hwm,
+                self.__task_counter)
+                for proc in range(self.__processes)))
+            for worker in workers:
+                worker.start()
+            broker.run()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            for worker in workers:
+                worker.join()

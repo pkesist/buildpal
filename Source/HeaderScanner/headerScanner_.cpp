@@ -158,20 +158,6 @@ namespace
             //}
         }
     };
-
-    struct DoNotOpenFiles : public clang::MemorizeStatCalls
-    {
-        virtual LookupResult getStat
-        (
-            const char * path,
-            struct stat & statBuf,
-            bool isFile,
-            int * FileDescriptor
-        )
-        {
-            return clang::MemorizeStatCalls::getStat( path, statBuf, isFile, 0 );
-        };
-    };
 }  // anonymous namespace
 
 Preprocessor::Preprocessor( bool useCache )
@@ -202,7 +188,7 @@ Preprocessor::Preprocessor( bool useCache )
     hsopts.Sysroot.clear();
 
     compiler().createFileManager();
-    compiler().getFileManager().addStatCache( new DoNotOpenFiles() );
+    compiler().getFileManager().addStatCache( new clang::MemorizeStatCalls() );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
@@ -308,9 +294,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
 
     preprocessor().EnterMainSourceFile();
     if ( compiler().getDiagnostics().hasFatalErrorOccurred() )
-    {
         return result;
-    }
     while ( true )
     {
         clang::Token token;

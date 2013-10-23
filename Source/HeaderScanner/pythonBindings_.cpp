@@ -219,14 +219,11 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
         PyObject * tuple = PyTuple_New( 3 );
-        PyObject * first = PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() );
-        PyObject * second = PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() );
-        PyObject * third =  PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ );
-        PyTuple_SET_ITEM( tuple, 0, first );
-        PyTuple_SET_ITEM( tuple, 1, second );
-        PyTuple_SET_ITEM( tuple, 2, third );
-
-        PyTuple_SET_ITEM( result, index++, tuple );
+        PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
+        PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() ) );
+        PyTuple_SET_ITEM( tuple, 2, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
+        PyTuple_SET_ITEM( result, index, tuple );
+        ++index;
     }
     return result;
 }

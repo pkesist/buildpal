@@ -7,16 +7,17 @@ import tarfile
 from threading import Lock
 
 class Header:
-    def __init__(self, abs, dir, reader):
+    def __init__(self, abs, checksum, dir, reader):
         self._abs = abs
+        self._checksum = checksum
         handle, self.filename = tempfile.mkstemp(dir=dir)
         with os.fdopen(handle, 'wb') as tmp:
             for data in iter(reader.read, b''):
                 tmp.write(data)
             self._size = tmp.tell()
 
-    def matches(self, size):
-        return size == self._size
+    def matches(self, size, checksum):
+        return size == self._size and self._checksum == checksum
 
     def size(self):
         return self._size
@@ -42,10 +43,10 @@ class HeaderRepository:
         needed_files = {}
         out_list = []
         machine_files = self.files.get(machine_id)
-        for name, size, abs in in_list:
-            needed_files[name] = abs
+        for name, checksum, size, abs in in_list:
+            needed_files[name] = abs, checksum
             if abs not in machine_files or \
-                not machine_files[abs].matches(size):
+                not machine_files[abs].matches(size, checksum):
                 out_list.append(name)
         self.counter += 1
         self.needed_files[self.counter] = needed_files
@@ -76,11 +77,11 @@ class HeaderRepository:
                     # and do not remember it.
                     new_files_tar.extract(tar_info, dir)
                 else:
-                    abs = needed_files[tar_info.name]
+                    abs, checksum = needed_files[tar_info.name]
                     content = new_files_tar.extractfile(tar_info)
-                    machine_files[abs] = Header(abs, self.dir, content)
+                    machine_files[abs] = Header(abs, checksum, self.dir, content)
             # Do not copy the files here. This is a shared resource and we want
             # to be as fast as possible. Let the caller worry about copying.
             files_to_copy = list((machine_files[abs].location(), name)
-                for name, abs in needed_files.items())
+                for name, (abs, checksum) in needed_files.items())
         return include_paths, files_to_copy

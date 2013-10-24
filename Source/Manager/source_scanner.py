@@ -6,6 +6,7 @@ import zmq
 import tarfile
 import os
 import pickle
+from hashlib import md5
 
 from io import BytesIO
 from multiprocessing import Process
@@ -30,8 +31,8 @@ class SourceScanner(Process):
 
         def create_filelist(self):
             filelist = []
-            for file, abs, content, header in self.header_info:
-                filelist.append((file, len(content) + len(header), os.path.normpath(abs)))
+            for file, abs, content, header, digest in self.header_info:
+                filelist.append((file, digest, len(content) + len(header), os.path.normpath(abs)))
             return filelist
 
     def run(self):
@@ -53,7 +54,7 @@ class SourceScanner(Process):
                     task = pickle.loads(task)
                     node_index = pickle.loads(node_index)
                     timer = SimpleTimer()
-                    header_info = self.header_info(task)
+                    header_info = list(self.header_info(task))
                     time = timer.get()
 
                     available_sockets = sockets.setdefault(node_index, [])
@@ -104,13 +105,13 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        file, abs, content, header = next(header_info_iter)
+                        file, abs, content, header, digest = next(header_info_iter)
                         if in_name == file:
                             found = True
                             break
                     except StopIteration:
                         print("Could not find information for", in_name)
-                        raise
+                        raise 
                 assert found
                 depth = 0
                 path_elements = file.split('/')
@@ -146,4 +147,10 @@ class SourceScanner(Process):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
             [task['pch_header']] if task['pch_header'] else [])
-        return list(h + (cls.header_beginning(h[1]),) for h in header_info)
+        for file, abs, content in header_info:
+            input = BytesIO(content)
+            hash = md5()
+            for chunk in iter(lambda : input.read(128 * hash.block_size), b''):
+                hash.update(chunk)
+            digest = hash.digest()
+            yield file, abs, content, cls.header_beginning(abs), digest

@@ -45,7 +45,7 @@ class ServerRunner(Process):
                 worker.start()
             broker.run()
         except KeyboardInterrupt:
-            pass
+            print("\nCleaning up...")
         finally:
             for worker in workers:
                 worker.join()

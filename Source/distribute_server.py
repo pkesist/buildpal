@@ -46,7 +46,7 @@ Usage:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
         header_repository = manager.HeaderRepository()
-        run_compiler_sem = manager.Semaphore(cpu_count())
+        run_compiler_sem = manager.Semaphore(cpu_count() + 1)
 
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)

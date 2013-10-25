@@ -18,15 +18,14 @@ class SourceScanner(Process):
         return super().__init__()
 
     class Session:
-        STATE_ATTACHING_TO_SESSION = 0
-        STATE_SENDING_FILE_LIST = 1
+        STATE_ATTACHING_TO_SESSION = 1
+        STATE_SENDING_FILE_LIST = 2
 
-        def __init__(self, task, header_info, time, node_index):
+        def __init__(self, task, header_info, node_index):
             self.state = self.STATE_ATTACHING_TO_SESSION
             self.task = task
             self.header_info = header_info
             self.filelist = self.create_filelist()
-            self.time = time
             self.node_index = node_index
 
         def create_filelist(self):
@@ -35,12 +34,17 @@ class SourceScanner(Process):
                 filelist.append((file, digest, len(content) + len(header), os.path.normpath(abs)))
             return filelist
 
+    STATE_WAITING_FOR_TASK = 0
+    STATE_WAITING_FOR_SERVER = 1
+
     def run(self):
         zmq_ctx = zmq.Context()
         mgr_socket = zmq_ctx.socket(zmq.DEALER)
         mgr_socket.connect('tcp://localhost:{}'.format(self.__port))
+        mgr_socket.send(b'PREPROCESSOR_READY')
         sockets = {}
-        sessions = {}
+        server_sessions = {}
+        state = self.STATE_WAITING_FOR_TASK
 
         poller = zmq.Poller()
         poller.register(mgr_socket, zmq.POLLIN)
@@ -50,30 +54,38 @@ class SourceScanner(Process):
             for sock, event in socks.items():
                 assert event == zmq.POLLIN
                 if sock is mgr_socket:
-                    server_id, task, node_index = mgr_socket.recv_multipart()
-                    task = pickle.loads(task)
-                    node_index = pickle.loads(node_index)
-                    timer = SimpleTimer()
-                    header_info = list(self.header_info(task))
-                    time = timer.get()
-
-                    available_sockets = sockets.setdefault(node_index, [])
-                    if available_sockets:
-                        socket = available_sockets[0]
-                        del available_sockets[0]
+                    if state == self.STATE_WAITING_FOR_TASK:
+                        jorgula = mgr_socket.recv()
+                        self.task = pickle.loads(jorgula)
+                        timer = SimpleTimer()
+                        self.header_info = list(self.header_info(self.task))
+                        time = timer.get()
+                        mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(time)])
+                        state = self.STATE_WAITING_FOR_SERVER
                     else:
-                        socket = zmq_ctx.socket(zmq.DEALER)
-                        socket.connect(self.__nodes[node_index]['address'])
-                    socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
-                    poller.register(socket, zmq.POLLIN)
-                    sessions[socket] = self.Session(task, header_info, time, node_index)
+                        assert state == self.STATE_WAITING_FOR_SERVER
+                        server_id, node_index = mgr_socket.recv_multipart()
+                        node_index = pickle.loads(node_index)
+                        available_sockets = sockets.setdefault(node_index, [])
+                        if available_sockets:
+                            socket = available_sockets[0]
+                            del available_sockets[0]
+                        else:
+                            socket = zmq_ctx.socket(zmq.DEALER)
+                            socket.connect(self.__nodes[node_index]['address'])
+                        socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
+                        poller.register(socket, zmq.POLLIN)
+                        server_sessions[socket] = self.Session(self.task, self.header_info, node_index)
+                        del self.task
+                        del self.header_info
+                        state = self.STATE_WAITING_FOR_TASK
                 else:
-                    assert sock in sessions
-                    session = sessions[sock]
+                    assert sock in server_sessions
+                    session = server_sessions[sock]
                     if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
                         msg = sock.recv_multipart()
                         assert len(msg) == 1 and msg[0] == b'SESSION_ATTACHED'
-                        sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist), pickle.dumps(session.time)])
+                        sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
                         session.state = self.Session.STATE_SENDING_FILE_LIST
                     elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                         resp = sock.recv_multipart()
@@ -83,7 +95,7 @@ class SourceScanner(Process):
                         sock.send_multipart([b'TASK_FILES', new_tar.read()])
                         poller.unregister(sock)
                         node_index = session.node_index
-                        del sessions[sock]
+                        del server_sessions[sock]
                         sockets[node_index].append(sock)
                     else:
                         assert not "Invalid state"

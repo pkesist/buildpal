@@ -209,7 +209,6 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.times['wait_for_header_list'] = 0
             self.wait_for_headers = SimpleTimer()
             assert msg[0] == b'TASK_FILE_LIST'
-            self.times['preprocessing.internal'] = pickle.loads(msg[2])
             filelist = pickle.loads(msg[1])
             missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
             socket.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])

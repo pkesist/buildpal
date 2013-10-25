@@ -1,7 +1,10 @@
+from Compilers import MSVCWrapper
+
 from .compile_session import CompileSession
 from .node_info import NodeInfo
 from .source_scanner import SourceScanner
 from .timer import Timer
+from .task_creator import create_tasks
 
 from Common import bind_to_random_port
 
@@ -97,7 +100,7 @@ class TaskProcessor:
         client_socket = zmq_ctx.socket(zmq.STREAM)
         client_socket.bind('tcp://*:{}'.format(self.__port))
 
-        preprocess_socket = zmq_ctx.socket(zmq.DEALER)
+        preprocess_socket = zmq_ctx.socket(zmq.ROUTER)
         preprocess_socket_port = bind_to_random_port(preprocess_socket)
 
         registered_sockets = set()
@@ -114,6 +117,7 @@ class TaskProcessor:
             poller.unregister(socket)
 
         register_socket(client_socket)
+        register_socket(preprocess_socket)
 
         compiler_info = {}
 
@@ -129,23 +133,28 @@ class TaskProcessor:
         recycled_connections = {}
 
         class Sessions:
+            FROM_CLIENT = 0
+            FROM_PREPR  = 1
+            FROM_SERVER = 2
+
             def __init__(self):
-                self.session_from_server = {}
-                self.session_from_client = {}
+                self.session = {self.FROM_CLIENT : {}, self.FROM_PREPR : {},
+                                self.FROM_SERVER : {}}
 
-            def register_session(self, session, node_index):
-                self.session_from_server[session.server_conn] = session, node_index
-                self.session_from_client[session.client_conn.id] = session
+            def register(self, type, key, *val):
+                self.session[type][key] = val
 
-            def unregister_session(self, session):
-                del self.session_from_server[session.server_conn]
-                del self.session_from_client[session.client_conn.id]
+            def get(self, type, key):
+                result = self.session[type].get(key)
+                if result is None:
+                    return None
+                assert isinstance(result, tuple)
+                if len(result) == 1:
+                    return result[0]
+                return result
 
-            def get_session_for_server_conn(self, server_conn):
-                return self.session_from_server.get(server_conn)
-
-            def get_session_for_client_id(self, client_id):
-                return self.session_from_client.get(client_id)
+            def unregister(self, type, key):
+                del self.session[type][key]
 
         sessions = Sessions()
 
@@ -201,6 +210,12 @@ class TaskProcessor:
         # Clients waiting for a node.
         clients_waiting = []
 
+        # Preprocessor names.
+        preprocessors = []
+        waiting_for_preprocessor = []
+
+        self.timer = Timer()
+
         try:
             while True:
                 self.print_stats(node_info, recycled_connections)
@@ -217,36 +232,75 @@ class TaskProcessor:
                     if flags != zmq.POLLIN:
                         continue
 
+                    elif socket is preprocess_socket:
+                        msg = preprocess_socket.recv_multipart()
+                        preprocessor_id = msg[0]
+                        if msg[1] == b'PREPROCESSOR_READY':
+                            assert preprocessor_id not in preprocessors
+                            if waiting_for_preprocessor:
+                                compiler, executable, task, client_conn = \
+                                    waiting_for_preprocessor[0]
+                                del waiting_for_preprocessor[0]
+                                session = CompileSession(compiler, executable, task,
+                                    client_conn, preprocess_socket,
+                                    preprocessor_id, compiler_info)
+                                sessions.register(Sessions.FROM_CLIENT,
+                                    client_conn.id, session)
+                                sessions.register(Sessions.FROM_PREPR,
+                                    preprocessor_id, session)
+                            else:
+                                preprocessors.append(preprocessor_id)
+                        else:
+                            session = sessions.get(Sessions.FROM_PREPR, preprocessor_id)
+                            if session:
+                                assert msg[1] == b'PREPROCESSING_DONE'
+                                time = pickle.loads(msg[2])
+                                self.timer.add_time('preprocessing', time)
+                                sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
+                                node_index = self.best_node(node_info)
+                                server_conn = node_manager.get_server_conn(node_index)
+                                if server_conn:
+                                    preprocessor_id = session.preprocessing_done(server_conn, node_info[node_index])
+                                    sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
+                                    preprocessors.append(preprocessor_id)
+                                else:
+                                    clients_waiting.append(session)
                     elif socket is client_socket:
                         msg = client_socket.recv_multipart()
                         client_id = msg[0]
                         assert len(msg) == 2
                         assert msg[1][-2:] == b'\x00\x01'
                         parts = msg[1][:-2].split(b'\x00')
-                        session = sessions.get_session_for_client_id(client_id)
+                        session = sessions.get(Sessions.FROM_CLIENT, client_id)
                         if session:
                             session.got_data_from_client(parts)
                         else:
                             # Create new session.
-                            compiler = parts[0].decode()
+                            compiler_name = parts[0].decode()
                             executable = parts[1].decode()
                             sysincludes = parts[2].decode()
                             cwd = parts[3].decode()
                             command = [x.decode() for x in parts[4:]]
                             client_conn = self.SendProxy(client_socket, client_id)
                             client_conn.send([b"TASK_RECEIVED"])
-                            node_index = self.best_node(node_info)
-                            server_conn = node_manager.get_server_conn(node_index)
-                            if server_conn:
-                                session = CompileSession(compiler, executable, cwd, sysincludes,
-                                    command, client_conn, server_conn,
-                                    preprocess_socket, node_info[node_index], compiler_info)
-                                sessions.register_session(session, node_index)
-                            else:
-                                clients_waiting.append((client_conn, compiler, executable, sysincludes, cwd, command))
+                            assert compiler_name == 'msvc'
+                            compiler = MSVCWrapper()
+                            for task in create_tasks(client_conn, compiler,
+                                executable, cwd, sysincludes, command):
+                                if preprocessors:
+                                    preprocessor_id = preprocessors[0]
+                                    del preprocessors[0]
+                                    session = CompileSession(compiler, executable, task,
+                                        client_conn, preprocess_socket,
+                                        preprocessor_id, compiler_info)
+                                    sessions.register(Sessions.FROM_CLIENT, client_conn.id, session)
+                                    sessions.register(Sessions.FROM_PREPR, preprocessor_id, session)
+                                else:
+                                    waiting_for_preprocessor.append((compiler,
+                                        executable, task, client_conn))
                     else:
                         # Connection to server node.
-                        result = sessions.get_session_for_server_conn(socket)
+                        result = sessions.get(Sessions.FROM_SERVER, socket)
                         if result is not None:
                             # Part of a session.
                             session, node_index = result
@@ -254,7 +308,8 @@ class TaskProcessor:
                             client_id = session.client_conn.id
                             session_done = session.got_data_from_server(msg)
                             if session_done:
-                                sessions.unregister_session(session)
+                                sessions.unregister(Sessions.FROM_SERVER, socket)
+                                sessions.unregister(Sessions.FROM_CLIENT, client_id)
                                 unregister_socket(socket)
                                 recycled = recycled_connections.setdefault(
                                     node_index, [])
@@ -262,16 +317,17 @@ class TaskProcessor:
                                 recycled.append(socket)
                         else:
                             # Not part of a session, handled by node_manager.
-                            ready_node_index = node_manager.handle_socket(socket)
-                            if ready_node_index is not None and clients_waiting:
-                                server_conn = node_manager.get_server_conn(ready_node_index)
+                            if socket not in node_manager.sockets_registered:
+                                print("JOJO", socket.recv_multipart())
+                            node_index = node_manager.handle_socket(socket)
+                            if node_index is not None and clients_waiting:
+                                server_conn = node_manager.get_server_conn(node_index)
                                 assert server_conn
-                                client_conn, compiler, executable, sysincludes, cwd, command = clients_waiting[0]
+                                session = clients_waiting[0]
                                 del clients_waiting[0]
-                                session = CompileSession(compiler, executable, cwd, sysincludes,
-                                    command, client_conn, server_conn,
-                                    preprocess_socket, node_info[ready_node_index], compiler_info)
-                                sessions.register_session(session, ready_node_index)
+                                preprocessor_id = session.preprocessing_done(server_conn, node_info[node_index])
+                                sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
+                                preprocessors.append(preprocessor_id)
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()
@@ -300,6 +356,12 @@ class TaskProcessor:
                 node.average_tasks    (),
                 node.average_task_time()))
         print("================")
+        def print_times(times):
+            sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
+            sorted_times.sort(key=operator.itemgetter(1), reverse=True)
+            for name, tm, count, average in sorted_times:
+                print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
+        print_times(self.timer.as_dict())
         for index in range(len(node_info)):
             node = node_info[index]
             times = node.timer().as_dict()
@@ -308,8 +370,5 @@ class TaskProcessor:
             print("================")
             print("Statistics for '{}'".format(node.node_dict()['address']))
             print("================")
-            sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
-            sorted_times.sort(key=operator.itemgetter(1), reverse=True)
-            for name, tm, count, average in sorted_times:
-                print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
+            print_times(times)
         return True

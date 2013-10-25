@@ -165,7 +165,7 @@ class MSVCWrapper(CompilerWrapper):
                     lines.append('#endif\n')
                 file.writelines(lines)
 
-        def __del__(self):
+        def destroy(self):
             os.remove(self.cpp_filename)
             os.remove(self.obj_filename)
 

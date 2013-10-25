@@ -214,7 +214,8 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
-        assert self.state in [self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT]
+        assert self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
+        self.test_source.destroy()
         del self.test_source
         retcode = int(msg[0])
         stdout = msg[1]

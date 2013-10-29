@@ -1,4 +1,5 @@
 from Compilers import MSVCWrapper
+from Common import SimpleTimer, RendezVous
 
 from .compile_session import CompileSession
 from .node_info import NodeInfo
@@ -65,7 +66,7 @@ class TaskProcessor:
                 self.__unique_id += 1
                 socket.connect(node_address)
             except zmq.ZMQError:
-                print("Failed to connect to '{}'".format(node))
+                print("Failed to connect to '{}'".format(node_address))
                 return None
         socket.send(b'CREATE_SESSION')
         return socket
@@ -103,18 +104,10 @@ class TaskProcessor:
         preprocess_socket = zmq_ctx.socket(zmq.ROUTER)
         preprocess_socket_port = bind_to_random_port(preprocess_socket)
 
-        registered_sockets = set()
         poller = zmq.Poller()
 
-        def register_socket(socket):
-            assert socket not in registered_sockets
-            poller.register(socket, zmq.POLLIN)
-            registered_sockets.add(socket)
-
-        def unregister_socket(socket):
-            assert socket in registered_sockets
-            registered_sockets.remove(socket)
-            poller.unregister(socket)
+        register_socket = lambda socket : poller.register(socket, zmq.POLLIN)
+        unregister_socket = lambda socket : poller.unregister(socket)
 
         register_socket(client_socket)
         register_socket(preprocess_socket)
@@ -127,7 +120,7 @@ class TaskProcessor:
         for scan_worker in scan_workers:
             scan_worker.start()
 
-        connections_per_node = 4
+        connections_per_node = 16
 
         # Connections to be re-used.
         recycled_connections = {}
@@ -211,11 +204,40 @@ class TaskProcessor:
         clients_waiting = []
 
         # Preprocessor names.
-        preprocessors = []
+        self.preprocessors = set()
+        preprocessor_experience = {}
         waiting_for_preprocessor = []
 
         self.timer = Timer()
 
+        def get_preprocessor():
+            if not self.preprocessors:
+                return None
+            result = max(self.preprocessors, key=lambda prep : preprocessor_experience[prep])
+            assert result
+            self.preprocessors.remove(result)
+            return result
+
+        def preprocessor_ready(preprocessor_id):
+            assert preprocessor_id not in self.preprocessors
+            if preprocessor_id in preprocessor_experience:
+                preprocessor_experience[preprocessor_id] += 1
+            else:
+                preprocessor_experience[preprocessor_id] = 0
+            if waiting_for_preprocessor:
+                compiler, executable, task, client_conn, timer = \
+                    waiting_for_preprocessor[0]
+                self.timer.add_time('waiting.preprocessor', timer.get())
+                del waiting_for_preprocessor[0]
+                session = CompileSession(compiler, executable, task,
+                    client_conn, preprocess_socket,
+                    preprocessor_id, compiler_info)
+                sessions.register(Sessions.FROM_CLIENT,
+                    client_conn.id, session)
+                sessions.register(Sessions.FROM_PREPR,
+                    preprocessor_id, session)
+            else:
+                self.preprocessors.add(preprocessor_id)
         try:
             while True:
                 self.print_stats(node_info, recycled_connections)
@@ -233,101 +255,91 @@ class TaskProcessor:
                         continue
 
                     elif socket is preprocess_socket:
-                        msg = preprocess_socket.recv_multipart()
-                        preprocessor_id = msg[0]
-                        if msg[1] == b'PREPROCESSOR_READY':
-                            assert preprocessor_id not in preprocessors
-                            if waiting_for_preprocessor:
-                                compiler, executable, task, client_conn = \
-                                    waiting_for_preprocessor[0]
-                                del waiting_for_preprocessor[0]
-                                session = CompileSession(compiler, executable, task,
-                                    client_conn, preprocess_socket,
-                                    preprocessor_id, compiler_info)
-                                sessions.register(Sessions.FROM_CLIENT,
-                                    client_conn.id, session)
-                                sessions.register(Sessions.FROM_PREPR,
-                                    preprocessor_id, session)
+                        with self.timer.timeit('poller.preprocess'):
+                            msg = preprocess_socket.recv_multipart()
+                            preprocessor_id = msg[0]
+                            if msg[1] == b'PREPROCESSOR_READY':
+                                preprocessor_ready(preprocessor_id)
                             else:
-                                preprocessors.append(preprocessor_id)
-                        else:
-                            session = sessions.get(Sessions.FROM_PREPR, preprocessor_id)
-                            if session:
-                                assert msg[1] == b'PREPROCESSING_DONE'
-                                time = pickle.loads(msg[2])
-                                self.timer.add_time('preprocessing', time)
-                                sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
-                                node_index = self.best_node(node_info)
-                                server_conn = node_manager.get_server_conn(node_index)
-                                if server_conn:
-                                    preprocessor_id = session.preprocessing_done(server_conn, node_info[node_index])
-                                    sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
-                                    preprocessors.append(preprocessor_id)
-                                else:
-                                    clients_waiting.append(session)
+                                session = sessions.get(Sessions.FROM_PREPR, preprocessor_id)
+                                if session:
+                                    assert msg[1] == b'PREPROCESSING_DONE'
+                                    time = pickle.loads(msg[2])
+                                    self.timer.add_time('preprocessing', time)
+                                    node_index = self.best_node(node_info)
+                                    server_conn = node_manager.get_server_conn(node_index)
+                                    if server_conn:
+                                        session.preprocessing_done(server_conn, node_info[node_index])
+                                        sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
+                                        sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
+                                        preprocessor_ready(preprocessor_id)
+                                    else:
+                                        clients_waiting.append((session, preprocessor_id, SimpleTimer()))
                     elif socket is client_socket:
-                        msg = client_socket.recv_multipart()
-                        client_id = msg[0]
-                        assert len(msg) == 2
-                        assert msg[1][-2:] == b'\x00\x01'
-                        parts = msg[1][:-2].split(b'\x00')
-                        session = sessions.get(Sessions.FROM_CLIENT, client_id)
-                        if session:
-                            session.got_data_from_client(parts)
-                        else:
-                            # Create new session.
-                            compiler_name = parts[0].decode()
-                            executable = parts[1].decode()
-                            sysincludes = parts[2].decode()
-                            cwd = parts[3].decode()
-                            command = [x.decode() for x in parts[4:]]
-                            client_conn = self.SendProxy(client_socket, client_id)
-                            client_conn.send([b"TASK_RECEIVED"])
-                            assert compiler_name == 'msvc'
-                            compiler = MSVCWrapper()
-                            for task in create_tasks(client_conn, compiler,
-                                executable, cwd, sysincludes, command):
-                                if preprocessors:
-                                    preprocessor_id = preprocessors[0]
-                                    del preprocessors[0]
-                                    session = CompileSession(compiler, executable, task,
-                                        client_conn, preprocess_socket,
-                                        preprocessor_id, compiler_info)
-                                    sessions.register(Sessions.FROM_CLIENT, client_conn.id, session)
-                                    sessions.register(Sessions.FROM_PREPR, preprocessor_id, session)
-                                else:
-                                    waiting_for_preprocessor.append((compiler,
-                                        executable, task, client_conn))
+                        with self.timer.timeit('poller.client'):
+                            msg = client_socket.recv_multipart()
+                            client_id = msg[0]
+                            assert len(msg) == 2
+                            assert msg[1][-2:] == b'\x00\x01'
+                            parts = msg[1][:-2].split(b'\x00')
+                            session = sessions.get(Sessions.FROM_CLIENT, client_id)
+                            if session:
+                                session.got_data_from_client(parts)
+                            else:
+                                # Create new session.
+                                compiler_name = parts[0].decode()
+                                executable = parts[1].decode()
+                                sysincludes = parts[2].decode()
+                                cwd = parts[3].decode()
+                                command = [x.decode() for x in parts[4:]]
+                                client_conn = self.SendProxy(client_socket, client_id)
+                                client_conn.send([b'TASK_RECEIVED'])
+                                assert compiler_name == 'msvc'
+                                compiler = MSVCWrapper()
+                                tasks = create_tasks(client_conn, compiler,
+                                    executable, cwd, sysincludes, command)
+                                for task in tasks:
+                                    preprocessor_id = get_preprocessor()
+                                    if preprocessor_id:
+                                        session = CompileSession(compiler, executable, task,
+                                            client_conn, preprocess_socket,
+                                            preprocessor_id, compiler_info)
+                                        sessions.register(Sessions.FROM_CLIENT, client_conn.id, session)
+                                        sessions.register(Sessions.FROM_PREPR, preprocessor_id, session)
+                                    else:
+                                        waiting_for_preprocessor.append((compiler,
+                                            executable, task, client_conn, SimpleTimer()))
                     else:
-                        # Connection to server node.
-                        result = sessions.get(Sessions.FROM_SERVER, socket)
-                        if result is not None:
-                            # Part of a session.
-                            session, node_index = result
-                            msg = socket.recv_multipart()
-                            client_id = session.client_conn.id
-                            session_done = session.got_data_from_server(msg)
-                            if session_done:
-                                sessions.unregister(Sessions.FROM_SERVER, socket)
-                                sessions.unregister(Sessions.FROM_CLIENT, client_id)
-                                unregister_socket(socket)
-                                recycled = recycled_connections.setdefault(
-                                    node_index, [])
-                                assert socket not in recycled
-                                recycled.append(socket)
-                        else:
-                            # Not part of a session, handled by node_manager.
-                            if socket not in node_manager.sockets_registered:
-                                print("JOJO", socket.recv_multipart())
-                            node_index = node_manager.handle_socket(socket)
-                            if node_index is not None and clients_waiting:
-                                server_conn = node_manager.get_server_conn(node_index)
-                                assert server_conn
-                                session = clients_waiting[0]
-                                del clients_waiting[0]
-                                preprocessor_id = session.preprocessing_done(server_conn, node_info[node_index])
-                                sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
-                                preprocessors.append(preprocessor_id)
+                        with self.timer.timeit('poller.server'):
+                            # Connection to server node.
+                            result = sessions.get(Sessions.FROM_SERVER, socket)
+                            if result is not None:
+                                # Part of a session.
+                                session, node_index = result
+                                msg = socket.recv_multipart()
+                                client_id = session.client_conn.id
+                                session_done = session.got_data_from_server(msg)
+                                if session_done:
+                                    sessions.unregister(Sessions.FROM_SERVER, socket)
+                                    sessions.unregister(Sessions.FROM_CLIENT, client_id)
+                                    unregister_socket(socket)
+                                    recycled = recycled_connections.setdefault(
+                                        node_index, [])
+                                    assert socket not in recycled
+                                    recycled.append(socket)
+                            else:
+                                # Not part of a session, handled by node_manager.
+                                node_index = node_manager.handle_socket(socket)
+                                if node_index is not None and clients_waiting:
+                                    server_conn = node_manager.get_server_conn(node_index)
+                                    assert server_conn
+                                    session, preprocessor_id, timer = clients_waiting[0]
+                                    self.timer.add_time('waiting.server', timer.get())
+                                    del clients_waiting[0]
+                                    session.preprocessing_done(server_conn, node_info[node_index])
+                                    sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
+                                    sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
+                                    preprocessor_ready(preprocessor_id)
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()
@@ -355,6 +367,8 @@ class TaskProcessor:
                 node.tasks_processing (),
                 node.average_tasks    (),
                 node.average_task_time()))
+        print("================")
+        print("Preprocessors ready: {}".format(len(self.preprocessors)))
         print("================")
         def print_times(times):
             sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]

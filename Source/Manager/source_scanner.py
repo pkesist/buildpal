@@ -55,16 +55,17 @@ class SourceScanner(Process):
                 assert event == zmq.POLLIN
                 if sock is mgr_socket:
                     if state == self.STATE_WAITING_FOR_TASK:
-                        jorgula = mgr_socket.recv()
-                        self.task = pickle.loads(jorgula)
+                        tag, self.task = mgr_socket.recv_multipart()
+                        assert tag == b'PREPROCESS_TASK'
+                        self.task = pickle.loads(self.task)
                         timer = SimpleTimer()
                         self.header_info = list(self.header_info(self.task))
-                        time = timer.get()
-                        mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(time)])
+                        mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(timer.get())])
                         state = self.STATE_WAITING_FOR_SERVER
                     else:
                         assert state == self.STATE_WAITING_FOR_SERVER
-                        server_id, node_index = mgr_socket.recv_multipart()
+                        tag, server_id, node_index = mgr_socket.recv_multipart()
+                        assert tag == b'SEND_TO_SERVER'
                         node_index = pickle.loads(node_index)
                         available_sockets = sockets.setdefault(node_index, [])
                         if available_sockets:
@@ -75,6 +76,9 @@ class SourceScanner(Process):
                             socket.connect(self.__nodes[node_index]['address'])
                         socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
                         poller.register(socket, zmq.POLLIN)
+                        assert socket not in server_sessions
+                        task = self.task
+                        header_info = self.header_info
                         server_sessions[socket] = self.Session(self.task, self.header_info, node_index)
                         del self.task
                         del self.header_info
@@ -94,9 +98,9 @@ class SourceScanner(Process):
                         new_tar = self.tar_with_new_headers(session.task, req_files, session.header_info)
                         sock.send_multipart([b'TASK_FILES', new_tar.read()])
                         poller.unregister(sock)
-                        node_index = session.node_index
+                        sockets[session.node_index].append(sock)
                         del server_sessions[sock]
-                        sockets[node_index].append(sock)
+                        
                     else:
                         assert not "Invalid state"
 

@@ -35,6 +35,7 @@
     <Compile Include="Source\Manager\compile_session.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\scan_headers.py" />
+    <Compile Include="Source\Manager\task_creator.py" />
     <Compile Include="Source\Manager\timer.py" />
     <Compile Include="Source\Manager\source_scanner.py" />
     <Compile Include="Source\Manager\task_processor.py" />

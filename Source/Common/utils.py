@@ -106,15 +106,21 @@ def write_str_to_tar(tar, name, content, header=b''):
         blocks += 1
     tar.offset += blocks * tarfile.BLOCKSIZE
 
-class RendezVous:
-    def __init__(first_name='first', second_name='second'):
+class Rendezvous:
+    def __init__(self, first_name='add_first', second_name='add_second'):
         self._first = []
         self._second = []
 
-        self.__dict__[first_name] = RendezVous.add_first
-        self.__dict__[second_name] = RendezVous.add_second
+        self.__dict__[first_name] = self.__add_first
+        self.__dict__[second_name] = self.__add_second
 
-    def add_first(self, first):
+    def has_first(self):
+        return not not self._first
+
+    def has_second(self):
+        return not not self._second
+
+    def __add_first(self, first):
         if self._second:
             second = self._second[0]
             del self._second[0]
@@ -122,13 +128,13 @@ class RendezVous:
         else:
             self._first.append(first)
 
-    def add_second(self, second):
+    def __add_second(self, second):
         if self._first:
             first = self._first[0]
             del self._first[0]
             self.match(first, second)
         else:
-            self._second.append(first)
+            self._second.append(second)
 
     def match(self, first, second):
         raise NotImplementedError()

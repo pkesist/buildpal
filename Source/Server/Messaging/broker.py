@@ -91,7 +91,6 @@ class Broker:
                     clients_waiting_for_session.append(client_id)
                     self.servers.send_multipart([server_id, b'CREATE_SESSION'], copy=False)
                 elif len(msg) == 3 and msg[1] == b'ATTACH_TO_SESSION':
-                    assert attacher_id not in server_from_client
                     attacher_id = msg[0]
                     client_id = msg[2]
                     server_id, session_id = server_from_client.get(client_id)

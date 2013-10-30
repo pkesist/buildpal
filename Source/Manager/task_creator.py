@@ -112,7 +112,8 @@ class TaskCreator:
         return [create_task(source) for source in sources]
 
     def should_invoke_linker(self):
-        return self.__compiler.compile_no_link_option() not in [token.option for token in self.option_values()]
+        return self.__compiler.compile_no_link_option() not in [
+            token.option for token in self.option_values()]
 
     def postprocess(self):
         if not self.should_invoke_linker():

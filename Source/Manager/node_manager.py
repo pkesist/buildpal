@@ -72,8 +72,7 @@ class NodeManager:
             if lhs_time_per_task == 0 and lhs_tasks_processing >= 5:
                 return 1
             return -1 if lhs_tasks_processing * lhs_time_per_task <= rhs_tasks_processing * rhs_time_per_task else 1
-        compare_key = cmp_to_key(cmp)
-        return min(range(len(self.node_info)), key=compare_key)
+        return min(range(len(self.node_info)), key=cmp_to_key(cmp))
 
     def recycle(self, node_index, socket):
         recycled = self.recycled_connections.setdefault(

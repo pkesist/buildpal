@@ -10,8 +10,8 @@ import zmq
 
 class ServerRunner(Process):
     def __init__(self, port, control_port, processes, run_compiler_sem,
-                 file_repository, header_repository, cpu_usage_hwm,
-                 task_counter):
+                 file_repository, header_repository, compiler_repository,
+                 cpu_usage_hwm, task_counter):
         super(ServerRunner, self).__init__()
         print("Starting server on port {} with {} worker processes.".format(
             port, processes))
@@ -23,6 +23,7 @@ class ServerRunner(Process):
         self.__control_address = 'tcp://localhost:{}'.format(control_port)
         self.__file_repository = file_repository
         self.__header_repository = header_repository
+        self.__compiler_repository = compiler_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
 
@@ -38,8 +39,8 @@ class ServerRunner(Process):
         try:
             workers = list((CompileWorker(worker_address, self.__control_address,
                 self.__file_repository, self.__header_repository,
-                self.__run_compiler_sem, self.__cpu_usage_hwm,
-                self.__task_counter)
+                self.__compiler_repository, self.__run_compiler_sem,
+                self.__cpu_usage_hwm, self.__task_counter)
                 for proc in range(self.__processes)))
             for worker in workers:
                 worker.start()

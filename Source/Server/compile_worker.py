@@ -1,11 +1,11 @@
 from .Messaging import ServerSession, ServerWorker
-from Compilers import MSVCWrapper
 from Common import send_compressed_file, SimpleTimer
 
 from io import BytesIO
 from multiprocessing import Process
 from time import sleep, time
 from socket import getfqdn
+import subprocess
 
 import os
 import pickle
@@ -14,6 +14,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import zipfile
 import zlib
 import zmq
 
@@ -27,9 +28,8 @@ except FileNotFoundError:
     pass
 
 class ServerCompiler:
-    def __init__(self, file_repository, compiler_setup, cpu_usage_hwm):
+    def __init__(self, file_repository, cpu_usage_hwm):
         self.__hwm = cpu_usage_hwm
-        self.__compiler_setup = compiler_setup
         self.__file_repository = file_repository
 
     def accept(self):
@@ -40,44 +40,29 @@ class ServerCompiler:
     def file_repository(self):
         return self.__file_repository
 
-    def setup_compiler(self, compiler_info):
-        key = (compiler_info.toolset(), compiler_info.id())
-        setup = self.__compiler_setup.get(key)
-        if setup:
-            return setup
-
-        if compiler_info.toolset() == 'msvc':
-            setup = MSVCWrapper.setup_compiler(compiler_info)
-            if setup:
-                self.__compiler_setup[key] = setup
-            return setup
-        else:
-            raise RuntimeError("Unknown toolset '{}'".format(
-                                  self.__compiler_info.toolset()))
-
 class CompileSession(ServerSession, ServerCompiler):
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
     STATE_SH_WAIT_FOR_TASK_DATA = 3
-    STATE_SH_GET_SOURCE_FILE_NAME = 4
-    STATE_SH_CHECK_PCH_TAG = 5
-    STATE_SH_GET_PCH_DATA = 6
+    STATE_WAITING_FOR_COMPILER = 4
+    STATE_SH_GET_SOURCE_FILE_NAME = 5
+    STATE_SH_CHECK_PCH_TAG = 6
+    STATE_SH_GET_PCH_DATA = 7
 
     STATE_WAITING_FOR_HEADER_LIST = 0
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
-    def __init__(self, file_repository, header_repository, run_compiler_sem,
-                 cpu_usage_hwm, task_counter, compiler_setup, include_path,
+    def __init__(self, file_repository, header_repository, compiler_repository,
+                 run_compiler_sem, cpu_usage_hwm, task_counter, include_path,
                  headers):
-        ServerCompiler.__init__(self, file_repository, compiler_setup,
-                                cpu_usage_hwm)
+        ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
-        self.compiler_setup = compiler_setup
         self.header_repository = header_repository
+        self.compiler_repository = compiler_repository
         self.run_compiler_sem = run_compiler_sem
         self.include_path = include_path
         self.include_dirs = [self.include_path]
@@ -139,25 +124,51 @@ class CompileSession(ServerSession, ServerCompiler):
             with open(object_file_name, 'rb') as obj:
                 send_compressed_file(self.send_multipart, obj, copy=False)
 
+    def compiler_ready(self):
+        assert hasattr(self, 'compiler_id')
+        self.compiler_exe = os.path.join(
+            self.compiler_repository.compiler_dir(self.compiler_id),
+            self.task['compiler_info'].executable())
+        def run_compiler(command, cwd):
+            command[0] = self.compiler_exe
+            with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
+                output = proc.communicate()
+                return proc.returncode, output[0], output[1]
+        self.compiler = run_compiler
+        self.task_counter.inc()
+        if self.task['pch_file'] is None:
+            if self.header_state == self.STATE_HEADERS_ARRIVED:
+                self.run_compiler()
+                return True
+            else:
+                self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
+                return False
+        self.state = self.STATE_SH_CHECK_PCH_TAG
+        return False
+
     def process_msg_worker(self, msg):
         if self.state == self.STATE_GET_TASK:
             self.waiting_for_header_list = SimpleTimer()
             self.task = pickle.loads(msg[0])
-            self.compiler = self.setup_compiler(self.task['compiler_info'])
-            if self.compiler:
-                self.send(b'OK')
+            self.compiler_id = self.task['compiler_info'].id()
+            assert self.compiler_id
+            if self.compiler_repository.has_compiler(self.compiler_id):
+                self.send(b'READY')
+                return self.compiler_ready()
             else:
-                self.send(b'FAIL')
-                return False
-            self.task_counter.inc()
-            if self.task['pch_file'] is None:
-                if self.header_state == self.STATE_HEADERS_ARRIVED:
-                    self.run_compiler()
-                    return True
-                else:
-                    self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
-            else:
-                self.state = self.STATE_SH_CHECK_PCH_TAG
+                self.send(b'NEED_COMPILER')
+                self.state = self.STATE_WAITING_FOR_COMPILER
+                self.compiler_data = BytesIO()
+        elif self.state == self.STATE_WAITING_FOR_COMPILER:
+            more, data = msg
+            self.compiler_data.write(data)
+            if more == b'\x00':
+                self.compiler_data.seek(0)
+                with zipfile.ZipFile(self.compiler_data) as zip:
+                    zip.extractall(path=self.compiler_repository.compiler_dir(self.compiler_id))
+                del self.compiler_data
+                self.compiler_repository.set_compiler_ready(self.compiler_id)
+                return self.compiler_ready()
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = msg[0]
             assert tag == b'NEED_PCH_FILE'
@@ -245,13 +256,14 @@ class CompileSession(ServerSession, ServerCompiler):
 
 class CompileWorker(Process):
     def __init__(self, address, control_address, file_repository,
-                 header_repository, run_compiler_sem, cpu_usage_hwm,
-                 task_counter):
+        header_repository, compiler_repository, run_compiler_sem, cpu_usage_hwm,
+        task_counter):
         Process.__init__(self)
         self.__address = address
         self.__control_address = control_address
         self.__file_repository = file_repository
         self.__header_repository = header_repository
+        self.__compiler_repository = compiler_repository
         self.__run_compiler_sem = run_compiler_sem
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
@@ -260,41 +272,33 @@ class CompileWorker(Process):
         self.__headers = {}
 
     class SessionMaker:
-        def __init__(self, file_repository, header_repository, run_compiler_sem,
-                     cpu_usage_hwm, task_counter, compiler_setup, include_path,
-                     headers):
+        def __init__(self, file_repository, header_repository,
+            compiler_repository, compiler_sem, cpu_usage_hwm, task_counter,
+            include_path, headers):
             self.__file_repository = file_repository
             self.__header_repository = header_repository
-            self.__run_compiler_sem = run_compiler_sem
+            self.__compiler_repository = compiler_repository
+            self.__run_compiler_sem = compiler_sem
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
-            self.__compiler_setup = compiler_setup
             self.__include_path = include_path
             self.__headers = headers
 
         def __call__(self):
             return CompileSession(self.__file_repository,
-                                  self.__header_repository,
-                                  self.__run_compiler_sem,
-                                  self.__cpu_usage_hwm,
-                                  self.__task_counter, self.__compiler_setup,
-                                  self.__include_path, self.__headers)
+                self.__header_repository, self.__compiler_repository,
+                self.__run_compiler_sem, self.__cpu_usage_hwm,
+                self.__task_counter, self.__include_path, self.__headers)
 
     def run(self):
-        compiler_setup = {}
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
         try:
             worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
-                                    self.__file_repository,
-                                    self.__header_repository,
-                                    self.__run_compiler_sem,
-                                    self.__cpu_usage_hwm,
-                                    self.__task_counter,
-                                    compiler_setup,
-                                    self.__include_path,
-                                    self.__headers
-                                    ))
+                self.__file_repository, self.__header_repository,
+                self.__compiler_repository, self.__run_compiler_sem,
+                self.__cpu_usage_hwm, self.__task_counter, self.__include_path,
+                self.__headers))
             worker.connect_broker(self.__address)
             worker.connect_control(self.__control_address)
             worker.run()

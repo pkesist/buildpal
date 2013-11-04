@@ -46,6 +46,7 @@ Usage:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
         header_repository = manager.HeaderRepository()
+        compiler_repository = manager.CompilerRepository()
         run_compiler_sem = manager.Semaphore(cpu_count() + 1)
 
         zmq_ctx = zmq.Context()
@@ -53,8 +54,8 @@ Usage:
         control_port = bind_to_random_port(control)
         server_runner = ServerRunner(port, control_port, processes,
                                      run_compiler_sem, file_repository,
-                                     header_repository, cpu_usage_hwm,
-                                     task_counter)
+                                     header_repository, compiler_repository,
+                                     cpu_usage_hwm, task_counter)
         server_runner.start()
 
         import signal

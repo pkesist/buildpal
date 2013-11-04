@@ -46,36 +46,16 @@ echo {delimiter}
             to_add[a[:eq].upper()] = a[eq+1:]
     return to_add
 
-def receive_file(receiver, fileobj):
-    more = b'\x01'
-    while more == b'\x01':
-        more, data = receiver()
-        fileobj.write(data)
-
 def send_compressed_file(sender, fileobj, *args, **kwargs):
     compressor = zlib.compressobj(1)
     for data in iter(lambda : fileobj.read(256 * 1024), b''):
         sender((b'\x01', compressor.compress(data)), *args, **kwargs)
     sender((b'\x00', compressor.flush(zlib.Z_FINISH)), *args, **kwargs)
 
-def receive_compressed_file(receiver, fileobj):
-    more = b'\x01'
-    decompressor = zlib.decompressobj()
-    while more == b'\x01':
-        more, data = receiver()
-        fileobj.write(decompressor.decompress(data))
-    fileobj.write(decompressor.flush())
-
 def send_file(sender, file, *args, **kwargs):
     for data in iter(lambda : file.read(256 * 1024), b''):
         sender((b'\x01', data), *args, **kwargs)
     sender((b'\x00', b''), *args, **kwargs)
-
-def relay_file(source_read, target_send):
-    more = b'\x01'
-    while more == b'\x01':
-        more, data = source_read()
-        target_send((more, data))
 
 def bind_to_random_port(socket):
     socket.bind('tcp://*:*')

@@ -1,4 +1,7 @@
 #include "boost/asio.hpp"
+#include "boost/utility/string_ref.hpp"
+#include "boost/filesystem/convenience.hpp"
+#include "boost/filesystem/path.hpp"
 
 #include <cassert>
 #include <deque>
@@ -10,33 +13,44 @@
 char const compiler[] = "msvc";
 unsigned int compilerSize = sizeof(compiler) / sizeof(compiler[0]) - 1;
 
-char const compilerExecutable[] = "cl.exe";
+char const compilerExeFilename[] = "cl.exe";
 
-bool locateExecutable( std::string & executable )
+typedef std::vector<boost::filesystem::path> PathList;
+
+PathList const & getPath()
 {
-    DWORD const size = GetEnvironmentVariable( "PATH", NULL, 0 );
-    if ( size == 0 )
-        return false;
-
-    if ( size > 16 * 1024 )
-        return false;
-
-    char * const pathBuffer( static_cast<char *>( alloca( size ) ) );
-    GetEnvironmentVariable( "PATH", pathBuffer, size );
-    std::stringstream pathStream( pathBuffer );
-    std::string path;
-    while ( std::getline( pathStream, path, ';' ) )
+    static PathList result;
+    static bool initialized = false;
+    if ( !initialized )
     {
-        if ( path.empty() )
-            continue;
-        if ( *path.rbegin() != '\\' )
-            path.push_back('\\');
-        path.append( compilerExecutable );
-        DWORD const faResult = GetFileAttributes( path.c_str() );
-        if ( faResult == INVALID_FILE_ATTRIBUTES )
-            continue;
-        executable.swap( path );
-        return true;
+        DWORD const size = GetEnvironmentVariable( "PATH", NULL, 0 );
+        assert( size > 0 );
+        char * const pathBuffer( static_cast<char *>( alloca( size ) ) );
+        GetEnvironmentVariable( "PATH", pathBuffer, size );
+        std::size_t last( 0 );
+        for ( std::size_t iter( 0 ); iter != size; ++iter )
+        {
+            if ( ( pathBuffer[ iter ] == ';' ) && ( iter != last + 1 ) )
+            {
+                result.push_back( boost::filesystem::path( pathBuffer + last, pathBuffer + iter ) );
+                last = iter + 1;
+            }
+        }
+        initialized = true;
+    }
+    return result;
+}
+
+bool findOnPath( PathList const & pathList, boost::filesystem::path const file, boost::filesystem::path & result )
+{
+    for ( PathList::const_iterator iter( pathList.begin() ); iter != pathList.end(); ++iter )
+    {
+        boost::filesystem::path tmpPath = (*iter) / file;
+        if ( boost::filesystem::exists( tmpPath ) )
+        {
+            result = tmpPath;
+            return true;
+        }
     }
     return false;
 }
@@ -117,8 +131,8 @@ private:
 
 int main( int argc, char * argv[] )
 {
-    std::string executable;
-    if ( !locateExecutable( executable ) )
+    boost::filesystem::path compilerExecutable;
+    if ( !findOnPath( getPath(), compilerExeFilename, compilerExecutable ) )
     {
         std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
         return -1;
@@ -162,7 +176,8 @@ int main( int argc, char * argv[] )
     std::vector<boost::asio::const_buffer> req;
 
     req.push_back( boost::asio::buffer( compiler, compilerSize + 1 ) );
-    req.push_back( boost::asio::buffer( executable.c_str(), executable.size() + 1 ) );
+    std::string const compilerExeStr( compilerExecutable.string() );
+    req.push_back( boost::asio::buffer( compilerExeStr.c_str(), compilerExeStr.size() + 1 ) );
 
     DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
     if ( includeSize == 0 )
@@ -306,7 +321,6 @@ int main( int argc, char * argv[] )
                     GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
                     char buffer[20];
                     _itoa( result, buffer, 10 );
-                    std::size_t const size( strlen( buffer ) );
                     res.push_back( boost::asio::buffer( buffer, strlen( buffer ) + 1 ) );
                 }
                 DWORD stdOutSize;
@@ -396,6 +410,36 @@ int main( int argc, char * argv[] )
 
             std::vector<boost::asio::const_buffer> res;
             res.push_back( boost::asio::buffer( buffer, size + 1 ) );
+            res.push_back( boost::asio::buffer( "\1", 1 ) );
+            boost::system::error_code writeError;
+            boost::asio::write( socket, res, writeError );
+            if ( writeError )
+            {
+                std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
+                exit( 1 );
+            }
+        }
+        else if ( ( requestSize == 12 ) && strncmp( request, "LOCATE_FILES", 12 ) == 0 )
+        {
+            assert( receiver.parts() > 1 );
+            std::vector<std::string> files;
+            std::vector<boost::asio::const_buffer> res;
+            // First search relative to compiler dir, then path.
+            PathList pathList;
+            pathList.push_back( compilerExecutable.parent_path() );
+            PathList const & path( getPath() );
+            std::copy( path.begin(), path.end(), std::back_inserter( pathList ) );
+
+            for ( std::size_t part = 1; part < receiver.parts(); ++part )
+            {
+                char const * file;
+                std::size_t fileSize;
+                receiver.getPart( part, &file, &fileSize );
+                boost::filesystem::path result;
+                findOnPath( pathList, boost::filesystem::path( file, file + fileSize ), result );
+                files.push_back( result.string() );
+                res.push_back( boost::asio::buffer( files.back().c_str(), files.back().size() + 1 ) );
+            }
             res.push_back( boost::asio::buffer( "\1", 1 ) );
             boost::system::error_code writeError;
             boost::asio::write( socket, res, writeError );

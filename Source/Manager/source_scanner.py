@@ -106,6 +106,12 @@ class SourceScanner(Process):
 
     @classmethod
     def header_beginning(cls, filename):
+        # 'sourceannotations.h' header is funny. If you add a #line directive to
+        # it it will start tossing incomprehensible compiler erros. It would
+        # seem that cl.exe has some hardcoded logic for this header. Person
+        # responsible for this should be severely punished.
+        if 'sourceannotations.h' in filename:
+            return b''
         pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
         return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
 
@@ -162,7 +168,7 @@ class SourceScanner(Process):
     def header_info(cls, task):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
-            [task['pch_header']] if task['pch_header'] else [])
+            ignored_headers=[task['pch_header']] if task['pch_header'] else [])
         for file, abs, content in header_info:
             input = BytesIO(content)
             hash = md5()

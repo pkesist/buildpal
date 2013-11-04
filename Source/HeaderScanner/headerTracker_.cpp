@@ -87,11 +87,8 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName, macroState() );
         }
-        if ( !isSystem )
-        {
-            HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file ) );
-            headerCtxStack().back().addHeader( header );
-        }
+        HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file ) );
+        headerCtxStack().back().addHeader( header );
     }
 }
 
@@ -121,8 +118,7 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file ) );
     if ( file )
     {
-        if ( !isSystem )
-            headerCtxStack().back().addHeader( header );
+        headerCtxStack().back().addHeader( header );
         headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_ ) );
         cacheHit_.reset();
     }

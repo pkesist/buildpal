@@ -195,12 +195,13 @@ class MSVCWrapper(CompilerWrapper):
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
         assert version in self.compiler_versions
-        result = CompilerInfo("msvc", os.path.split(executable)[1], version, macros)
+        result = CompilerInfo('msvc', os.path.split(executable)[1], version, macros)
         result.pch_file_option = self.pch_file_option()
         result.define_option = self.define_option()
         result.include_option = self.include_option()
         result.object_name_option = self.object_name_option()
         result.compile_no_link_option = self.compile_no_link_option()
+        result.compiler_files = self.compiler_files[version[0]]
         return result
 
     def compiler_option_macros(self, tokens):
@@ -233,43 +234,6 @@ class MSVCWrapper(CompilerWrapper):
             compile_call.append('/Z7')
         return compile_call, self.compiler_option_macros(option_values.all())
 
-    @classmethod
-    def get_compiler_environment(cls, compiler_info):
-        compiler_id = compiler_info.id()
-        info = cls.compiler_versions.get(compiler_id)
-        if not info:
-            return None
-
-        location = None
-        for element in ['', 'Wow6432Node\\']:
-            for type in ['VisualStudio', 'VCExpress']:
-                key = "SOFTWARE\\{}Microsoft\\{}\\{}.0\\Setup\\VC".format(element, type, info[0])
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as reg_key:
-                        location = winreg.QueryValueEx(reg_key, "ProductDir")[0]
-                        break
-                except Exception:
-                    pass
-        if not location:
-            return None
-        script = os.path.join(location, 'vcvarsall.bat')
-        if not os.path.exists(script):
-            return None
-        return get_batch_file_environment_side_effects(script, [info[1]])
-
-    @classmethod
-    def setup_compiler(cls, compiler_info):
-        def run_compiler(command, cwd, compiler_environ):
-            env = dict(os.environ)
-            env.update(compiler_environ)
-            with subprocess.Popen(command, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
-                output = proc.communicate()
-                return proc.returncode, output[0], output[1]
-        compiler_env = MSVCWrapper.get_compiler_environment(compiler_info)
-        if compiler_env:
-            return lambda command, cwd : run_compiler(command, cwd, compiler_env)
-        return None
-
     compiler_versions = {
         (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
         (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
@@ -278,6 +242,66 @@ class MSVCWrapper(CompilerWrapper):
         (b'17.00.50727.1' , b'x86'  ) : (11, 'x86'  ), # msvc11
         (b'17.00.50727.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
     }
+
+    compiler_files = {
+        b'15.00.30729.01' : 
+        [
+            b'c1.dll',
+            b'c1ast.dll',
+            b'c1xx.dll',
+            b'c1xxast.dll',
+            b'c2.dll',
+            b'cl.exe',
+            b'mspdb80.dll',
+            b'1033/atlprovui.dll',
+            b'1033/bscmakeui.dll',
+            b'1033/clui.dll',
+            b'1033/cvtresui.dll',
+            b'1033/linkui.dll',
+            b'1033/mspft80ui.dll',
+            b'1033/nmakeui.dll',
+            b'1033/pgort90ui.dll',
+            b'1033/pgoui.dll',
+            b'1033/vcomp90ui.dll'],
+        b'16.00.40219.01' :
+        [
+            b'c1.dll',
+            b'c1ast.dll',
+            b'c1xx.dll',
+            b'c1xxast.dll',
+            b'c2.dll',
+            b'cl.exe',
+            b'mspdb100.dll',
+            b'1033/atlprovui.dll',
+            b'1033/bscmakeui.dll',
+            b'1033/clui.dll',
+            b'1033/cvtresui.dll',
+            b'1033/linkui.dll',
+            b'1033/nmakeui.dll',
+            b'1033/pgort100ui.dll',
+            b'1033/pgoui.dll',
+            b'1033/vcomp100ui.dll'],
+        b'17.00.50727.1' :
+        [
+            b'c1.dll',
+            b'c1ast.dll',
+            b'c1xx.dll',
+            b'c1xxast.dll',
+            b'c2.dll',
+            b'cl.exe',
+            b'mspdb100.dll',
+            b'1033/atlprovui.dll',
+            b'1033/bscmakeui.dll',
+            b'1033/clui.dll',
+            b'1033/cvtresui.dll',
+            b'1033/linkui.dll',
+            b'1033/mspft110ui.dll',
+            b'1033/nmakeui.dll',
+            b'1033/pgort110ui.dll',
+            b'1033/pgoui.dll',
+            b'1033/vcomp110ui.dll'],
+
+       }
 
     build_local_options = [
         # If we run into these just run the damn thing locally

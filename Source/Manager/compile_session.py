@@ -1,9 +1,11 @@
-from Common import SimpleTimer, send_compressed_file
+from Common import SimpleTimer, send_compressed_file, send_file
 
 from subprocess import list2cmdline
+from io import BytesIO
 
 import os
 import pickle
+import zipfile
 import zlib
 import zmq
 
@@ -14,9 +16,10 @@ class CompileSession:
     STATE_WAIT_FOR_PCH_RESPONSE = 3
     STATE_WAIT_FOR_SERVER_RESPONSE = 4
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 5
-    STATE_RECEIVE_RESULT_FILE = 6
-    STATE_POSTPROCESS = 7
-    STATE_WAIT_FOR_SESSION_DONE = 8
+    STATE_WAIT_FOR_COMPILER_FILE_LIST = 6
+    STATE_RECEIVE_RESULT_FILE = 7
+    STATE_POSTPROCESS = 8
+    STATE_WAIT_FOR_SESSION_DONE = 9
 
     def __init__(self, compiler, executable, task, client_conn, preprocess_socket,
         preprocessor_id, compiler_info):
@@ -51,15 +54,19 @@ class CompileSession:
         self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
 
     def got_data_from_client(self, msg):
-        assert self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
-        self.test_source.destroy()
-        del self.test_source
-        retcode = int(msg[0])
-        stdout = msg[1]
-        stderr = msg[2]
-        info = self.compiler.compiler_info(self.executable, stdout, stderr)
-        self.compiler_info[self.executable] = info
-        self.start_preprocessing()
+        if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
+            self.test_source.destroy()
+            del self.test_source
+            retcode = int(msg[0])
+            stdout = msg[1]
+            stderr = msg[2]
+            info = self.compiler.compiler_info(self.executable, stdout, stderr)
+            self.compiler_info[self.executable] = info
+            self.client_conn.send([b'LOCATE_FILES'] + info.compiler_files)
+            self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
+        elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
+            self.compiler_info[self.executable].files = msg
+            self.start_preprocessing()
 
     def preprocessing_done(self, server_conn, node_info):
         assert self.state == self.STATE_WAIT_FOR_PREPROCESSING_DONE
@@ -77,8 +84,20 @@ class CompileSession:
 
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_SERVER_OK:
-            task_ok = msg[0]
-            assert msg[0] == b'OK'
+            compiler_state = msg[0]
+            if compiler_state == b'NEED_COMPILER':
+                ci = self.compiler_info[self.executable]
+                assert hasattr(ci, 'files')
+                assert hasattr(ci, 'compiler_files')
+                zip_data = BytesIO()
+                with zipfile.ZipFile(zip_data, mode='w') as zip_file:
+                    for path, file in zip(ci.files, ci.compiler_files):
+                        zip_file.write(path.decode(), file.decode())
+                zip_data.seek(0)
+                send_file(self.server_conn.send_multipart, zip_data)
+            else:
+                assert compiler_state == b'READY'
+
             if self.task.pch_file:
                 self.server_conn.send(b'NEED_PCH_FILE')
                 self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
@@ -120,13 +139,15 @@ class CompileSession:
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg
-            self.output.write(self.output_decompressor.decompress(data))
+            with self.timer.timeit('write_to_obj'):
+                self.output.write(self.output_decompressor.decompress(data))
             if more == b'\x00':
                 self.output.write(self.output_decompressor.flush())
                 del self.output_decompressor
                 self.timer.add_time('receive_result', self.receive_result_time.get())
                 del self.receive_result_time
-                self.output.close()
+                with self.timer.timeit('close_obj'):
+                    self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed()

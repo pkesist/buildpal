@@ -101,6 +101,11 @@ class CompileSession(ServerSession, ServerCompiler):
             pch_switch.append(
                 compiler_info.pch_file_option.make_value(self.pch_file).make_str())
 
+        while not self.compiler_repository.has_compiler(self.compiler_id):
+            # Compiler is being downloaded by another session.
+            # Similar to the PCH hack above.
+            sleep(1)
+
         try:
             start = time()
             command = (self.task['call'] + pch_switch +
@@ -152,13 +157,15 @@ class CompileSession(ServerSession, ServerCompiler):
             self.task = pickle.loads(msg[0])
             self.compiler_id = self.task['compiler_info'].id()
             assert self.compiler_id
-            if self.compiler_repository.has_compiler(self.compiler_id):
-                self.send(b'READY')
-                return self.compiler_ready()
-            else:
+            has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
+            if has_compiler is None:
+                # Never heard of it.
                 self.send(b'NEED_COMPILER')
                 self.state = self.STATE_WAITING_FOR_COMPILER
                 self.compiler_data = BytesIO()
+            else:
+                self.send(b'READY')
+                return self.compiler_ready()
         elif self.state == self.STATE_WAITING_FOR_COMPILER:
             more, data = msg
             self.compiler_data.write(data)

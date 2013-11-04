@@ -239,8 +239,8 @@ class MSVCWrapper(CompilerWrapper):
         (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
         (b'16.00.40219.01', b'80x86') : (10, 'x86'  ), # msvc10
         (b'16.00.40219.01', b'x64'  ) : (10, 'amd64'), # msvc10 x64
-        (b'17.00.50727.1' , b'x86'  ) : (11, 'x86'  ), # msvc11
-        (b'17.00.50727.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
+        (b'17.00.60610.1' , b'x86'  ) : (11, 'x86'  ), # msvc11
+        (b'17.00.60610.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
     }
 
     compiler_files = {
@@ -281,7 +281,7 @@ class MSVCWrapper(CompilerWrapper):
             b'1033/pgort100ui.dll',
             b'1033/pgoui.dll',
             b'1033/vcomp100ui.dll'],
-        b'17.00.50727.1' :
+        b'17.00.60610.1' :
         [
             b'c1.dll',
             b'c1ast.dll',
@@ -289,7 +289,7 @@ class MSVCWrapper(CompilerWrapper):
             b'c1xxast.dll',
             b'c2.dll',
             b'cl.exe',
-            b'mspdb100.dll',
+            b'mspdb110.dll',
             b'1033/atlprovui.dll',
             b'1033/bscmakeui.dll',
             b'1033/clui.dll',

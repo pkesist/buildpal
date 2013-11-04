@@ -250,9 +250,9 @@ class CompileSession(ServerSession, ServerCompiler):
                     os.makedirs(os.path.dirname(full_target), exist_ok=True)
                     make_link(src, full_target)
                 except FileExistsError:
-                    # TODO
-                    # make sure this is the file we expect
-                    pass
+                    # FIXME: Very slow
+                    os.remove(full_target)
+                    make_link(src, full_target)
             self.times['copy_files'] = copy_files_timer.get()
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:

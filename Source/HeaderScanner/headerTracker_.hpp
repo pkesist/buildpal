@@ -30,8 +30,13 @@ class HeaderTracker
 public:
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::pair<clang::HeaderSearch *, clang::HeaderSearch *> headerSearch, Cache * cache )
-        : userHeaderSearch_( headerSearch.first ), systemHeaderSearch_( headerSearch.second ), preprocessor_( preprocessor ), cache_( cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> headerSearch, Cache * cache )
+        :
+        relativeHeaderSearch_( std::get<0>( headerSearch ) ),
+        userHeaderSearch_( std::get<1>( headerSearch ) ),
+        systemHeaderSearch_( std::get<2>( headerSearch ) ),
+        preprocessor_( preprocessor ),
+        cache_( cache )
     {
     }
 
@@ -171,10 +176,11 @@ private:
 
 private:
     typedef llvm::SmallVector<char, 100> IncludePath;
-    typedef std::tuple<clang::FileEntry const *, bool, IncludePath> IncludeStackEntry;
+    typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, IncludePath> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
 
 private:
+    llvm::OwningPtr<clang::HeaderSearch> relativeHeaderSearch_;
     llvm::OwningPtr<clang::HeaderSearch> userHeaderSearch_;
     llvm::OwningPtr<clang::HeaderSearch> systemHeaderSearch_;
     clang::Preprocessor & preprocessor_;

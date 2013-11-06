@@ -52,17 +52,27 @@ private:
     IgnoredHeaders ignoredHeaders_;
 };
 
+struct HeaderLocation
+{
+    enum Enum
+    {
+        relative,
+        regular,
+        system
+    };
+};
+
 struct HeaderRef
 {
     HeaderRef(
         llvm::StringRef rel,
         llvm::StringRef abs,
-        bool sys,
+        HeaderLocation::Enum loc,
         char const * d,
         std::size_t s ) :
         relative( rel ),
         absolute( abs ),
-        system( sys ),
+        location( loc ),
         data( d ),
         size( s )
     {
@@ -70,7 +80,7 @@ struct HeaderRef
 
     std::string relative;
     llvm::StringRef absolute;
-    bool system;
+    HeaderLocation::Enum location;
     char const * data;
     std::size_t size;
 
@@ -93,7 +103,7 @@ public:
     typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
-    std::pair<clang::HeaderSearch *, clang::HeaderSearch *> getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
+    std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }

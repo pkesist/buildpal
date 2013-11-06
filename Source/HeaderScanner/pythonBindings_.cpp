@@ -218,13 +218,18 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     unsigned int index( 0 );
     for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
-        PyObject * tuple = PyTuple_New( 4 );
+        PyObject * tuple = PyTuple_New( 5 );
         PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
         PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() ) );
-        PyObject * const system( iter->system ? Py_True : Py_False );
-        Py_INCREF( system );
-        PyTuple_SET_ITEM( tuple, 2, system );
-        PyTuple_SET_ITEM( tuple, 3, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
+        PyObject * const isSystem( iter->location == HeaderLocation::system ? Py_True : Py_False );
+        Py_INCREF( isSystem );
+        PyTuple_SET_ITEM( tuple, 2, isSystem );
+
+        PyObject * const isRelative( iter->location == HeaderLocation::relative ? Py_True : Py_False );
+        Py_INCREF( isRelative );
+        PyTuple_SET_ITEM( tuple, 3, isRelative );
+
+        PyTuple_SET_ITEM( tuple, 4, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
         PyTuple_SET_ITEM( result, index, tuple );
         ++index;
     }

@@ -30,8 +30,8 @@ class SourceScanner(Process):
 
         def create_filelist(self):
             filelist = []
-            for file, abs, system, content, header, digest in self.header_info:
-                filelist.append((file, digest, len(content) + len(header), os.path.normpath(abs)))
+            for file, abs, system, relative, content, header, checksum in self.header_info:
+                filelist.append((file, system, relative, checksum, len(content) + len(header), os.path.normpath(abs)))
             return filelist
 
     STATE_WAITING_FOR_TASK = 0
@@ -128,7 +128,7 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        file, abs, system, content, header, digest = next(header_info_iter)
+                        file, abs, system, relative, content, header, checksum = next(header_info_iter)
                         if in_name == file:
                             found = True
                             break
@@ -170,9 +170,9 @@ class SourceScanner(Process):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
             ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-        for file, abs, system, content in header_info:
+        for file, abs, system, relative, content in header_info:
             input = BytesIO(content)
             hash = md5()
             for chunk in iter(lambda : input.read(128 * hash.block_size), b''):
                 hash.update(chunk)
-            yield file, abs, system, content, cls.header_beginning(abs), hash.digest()
+            yield file, abs, system, relative, content, cls.header_beginning(abs), hash.digest()

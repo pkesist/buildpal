@@ -223,8 +223,15 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
-std::pair<clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
+std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
 {
+    clang::HeaderSearch * relativeHeaderSearch( new clang::HeaderSearch(
+        &compiler().getHeaderSearchOpts(),
+        compiler().getFileManager(),
+        compiler().getDiagnostics(),
+        compiler().getLangOpts(),
+        &compiler().getTarget()));
+
     clang::HeaderSearch * userHeaderSearch( new clang::HeaderSearch(
         &compiler().getHeaderSearchOpts(),
         compiler().getFileManager(),
@@ -252,7 +259,7 @@ std::pair<clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderS
             userHeaderSearch->AddSearchPath( lookup, true );
     }
 
-    return std::make_pair( userHeaderSearch, systemHeaderSearch );
+    return std::make_tuple( relativeHeaderSearch, userHeaderSearch, systemHeaderSearch );
 }
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )

@@ -17,14 +17,47 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
     IncludeStackEntry currentEntry( fileStack_.back() );
     clang::FileEntry const * currentFile = std::get<0>( currentEntry );
     clang::DirectoryLookup const * curDir( 0 );
+    HeaderLocation::Enum const parentLocation( std::get<1>( currentEntry ) );
+    HeaderLocation::Enum headerLocation;
     // If including header is system header, then so are we.
-    bool isSystem = std::get<1>( currentEntry );
+    if ( parentLocation == HeaderLocation::system )
+    {
+        assert( fileStack_.size() > 1 );
+        headerLocation = HeaderLocation::system;
+    }
+
+    clang::HeaderSearch * headerSearch;
+
     IncludePath const & parentRelative = std::get<2>( currentEntry );
-    clang::FileEntry const * entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
+    clang::FileEntry const * entry( 0 );
+    if ( !isAngled && fileStack_.size() == 1 )
+    {
+        entry = relativeHeaderSearch_->LookupFile( relative, false, 0, curDir, currentFile, 0, 0, 0, false );
+        if ( entry )
+        {
+            headerLocation = HeaderLocation::relative;
+            headerSearch = relativeHeaderSearch_.get();
+        }
+    }
+
     if ( !entry )
     {
-        isSystem = true;
+        entry = userHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
+        if ( entry )
+        {
+            headerLocation = HeaderLocation::regular;
+            headerSearch = userHeaderSearch_.get();
+        }
+    }
+
+    if ( !entry )
+    {
         entry = systemHeaderSearch_->LookupFile( relative, isAngled, 0, curDir, currentFile, 0, 0, 0, false );
+        if ( entry )
+        {
+            headerLocation = HeaderLocation::system;
+            headerSearch = systemHeaderSearch_.get();
+        }
     }
 
     if ( !entry )
@@ -42,8 +75,8 @@ void HeaderTracker::findFile( llvm::StringRef relative, bool const isAngled, cla
         llvm::sys::path::append( relPath, relative );
     }
 
-    fileStack_.push_back( std::make_tuple( entry, isSystem, relPath ) );
-    if ( cacheDisabled() || !( isSystem ? systemHeaderSearch_ : userHeaderSearch_ )->ShouldEnterIncludeFile( entry, false ) )
+    fileStack_.push_back( std::make_tuple( entry, headerLocation, relPath ) );
+    if ( cacheDisabled() || !headerSearch->ShouldEnterIncludeFile( entry, false ) )
     {
         // File will be skipped anyway. Do not search cache.
         fileEntry = entry;
@@ -65,7 +98,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
     assert( !fileStack_.empty() );
     IncludeStackEntry const & currentEntry( fileStack_.back() );
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
-    bool const isSystem( std::get<1>( currentEntry ) );
+    HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
     IncludePath const & relativeInc( std::get<2>( currentEntry ) );
     fileStack_.pop_back();
 
@@ -87,7 +120,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName, macroState() );
         }
-        HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file, isSystem ) );
+        HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file, headerLocation ) );
         headerCtxStack().back().addHeader( header );
     }
 }
@@ -101,10 +134,10 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_tuple( headerNameFromDataAndSize( "<<<MAIN_FILE>>>", 15 ), mainFileEntry, false ), CacheEntryPtr(), preprocessor_ ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_tuple( headerNameFromDataAndSize( "<<<MAIN_FILE>>>", 15 ), mainFileEntry, HeaderLocation::regular ), CacheEntryPtr(), preprocessor_ ) );
     IncludePath buffer;
     buffer.append( relFilename.data(), relFilename.data() + relFilename.size() );
-    fileStack_.push_back( std::make_tuple( mainFileEntry, false, buffer ) );
+    fileStack_.push_back( std::make_tuple( mainFileEntry, HeaderLocation::regular, buffer ) );
 }
 
 void HeaderTracker::enterHeader( llvm::StringRef relative )
@@ -113,9 +146,9 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     IncludeStackEntry const & currentEntry( fileStack_.back() );
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
     assert( file );
-    bool const isSystem( std::get<1>( currentEntry ) );
+    HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
     IncludePath const & relName( std::get<2>( currentEntry ) );
-    HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file, isSystem ) );
+    HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file, headerLocation ) );
     if ( file )
     {
         headerCtxStack().back().addHeader( header );

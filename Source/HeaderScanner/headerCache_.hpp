@@ -51,7 +51,7 @@ struct HeaderNameTag {};
 
 namespace BF = boost::flyweights;
 typedef boost::flyweight<std::string, BF::tag<HeaderNameTag>, BF::no_locking, BF::no_tracking> HeaderName;
-typedef std::tuple<HeaderName, clang::FileEntry const *> HeaderFile;
+typedef std::tuple<HeaderName, clang::FileEntry const *, bool> HeaderFile;
 struct MacroNameTag {};
 typedef boost::flyweight<std::string, BF::tag<MacroNameTag>, BF::no_locking, BF::no_tracking> MacroName;
 struct MacroValueTag {};

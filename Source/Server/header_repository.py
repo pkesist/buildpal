@@ -82,6 +82,6 @@ class HeaderRepository:
                     machine_files[abs] = Header(abs, checksum, self.dir, content)
             # Do not copy the files here. This is a shared resource and we want
             # to be as fast as possible. Let the caller worry about copying.
-            files_to_copy = list((machine_files[abs].location(), name)
+            files_to_copy = list((machine_files[abs].location(), name, checksum)
                 for name, (abs, checksum) in needed_files.items())
         return include_paths, files_to_copy

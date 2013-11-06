@@ -47,7 +47,7 @@ class Broker:
                 msg = self.servers.recv_multipart(flags=zmq.NOBLOCK)
                 name = msg[0]
                 if len(msg) == 2 and msg[1] == b'READY':
-                    assert not name in workers
+                    assert name not in workers
                     workers.append(name)
                     self.servers.send_multipart([name, b'OK'])
 

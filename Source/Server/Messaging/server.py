@@ -139,7 +139,7 @@ class ServerWorker:
                             self.__destroy_session(session)
                         elif sock in session.attached_sockets:
                             detach, destroy_session = session.process_attached_msg(sock, msg)
-                            # assert destroy_session ==> detach
+                            # destroy_session ==> detach
                             assert not destroy_session or detach
                             if detach:
                                 self.__detach_from_session(session, sock)

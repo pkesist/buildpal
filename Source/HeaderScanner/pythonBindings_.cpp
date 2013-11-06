@@ -218,10 +218,13 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     unsigned int index( 0 );
     for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
-        PyObject * tuple = PyTuple_New( 3 );
+        PyObject * tuple = PyTuple_New( 4 );
         PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
         PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() ) );
-        PyTuple_SET_ITEM( tuple, 2, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
+        PyObject * const system( iter->system ? Py_True : Py_False );
+        Py_INCREF( system );
+        PyTuple_SET_ITEM( tuple, 2, system );
+        PyTuple_SET_ITEM( tuple, 3, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
         PyTuple_SET_ITEM( result, index, tuple );
         ++index;
     }
@@ -264,9 +267,9 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
 
 PyMethodDef PyPreprocessor_methods[] =
 {
-    {"scanHeaders"     , (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
-    {"setMicrosoftExt" , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
-    {"setMicrosoftMode", (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
+    {"scan_headers", (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"set_ms_ext"  , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
+    {"set_ms_mode" , (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}
 };
 

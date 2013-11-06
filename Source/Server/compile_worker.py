@@ -27,20 +27,7 @@ except NotImplementedError:
 except FileNotFoundError:
     pass
 
-class ServerCompiler:
-    def __init__(self, file_repository, cpu_usage_hwm):
-        self.__hwm = cpu_usage_hwm
-        self.__file_repository = file_repository
-
-    def accept(self):
-        if not self.__hwm:
-            return True
-        return psutil.cpu_percent() < self.__hwm
-
-    def file_repository(self):
-        return self.__file_repository
-
-class CompileSession(ServerSession, ServerCompiler):
+class CompileSession(ServerSession):
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
@@ -56,30 +43,31 @@ class CompileSession(ServerSession, ServerCompiler):
 
     def __init__(self, file_repository, header_repository, compiler_repository,
                  run_compiler_sem, cpu_usage_hwm, task_counter, include_path,
-                 headers):
-        ServerCompiler.__init__(self, file_repository, cpu_usage_hwm)
+                 checksums):
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
-        self.header_repository = header_repository
         self.compiler_repository = compiler_repository
+        self.header_repository = header_repository
+        self.file_repository = file_repository
         self.run_compiler_sem = run_compiler_sem
+        self.cpu_usage_hwm = cpu_usage_hwm
         self.include_path = include_path
         self.include_dirs = [self.include_path]
+        self.checksums = checksums
         self.times = {}
-        self.headers = headers
 
     def created(self):
         assert self.state == self.STATE_START
-        accept = self.accept()
-        self.send_pyobj('ACCEPT' if accept else 'REJECT')
-        self.state = self.STATE_GET_TASK if accept else self.STATE_DONE
-        return accept
+        accept_task = not self.cpu_usage_hwm or psutil.cpu_percent() < self.cpu_usage_hwm
+        self.send_pyobj('ACCEPT' if accept_task else 'REJECT')
+        self.state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
+        return accept_task
 
     def run_compiler(self):
         self.source_file = os.path.join(self.include_path, self.task['source'])
         if self.task['pch_file'] is not None:
-            while not self.file_repository().file_arrived(
+            while not self.file_repository.file_arrived(
                 *self.task['pch_file']):
                 # The PCH file is being downloaded by another session.
                 # This could be made prettier by introducing another state
@@ -179,7 +167,7 @@ class CompileSession(ServerSession, ServerCompiler):
         elif self.state == self.STATE_SH_CHECK_PCH_TAG:
             tag = msg[0]
             assert tag == b'NEED_PCH_FILE'
-            self.pch_file, required = self.file_repository().register_file(
+            self.pch_file, required = self.file_repository.register_file(
                 *self.task['pch_file'])
             if required:
                 self.send(b'YES')
@@ -201,15 +189,14 @@ class CompileSession(ServerSession, ServerCompiler):
                 self.pch_desc.close()
                 del self.pch_desc
                 del self.pch_decompressor
-                self.file_repository().file_completed(*self.task['pch_file'])
+                self.file_repository.file_completed(*self.task['pch_file'])
                 if self.header_state == self.STATE_HEADERS_ARRIVED:
                     self.run_compiler()
                     return True
                 else:
                     self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
         else:
-            print(self.state, msg)
-            assert not "Invalid state"
+            raise Exception("Invalid state.")
         return False
 
     def process_msg(self, msg):
@@ -217,6 +204,27 @@ class CompileSession(ServerSession, ServerCompiler):
         if result:
             self.task_counter.dec()
         return result
+
+    def link_to_include_dir(self, src, target, checksum):
+        """
+        Add the 'src' file to include dir, with 'target' relative path. This
+        function is used to create every header file for compilation, so
+        it should be as fast as possible.
+        """
+        full_target = os.path.join(self.include_path, target)
+        target = target.lower()
+        try:
+            make_link(src, full_target)
+            self.checksums[target] = checksum
+        except FileNotFoundError:
+            os.makedirs(os.path.dirname(full_target), exist_ok=True)
+            make_link(src, full_target)
+            self.checksums[target] = checksum
+        except FileExistsError:
+            if self.checksums[target] != checksum:
+                os.remove(full_target)
+                make_link(src, full_target)
+                self.checksums[target] = checksum
 
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
@@ -242,17 +250,8 @@ class CompileSession(ServerSession, ServerCompiler):
             self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
             del shared_prepare_dir_timer
             copy_files_timer = SimpleTimer()
-            for src, target in files_to_copy:
-                full_target = os.path.join(self.include_path, target)
-                try:
-                    make_link(src, full_target)
-                except FileNotFoundError:
-                    os.makedirs(os.path.dirname(full_target), exist_ok=True)
-                    make_link(src, full_target)
-                except FileExistsError:
-                    # FIXME: Very slow
-                    os.remove(full_target)
-                    make_link(src, full_target)
+            for src, target, checksum in files_to_copy:
+                self.link_to_include_dir(src, target, checksum)
             self.times['copy_files'] = copy_files_timer.get()
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
@@ -276,12 +275,12 @@ class CompileWorker(Process):
         self.__task_counter = task_counter
         self.__include_path = tempfile.mkdtemp(suffix='', prefix='tmp',
                                                dir=None)
-        self.__headers = {}
+        self.__checksums = {}
 
     class SessionMaker:
         def __init__(self, file_repository, header_repository,
             compiler_repository, compiler_sem, cpu_usage_hwm, task_counter,
-            include_path, headers):
+            include_path, checksums):
             self.__file_repository = file_repository
             self.__header_repository = header_repository
             self.__compiler_repository = compiler_repository
@@ -289,13 +288,13 @@ class CompileWorker(Process):
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
             self.__include_path = include_path
-            self.__headers = headers
+            self.__checksums = checksums
 
         def __call__(self):
             return CompileSession(self.__file_repository,
                 self.__header_repository, self.__compiler_repository,
                 self.__run_compiler_sem, self.__cpu_usage_hwm,
-                self.__task_counter, self.__include_path, self.__headers)
+                self.__task_counter, self.__include_path, self.__checksums)
 
     def run(self):
         import signal
@@ -305,7 +304,7 @@ class CompileWorker(Process):
                 self.__file_repository, self.__header_repository,
                 self.__compiler_repository, self.__run_compiler_sem,
                 self.__cpu_usage_hwm, self.__task_counter, self.__include_path,
-                self.__headers))
+                self.__checksums))
             worker.connect_broker(self.__address)
             worker.connect_control(self.__control_address)
             worker.run()

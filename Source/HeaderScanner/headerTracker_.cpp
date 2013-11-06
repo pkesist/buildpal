@@ -87,7 +87,7 @@ void HeaderTracker::headerSkipped( llvm::StringRef const relative )
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName, macroState() );
         }
-        HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file ) );
+        HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relativeInc.data(), relativeInc.size() ), file, isSystem ) );
         headerCtxStack().back().addHeader( header );
     }
 }
@@ -101,7 +101,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back( HeaderCtx( std::make_tuple( headerNameFromDataAndSize( "<<<MAIN_FILE>>>", 15 ), mainFileEntry ), CacheEntryPtr(), preprocessor_ ) );
+    headerCtxStack().push_back( HeaderCtx( std::make_tuple( headerNameFromDataAndSize( "<<<MAIN_FILE>>>", 15 ), mainFileEntry, false ), CacheEntryPtr(), preprocessor_ ) );
     IncludePath buffer;
     buffer.append( relFilename.data(), relFilename.data() + relFilename.size() );
     fileStack_.push_back( std::make_tuple( mainFileEntry, false, buffer ) );
@@ -115,7 +115,7 @@ void HeaderTracker::enterHeader( llvm::StringRef relative )
     assert( file );
     bool const isSystem( std::get<1>( currentEntry ) );
     IncludePath const & relName( std::get<2>( currentEntry ) );
-    HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file ) );
+    HeaderFile header( std::make_tuple( headerNameFromDataAndSize( relName.data(), relName.size() ), file, isSystem ) );
     if ( file )
     {
         headerCtxStack().back().addHeader( header );
@@ -207,6 +207,7 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
                 HeaderRef(
                     std::get<0>( h ).get(),
                     headerFile->getName(),
+                    std::get<2>( h ),
                     buffer->getBufferStart(),
                     buffer->getBufferSize() ) );
         }

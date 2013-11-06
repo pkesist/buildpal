@@ -30,7 +30,7 @@ class SourceScanner(Process):
 
         def create_filelist(self):
             filelist = []
-            for file, abs, content, header, digest in self.header_info:
+            for file, abs, system, content, header, digest in self.header_info:
                 filelist.append((file, digest, len(content) + len(header), os.path.normpath(abs)))
             return filelist
 
@@ -94,18 +94,19 @@ class SourceScanner(Process):
                     elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                         resp = sock.recv_multipart()
                         assert len(resp) == 2 and resp[0] == b'MISSING_FILES'
-                        req_files = pickle.loads(resp[1])
-                        new_tar = self.tar_with_new_headers(session.task, req_files, session.header_info)
+                        missing_files = pickle.loads(resp[1])
+                        new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
                         sock.send_multipart([b'TASK_FILES', new_tar.read()])
                         poller.unregister(sock)
                         sockets[session.node_index].append(sock)
                         del server_sessions[sock]
                         
                     else:
-                        assert not "Invalid state"
+                        raise Exception("Invalid state.")
 
     @classmethod
     def header_beginning(cls, filename):
+        return b''
         # 'sourceannotations.h' header is funny. If you add a #line directive to
         # it it will start tossing incomprehensible compiler erros. It would
         # seem that cl.exe has some hardcoded logic for this header. Person
@@ -127,7 +128,7 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        file, abs, content, header, digest = next(header_info_iter)
+                        file, abs, system, content, header, digest = next(header_info_iter)
                         if in_name == file:
                             found = True
                             break
@@ -169,10 +170,9 @@ class SourceScanner(Process):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
             ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-        for file, abs, content in header_info:
+        for file, abs, system, content in header_info:
             input = BytesIO(content)
             hash = md5()
             for chunk in iter(lambda : input.read(128 * hash.block_size), b''):
                 hash.update(chunk)
-            digest = hash.digest()
-            yield file, abs, content, cls.header_beginning(abs), digest
+            yield file, abs, system, content, cls.header_beginning(abs), hash.digest()

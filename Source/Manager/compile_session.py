@@ -95,6 +95,7 @@ class CompileSession:
                         zip_file.write(path.decode(), file.decode())
                 zip_data.seek(0)
                 send_file(self.server_conn.send_multipart, zip_data)
+                del zip_data
             else:
                 assert compiler_state == b'READY'
 

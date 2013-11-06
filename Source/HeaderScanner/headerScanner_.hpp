@@ -57,10 +57,12 @@ struct HeaderRef
     HeaderRef(
         llvm::StringRef rel,
         llvm::StringRef abs,
+        bool sys,
         char const * d,
         std::size_t s ) :
         relative( rel ),
         absolute( abs ),
+        system( sys ),
         data( d ),
         size( s )
     {
@@ -68,6 +70,7 @@ struct HeaderRef
 
     std::string relative;
     llvm::StringRef absolute;
+    bool system;
     char const * data;
     std::size_t size;
 

@@ -212,7 +212,7 @@ class CompileSession(ServerSession):
         it should be as fast as possible.
         """
         full_target = os.path.join(self.include_path, target)
-        target = target.lower()
+        target = os.path.normpath(target).lower()
         try:
             make_link(src, full_target)
             self.checksums[target] = checksum

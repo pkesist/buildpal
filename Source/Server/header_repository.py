@@ -37,13 +37,11 @@ class HeaderRepository:
         checksums = self.checksums.setdefault(machine_id, {})
         dirs = set()
         for dir, name, system, relative, checksum, size in in_list:
-            needed_files[name] = dir, checksum, relative
-            if (dir, name) not in checksums or \
-                checksums[(dir, name)] != checksum:
+            key = (dir, name)
+            dirs.add(self.map_dir(dir))
+            if key not in checksums or checksums[key] != checksum:
+                needed_files[name] = dir, name, checksum, relative
                 out_list.append(name)
-            else:
-                dirs.add(self.map_dir(dir))
-
         self.counter += 1
         self.session_data[self.counter] = needed_files, dirs
         return out_list, self.counter
@@ -74,22 +72,30 @@ class HeaderRepository:
                     # and do not remember it.
                     new_files_tar.extract(tar_info, dir)
                 else:
-                    remote_dir, checksum, relative = needed_files[tar_info.name]
+                    remote_dir, remote_name, checksum, relative = needed_files[tar_info.name]
                     if relative:
                         new_files_tar.extract(tar_info, dir)
                     else:
                         content = new_files_tar.extractfile(tar_info)
                         # Extract system files to a fixed location which can be
                         # reused.
-                        name = os.path.normpath(tar_info.name).lower()
                         dirname = self.map_dir(remote_dir)
-                        filename = os.path.join(dirname, name)
-                        os.makedirs(os.path.dirname(filename), exist_ok=True)
-                        with self.lock_dir(remote_dir):
-                            if not os.path.exists(filename):
-                                fileobj = open(filename, 'wb')
-                                fileobj.write(content.read())
-                                checksums[(remote_dir, tar_info.name)] = checksum
+                        filename = os.path.join(dirname, remote_name)
+                        try:
+                            # Try to place the file in the shared dir.
+                            os.makedirs(os.path.dirname(filename), exist_ok=True)
+                            with open(filename, 'wb') as file:
+                                file.write(content.read())
+                            checksums[(remote_dir, remote_name)] = checksum
+                        except Exception:
+                            # If that fails for any reason - unpack to compiler
+                            # process specific dir.
+                            # TODO: This will fail in case this header is
+                            # included from another header via relative path.
+                            filename = os.path.normpath(os.path.join(dir, remote_name))
+                            os.makedirs(os.path.dirname(filename), exist_ok=True)
+                            with open(filename, 'wb') as file:
+                                file.write(content.read())
                         if not dirname in include_paths:
                             include_paths.append(dirname)
         return include_paths

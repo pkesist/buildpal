@@ -248,8 +248,8 @@ class CompileWorker(Process):
         self.__run_compiler_sem = run_compiler_sem
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
-        self.__include_path = tempfile.mkdtemp(suffix='', prefix='tmp',
-                                               dir=None)
+        self.__include_path = tempfile.mkdtemp(suffix='',
+            prefix='tmp', dir=None)
         self.__checksums = {}
 
     class SessionMaker:

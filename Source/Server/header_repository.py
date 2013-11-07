@@ -7,14 +7,10 @@ import tarfile
 from threading import Lock
 from hashlib import md5
 
-import cProfile
-
 class HeaderRepository:
     def __init__(self):
-        self.profiler = cProfile.Profile()
-        self.profiler_count = 0
         self.checksums = {}
-        self.dir = tempfile.mkdtemp()
+        self.dir = os.path.join(tempfile.gettempdir(), 'DistriBuild', 'Headers')
         self.counter = 0
         self.session_data = {}
         self.dir_lock = {}
@@ -53,7 +49,6 @@ class HeaderRepository:
         return out_list, self.counter
 
     def prepare_dir(self, machine_id, new_files_tar_buffer, id, dir):
-        self.profiler.enable()
         assert id in self.session_data
         include_paths = [dir]
         needed_files, include_dirs = self.session_data[id]
@@ -97,8 +92,4 @@ class HeaderRepository:
                                 checksums[(remote_dir, tar_info.name)] = checksum
                         if not dirname in include_paths:
                             include_paths.append(dirname)
-        self.profiler.disable()
-        self.profiler_count += 1
-        if self.profiler_count % 20 == 0:
-            self.profiler.print_stats()
         return include_paths

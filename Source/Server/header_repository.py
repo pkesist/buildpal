@@ -7,42 +7,26 @@ import tarfile
 from threading import Lock
 from hashlib import md5
 
-class Header:
-    def __init__(self, src_dir, src_file, checksum, fileobj, filename, reader, dir):
-        self._checksum = checksum
-        self._filename = filename
-        self._dir = dir
-        for data in iter(reader.read, b''):
-            fileobj.write(data)
-        self._size = fileobj.tell()
-
-    def matches(self, size, checksum):
-        return size == self._size and self._checksum == checksum
-
-    def size(self):
-        return self._size
-
-    def location(self):
-        return self._filename
-
-    def dir(self):
-        return self._dir
-
-class FileList:
-    def __init__(self):
-        self.files = {}
-
-    def get(self, machine):
-        return self.files.setdefault(machine, {})
+import cProfile
 
 class HeaderRepository:
     def __init__(self):
-        self.files = FileList()
+        self.profiler = cProfile.Profile()
+        self.profiler_count = 0
+        self.checksums = {}
         self.dir = tempfile.mkdtemp()
         self.counter = 0
         self.session_data = {}
-        self.system_dir_lock = Lock()
+        self.dir_lock = {}
         self.dir_map = {}
+
+    def lock_dir(self, dir):
+        assert dir in self.dir_map
+        result = self.dir_lock.get(dir)
+        if not result:
+            result = Lock()
+            self.dir_lock[dir] = result
+        return result
 
     def map_dir(self, dir):
         result = self.dir_map.get(dir)
@@ -54,12 +38,12 @@ class HeaderRepository:
     def missing_files(self, machine_id, in_list):
         needed_files = {}
         out_list = []
-        machine_files = self.files.get(machine_id)
+        checksums = self.checksums.setdefault(machine_id, {})
         dirs = set()
         for dir, name, system, relative, checksum, size in in_list:
             needed_files[name] = dir, checksum, relative
-            if (dir, name) not in machine_files or \
-                not machine_files[(dir, name)].matches(size, checksum):
+            if (dir, name) not in checksums or \
+                checksums[(dir, name)] != checksum:
                 out_list.append(name)
             else:
                 dirs.add(self.map_dir(dir))
@@ -69,6 +53,7 @@ class HeaderRepository:
         return out_list, self.counter
 
     def prepare_dir(self, machine_id, new_files_tar_buffer, id, dir):
+        self.profiler.enable()
         assert id in self.session_data
         include_paths = [dir]
         needed_files, include_dirs = self.session_data[id]
@@ -76,7 +61,7 @@ class HeaderRepository:
         del self.session_data[id]
         new_files_tar_stream = BytesIO(new_files_tar_buffer)
 
-        machine_files = self.files.get(machine_id)
+        checksums = self.checksums.get(machine_id)
 
         # Update headers.
         with tarfile.open(mode='r', fileobj=new_files_tar_stream) as new_files_tar:
@@ -105,10 +90,15 @@ class HeaderRepository:
                         dirname = self.map_dir(remote_dir)
                         filename = os.path.join(dirname, name)
                         os.makedirs(os.path.dirname(filename), exist_ok=True)
-                        with self.system_dir_lock:
+                        with self.lock_dir(remote_dir):
                             if not os.path.exists(filename):
                                 fileobj = open(filename, 'wb')
-                                machine_files[(dir, name)] = Header(dir, name, checksum, fileobj, filename, content, dirname)
+                                fileobj.write(content.read())
+                                checksums[(dir, name)] = checksum
                         if not dirname in include_paths:
                             include_paths.append(dirname)
+        self.profiler.disable()
+        self.profiler_count += 1
+        if self.profiler_count % 20 == 0:
+            self.profiler.print_stats()
         return include_paths

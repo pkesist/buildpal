@@ -219,8 +219,8 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
     {
         PyObject * tuple = PyTuple_New( 5 );
-        PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
-        PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->absolute.data(), iter->absolute.size() ) );
+        PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->directory.data(), iter->directory.size() ) );
+        PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
         PyObject * const isSystem( iter->location == HeaderLocation::system ? Py_True : Py_False );
         Py_INCREF( isSystem );
         PyTuple_SET_ITEM( tuple, 2, isSystem );

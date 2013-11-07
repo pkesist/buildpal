@@ -65,21 +65,21 @@ struct HeaderLocation
 struct HeaderRef
 {
     HeaderRef(
+        llvm::StringRef dir,
         llvm::StringRef rel,
-        llvm::StringRef abs,
         HeaderLocation::Enum loc,
         char const * d,
         std::size_t s ) :
+        directory( dir ),
         relative( rel ),
-        absolute( abs ),
         location( loc ),
         data( d ),
         size( s )
     {
     }
 
-    std::string relative;
-    llvm::StringRef absolute;
+    llvm::StringRef directory;
+    llvm::StringRef relative;
     HeaderLocation::Enum location;
     char const * data;
     std::size_t size;

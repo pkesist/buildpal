@@ -35,6 +35,7 @@ namespace
         explicit HeaderScanner
         (
             HeaderTracker & headerTracker,
+            llvm::StringRef dir,
             llvm::StringRef relFilename,
             clang::Preprocessor & preprocessor,
             PreprocessingContext::IgnoredHeaders const & ignoredHeaders,
@@ -45,6 +46,7 @@ namespace
             preprocessor_  ( preprocessor    ),
             headers_       ( includedHeaders ),
             ignoredHeaders_( ignoredHeaders  ),
+            dir_           ( dir             ),
             relFilename_   ( relFilename     )
         {
         }
@@ -58,8 +60,6 @@ namespace
             clang::FileEntry const * & file)
         {
             headerTracker_.findFile( filename, isAngled, file );
-            if ( file )
-                includeFilename_ = filename;
         }
 
         virtual void FileChanged( clang::SourceLocation loc, FileChangeReason reason,
@@ -72,9 +72,9 @@ namespace
                 if ( !fileEntry )
                     return;
                 if ( fileId == preprocessor_.getSourceManager().getMainFileID() )
-                    headerTracker_.enterSourceFile( fileEntry, relFilename_ );
+                    headerTracker_.enterSourceFile( fileEntry, dir_, relFilename_ );
                 else
-                    headerTracker_.enterHeader( includeFilename_ );
+                    headerTracker_.enterHeader();
             }
             else if ( reason == ExitFile )
             {
@@ -98,7 +98,7 @@ namespace
             clang::SrcMgr::CharacteristicKind
         )
         {
-            headerTracker_.headerSkipped( includeFilename_ );
+            headerTracker_.headerSkipped();
         }
 
         virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * )
@@ -134,10 +134,10 @@ namespace
     private:
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
+        llvm::StringRef dir_;
         llvm::StringRef relFilename_;
         Preprocessor::HeaderRefs & headers_;
         PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
-        clang::StringRef includeFilename_;
     };
 
     class DiagnosticConsumer : public clang::DiagnosticConsumer
@@ -296,7 +296,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_.get() );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, relFilename,
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, dir, relFilename,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 
     preprocessor().EnterMainSourceFile();

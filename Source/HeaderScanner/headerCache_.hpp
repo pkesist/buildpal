@@ -10,6 +10,13 @@
 #include <boost/variant.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/flat_map.hpp>
+#include <boost/flyweight/flyweight.hpp>
+#include <boost/flyweight/hashed_factory.hpp>
+#include <boost/flyweight/tag.hpp>
+#include <boost/flyweight/no_locking.hpp>
+#include <boost/flyweight/no_tracking.hpp>
+#include <boost/flyweight/static_holder.hpp>
+#include <boost/flyweight/refcounted.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 
@@ -23,20 +30,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-//------------------------------------------------------------------------------
-#define POOL_MACROS_USING_BOOST_FLYWEIGHT
-#ifdef POOL_MACROS_USING_BOOST_FLYWEIGHT
-#include <boost/flyweight/flyweight.hpp>
-#include <boost/flyweight/hashed_factory.hpp>
-#include <boost/flyweight/tag.hpp>
-#include <boost/flyweight/no_locking.hpp>
-#include <boost/flyweight/no_tracking.hpp>
-#include <boost/flyweight/static_holder.hpp>
-#include <boost/flyweight/refcounted.hpp>
-#elif defined(POOL_MACROS_USING_LLVM_STRINGPOOL)
-#include <llvm/Support/StringPool.h>
-#endif
-//------------------------------------------------------------------------------
 
 namespace clang
 {
@@ -46,12 +39,12 @@ namespace clang
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
 typedef boost::container::flat_map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
-#ifdef POOL_MACROS_USING_BOOST_FLYWEIGHT
-struct HeaderNameTag {};
-
 namespace BF = boost::flyweights;
+struct DirTag {};
+typedef boost::flyweight<std::string, BF::tag<DirTag>, BF::no_locking, BF::no_tracking> Dir;
+struct HeaderNameTag {};
 typedef boost::flyweight<std::string, BF::tag<HeaderNameTag>, BF::no_locking, BF::no_tracking> HeaderName;
-typedef std::tuple<HeaderName, clang::FileEntry const *, HeaderLocation::Enum> HeaderFile;
+typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> HeaderFile;
 struct MacroNameTag {};
 typedef boost::flyweight<std::string, BF::tag<MacroNameTag>, BF::no_locking, BF::no_tracking> MacroName;
 struct MacroValueTag {};
@@ -60,9 +53,10 @@ typedef boost::flyweight<std::string, BF::tag<MacroValueTag>, BF::no_locking, BF
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
 
-inline HeaderName headerNameFromDataAndSize( char const * data, std::size_t size )
+template<typename T>
+inline T fromDataAndSize( char const * data, std::size_t size )
 {
-    return HeaderName( data, size );
+    return T( data, size );
 }
 
 inline Macro macroFromMacroRef( MacroRef const & macroRef )
@@ -86,33 +80,6 @@ inline MacroRef macroRefFromMacro( Macro const & macro )
 {
     return std::make_pair( macroName( macro ), macroValue( macro ) );
 }
-#else
-typedef std::string MacroName;
-typedef std::string MacroValue;
-
-typedef boost::container::flat_map<MacroName, MacroValue> Macros;
-typedef Macros::value_type Macro;
-
-inline Macro macroFromMacroRef( MacroRef const & macroRef )
-{
-    return macroRef;
-}
-
-inline llvm::StringRef macroName( Macro const & macro )
-{
-    return macro.first;
-}
-
-inline llvm::StringRef macroValue( Macro const & macro )
-{
-    return macro.second;
-}
-
-inline MacroRef macroRefFromMacro( Macro const & macro )
-{
-    return macro;
-}
-#endif // DONT_USE_POOLED_MACROS_IN_CACHE
 
 inline llvm::StringRef undefinedMacroValue()
 {

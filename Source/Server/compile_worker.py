@@ -124,7 +124,7 @@ class CompileSession(ServerSession):
             self.task['compiler_info'].executable())
         def run_compiler(command, cwd):
             command[0] = self.compiler_exe
-            with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True) as proc:
+            with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         self.compiler = run_compiler
@@ -205,27 +205,6 @@ class CompileSession(ServerSession):
             self.task_counter.dec()
         return result
 
-    def link_to_include_dir(self, src, target, checksum):
-        """
-        Add the 'src' file to include dir, with 'target' relative path. This
-        function is used to create every header file for compilation, so
-        it should be as fast as possible.
-        """
-        full_target = os.path.join(self.include_path, target)
-        target = os.path.normpath(target).lower()
-        try:
-            make_link(src, full_target)
-            self.checksums[target] = checksum
-        except FileNotFoundError:
-            os.makedirs(os.path.dirname(full_target), exist_ok=True)
-            make_link(src, full_target)
-            self.checksums[target] = checksum
-        except FileExistsError:
-            if self.checksums[target] != checksum:
-                os.remove(full_target)
-                make_link(src, full_target)
-                self.checksums[target] = checksum
-
     def process_attached_msg(self, socket, msg):
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             if hasattr(self, 'waiting_for_header_list'):
@@ -246,13 +225,9 @@ class CompileSession(ServerSession):
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             shared_prepare_dir_timer = SimpleTimer()
-            self.include_dirs, files_to_copy = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
+            self.include_dirs = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
             self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
             del shared_prepare_dir_timer
-            copy_files_timer = SimpleTimer()
-            for src, target, checksum in files_to_copy:
-                self.link_to_include_dir(src, target, checksum)
-            self.times['copy_files'] = copy_files_timer.get()
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.run_compiler()

@@ -40,12 +40,12 @@ public:
     {
     }
 
-    void enterSourceFile( clang::FileEntry const *, llvm::StringRef relFilename );
+    void enterSourceFile( clang::FileEntry const *, llvm::StringRef dirPart, llvm::StringRef relPart );
     Preprocessor::HeaderRefs exitSourceFile();
 
     void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
-    void headerSkipped( llvm::StringRef relative );
-    void enterHeader( llvm::StringRef relative );
+    void headerSkipped();
+    void enterHeader();
     void leaveHeader( IgnoredHeaders const & );
 
     void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );
@@ -175,8 +175,8 @@ private:
     clang::SourceManager & sourceManager() const;
 
 private:
-    typedef llvm::SmallVector<char, 100> IncludePath;
-    typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, IncludePath> IncludeStackEntry;
+    typedef llvm::SmallString<1024> PathPart;
+    typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, PathPart, PathPart> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
 
 private:

@@ -94,7 +94,7 @@ class HeaderRepository:
                             if not os.path.exists(filename):
                                 fileobj = open(filename, 'wb')
                                 fileobj.write(content.read())
-                                checksums[(dir, name)] = checksum
+                                checksums[(remote_dir, tar_info.name)] = checksum
                         if not dirname in include_paths:
                             include_paths.append(dirname)
         self.profiler.disable()

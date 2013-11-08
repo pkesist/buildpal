@@ -194,14 +194,13 @@ class MSVCWrapper(CompilerWrapper):
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
-        assert version in self.compiler_versions
         result = CompilerInfo('msvc', os.path.split(executable)[1], version, macros)
         result.pch_file_option = self.pch_file_option()
         result.define_option = self.define_option()
         result.include_option = self.include_option()
         result.object_name_option = self.object_name_option()
         result.compile_no_link_option = self.compile_no_link_option()
-        result.compiler_files = self.compiler_files[version[0]]
+        result.compiler_files = self.compiler_files[version[0][:5]]
         return result
 
     def compiler_option_macros(self, tokens):
@@ -234,17 +233,8 @@ class MSVCWrapper(CompilerWrapper):
             compile_call.append('/Z7')
         return compile_call, self.compiler_option_macros(option_values.all())
 
-    compiler_versions = {
-        (b'15.00.30729.01', b'80x86') : (9 , 'x86'  ), # msvc9
-        (b'15.00.30729.01', b'x64'  ) : (9 , 'amd64'), # msvc9 x64
-        (b'16.00.40219.01', b'80x86') : (10, 'x86'  ), # msvc10
-        (b'16.00.40219.01', b'x64'  ) : (10, 'amd64'), # msvc10 x64
-        (b'17.00.60610.1' , b'x86'  ) : (11, 'x86'  ), # msvc11
-        (b'17.00.60610.1' , b'x64'  ) : (11, 'amd64'), # msvc11 x64
-    }
-
     compiler_files = {
-        b'15.00.30729.01' : 
+        b'15.00' : 
         [
             b'c1.dll',
             b'c1ast.dll',
@@ -263,7 +253,7 @@ class MSVCWrapper(CompilerWrapper):
             b'1033/pgort90ui.dll',
             b'1033/pgoui.dll',
             b'1033/vcomp90ui.dll'],
-        b'16.00.40219.01' :
+        b'16.00' :
         [
             b'c1.dll',
             b'c1ast.dll',
@@ -281,7 +271,7 @@ class MSVCWrapper(CompilerWrapper):
             b'1033/pgort100ui.dll',
             b'1033/pgoui.dll',
             b'1033/vcomp100ui.dll'],
-        b'17.00.60610.1' :
+        b'17.00' :
         [
             b'c1.dll',
             b'c1ast.dll',

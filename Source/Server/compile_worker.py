@@ -42,8 +42,7 @@ class CompileSession(ServerSession):
     STATE_HEADERS_ARRIVED = 2
 
     def __init__(self, file_repository, header_repository, compiler_repository,
-                 run_compiler_sem, cpu_usage_hwm, task_counter, include_path,
-                 checksums):
+                 run_compiler_sem, cpu_usage_hwm, task_counter, checksums):
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
@@ -52,10 +51,18 @@ class CompileSession(ServerSession):
         self.file_repository = file_repository
         self.run_compiler_sem = run_compiler_sem
         self.cpu_usage_hwm = cpu_usage_hwm
-        self.include_path = include_path
-        self.include_dirs = [self.include_path]
+        temp_dir = os.path.join(tempfile.gettempdir(), "DistriBuild", "Temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        self.include_path = tempfile.mkdtemp(dir=temp_dir)
         self.checksums = checksums
         self.times = {}
+
+    def __del__(self):
+        try:
+            shutil.rmtree(self.include_path)
+            os.rmdir(self.include_path)
+        except Exception:
+            pass
 
     def created(self):
         assert self.state == self.STATE_START
@@ -103,7 +110,7 @@ class CompileSession(ServerSession):
                 [self.source_file])
             with self.run_compiler_sem:
                 retcode, stdout, stderr = self.compiler(command,
-                                                        self.include_path)
+                    self.include_path)
         except Exception:
             self.send(b'SERVER_FAILED')
             import traceback
@@ -248,28 +255,25 @@ class CompileWorker(Process):
         self.__run_compiler_sem = run_compiler_sem
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
-        self.__include_path = tempfile.mkdtemp(suffix='',
-            prefix='tmp', dir=None)
         self.__checksums = {}
 
     class SessionMaker:
         def __init__(self, file_repository, header_repository,
             compiler_repository, compiler_sem, cpu_usage_hwm, task_counter,
-            include_path, checksums):
+            checksums):
             self.__file_repository = file_repository
             self.__header_repository = header_repository
             self.__compiler_repository = compiler_repository
             self.__run_compiler_sem = compiler_sem
             self.__cpu_usage_hwm = cpu_usage_hwm
             self.__task_counter = task_counter
-            self.__include_path = include_path
             self.__checksums = checksums
 
         def __call__(self):
             return CompileSession(self.__file_repository,
                 self.__header_repository, self.__compiler_repository,
                 self.__run_compiler_sem, self.__cpu_usage_hwm,
-                self.__task_counter, self.__include_path, self.__checksums)
+                self.__task_counter, self.__checksums)
 
     def run(self):
         import signal
@@ -278,12 +282,9 @@ class CompileWorker(Process):
             worker = ServerWorker(zmq.Context(), CompileWorker.SessionMaker(
                 self.__file_repository, self.__header_repository,
                 self.__compiler_repository, self.__run_compiler_sem,
-                self.__cpu_usage_hwm, self.__task_counter, self.__include_path,
-                self.__checksums))
+                self.__cpu_usage_hwm, self.__task_counter, self.__checksums))
             worker.connect_broker(self.__address)
             worker.connect_control(self.__control_address)
             worker.run()
         except KeyboardInterrupt:
             pass
-        finally:
-            shutil.rmtree(self.__include_path)

@@ -12,7 +12,11 @@ class FileRepository:
         self.__partial_files = {}
 
     def __del__(self):
-        rmtree(self.__dir)
+        try:
+            rmtree(self.__dir)
+            os.rmdir(self.__dir)
+        except Exception:
+            pass
 
     def register_file(self, filename, size, last_modified):
         key = (filename, size, last_modified)

@@ -42,6 +42,6 @@ llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocesso
         assert( startSpellingLoc.second <= endSpellingLoc.second );
         result = llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second );
     }
-    assert( std::memcmp( result.data(), macroName.data(), macroName.size() ) == 0 );
+    // Result starts with macro name, skip that.
     return llvm::StringRef( result.data() + macroName.size(), result.size() - macroName.size() );
 }

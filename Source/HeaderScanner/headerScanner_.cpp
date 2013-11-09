@@ -2,28 +2,28 @@
 #include "headerScanner_.hpp"
 #include "headerTracker_.hpp"
 
-#include "clang/Basic/Diagnostic.h"
-#include "clang/Basic/DiagnosticOptions.h"
-#include "clang/Basic/FileSystemStatCache.h"
-#include "clang/Basic/MacroBuilder.h"
-#include "clang/Basic/TargetInfo.h"
-#include "clang/Basic/TokenKinds.h"
-#include "clang/Basic/SourceManager.h"
-#include "clang/Basic/FileManager.h"
-#include "clang/Frontend/PreprocessorOutputOptions.h"
-#include "clang/Frontend/FrontendActions.h"
-#include "clang/Frontend/TextDiagnosticBuffer.h"
-#include "clang/Frontend/Utils.h"
-#include "clang/Lex/HeaderSearch.h"
-#include "clang/Lex/HeaderSearchOptions.h"
-#include "clang/Lex/Preprocessor.h"
-#include "clang/Lex/PreprocessorOptions.h"
-#include "clang/Rewrite/Frontend/Rewriters.h"
-#include "llvm/Config/config.h"
-#include "llvm/Support/Host.h"
-#include "llvm/Support/Path.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/ADT/SmallString.h"
+#include <clang/Basic/Diagnostic.h>
+#include <clang/Basic/DiagnosticOptions.h>
+#include <clang/Basic/FileSystemStatCache.h>
+#include <clang/Basic/MacroBuilder.h>
+#include <clang/Basic/TargetInfo.h>
+#include <clang/Basic/TokenKinds.h>
+#include <clang/Basic/SourceManager.h>
+#include <clang/Basic/FileManager.h>
+#include <clang/Frontend/PreprocessorOutputOptions.h>
+#include <clang/Frontend/FrontendActions.h>
+#include <clang/Frontend/TextDiagnosticBuffer.h>
+#include <clang/Frontend/Utils.h>
+#include <clang/Lex/HeaderSearch.h>
+#include <clang/Lex/HeaderSearchOptions.h>
+#include <clang/Lex/Preprocessor.h>
+#include <clang/Lex/PreprocessorOptions.h>
+#include <clang/Rewrite/Frontend/Rewriters.h>
+#include <llvm/Config/config.h>
+#include <llvm/Support/Host.h>
+#include <llvm/Support/Path.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/ADT/SmallString.h>
 
 #include <iostream>
 
@@ -223,23 +223,9 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::str
     preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
-std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
+clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
 {
-    clang::HeaderSearch * relativeHeaderSearch( new clang::HeaderSearch(
-        &compiler().getHeaderSearchOpts(),
-        compiler().getFileManager(),
-        compiler().getDiagnostics(),
-        compiler().getLangOpts(),
-        &compiler().getTarget()));
-
-    clang::HeaderSearch * userHeaderSearch( new clang::HeaderSearch(
-        &compiler().getHeaderSearchOpts(),
-        compiler().getFileManager(),
-        compiler().getDiagnostics(),
-        compiler().getLangOpts(),
-        &compiler().getTarget()));
-
-    clang::HeaderSearch * systemHeaderSearch( new clang::HeaderSearch(
+    clang::HeaderSearch * headerSearch( new clang::HeaderSearch(
         &compiler().getHeaderSearchOpts(),
         compiler().getFileManager(),
         compiler().getDiagnostics(),
@@ -253,13 +239,10 @@ std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> 
         bool const sysinclude = iter->second;
         clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
         clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
-        if ( sysinclude )
-            systemHeaderSearch->AddSearchPath( lookup, true );
-        else
-            userHeaderSearch->AddSearchPath( lookup, true );
+        headerSearch->AddSearchPath( lookup, true );
     }
 
-    return std::make_tuple( relativeHeaderSearch, userHeaderSearch, systemHeaderSearch );
+    return headerSearch;
 }
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )

@@ -39,16 +39,20 @@ namespace clang
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
 typedef boost::container::flat_map<llvm::StringRef, llvm::StringRef> MacroRefs;
 
-namespace BF = boost::flyweights;
-struct DirTag {};
-typedef boost::flyweight<std::string, BF::tag<DirTag>, BF::no_locking, BF::no_tracking> Dir;
-struct HeaderNameTag {};
-typedef boost::flyweight<std::string, BF::tag<HeaderNameTag>, BF::no_locking, BF::no_tracking> HeaderName;
+#define DEFINE_FLYWEIGHT(base, name) \
+    struct name##Tag {}; \
+    typedef boost::flyweight<base, \
+        boost::flyweights::tag<name##Tag>, \
+        boost::flyweights::no_locking, \
+        boost::flyweights::no_tracking> name
+
+DEFINE_FLYWEIGHT(std::string, Dir);
+DEFINE_FLYWEIGHT(std::string, HeaderName);
+DEFINE_FLYWEIGHT(std::string, MacroName);
+typedef std::string MacroValue;
+//DEFINE_FLYWEIGHT(std::string, MacroValue);
+
 typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> HeaderFile;
-struct MacroNameTag {};
-typedef boost::flyweight<std::string, BF::tag<MacroNameTag>, BF::no_locking, BF::no_tracking> MacroName;
-struct MacroValueTag {};
-typedef boost::flyweight<std::string, BF::tag<MacroValueTag>, BF::no_locking, BF::no_tracking> MacroValue;
 
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
@@ -73,7 +77,7 @@ inline llvm::StringRef macroName( Macro const & macro )
 
 inline llvm::StringRef macroValue( Macro const & macro )
 {
-    return macro.second.get();
+    return macro.second;
 }
 
 inline MacroRef macroRefFromMacro( Macro const & macro )

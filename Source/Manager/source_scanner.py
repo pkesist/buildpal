@@ -6,7 +6,7 @@ import zmq
 import tarfile
 import os
 import pickle
-from hashlib import md5
+from zlib import adler32
 
 from io import BytesIO
 from multiprocessing import Process
@@ -30,8 +30,8 @@ class SourceScanner(Process):
 
         def create_filelist(self):
             filelist = []
-            for dir, file, system, relative, content, header, checksum in self.header_info:
-                filelist.append((dir, file, system, relative, checksum, len(content) + len(header)))
+            for dir, file, relative, content, header, checksum in self.header_info:
+                filelist.append((dir, file, relative, checksum, len(content) + len(header)))
             return filelist
 
     STATE_WAITING_FOR_TASK = 0
@@ -128,7 +128,7 @@ class SourceScanner(Process):
                 found = False
                 while not found:
                     try:
-                        dir, file, system, relative, content, header, checksum = next(header_info_iter)
+                        dir, file, relative, content, header, checksum = next(header_info_iter)
                         if in_name == file:
                             found = True
                             break
@@ -170,10 +170,7 @@ class SourceScanner(Process):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
             ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-        for dir, file, system, relative, content in header_info:
+        for dir, file, relative, content in header_info:
             input = BytesIO(content)
-            hash = md5()
-            for chunk in iter(lambda : input.read(128 * hash.block_size), b''):
-                hash.update(chunk)
             abs = os.path.join(dir, file)
-            yield dir, file, system, relative, content, cls.header_beginning(abs), hash.digest()
+            yield dir, file, relative, content, cls.header_beginning(abs), adler32(content)

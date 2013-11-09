@@ -5,7 +5,7 @@
 
 #include <clang/Lex/Preprocessor.h>
 
-#include <boost/make_shared.hpp>
+#include <boost/spirit/include/karma.hpp>
 
 #include <iostream>
 //------------------------------------------------------------------------------
@@ -65,9 +65,12 @@ void CacheEntry::generateContent()
 
 std::string Cache::uniqueFileName()
 {
-    std::stringstream result;
-    result << "__cached_file_" << ++counter_;
-    return result.str();
+    std::string result;
+    using namespace boost::spirit::karma;
+    generate( std::back_inserter( result ),
+        lit( "__cached_file_" ) << uint_,
+        ++counter_ );
+    return result;
 }
 
 

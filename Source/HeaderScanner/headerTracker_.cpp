@@ -2,9 +2,11 @@
 
 #include "utility_.hpp"
 
-#include "clang/Lex/Preprocessor.h"
-#include "clang/Lex/HeaderSearch.h"
-#include "llvm/Support/Path.h"
+#include <clang/Lex/Preprocessor.h>
+#include <clang/Lex/HeaderSearch.h>
+#include <llvm/Support/Path.h>
+
+#include <boost/spirit/include/karma.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -16,58 +18,26 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     assert( !fileStack_.empty() );
     IncludeStackEntry currentEntry( fileStack_.back() );
     clang::FileEntry const * currentFile = std::get<0>( currentEntry );
-    clang::DirectoryLookup const * curDir( 0 );
+    clang::DirectoryLookup const * dirLookup( 0 );
     HeaderLocation::Enum const parentLocation( std::get<1>( currentEntry ) );
-    HeaderLocation::Enum headerLocation;
+    PathPart const & parentSearchPath = std::get<2>( currentEntry );
+    PathPart const & parentRelative = std::get<3>( currentEntry );
 
     PathPart searchPath;
     PathPart relativePath;
 
+    clang::FileEntry const * entry = headerSearch_->LookupFile( include, false, 0, dirLookup, currentFile, &searchPath, &relativePath, 0, false );
+    HeaderLocation::Enum const headerLocation = dirLookup == 0
+        ? fileStack_.size() == 1
+            ? HeaderLocation::relative
+            : parentLocation
+        : headerSearch_->getFileDirFlavor( entry ) == clang::SrcMgr::C_System
+            ? HeaderLocation::system
+            : HeaderLocation::regular
+    ;
+
     // If including header is system header, then so are we.
-    if ( parentLocation == HeaderLocation::system )
-    {
-        assert( fileStack_.size() > 1 );
-        headerLocation = HeaderLocation::system;
-    }
-
-    clang::HeaderSearch * headerSearch;
-
-    PathPart const & parentSearchPath = std::get<2>( currentEntry );
-    PathPart const & parentRelative = std::get<3>( currentEntry );
-
-    clang::FileEntry const * entry( 0 );
-    if ( !isAngled && fileStack_.size() == 1 )
-    {
-        entry = relativeHeaderSearch_->LookupFile( include, false, 0, curDir, currentFile, &searchPath, &relativePath, 0, false );
-        if ( entry )
-        {
-            headerLocation = HeaderLocation::relative;
-            headerSearch = relativeHeaderSearch_.get();
-        }
-    }
-
-    if ( !entry )
-    {
-        entry = userHeaderSearch_->LookupFile( include, isAngled, 0, curDir, currentFile, &searchPath, &relativePath, 0, false );
-        if ( entry )
-        {
-            headerLocation = HeaderLocation::regular;
-            headerSearch = userHeaderSearch_.get();
-        }
-    }
-
-    if ( !entry )
-    {
-        entry = systemHeaderSearch_->LookupFile( include, isAngled, 0, curDir, currentFile, &searchPath, &relativePath, 0, false );
-        if ( entry )
-        {
-            headerLocation = HeaderLocation::system;
-            headerSearch = systemHeaderSearch_.get();
-        }
-    }
-
-    if ( !entry )
-        return;
+    assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
     if ( headerLocation == HeaderLocation::relative )
     {
@@ -78,22 +48,99 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     }
 
     fileStack_.push_back( std::make_tuple( entry, headerLocation, searchPath, relativePath ) );
-    if ( cacheDisabled() || !headerSearch->ShouldEnterIncludeFile( entry, false ) )
-    {
-        // File will be skipped anyway. Do not search cache.
-        fileEntry = entry;
-        return;
-    }
 
-    CacheEntryPtr const cacheHit( cache().findEntry( entry->getName(), macroState() ) );
-    if ( !cacheHit )
+    if
+    (
+        !cacheDisabled() &&
+        headerSearch_->ShouldEnterIncludeFile( entry, false ) &&
+        ( cacheHit_ = cache().findEntry( entry->getName(), macroState() ) )
+    )
     {
-        fileEntry = entry;
-        return;
+        // There is a hit in cache!
+        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
     }
-    cacheHit_ = cacheHit;
-    fileEntry = cacheHit->getFileEntry( preprocessor().getSourceManager() );
+    else
+    {
+        // No match in cache. We will have to use the disk file.
+        // Create a stripped version of it containing only preprocessor directives.
+        //fileEntry = strippedEquivalent( entry );
+        fileEntry = entry;
+    }
 }
+
+std::string HeaderTracker::uniqueFileName()
+{
+    std::string result;
+    using namespace boost::spirit::karma;
+    generate( std::back_inserter( result ),
+        lit( "__stripped_file_" ) << uint_,
+        ++counter_ );
+    return result;
+}
+
+clang::FileEntry const * HeaderTracker::strippedEquivalent( clang::FileEntry const * file )
+{
+    FileMapping::const_iterator const iter( strippedEquivalent_.find( file ) );
+    if ( iter != strippedEquivalent_.end() )
+        return iter->second;
+
+    bool invalid;
+
+    assert( !sourceManager().isFileOverridden( file ) );
+    llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( file, &invalid );
+    assert( ( buffer == 0 ) == invalid );
+    if ( invalid )
+        buffer = sourceManager().getFileManager().getBufferForFile( file, 0 );
+    assert( buffer );
+
+    buffers_.resize( buffers_.size() + 1 );
+    buffers_.back().reserve( buffer->getBufferSize() / 2 );
+    llvm::raw_string_ostream ostream( buffers_.back() );
+    bool newLine = true;
+    bool skipLine = true;
+    char lastNonWs = 0;
+
+    char const * lineStart = buffer->getBufferStart();
+    char const * end = lineStart + buffer->getBufferSize();
+    for ( char const * pos = lineStart; pos != end; ++pos )
+    {
+        switch ( *pos )
+        {
+            case ' ':
+            case '\t':
+            case '\r':
+                break;
+
+            case '\n':
+                if ( lastNonWs != '\\' )
+                {
+                    newLine = true;
+                    if ( !skipLine )
+                        ostream << llvm::StringRef( lineStart, pos - lineStart + 1 );
+                    lineStart = pos + 1;
+                    skipLine = true;
+                }
+                break;
+
+            case '#':
+                if ( newLine ) skipLine = false;
+                newLine = false;
+                // Fall through.
+
+            default:
+                lastNonWs = *pos;
+                newLine = false;
+        }
+    }
+    if ( ( lineStart < end ) && !skipLine )
+        ostream << llvm::StringRef( lineStart, end - lineStart ) << "\n";
+    ostream << '\0';
+    clang::FileEntry const * replacement = sourceManager().getFileManager().getVirtualFile( uniqueFileName(), 0, 0 );
+    sourceManager().overrideFileContents( replacement, llvm::MemoryBuffer::getMemBuffer( ostream.str(), "", true ) );
+    strippedEquivalent_.insert( std::make_pair( file, replacement ) );
+    return replacement;
+}
+
 
 void HeaderTracker::headerSkipped()
 {
@@ -105,6 +152,7 @@ void HeaderTracker::headerSkipped()
     PathPart const & relPart( std::get<3>( currentEntry ) );
     fileStack_.pop_back();
 
+    //file = strippedEquivalent( file );
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
     if ( !headerCtxStack().empty() )
@@ -123,11 +171,11 @@ void HeaderTracker::headerSkipped()
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName, macroState() );
         }
-        HeaderFile header( std::make_tuple(
+        headerCtxStack().back().addHeader
+        ( HeaderFile( std::make_tuple(
             fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
             fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
-            file, headerLocation ) );
-        headerCtxStack().back().addHeader( header );
+            file, headerLocation ) ) );
     }
 }
 

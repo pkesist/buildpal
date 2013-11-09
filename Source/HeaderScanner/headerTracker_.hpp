@@ -30,13 +30,12 @@ class HeaderTracker
 public:
     typedef PreprocessingContext::IgnoredHeaders IgnoredHeaders;
 
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> headerSearch, Cache * cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch * headerSearch, Cache * cache )
         :
-        relativeHeaderSearch_( std::get<0>( headerSearch ) ),
-        userHeaderSearch_( std::get<1>( headerSearch ) ),
-        systemHeaderSearch_( std::get<2>( headerSearch ) ),
+        headerSearch_( headerSearch ),
         preprocessor_( preprocessor ),
-        cache_( cache )
+        cache_( cache ), 
+        counter_( 0 )
     {
     }
 
@@ -69,7 +68,9 @@ private:
         void macroUsed( llvm::StringRef macroName, MacroState const & macroState )
         {
             assert( !fromCache() );
-            if ( definedMacroNames_.find( macroName ) == definedMacroNames_.end() )
+            // Macro is marked as 'used' in this header only if it was not also
+            // defined here.
+            if ( definedHere_.find( macroName ) == definedHere_.end() )
                 usedMacros_.insert( std::make_pair( macroName, macroState.macroValue( macroName ) ) );
         }
 
@@ -78,7 +79,11 @@ private:
             assert( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, macroDef ) );
             headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
-            definedMacroNames_.insert( macroName );
+            MacroNames::const_iterator const undefIter( undefinedHere_.find( macroName ) );
+            if ( undefIter != undefinedHere_.end() )
+                undefinedHere_.erase( undefIter );
+            else
+                definedHere_.insert( macroName );
         }
 
         void macroUndefined( llvm::StringRef macroName )
@@ -86,6 +91,16 @@ private:
             assert( !fromCache() );
             MacroRef const macro( std::make_pair( macroName, undefinedMacroValue() ) );
             headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
+            MacroNames::const_iterator const defIter( definedHere_.find( macroName ) );
+            if ( defIter != definedHere_.end() )
+            {
+                usedMacros_.erase( macroName );
+                definedHere_.erase( defIter );
+            }
+            else
+            {
+                undefinedHere_.insert( macroName );
+            }
         }
 
         void addHeader( HeaderFile const & header )
@@ -98,8 +113,8 @@ private:
         {
             Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
             Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
-            DefinedMacroNames::const_iterator       definedIter = definedMacroNames_.begin();
-            DefinedMacroNames::const_iterator const definedEnd = definedMacroNames_.end();
+            MacroNames::const_iterator       definedIter = definedHere_.begin();
+            MacroNames::const_iterator const definedEnd = definedHere_.end();
             while ( cacheIter != cacheEnd && definedIter != definedEnd )
             {
                 int const compareResult = definedIter->compare( macroName( *cacheIter ) );
@@ -149,14 +164,15 @@ private:
         bool fromCache() const { return cacheHit_; }
 
     private:
-        typedef boost::container::flat_set<llvm::StringRef> DefinedMacroNames;
+        typedef boost::container::flat_set<llvm::StringRef> MacroNames;
 
     private:
         clang::Preprocessor const & preprocessor_;
         HeaderFile header_;
         CacheEntryPtr cacheHit_;
         MacroRefs usedMacros_;
-        DefinedMacroNames definedMacroNames_;
+        MacroNames definedHere_;
+        MacroNames undefinedHere_;
         HeaderContent headerContent_;
         Headers includedHeaders_;
     };
@@ -171,6 +187,8 @@ private:
     MacroState const & macroState() const { return macroState_; }
     MacroState       & macroState()       { return macroState_; }
 
+    clang::FileEntry const * strippedEquivalent( clang::FileEntry const * );
+
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
 
@@ -178,14 +196,18 @@ private:
     typedef llvm::SmallString<1024> PathPart;
     typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, PathPart, PathPart> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
+    typedef boost::container::flat_map<clang::FileEntry const *, clang::FileEntry const *> FileMapping;
+
+    std::string uniqueFileName();
 
 private:
-    llvm::OwningPtr<clang::HeaderSearch> relativeHeaderSearch_;
-    llvm::OwningPtr<clang::HeaderSearch> userHeaderSearch_;
-    llvm::OwningPtr<clang::HeaderSearch> systemHeaderSearch_;
+    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
+    std::vector<std::string> buffers_;
+    FileMapping strippedEquivalent_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
+    unsigned int counter_;
     CacheEntryPtr cacheHit_;
     IncludeStack fileStack_;
     MacroState macroState_;

@@ -17,6 +17,10 @@
 #include <boost/flyweight/no_tracking.hpp>
 #include <boost/flyweight/static_holder.hpp>
 #include <boost/flyweight/refcounted.hpp>
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
+#include <boost/functional/hash.hpp>
 #include <boost/thread/locks.hpp>
 #include <boost/thread/lock_types.hpp> 
 
@@ -36,8 +40,16 @@ namespace clang
     class FileEntry;
 }
 
+struct HashStrRef
+{
+    std::size_t operator()( llvm::StringRef str )
+    {
+        return boost::hash_range( str.data(), str.data() + str.size() );
+    }
+};
+
 typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
-typedef boost::container::flat_map<llvm::StringRef, llvm::StringRef> MacroRefs;
+typedef std::unordered_map<llvm::StringRef, llvm::StringRef, HashStrRef> MacroRefs;
 
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
@@ -140,11 +152,13 @@ class CacheEntry
 private:
     CacheEntry
     (
+        unsigned uid,
         std::string const & uniqueVirtualFileName,
         MacroRefs const & usedMacros,
         HeaderContent const & headerContent,
         Headers const & headers
-    ) : 
+    ) :
+        uid_( uid ),
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
@@ -158,6 +172,7 @@ private:
 public:
     static CacheEntryPtr create
     (
+        unsigned uid,
         std::string const & uniqueVirtualFileName,
         MacroRefs const & usedMacros,
         HeaderContent const & headerContent,
@@ -166,6 +181,7 @@ public:
     {
         CacheEntry * result = new CacheEntry
         (
+            uid,
             uniqueVirtualFileName,
             usedMacros,
             headerContent,
@@ -182,6 +198,7 @@ public:
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
+    unsigned uid() const { return uid_; }
 
 private:
     friend void intrusive_ptr_add_ref( CacheEntry * );
@@ -196,6 +213,7 @@ private:
     }
 
 private:
+    unsigned uid_;
     std::string fileName_;
     Macros usedMacros_;
     HeaderContent headerContent_;
@@ -213,46 +231,6 @@ class Cache
 public:
     Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
 
-    typedef CacheEntry CacheEntry;
-
-    class HeaderInfo
-    {
-    private:
-        HeaderInfo( HeaderInfo const & );
-        HeaderInfo & operator=( HeaderInfo & );
-
-    public:
-        typedef boost::container::list<CacheEntryPtr> CacheList;
-
-        HeaderInfo( std::string const & header, std::size_t const size )
-            :
-            header_( header )
-        {}
-
-        HeaderInfo( HeaderInfo && other )
-            :
-            cacheList_( other.cacheList_ )
-        {
-            header_.swap( other.header_ );
-        }
-
-        HeaderInfo & operator=( HeaderInfo && other )
-        {
-            header_.swap( other.header_ );
-            cacheList_ = other.cacheList_;
-            return *this;
-        }
-
-        CacheEntryPtr findCacheEntry( MacroState const & );
-        void insert( CacheEntryPtr c ) { cacheList_.push_front( c ); }
-
-        std::string const & header() const { return header_; }
-
-    private:
-        std::string header_;
-        CacheList cacheList_;
-    };
-
     CacheEntryPtr addEntry
     (
         clang::FileEntry const * file,
@@ -261,31 +239,15 @@ public:
         Headers const & headers
     )
     {
-        HeadersInfo::iterator iter( headersInfo().find( file->getName() ) );
-        if ( iter == headersInfo().end() )
-        {
-            while ( headersInfoList_.size() > 1024 * 1 )
-            {
-                headersInfo_.erase( headersInfoList_.back().header() );
-                headersInfoList_.pop_back();
-            }
-            headersInfoList_.push_front( HeaderInfo( file->getName(), 20 ) );
-            std::pair<HeadersInfo::iterator, bool> const insertResult(
-                headersInfo().insert( std::make_pair( file->getName(),
-                headersInfoList_.begin() ) ) );
-            assert( insertResult.second );
-            iter = insertResult.first;
-        }
-
-        CacheEntryPtr result = CacheEntry::create( uniqueFileName(),
+        CacheEntryPtr result = CacheEntry::create( file->getUID(), uniqueFileName(),
             macros, headerContent, headers );
-        iter->second->insert( result );
+        cacheContainer_.push_back( result );
         return result;
     }
 
     CacheEntryPtr findEntry
     (
-        llvm::StringRef fileName,
+        unsigned uid,
         MacroState const & macroState
     );
 
@@ -296,15 +258,28 @@ private:
     std::string uniqueFileName();
 
 private:
-    struct HeadersInfoList : public boost::container::list<HeaderInfo> {};
-    struct HeadersInfo : public std::unordered_map<std::string, HeadersInfoList::iterator> {};
+    struct ByUid {};
 
-    HeadersInfo const & headersInfo() const { return headersInfo_; }
-    HeadersInfo       & headersInfo()       { return headersInfo_; }
+    struct GetUid
+    {
+        typedef unsigned result_type;
+        result_type operator()( CacheEntryPtr const & c ) const
+        {
+            return c->uid();
+        }
+    };
+
+    typedef boost::multi_index_container<
+        CacheEntryPtr,
+        boost::multi_index::indexed_by<
+            boost::multi_index::sequenced<>,
+            boost::multi_index::ordered_non_unique<
+                boost::multi_index::tag<ByUid>, GetUid>
+        >
+    > CacheContainer;
 
 private:
-    HeadersInfoList headersInfoList_;
-    HeadersInfo headersInfo_;
+    CacheContainer cacheContainer_;
     std::size_t counter_;
     std::size_t hits_;
     std::size_t misses_;

@@ -53,7 +53,7 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     (
         !cacheDisabled() &&
         headerSearch_->ShouldEnterIncludeFile( entry, false ) &&
-        ( cacheHit_ = cache().findEntry( entry->getName(), macroState() ) )
+        ( cacheHit_ = cache().findEntry( entry->getUID(), macroState() ) )
     )
     {
         // There is a hit in cache!

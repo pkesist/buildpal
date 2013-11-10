@@ -196,7 +196,7 @@ private:
     typedef llvm::SmallString<1024> PathPart;
     typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, PathPart, PathPart> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
-    typedef boost::container::flat_map<clang::FileEntry const *, clang::FileEntry const *> FileMapping;
+    typedef std::unordered_map<clang::FileEntry const *, clang::FileEntry const *> FileMapping;
 
     std::string uniqueFileName();
 

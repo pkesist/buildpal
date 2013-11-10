@@ -103,7 +103,7 @@ public:
     typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
-    std::tuple<clang::HeaderSearch *, clang::HeaderSearch *, clang::HeaderSearch *> getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
+    clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }

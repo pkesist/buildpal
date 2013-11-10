@@ -81,40 +81,25 @@ void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
     sourceManager.disableFileContentsOverride( result );
 }
 
-CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & macroState )
+CacheEntryPtr Cache::findEntry( unsigned uid, MacroState const & macroState )
 {
-    HeadersInfo::iterator const iter( headersInfo().find( fileName ) );
-    if ( iter == headersInfo().end() )
-        return CacheEntryPtr();
-    CacheEntryPtr result( iter->second->findCacheEntry( macroState ) );
-    if ( result )
-    {
-        ++hits_;
-        headersInfoList_.splice( headersInfoList_.begin(), headersInfoList_, iter->second );
-        result->generateContent();
-    }
-    else
-    {
-        ++misses_;
-    }
-    return result;
-}
-
-
-CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
-{
+    typedef CacheContainer::index<ByUid>::type CacheByFile;
+    std::pair<CacheByFile::iterator, CacheByFile::iterator> const iterRange =
+        cacheContainer_.get<ByUid>().equal_range( uid );
     for
     (
-        CacheList::iterator headerInfoIter( cacheList_.begin() );
-        headerInfoIter != cacheList_.end();
-        ++headerInfoIter
+        CacheByFile::iterator iter = iterRange.first;
+        iter != iterRange.second;
+        ++iter
     )
     {
-        if (
+        CacheEntryPtr const pEntry = *iter;
+        if
+        (
             std::find_if_not
             (
-                (*headerInfoIter)->usedMacros().begin(),
-                (*headerInfoIter)->usedMacros().end(),
+                pEntry->usedMacros().begin(),
+                pEntry->usedMacros().end(),
                 [&]( Macro const & macro )
                 {
                     MacroState::const_iterator const iter( macroState.find( macroName( macro ) ) );
@@ -124,13 +109,15 @@ CacheEntryPtr Cache::HeaderInfo::findCacheEntry( MacroState const & macroState )
                         : iter->getValue() == value
                     ;
                 }
-            ) == (*headerInfoIter)->usedMacros().end()
+            ) == pEntry->usedMacros().end()
         )
         {
-            cacheList_.splice( cacheList_.begin(), cacheList_, headerInfoIter );
-            return *headerInfoIter;
+            ++hits_;
+            pEntry->generateContent();
+            return pEntry;
         }
     }
+    ++misses_;
     return CacheEntryPtr();
 }
 

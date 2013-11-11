@@ -73,7 +73,6 @@ std::string Cache::uniqueFileName()
     return result;
 }
 
-
 void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
@@ -83,12 +82,11 @@ void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
 
 CacheEntryPtr Cache::findEntry( unsigned uid, MacroState const & macroState )
 {
-    typedef CacheContainer::index<ByUid>::type CacheByFile;
-    std::pair<CacheByFile::iterator, CacheByFile::iterator> const iterRange =
-        cacheContainer_.get<ByUid>().equal_range( uid );
+    std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
+        cacheContainer_.equal_range( uid );
     for
     (
-        CacheByFile::iterator iter = iterRange.first;
+        CacheContainer::iterator iter = iterRange.first;
         iter != iterRange.second;
         ++iter
     )
@@ -113,6 +111,7 @@ CacheEntryPtr Cache::findEntry( unsigned uid, MacroState const & macroState )
         )
         {
             ++hits_;
+            cacheContainer_.modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
             pEntry->generateContent();
             return pEntry;
         }

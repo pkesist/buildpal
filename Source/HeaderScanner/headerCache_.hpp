@@ -18,11 +18,9 @@
 #include <boost/flyweight/static_holder.hpp>
 #include <boost/flyweight/refcounted.hpp>
 #include <boost/multi_index_container.hpp>
+#include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/ordered_index.hpp>
-#include <boost/multi_index/sequenced_index.hpp>
 #include <boost/functional/hash.hpp>
-#include <boost/thread/locks.hpp>
-#include <boost/thread/lock_types.hpp> 
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -61,8 +59,7 @@ typedef std::unordered_map<llvm::StringRef, llvm::StringRef, HashStrRef> MacroRe
 DEFINE_FLYWEIGHT(std::string, Dir);
 DEFINE_FLYWEIGHT(std::string, HeaderName);
 DEFINE_FLYWEIGHT(std::string, MacroName);
-typedef std::string MacroValue;
-//DEFINE_FLYWEIGHT(std::string, MacroValue);
+DEFINE_FLYWEIGHT(std::string, MacroValue);
 
 typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> HeaderFile;
 
@@ -89,7 +86,7 @@ inline llvm::StringRef macroName( Macro const & macro )
 
 inline llvm::StringRef macroValue( Macro const & macro )
 {
-    return macro.second;
+    return macro.second.get();
 }
 
 inline MacroRef macroRefFromMacro( Macro const & macro )
@@ -162,7 +159,8 @@ private:
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
-        refCount_( 0 )
+        refCount_( 0 ),
+        hitCount_( 0 )
     {
         std::transform( usedMacros.begin(), usedMacros.end(),
             std::inserter( usedMacros_, usedMacros_.begin() ),
@@ -199,6 +197,9 @@ public:
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
     unsigned uid() const { return uid_; }
+    std::size_t hitCount() const { return hitCount_; }
+    
+    void incHitCount() { ++hitCount_; }
 
 private:
     friend void intrusive_ptr_add_ref( CacheEntry * );
@@ -219,6 +220,7 @@ private:
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t refCount_;
+    std::size_t hitCount_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
@@ -241,7 +243,7 @@ public:
     {
         CacheEntryPtr result = CacheEntry::create( file->getUID(), uniqueFileName(),
             macros, headerContent, headers );
-        cacheContainer_.push_back( result );
+        cacheContainer_.insert( result );
         return result;
     }
 
@@ -258,8 +260,6 @@ private:
     std::string uniqueFileName();
 
 private:
-    struct ByUid {};
-
     struct GetUid
     {
         typedef unsigned result_type;
@@ -269,12 +269,32 @@ private:
         }
     };
 
+    struct GetHitCount
+    {
+        typedef std::size_t result_type;
+        result_type operator()( CacheEntryPtr const & c ) const
+        {
+            return c->hitCount();
+        }
+    };
+
+    struct ByUidAndHitCount {};
+
     typedef boost::multi_index_container<
         CacheEntryPtr,
         boost::multi_index::indexed_by<
-            boost::multi_index::sequenced<>,
             boost::multi_index::ordered_non_unique<
-                boost::multi_index::tag<ByUid>, GetUid>
+                boost::multi_index::tag<ByUidAndHitCount>,
+                boost::multi_index::composite_key<
+                    CacheEntryPtr,
+                    GetUid,
+                    GetHitCount
+                >,
+                boost::multi_index::composite_key_compare<
+                    std::less<unsigned>,
+                    std::greater<std::size_t>
+                >
+            >
         >
     > CacheContainer;
 

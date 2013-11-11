@@ -33,9 +33,8 @@ class CompileSession(ServerSession):
     STATE_DONE = 2
     STATE_SH_WAIT_FOR_TASK_DATA = 3
     STATE_WAITING_FOR_COMPILER = 4
-    STATE_SH_GET_SOURCE_FILE_NAME = 5
-    STATE_SH_CHECK_PCH_TAG = 6
-    STATE_SH_GET_PCH_DATA = 7
+    STATE_SH_CHECK_PCH_TAG = 5
+    STATE_SH_GET_PCH_DATA = 6
 
     STATE_WAITING_FOR_HEADER_LIST = 0
     STATE_WAITING_FOR_HEADERS = 1
@@ -72,6 +71,7 @@ class CompileSession(ServerSession):
         return accept_task
 
     def run_compiler(self):
+        compiler_prep = time()
         self.source_file = os.path.join(self.include_path, self.task['source'])
         if self.task['pch_file'] is not None:
             while not self.file_repository.file_arrived(
@@ -103,6 +103,7 @@ class CompileSession(ServerSession):
 
         try:
             start = time()
+            self.times['compiler_prep'] = start - compiler_prep
             command = (self.task['call'] + pch_switch +
                 [noLink, output] +
                 [compiler_info.include_option.make_value(incpath).make_str()
@@ -118,8 +119,10 @@ class CompileSession(ServerSession):
             return
         done = time()
         self.times['compiler'] = done - start
+        self.times['server_time'] = self.server_time_timer.get()
+        del self.server_time_timer
         self.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
-            stdout, stderr, self.times))])
+            stdout, stderr, self.times)), pickle.dumps(time())])
         if retcode == 0:
             with open(object_file_name, 'rb') as obj:
                 send_compressed_file(self.send_multipart, obj, copy=False)
@@ -129,15 +132,16 @@ class CompileSession(ServerSession):
         self.compiler_exe = os.path.join(
             self.compiler_repository.compiler_dir(self.compiler_id),
             self.task['compiler_info'].executable())
-        def run_compiler(command, cwd):
+        def spawn_compiler(command, cwd):
             command[0] = self.compiler_exe
             with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
-        self.compiler = run_compiler
+        self.compiler = spawn_compiler
         self.task_counter.inc()
         if self.task['pch_file'] is None:
             if self.header_state == self.STATE_HEADERS_ARRIVED:
+                self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                 self.run_compiler()
                 return True
             else:
@@ -148,10 +152,12 @@ class CompileSession(ServerSession):
 
     def process_msg_worker(self, msg):
         if self.state == self.STATE_GET_TASK:
+            self.server_time_timer = SimpleTimer()
             self.waiting_for_header_list = SimpleTimer()
-            self.task = pickle.loads(msg[0])
+            assert len(msg) == 3 and msg[0] == b'SERVER_TASK'
+            self.task = pickle.loads(msg[1])
+            self.times['task_travel_time'] = time() - pickle.loads(msg[2])
             self.compiler_id = self.task['compiler_info'].id()
-            assert self.compiler_id
             has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
             if has_compiler is None:
                 # Never heard of it.
@@ -184,6 +190,7 @@ class CompileSession(ServerSession):
             else:
                 self.send(b'NO')
                 if self.header_state == self.STATE_HEADERS_ARRIVED:
+                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                     self.run_compiler()
                     return True
                 else:
@@ -198,6 +205,7 @@ class CompileSession(ServerSession):
                 del self.pch_decompressor
                 self.file_repository.file_completed(*self.task['pch_file'])
                 if self.header_state == self.STATE_HEADERS_ARRIVED:
+                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                     self.run_compiler()
                     return True
                 else:
@@ -240,9 +248,12 @@ class CompileSession(ServerSession):
             del shared_prepare_dir_timer
             self.header_state = self.STATE_HEADERS_ARRIVED
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
+                self.times['waiting_for_mgr_data'] = 0
                 self.run_compiler()
                 self.task_counter.dec()
                 return True, True
+            else:
+                self.waiting_for_manager_data = SimpleTimer()
             return True, False
 
 class CompileWorker(Process):

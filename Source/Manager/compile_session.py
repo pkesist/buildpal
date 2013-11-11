@@ -9,6 +9,8 @@ import zipfile
 import zlib
 import zmq
 
+from time import time
+
 class CompileSession:
     STATE_START = 0
     STATE_WAIT_FOR_PREPROCESSING_DONE = 1
@@ -76,9 +78,9 @@ class CompileSession:
         assert server_id
         self.preprocess_socket.send_multipart([self.preprocessor_id, b'SEND_TO_SERVER',
             server_id, pickle.dumps(self.node_info.index())], copy=False)
-        self.server_conn.send_pyobj(self.task.server_task_info)
+        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info), pickle.dumps(time())])
         self.node_info.add_tasks_sent()
-        self.average_timer = SimpleTimer()
+        self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_SERVER_OK
         del self.preprocessor_id
 
@@ -115,11 +117,13 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
-            server_time = self.average_timer.get()
-            del self.average_timer
+            server_time = self.server_time.get()
+            del self.server_time
             self.timer.add_time('server_time', server_time)
             self.node_info.add_total_time(server_time)
             server_status = msg[0]
+            time_sent = pickle.loads(msg[2])
+            self.timer.add_time('serv_resp_travel_time', time() - time_sent)
             if server_status == b'SERVER_FAILED':
                 self.client_conn.send([b'EXIT', b'-1'])
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE

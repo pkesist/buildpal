@@ -260,4 +260,16 @@ class TaskProcessor:
             print("Statistics for '{}'".format(node.node_dict()['address']))
             print("================")
             print_times(times)
+            print("================")
+            print("Server time difference - {}".format(times['server_time'][0] - times['server.server_time'][0]))
+            sum = 0
+            for x in (
+                'wait_for_header_list',
+                'process_hdr_list',
+                'wait_for_headers',
+                'shared_prepare_dir',
+                'compiler',
+                'compiler_prep'):
+                sum += times['server.' + x][0]
+            print("Discrepancy - {}".format(times['server_time'][0] - sum))
         return True

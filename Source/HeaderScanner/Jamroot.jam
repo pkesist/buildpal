@@ -62,6 +62,5 @@ explicit preprocessing ;
 explicit preprocessing_d ;
 
 install ppinstall : preprocessing : <variant>profileWithAssert <location>C:\\Python33\\DLLs ;
-install ppinstall2 : preprocessing : <variant>profileWithAssert <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\Lib\\site-packages ;
-
-install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild <variant>debug ;
+#install ppinstall2 : preprocessing : <variant>profileWithAssert <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\Lib\\site-packages ;
+#install ppinstall_d : preprocessing_d :  <location>D:\\Sandboxes\\PKE\\Libraries\\Python\\Python-3.3.2\\Python\\PCbuild <variant>debug ;

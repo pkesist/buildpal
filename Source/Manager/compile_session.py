@@ -140,15 +140,13 @@ class CompileSession:
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg
-            with self.timer.timeit('write_to_obj'):
-                self.output.write(self.output_decompressor.decompress(data))
+            self.output.write(self.output_decompressor.decompress(data))
             if more == b'\x00':
                 self.output.write(self.output_decompressor.flush())
                 del self.output_decompressor
                 self.timer.add_time('receive_result', self.receive_result_time.get())
                 del self.receive_result_time
-                with self.timer.timeit('close_obj'):
-                    self.output.close()
+                self.output.close()
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed()

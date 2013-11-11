@@ -222,7 +222,9 @@ class CompileSession(ServerSession):
             self.wait_for_headers = SimpleTimer()
             assert msg[0] == b'TASK_FILE_LIST'
             filelist = pickle.loads(msg[1])
+            missing_files_timer = SimpleTimer()
             missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
+            self.times['process_hdr_list'] = missing_files_timer.get()
             socket.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
             return False, False
@@ -231,6 +233,7 @@ class CompileSession(ServerSession):
             del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
+            self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
             shared_prepare_dir_timer = SimpleTimer()
             self.include_dirs = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
             self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()

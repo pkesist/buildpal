@@ -16,7 +16,7 @@ import sys
 import zmq
 
 from functools import cmp_to_key
-from multiprocessing import cpu_count
+from multiprocessing import cpu_count, Semaphore
 from time import time
 
 class TaskProcessor:
@@ -69,7 +69,8 @@ class TaskProcessor:
 
         node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
 
-        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes) for i in range(cpu_count() * 2)]
+        scan_sem = Semaphore(cpu_count())
+        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes, scan_sem) for i in range(cpu_count() * 2)]
         for scan_worker in scan_workers:
             scan_worker.start()
 

@@ -4,7 +4,7 @@ from time import sleep
 from Common import bind_to_random_port
 from Server import ServerManager, ServerRunner
     
-from multiprocessing import cpu_count
+from multiprocessing import cpu_count, Semaphore
 
 import configparser
 import os
@@ -47,7 +47,7 @@ Usage:
         file_repository = manager.FileRepository()
         header_repository = manager.HeaderRepository()
         compiler_repository = manager.CompilerRepository()
-        run_compiler_sem = manager.Semaphore(cpu_count() + 1)
+        run_compiler_sem = Semaphore(cpu_count() + 1)
 
         zmq_ctx = zmq.Context()
         control = zmq_ctx.socket(zmq.PUB)

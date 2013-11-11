@@ -12,9 +12,10 @@ from io import BytesIO
 from multiprocessing import Process
 
 class SourceScanner(Process):
-    def __init__(self, port, nodes):
+    def __init__(self, port, nodes, sem):
         self.__port = port
         self.__nodes = nodes
+        self.__sem = sem
         return super().__init__()
 
     class Session:
@@ -58,8 +59,9 @@ class SourceScanner(Process):
                         tag, self.task = mgr_socket.recv_multipart()
                         assert tag == b'PREPROCESS_TASK'
                         self.task = pickle.loads(self.task)
-                        timer = SimpleTimer()
-                        self.header_info = list(self.header_info(self.task))
+                        with self.__sem:
+                            timer = SimpleTimer()
+                            self.header_info = list(self.header_info(self.task))
                         mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(timer.get())])
                         state = self.STATE_WAITING_FOR_SERVER
                     else:
@@ -90,13 +92,14 @@ class SourceScanner(Process):
                         msg = sock.recv_multipart()
                         assert len(msg) == 1 and msg[0] == b'SESSION_ATTACHED'
                         sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
+                        session.wait_for_header_list_response = SimpleTimer()
                         session.state = self.Session.STATE_SENDING_FILE_LIST
                     elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                         resp = sock.recv_multipart()
                         assert len(resp) == 2 and resp[0] == b'MISSING_FILES'
                         missing_files = pickle.loads(resp[1])
                         new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                        sock.send_multipart([b'TASK_FILES', new_tar.read()])
+                        sock.send_multipart([b'TASK_FILES', new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
                         poller.unregister(sock)
                         sockets[session.node_index].append(sock)
                         del server_sessions[sock]

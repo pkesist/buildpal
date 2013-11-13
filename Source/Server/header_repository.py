@@ -11,6 +11,7 @@ class HeaderRepository:
     def __init__(self):
         self.checksums = {}
         self.dir = os.path.join(tempfile.gettempdir(), 'DistriBuild', 'Headers')
+        self.session_lock = Lock()
         self.counter = 0
         self.session_data = {}
         self.dir_map = {}
@@ -33,14 +34,15 @@ class HeaderRepository:
             if key not in checksums or checksums[key] != checksum:
                 needed_files[name] = dir, name, checksum, relative
                 out_list.append(name)
-        self.counter += 1
-        self.session_data[self.counter] = needed_files, dirs
+        with self.session_lock:
+            self.counter += 1
+            self.session_data[self.counter] = needed_files, dirs
         return out_list, self.counter
 
     def prepare_dir(self, machine_id, new_files_tar_buffer, id, local_dir):
-        assert id in self.session_data
+        with self.session_lock:
+            needed_files, include_dirs = self.session_data[id]
         include_paths = [local_dir]
-        needed_files, include_dirs = self.session_data[id]
         include_paths.extend(include_dirs)
         del self.session_data[id]
         new_files_tar_stream = BytesIO(new_files_tar_buffer)
@@ -77,19 +79,22 @@ class HeaderRepository:
                             with open(filename, 'wb') as file:
                                 file.write(content.read())
 
-                        # Try to avoid lock.
-                        if (remote_dir, remote_name) in checksums:
-                            # Someone created this file in the meantime.
-                            # We will use our own copy.
+                        create_shared = False
+                        create_local = False
+                        key = (remote_dir, remote_name)
+                        with lock:
+                            old_checksum = checksums.get(key)
+                            if old_checksum is None:
+                                checksums[key] = 'IN_PROGRESS'
+                                create_shared = True
+                            elif old_checksum == 'IN_PROGRESS':
+                                create_local = True
+                            elif old_checksum != checksum:
+                                create_local = True
+                        if create_local:
                             create_file_in_dir(local_dir)
-                        else:
-                            # Try to place this file in the shared dir.
+                        if create_shared:
+                            create_file_in_dir(shared_dir)
                             with lock:
-                                # See if this entry was added while we were taking lock.
-                                exists = (remote_dir, remote_name) in checksums
-                                if not exists:
-                                    checksums[(remote_dir, remote_name)] = checksum
-                            create_file_in_dir(local_dir if exists else shared_dir)
-                        if not shared_dir in include_paths:
-                            include_paths.append(shared_dir)
+                                checksums[key] = checksum
         return include_paths

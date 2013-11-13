@@ -1,6 +1,5 @@
 from .compiler_repository import CompilerRepository
 from .file_repository import FileRepository
-from .header_repository import HeaderRepository
 
 from multiprocessing.managers import SyncManager
 
@@ -18,4 +17,3 @@ class ServerManager(SyncManager):
 ServerManager.register('CompilerRepository', CompilerRepository)
 ServerManager.register('Counter', Counter)
 ServerManager.register('FileRepository', FileRepository)
-ServerManager.register('HeaderRepository', HeaderRepository)

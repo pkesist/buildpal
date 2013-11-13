@@ -78,6 +78,8 @@ class CompileSession:
     def run_compiler(self):
         try:
             compiler_prep = time()
+            # Wait for include dir to be prepared.
+            self.prepare_include_dirs.result()
             self.source_file = os.path.join(self.include_path, self.task['source'])
             if self.task['pch_file'] is not None:
                 while not self.file_repository.file_arrived(
@@ -264,7 +266,7 @@ class CompileSession:
             tar_data = msg[1]
             self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
             self.prepare_include_dirs_timer = SimpleTimer()
-            self.prepare_include_dirs(self.misc_thread_pool, tar_data)
+            self.prepare_include_dirs = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
 
 class CompileWorker(Process):
     def __init__(self, address, file_repository,compiler_repository,
@@ -272,7 +274,6 @@ class CompileWorker(Process):
         Process.__init__(self)
         self.__address = address
         self.__file_repository = file_repository
-        self.__header_repository = HeaderRepository()
         self.__compiler_repository = compiler_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
         self.__task_counter = task_counter
@@ -320,6 +321,7 @@ class CompileWorker(Process):
 
         self.__compile_thread_pool = ThreadPoolExecutor(max_workers=cpu_count() + 1)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
+        self.__header_repository = HeaderRepository()
 
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
@@ -377,7 +379,9 @@ class CompileWorker(Process):
                         # TODO: Remove this, not needed.
                         clients.send_multipart([attacher_id, b'SESSION_ATTACHED'])
                     else:
-                        self.workers.get(client_id)(msg[1:])
+                        worker = self.workers.get(client_id)
+                        if worker:
+                            worker(msg[1:])
                 else:
                     assert sock is sessions
                     msg = sessions.recv_multipart()

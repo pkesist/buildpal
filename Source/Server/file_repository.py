@@ -6,7 +6,9 @@ from shutil import rmtree
 
 class FileRepository:
     def __init__(self):
-        self.__dir = tempfile.mkdtemp()
+        dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
+        os.makedirs(dir, exist_ok=True)
+        self.__dir = tempfile.mkdtemp(dir=dir)
         self.__lock = Lock()
         self.__files = {}
         self.__partial_files = {}

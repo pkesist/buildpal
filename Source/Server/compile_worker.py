@@ -122,14 +122,16 @@ class CompileSession:
             self.times['compiler'] = done - start
             self.times['server_time'] = self.server_time_timer.get()
             del self.server_time_timer
+        except Exception:
+            self.socket.send_multipart([b'SERVER_FAILED', pickle.dumps(time())])
+        else:
             self.socket.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
                 stdout, stderr, self.times)), pickle.dumps(time())])
             if retcode == 0:
                 with open(object_file_name, 'rb') as obj:
                     send_compressed_file(self.socket.send_multipart, obj, copy=False)
-        except Exception:
-            self.socket.send_multipart([b'SERVER_FAILED', pickle.dumps(time())])
         finally:
+            os.remove(object_file_name)
             self.session_done()
 
     async_run_compiler = async(run_compiler)
@@ -255,6 +257,8 @@ class CompileSession:
             else:
                 self.times['wait_for_header_list'] = 0
             self.wait_for_headers = SimpleTimer()
+            if not msg[0] == b'TASK_FILE_LIST':
+                print("TASK_FILE_LIST", msg)
             assert msg[0] == b'TASK_FILE_LIST'
             filelist = pickle.loads(msg[1])
             self.send_missing_files_timer = SimpleTimer()
@@ -308,11 +312,14 @@ class CompileWorker(Process):
     def terminate(self, id):
         session = self.sessions[id]
         session.socket.send(b'UNREGISTER')
+        session.socket.disconnect('inproc://sessions_socket')
+        del session.socket
         del self.workers[id]
         del self.sessions[id]
 
     def detach(self, session):
         session.attached_socket.send(b'UNREGISTER')
+        session.attached_socket.disconnect('inproc://sessions_socket')
         del session.attached_socket
         del session.attached_id
 

@@ -1,6 +1,7 @@
 from .scan_headers import collect_headers
 
 from Common import SimpleTimer, write_str_to_tar
+from Common import create_socket
 
 import zmq
 import tarfile
@@ -12,10 +13,9 @@ from io import BytesIO
 from multiprocessing import Process
 
 class SourceScanner(Process):
-    def __init__(self, port, nodes, sem):
+    def __init__(self, port, nodes):
         self.__port = port
         self.__nodes = nodes
-        self.__sem = sem
         return super().__init__()
 
     class Session:
@@ -40,7 +40,7 @@ class SourceScanner(Process):
 
     def run(self):
         zmq_ctx = zmq.Context()
-        mgr_socket = zmq_ctx.socket(zmq.DEALER)
+        mgr_socket = create_socket(zmq_ctx, zmq.DEALER)
         mgr_socket.connect('tcp://localhost:{}'.format(self.__port))
         mgr_socket.send(b'PREPROCESSOR_READY')
         sockets = {}
@@ -59,9 +59,8 @@ class SourceScanner(Process):
                         tag, self.task = mgr_socket.recv_multipart()
                         assert tag == b'PREPROCESS_TASK'
                         self.task = pickle.loads(self.task)
-                        with self.__sem:
-                            timer = SimpleTimer()
-                            self.header_info = list(self.header_info(self.task))
+                        timer = SimpleTimer()
+                        self.header_info = list(self.header_info(self.task))
                         mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(timer.get())])
                         state = self.STATE_WAITING_FOR_SERVER
                     else:
@@ -74,7 +73,7 @@ class SourceScanner(Process):
                             socket = available_sockets[0]
                             del available_sockets[0]
                         else:
-                            socket = zmq_ctx.socket(zmq.DEALER)
+                            socket = create_socket(zmq_ctx, zmq.DEALER)
                             socket.connect(self.__nodes[node_index]['address'])
                         socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
                         poller.register(socket, zmq.POLLIN)

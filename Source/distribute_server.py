@@ -2,9 +2,9 @@
 from time import sleep
 
 from Common import bind_to_random_port
-from Server import ServerManager, ServerRunner
+from Server import CompileWorker, ServerManager
     
-from multiprocessing import cpu_count, Semaphore
+from multiprocessing import cpu_count
 
 import configparser
 import os
@@ -35,7 +35,6 @@ Usage:
 
     server_section = 'Server'
     port = config.getint(server_section, 'port')
-    processes = config.getint(server_section, 'processes')
 
     cpu_usage_hwm = config.getint(server_section, 'cpu_usage_hwm', fallback=None)
     if cpu_usage_hwm is not None:
@@ -45,18 +44,11 @@ Usage:
     with ServerManager() as manager:
         task_counter = manager.Counter()
         file_repository = manager.FileRepository()
-        header_repository = manager.HeaderRepository()
         compiler_repository = manager.CompilerRepository()
-        run_compiler_sem = Semaphore(cpu_count() + 1)
 
-        zmq_ctx = zmq.Context()
-        control = zmq_ctx.socket(zmq.PUB)
-        control_port = bind_to_random_port(control)
-        server_runner = ServerRunner(port, control_port, processes,
-                                     run_compiler_sem, file_repository,
-                                     header_repository, compiler_repository,
-                                     cpu_usage_hwm, task_counter)
-        server_runner.start()
+        worker = CompileWorker('tcp://*:{}'.format(port), file_repository,
+            compiler_repository, cpu_usage_hwm, task_counter)
+        worker.start()
 
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
@@ -68,6 +60,5 @@ Usage:
         except KeyboardInterrupt:
             pass
 
-        control.send(b'SHUTDOWN')
-        server_runner.join()
+        worker.join()
 

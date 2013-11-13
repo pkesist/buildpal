@@ -1,7 +1,10 @@
+import pickle
 import zmq
 
 from functools import cmp_to_key
 from struct import pack
+
+from Common import create_socket
 
 class NodeManager:
     STATE_SOCKET_OPEN = 0
@@ -36,7 +39,7 @@ class NodeManager:
         else:
             node_address = self.node_info[node_index].node_dict()['address']
             try:
-                socket = zmq_ctx.socket(zmq.DEALER)
+                socket = create_socket(zmq_ctx, zmq.DEALER)
                 socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
                 self.__unique_id += 1
                 socket.connect(node_address)

@@ -122,12 +122,14 @@ class CompileSession:
             self.timer.add_time('server_time', server_time)
             self.node_info.add_total_time(server_time)
             server_status = msg[0]
-            time_sent = pickle.loads(msg[2])
-            self.timer.add_time('serv_resp_travel_time', time() - time_sent)
             if server_status == b'SERVER_FAILED':
+                time_sent = pickle.loads(msg[1])
+                self.timer.add_time('serv_resp_travel_time', time() - time_sent)
                 self.client_conn.send([b'EXIT', b'-1'])
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
             else:
+                time_sent = pickle.loads(msg[2])
+                self.timer.add_time('serv_resp_travel_time', time() - time_sent)
                 assert server_status == b'SERVER_DONE'
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
                 for name, duration in server_times.items():

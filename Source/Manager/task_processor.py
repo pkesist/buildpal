@@ -1,5 +1,6 @@
 from Compilers import MSVCWrapper
 from Common import SimpleTimer, Rendezvous
+from Common import create_socket
 
 from .compile_session import CompileSession
 from .node_info import NodeInfo
@@ -51,10 +52,10 @@ class TaskProcessor:
 
     def run(self):
         zmq_ctx = zmq.Context()
-        client_socket = zmq_ctx.socket(zmq.STREAM)
+        client_socket = create_socket(zmq_ctx, zmq.STREAM)
         client_socket.bind('tcp://*:{}'.format(self.__port))
 
-        preprocess_socket = zmq_ctx.socket(zmq.ROUTER)
+        preprocess_socket = create_socket(zmq_ctx, zmq.ROUTER)
         preprocess_socket_port = bind_to_random_port(preprocess_socket)
 
         poller = zmq.Poller()
@@ -69,8 +70,7 @@ class TaskProcessor:
 
         node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
 
-        scan_sem = Semaphore(cpu_count())
-        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes, scan_sem) for i in range(cpu_count() * 2)]
+        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes) for i in range(cpu_count() * 2)]
         for scan_worker in scan_workers:
             scan_worker.start()
 
@@ -136,9 +136,9 @@ class TaskProcessor:
                 session, preprocessor_id, timer = client_tuple
                 server_conn, node_index = server_tuple
                 self.timer.add_time('waiting.server', timer.get())
-                session.preprocessing_done(server_conn, self.node_info[node_index])
                 sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
                 sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
+                session.preprocessing_done(server_conn, self.node_info[node_index])
                 self.cprv.preprocessor_ready(preprocessor_id)
 
         csrv = ClientServerRendezvous(self.timer, sessions, node_info, cprv)
@@ -213,7 +213,7 @@ class TaskProcessor:
                             else:
                                 # Not part of a session, handled by node_manager.
                                 node_index = node_manager.handle_socket(socket)
-                                if node_index is not None and csrv.has_first():
+                                if node_index is not None and csrv.first():
                                     server_conn, node_index = node_manager.get_server_conn(node_index)
                                     assert server_conn
                                     csrv.server_ready((server_conn, node_index))
@@ -261,7 +261,7 @@ class TaskProcessor:
             print("================")
             print_times(times)
             print("================")
-            print("Server time difference - {}".format(times['server_time'][0] - times['server.server_time'][0]))
+            print("Server time difference - {}".format(times.get('server_time', (0, 0))[0] - times.get('server.server_time', (0, 0))[0]))
             sum = 0
             for x in (
                 'wait_for_header_list',
@@ -270,6 +270,6 @@ class TaskProcessor:
                 'shared_prepare_dir',
                 'compiler',
                 'compiler_prep'):
-                sum += times['server.' + x][0]
-            print("Discrepancy - {}".format(times['server_time'][0] - sum))
+                sum += times.get('server.' + x, (0,0))[0]
+            print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - sum))
         return True

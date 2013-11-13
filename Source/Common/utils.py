@@ -94,11 +94,11 @@ class Rendezvous:
         self.__dict__[first_name] = self.__add_first
         self.__dict__[second_name] = self.__add_second
 
-    def has_first(self):
-        return not not self._first
+    def first(self):
+        return self._first
 
-    def has_second(self):
-        return not not self._second
+    def second(self):
+        return self._second
 
     def __add_first(self, first):
         if self._second:
@@ -118,4 +118,10 @@ class Rendezvous:
 
     def match(self, first, second):
         raise NotImplementedError()
-    
+
+
+def create_socket(zmq_ctx, socket_type):
+    socket = zmq_ctx.socket(socket_type)
+    socket.setsockopt(zmq.SNDHWM, 0)
+    socket.setsockopt(zmq.RCVHWM, 0)
+    return socket

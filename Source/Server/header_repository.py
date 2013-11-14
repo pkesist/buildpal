@@ -32,7 +32,8 @@ class HeaderRepository:
             key = (dir, name)
             dirs.add(self.map_dir(dir))
             if key not in checksums or checksums[key] != checksum:
-                needed_files[name] = dir, name, checksum, relative
+                if not relative:
+                    needed_files[name] = dir, name, checksum
                 out_list.append(name)
         with self.session_lock:
             self.counter += 1
@@ -49,6 +50,14 @@ class HeaderRepository:
 
         checksums, lock = self.checksums.get(machine_id)
 
+        def create_file_in_dir(dir, name, content):
+            filename = os.path.normpath(os.path.join(dir, name))
+            upperdirs = os.path.dirname(filename)
+            if upperdirs and not os.path.exists(upperdirs):
+                os.makedirs(upperdirs)
+            with open(filename, 'wb') as file:
+                file.write(content.read())
+
         # Update headers.
         with tarfile.open(mode='r', fileobj=new_files_tar_stream) as new_files_tar:
             for tar_info in new_files_tar.getmembers():
@@ -63,38 +72,29 @@ class HeaderRepository:
                 elif not tar_info.name in needed_files:
                     # If not a part of needed_files, extract it directly to local_dir
                     # and do not remember it.
-                    new_files_tar.extract(tar_info, local_dir)
+                    create_file_in_dir(local_dir, tar_info.name,
+                        new_files_tar.extractfile(tar_info))
                 else:
-                    remote_dir, remote_name, checksum, relative = needed_files[tar_info.name]
-                    if relative:
-                        new_files_tar.extract(tar_info, local_dir)
-                    else:
-                        content = new_files_tar.extractfile(tar_info)
-                        shared_dir = self.map_dir(remote_dir)
-                        filename = os.path.join(shared_dir, remote_name)
-
-                        def create_file_in_dir(dir):
-                            filename = os.path.normpath(os.path.join(dir, remote_name))
-                            os.makedirs(os.path.dirname(filename), exist_ok=True)
-                            with open(filename, 'wb') as file:
-                                file.write(content.read())
-
-                        create_shared = False
-                        create_local = False
-                        key = (remote_dir, remote_name)
+                    remote_dir, remote_name, checksum = needed_files[tar_info.name]
+                    shared_dir = self.map_dir(remote_dir)
+                    filename = os.path.join(shared_dir, remote_name)
+                    create_shared = False
+                    create_local = False
+                    key = (remote_dir, remote_name)
+                    with lock:
+                        old_checksum = checksums.get(key)
+                        if old_checksum is None:
+                            checksums[key] = 'IN_PROGRESS'
+                            create_shared = True
+                        elif old_checksum == 'IN_PROGRESS':
+                            create_local = True
+                        elif old_checksum != checksum:
+                            create_local = True
+                    content = new_files_tar.extractfile(tar_info)
+                    if create_local:
+                        create_file_in_dir(local_dir, remote_name, content)
+                    if create_shared:
+                        create_file_in_dir(shared_dir, remote_name, content)
                         with lock:
-                            old_checksum = checksums.get(key)
-                            if old_checksum is None:
-                                checksums[key] = 'IN_PROGRESS'
-                                create_shared = True
-                            elif old_checksum == 'IN_PROGRESS':
-                                create_local = True
-                            elif old_checksum != checksum:
-                                create_local = True
-                        if create_local:
-                            create_file_in_dir(local_dir)
-                        if create_shared:
-                            create_file_in_dir(shared_dir)
-                            with lock:
-                                checksums[key] = checksum
+                            checksums[key] = checksum
         return include_paths

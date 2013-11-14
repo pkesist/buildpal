@@ -122,6 +122,4 @@ class Rendezvous:
 
 def create_socket(zmq_ctx, socket_type):
     socket = zmq_ctx.socket(socket_type)
-    socket.setsockopt(zmq.SNDHWM, 0)
-    socket.setsockopt(zmq.RCVHWM, 0)
     return socket

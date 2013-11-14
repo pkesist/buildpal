@@ -395,8 +395,6 @@ class CompileWorker(Process):
                         worker = self.workers.get(client_id)
                         if worker:
                             worker(msg[1:])
-                        else:
-
                 else:
                     assert sock is sessions
                     clients.send_multipart(sessions.recv_multipart())

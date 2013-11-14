@@ -58,7 +58,8 @@ class HeaderRepository:
             file = open(filename, 'wb')
             file.write(content.read())
             file.close()
-            assert file.closed
+            file.close()
+            file.close()
 
         # Update headers.
         with tarfile.open(mode='r', fileobj=new_files_tar_stream) as new_files_tar:

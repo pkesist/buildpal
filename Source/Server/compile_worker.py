@@ -99,6 +99,7 @@ class CompileSession:
         def disconnect(self):
             self.socket.disconnect('inproc://sessions_socket')
 
+    @async
     def run_compiler(self):
         try:
             compiler_prep = time()
@@ -162,8 +163,6 @@ class CompileSession:
             os.remove(object_file_name)
             self.session_done()
 
-    async_run_compiler = async(run_compiler)
-
     def compiler_ready(self):
         assert hasattr(self, 'compiler_id')
         self.compiler_exe = os.path.join(
@@ -179,7 +178,7 @@ class CompileSession:
         if self.task['pch_file'] is None:
             if self.header_state == self.STATE_HEADERS_ARRIVED:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                self.async_run_compiler(self.compile_thread_pool)
+                self.run_compiler(self.compile_thread_pool)
             else:
                 self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
         else:
@@ -232,7 +231,7 @@ class CompileSession:
                     sender.send(b'NO')
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.async_run_compiler(self.compile_thread_pool)
+                        self.run_compiler(self.compile_thread_pool)
                     else:
                         self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
             elif self.state == self.STATE_SH_GET_PCH_DATA:
@@ -246,7 +245,7 @@ class CompileSession:
                     self.file_repository.file_completed(*self.task['pch_file'])
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.async_run_compiler(self.compile_thread_pool)
+                        self.run_compiler(self.compile_thread_pool)
                     else:
                         self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
             else:
@@ -264,7 +263,6 @@ class CompileSession:
             missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
             self.times['process_hdr_list'] = missing_files_timer.get()
             sender.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
-            self.header_state = self.STATE_WAITING_FOR_HEADERS
         finally:
             sender.disconnect()
 
@@ -279,7 +277,7 @@ class CompileSession:
         self.header_state = self.STATE_HEADERS_ARRIVED
         if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
             self.times['waiting_for_mgr_data'] = 0
-            self.async_run_compiler(self.compile_thread_pool)
+            self.run_compiler(self.compile_thread_pool)
         else:
             self.waiting_for_manager_data = SimpleTimer()
 
@@ -295,6 +293,7 @@ class CompileSession:
                 print("TASK_FILE_LIST", msg)
             assert msg[0] == b'TASK_FILE_LIST'
             filelist = pickle.loads(msg[1])
+            self.header_state = self.STATE_WAITING_FOR_HEADERS
             self.send_missing_files_timer = SimpleTimer()
             self.send_missing_files(self.misc_thread_pool, filelist, attacher_id)
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
@@ -352,6 +351,13 @@ class CompileWorker(Process):
             def __call__(self, msg):
                 self.session.process_attached_msg(self.id, msg)
 
+        class ProcessMsg:
+            def __init__(self, session):
+                self.session = session
+
+            def __call__(self, msg):
+                self.session.process_msg(msg)
+
         clients = create_socket(zmq_ctx, zmq.ROUTER)
         clients.bind(self.__address)
 
@@ -372,21 +378,25 @@ class CompileWorker(Process):
                         session = self.create_session(client_id)
                         session.terminate = lambda client_id=client_id : self.terminate(client_id)
                         self.sessions[client_id] = session
-                        self.workers[client_id] = session.process_msg
+                        self.workers[client_id] = ProcessMsg(session)
                         # TODO: Remove this, not needed.
                         clients.send_multipart([client_id, b'SESSION_CREATED'])
                         session.created()
                     elif msg[1] == b'ATTACH_TO_SESSION':
                         session_id = msg[2]
                         attacher_id = msg[0]
-                        session = self.sessions[session_id]
-                        self.workers[attacher_id] = ProcessAttachedMsg(session, attacher_id)
-                        # TODO: Remove this, not needed.
-                        clients.send_multipart([attacher_id, b'SESSION_ATTACHED'])
+                        session = self.sessions.get(session_id)
+                        if session:
+                            self.workers[attacher_id] = ProcessAttachedMsg(session, attacher_id)
+                            clients.send_multipart([attacher_id, b'SESSION_ATTACHED'])
+                        else:
+                            clients.send_multipart([attacher_id, b'UNKNOWN_SESSION'])
                     else:
                         worker = self.workers.get(client_id)
                         if worker:
                             worker(msg[1:])
+                        else:
+
                 else:
                     assert sock is sessions
                     clients.send_multipart(sessions.recv_multipart())

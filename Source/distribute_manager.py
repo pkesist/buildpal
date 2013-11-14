@@ -1,6 +1,7 @@
 #! python3.3
 from Manager import TaskProcessor
 
+import argparse
 import configparser
 import os
 import sys
@@ -8,35 +9,26 @@ import sys
 default_script = 'distribute_manager.ini'
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
-        iniFile = os.path.join(os.getcwd(), sys.argv[1])
-    else:
-        iniFile = os.path.join(os.getcwd(), default_script)
-    if not os.path.isfile(iniFile):
-        print("""
-Usage:
-    {} [<ini-file>]
-
-    If no <ini-file> is specified, script will attept to use '{}'
-    in the current directory.
-""").format(sys.argv[0], default_script)
-        raise SystemExit()
+    parser = argparse.ArgumentParser(description='Command line parameters for distribute_manager.py')
+    parser.add_argument('--ini', dest='ini_file', type=str, default='distribute_manager.ini', help='Specify .ini file.')
+    parser.add_argument('profile', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
+    
+    opts = parser.parse_args()
 
     config = configparser.SafeConfigParser(strict=False)
-    if not config.read(iniFile):
+    if not config.read(opts.ini_file):
         raise Exception("Error reading the configuration file "
-            "'{}'.".format(iniFile))
+            "'{}'.".format(opts.ini_file))
 
     manager_section = 'Manager'
-    nodes_section = 'Build Nodes'
 
     port = config.get(manager_section, 'port')
 
-    if not nodes_section in config:
-        raise "ERROR: No '{}' section in '{}'.".format(nodes_section, iniFile)
+    if not opts.profile in config:
+        raise "ERROR: No '{}' section in '{}'.".format(opts.profile, opts.ini_file)
 
     nodes = []
-    section = config[nodes_section]
+    section = config[opts.profile]
     done = False
     while not done:
         option = "node[{}]".format(len(nodes))

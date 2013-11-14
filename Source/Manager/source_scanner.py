@@ -54,9 +54,10 @@ class SourceScanner(Process):
             socks = dict(poller.poll())
             for sock, event in socks.items():
                 assert event == zmq.POLLIN
+                msg = sock.recv_multipart()
                 if sock is mgr_socket:
                     if state == self.STATE_WAITING_FOR_TASK:
-                        tag, self.task = mgr_socket.recv_multipart()
+                        tag, self.task = msg
                         assert tag == b'PREPROCESS_TASK'
                         self.task = pickle.loads(self.task)
                         timer = SimpleTimer()
@@ -65,7 +66,7 @@ class SourceScanner(Process):
                         state = self.STATE_WAITING_FOR_SERVER
                     else:
                         assert state == self.STATE_WAITING_FOR_SERVER
-                        tag, server_id, node_index = mgr_socket.recv_multipart()
+                        tag, server_id, node_index = msg
                         assert tag == b'SEND_TO_SERVER'
                         node_index = pickle.loads(node_index)
                         available_sockets = sockets.setdefault(node_index, [])
@@ -88,15 +89,21 @@ class SourceScanner(Process):
                     assert sock in server_sessions
                     session = server_sessions[sock]
                     if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
-                        msg = sock.recv_multipart()
-                        assert len(msg) == 1 and msg[0] == b'SESSION_ATTACHED'
-                        sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
-                        session.wait_for_header_list_response = SimpleTimer()
-                        session.state = self.Session.STATE_SENDING_FILE_LIST
+                        assert len(msg) == 1
+                        if msg[0] == b'SESSION_ATTACHED':
+                            sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
+                            session.wait_for_header_list_response = SimpleTimer()
+                            session.state = self.Session.STATE_SENDING_FILE_LIST
+                        else:
+                            assert msg[0] == b'UNKNOWN_SESSION'
+                            # Huh. Weird.
+                            poller.unregister(sock)
+                            sockets[session.node_index].append(sock)
+                            del server_sessions[sock]
+
                     elif session.state == self.Session.STATE_SENDING_FILE_LIST:
-                        resp = sock.recv_multipart()
-                        assert len(resp) == 2 and resp[0] == b'MISSING_FILES'
-                        missing_files = pickle.loads(resp[1])
+                        assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
+                        missing_files = pickle.loads(msg[1])
                         new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
                         sock.send_multipart([b'TASK_FILES', new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
                         poller.unregister(sock)

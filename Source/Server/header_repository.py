@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import BytesIO, FileIO
 
 import os
 import shutil
@@ -55,7 +55,8 @@ class HeaderRepository:
             upperdirs = os.path.dirname(filename)
             if upperdirs and not os.path.exists(upperdirs):
                 os.makedirs(upperdirs)
-            with open(filename, 'wb') as file:
+            with FileIO(filename, 'wb') as file:
+            #with open(filename, 'wb') as file:
                 file.write(content.read())
 
         # Update headers.
@@ -86,10 +87,8 @@ class HeaderRepository:
                         if old_checksum is None:
                             checksums[key] = 'IN_PROGRESS'
                             create_shared = True
-                        elif old_checksum == 'IN_PROGRESS':
-                            create_local = True
-                        elif old_checksum != checksum:
-                            create_local = True
+                        else:
+                            create_local = old_checksum != checksum
                     content = new_files_tar.extractfile(tar_info)
                     if create_local:
                         create_file_in_dir(local_dir, remote_name, content)

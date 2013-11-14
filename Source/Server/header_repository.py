@@ -55,11 +55,8 @@ class HeaderRepository:
             upperdirs = os.path.dirname(filename)
             if upperdirs and not os.path.exists(upperdirs):
                 os.makedirs(upperdirs)
-            file = open(filename, 'wb')
-            file.write(content.read())
-            file.close()
-            file.close()
-            file.close()
+            with open(filename, 'wb') as file:
+                file.write(content.read())
 
         # Update headers.
         with tarfile.open(mode='r', fileobj=new_files_tar_stream) as new_files_tar:

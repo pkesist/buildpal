@@ -11,7 +11,7 @@ default_script = 'distribute_manager.ini'
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for distribute_manager.py')
     parser.add_argument('--ini', dest='ini_file', type=str, default='distribute_manager.ini', help='Specify .ini file.')
-    parser.add_argument('profile', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
+    parser.add_argument('profile', nargs='?', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
     
     opts = parser.parse_args()
 

@@ -53,6 +53,7 @@ class CompileSession:
         self.preprocess_socket.send_multipart([self.preprocessor_id, b'PREPROCESS_TASK',
             pickle.dumps(self.task.preprocess_task_info)],
             copy=False)
+        self.preprocessing_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
 
     def got_data_from_client(self, msg):
@@ -157,7 +158,5 @@ class CompileSession:
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed()
                 self.state = self.STATE_WAIT_FOR_SESSION_DONE
-        elif self.state == self.STATE_WAIT_FOR_SESSION_DONE:
-            assert msg[0] == b'SESSION_DESTROYED'
-            return True
+                return True
         return False

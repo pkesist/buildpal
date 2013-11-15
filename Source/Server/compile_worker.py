@@ -18,6 +18,7 @@ import pickle
 import psutil
 import signal
 import shutil
+import sched
 import sys
 import tarfile
 import tempfile
@@ -49,7 +50,7 @@ class CompileSession:
 
     def __init__(self, file_repository, header_repository, compiler_repository,
                  cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
-                 misc_thread_pool):
+                 misc_thread_pool, scheduler):
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
@@ -64,6 +65,7 @@ class CompileSession:
         self.times = {}
         self.compile_thread_pool = compile_thread_pool
         self.misc_thread_pool = misc_thread_pool
+        self.scheduler = scheduler
 
     def __del__(self):
         try:
@@ -101,6 +103,7 @@ class CompileSession:
 
     @async
     def run_compiler(self):
+        self.cancel_autodestruct()
         try:
             compiler_prep = time()
             # Wait for include dir to be prepared.
@@ -174,7 +177,6 @@ class CompileSession:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         self.compiler = spawn_compiler
-        self.task_counter.inc()
         if self.task['pch_file'] is None:
             if self.header_state == self.STATE_HEADERS_ARRIVED:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
@@ -188,10 +190,21 @@ class CompileSession:
         self.terminate()
         self.task_counter.dec()
 
+    def prolong_lifetime(self):
+        self.cancel_autodestruct()
+        self.selfdestruct = self.scheduler.enter(60, 1, self.session_done)
+
+    def cancel_autodestruct(self):
+        if hasattr(self, 'selfdestruct'):
+            self.scheduler.cancel(self.selfdestruct)
+            del self.selfdestruct
+
     def process_msg(self, msg):
+        self.prolong_lifetime()
         try:
             sender = self.Sender(self.id)
             if self.state == self.STATE_GET_TASK:
+                self.task_counter.inc()
                 self.server_time_timer = SimpleTimer()
                 self.waiting_for_header_list = SimpleTimer()
                 assert len(msg) == 3 and msg[0] == b'SERVER_TASK'
@@ -257,8 +270,6 @@ class CompileSession:
     def send_missing_files(self, filelist, attacher_id):
         try:
             sender = self.Sender(attacher_id)
-            self.times['async_missing_files'] = self.send_missing_files_timer.get()
-            del self.send_missing_files_timer
             missing_files_timer = SimpleTimer()
             missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
             self.times['process_hdr_list'] = missing_files_timer.get()
@@ -268,13 +279,10 @@ class CompileSession:
 
     @async
     def prepare_include_dirs(self, tar_data):
-        self.times['async_prep_inc_dir'] = self.prepare_include_dirs_timer.get()
-        del self.prepare_include_dirs_timer
         shared_prepare_dir_timer = SimpleTimer()
         self.include_dirs = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
-        self.header_state = self.STATE_HEADERS_ARRIVED
         if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
             self.times['waiting_for_mgr_data'] = 0
             self.run_compiler(self.compile_thread_pool)
@@ -282,6 +290,7 @@ class CompileSession:
             self.waiting_for_manager_data = SimpleTimer()
 
     def process_attached_msg(self, attacher_id, msg):
+        self.prolong_lifetime()
         if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
             if hasattr(self, 'waiting_for_header_list'):
                 self.times['wait_for_header_list'] = self.waiting_for_header_list.get()
@@ -294,7 +303,6 @@ class CompileSession:
             assert msg[0] == b'TASK_FILE_LIST'
             filelist = pickle.loads(msg[1])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
-            self.send_missing_files_timer = SimpleTimer()
             self.send_missing_files(self.misc_thread_pool, filelist, attacher_id)
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
             self.times['wait_for_headers'] = self.wait_for_headers.get()
@@ -302,7 +310,7 @@ class CompileSession:
             assert msg[0] == b'TASK_FILES'
             tar_data = msg[1]
             self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
-            self.prepare_include_dirs_timer = SimpleTimer()
+            self.header_state = self.STATE_HEADERS_ARRIVED
             self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
 
 class CompileWorker(Process):
@@ -323,7 +331,7 @@ class CompileWorker(Process):
             self.__header_repository, self.__compiler_repository,
             self.__cpu_usage_hwm, self.__task_counter,
             self.__checksums, self.__compile_thread_pool,
-            self.__misc_thread_pool)
+            self.__misc_thread_pool, self.scheduler)
         session.id = client_id
         return session
 
@@ -339,6 +347,7 @@ class CompileWorker(Process):
         self.__compile_thread_pool = ThreadPoolExecutor(max_workers=cpu_count() + 1)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
+        self.scheduler = sched.scheduler()
 
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
@@ -368,7 +377,12 @@ class CompileWorker(Process):
         poller.register(clients, zmq.POLLIN)
         poller.register(sessions, zmq.POLLIN)
         
+        scheduler = sched.scheduler()
+
         while True:
+            # Run any scheduled tasks.
+            self.scheduler.run(False)
+
             for sock, event in dict(poller.poll(1000)).items():
                 assert event == zmq.POLLIN
                 if sock is clients:

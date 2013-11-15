@@ -15,6 +15,7 @@ import operator
 import pickle
 import sys
 import zmq
+import sched
 
 from functools import cmp_to_key
 from multiprocessing import cpu_count, Semaphore
@@ -139,9 +140,12 @@ class TaskProcessor:
                 sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
                 sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
                 session.preprocessing_done(server_conn, self.node_info[node_index])
+                self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
                 self.cprv.preprocessor_ready(preprocessor_id)
 
         csrv = ClientServerRendezvous(self.timer, sessions, node_info, cprv)
+
+        scheduler = sched.scheduler()
 
         try:
             while True:
@@ -165,7 +169,7 @@ class TaskProcessor:
                                 session = sessions.get(Sessions.FROM_PREPR, preprocessor_id)
                                 if session:
                                     assert msg[1] == b'PREPROCESSING_DONE'
-                                    self.timer.add_time('preprocessing', pickle.loads(msg[2]))
+                                    self.timer.add_time('preprocessing.internal', pickle.loads(msg[2]))
                                     csrv.client_ready((session, preprocessor_id, SimpleTimer()))
                                     server_result = node_manager.get_server_conn()
                                     if server_result:
@@ -217,6 +221,7 @@ class TaskProcessor:
                                     server_conn, node_index = node_manager.get_server_conn(node_index)
                                     assert server_conn
                                     csrv.server_ready((server_conn, node_index))
+                scheduler.run(False)
         finally:
             for scan_worker in scan_workers:
                 scan_worker.terminate()

@@ -286,8 +286,6 @@ class CompileSession:
         if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
             self.times['waiting_for_mgr_data'] = 0
             self.run_compiler(self.compile_thread_pool)
-        else:
-            self.waiting_for_manager_data = SimpleTimer()
 
     def process_attached_msg(self, attacher_id, msg):
         self.prolong_lifetime()
@@ -311,6 +309,7 @@ class CompileSession:
             tar_data = msg[1]
             self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
             self.header_state = self.STATE_HEADERS_ARRIVED
+            self.waiting_for_manager_data = SimpleTimer()
             self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
 
 class CompileWorker(Process):
@@ -340,8 +339,10 @@ class CompileWorker(Process):
         return id
 
     def terminate(self, id):
-        del self.workers[id]
-        del self.sessions[id]
+        if id in self.workers:
+            del self.workers[id]
+        if id in self.sessions:
+            del self.sessions[id]
 
     def run(self):
         self.__compile_thread_pool = ThreadPoolExecutor(max_workers=cpu_count() + 1)

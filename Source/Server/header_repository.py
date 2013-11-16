@@ -55,8 +55,10 @@ class HeaderRepository:
             upperdirs = os.path.dirname(filename)
             if upperdirs and not os.path.exists(upperdirs):
                 os.makedirs(upperdirs)
-            with FileIO(filename, 'wb') as file:
-            #with open(filename, 'wb') as file:
+            # Do not inherit this handle.
+            # This avoids a subprocess bug which is fixed in Python 3.4.
+            fd = os.open(filename, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
+            with os.fdopen(fd, 'wb') as file:
                 file.write(content.read())
 
         # Update headers.

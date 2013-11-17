@@ -3,6 +3,7 @@ import tempfile
 
 from threading import Lock
 from shutil import rmtree
+from hashlib import md5
 
 class FileRepository:
     def __init__(self):
@@ -27,9 +28,8 @@ class FileRepository:
                 return self.__files[key], False
             if key in self.__partial_files:
                 return self.__partial_files[key], False
-            ext = os.path.splitext(filename)[1]
-            handle, local_filename = tempfile.mkstemp(dir=self.__dir, suffix=ext)
-            os.close(handle)
+            dir, fn = os.path.split(filename)
+            local_filename = os.path.join(self.__dir, md5(dir.encode()).hexdigest(), fn)
             self.__partial_files[key] = local_filename
             return local_filename, True
 

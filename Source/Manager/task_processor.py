@@ -273,8 +273,9 @@ class TaskProcessor:
                 'process_hdr_list',
                 'wait_for_headers',
                 'shared_prepare_dir',
-                'compiler',
-                'compiler_prep'):
+                'async_compiler_delay',
+                'compiler_prep',
+                'compiler',):
                 sum += times.get('server.' + x, (0,0))[0]
             print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - sum))
         return True

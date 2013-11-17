@@ -7,7 +7,7 @@ from time import sleep, time
 from socket import getfqdn
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from threading import Lock, Thread
 
 from .header_repository import HeaderRepository
 
@@ -25,10 +25,43 @@ import tempfile
 import zipfile
 import zlib
 import zmq
+import queue
 
 
 zmq_ctx = zmq.Context()
 
+class CompileQueue(queue.Queue):
+    class CallProxy:
+        def __init__(self, callable, *args, **kwargs):
+            self.callable = callable
+            self.args = args
+            self.kwargs = kwargs
+
+        def __call__(self):
+            self.callable(*self.args, **self.kwargs)
+
+    def __init__(self):
+        super(CompileQueue, self).__init__()
+
+    def call(self, callable, *args, **kwargs):
+        self.put(self.CallProxy(callable, *args, **kwargs))
+
+    def execute_one(self):
+        callable = self.get()
+        if not callable:
+            return False
+        callable()
+        return True
+
+class CompileThread(Thread):
+    def __init__(self, queue):
+        super(CompileThread, self).__init__()
+        self.queue = queue
+
+    def run(self):
+        while True:
+            if not self.queue.execute_one():
+                break
 
 class CompileSession:
     STATE_START = 0
@@ -49,7 +82,7 @@ class CompileSession:
         return wrapper
 
     def __init__(self, file_repository, header_repository, compiler_repository,
-                 cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
+                 cpu_usage_hwm, task_counter, checksums, compile_queue,
                  misc_thread_pool, scheduler):
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
@@ -63,7 +96,7 @@ class CompileSession:
         self.include_path = tempfile.mkdtemp(dir=temp_dir)
         self.checksums = checksums
         self.times = {}
-        self.compile_thread_pool = compile_thread_pool
+        self.compile_queue = compile_queue
         self.misc_thread_pool = misc_thread_pool
         self.scheduler = scheduler
 
@@ -101,13 +134,14 @@ class CompileSession:
         def disconnect(self):
             self.socket.disconnect('inproc://sessions_socket')
 
-    @async
     def run_compiler(self):
         self.cancel_autodestruct()
+        self.compile_queue.call(self.async_run_compiler, time())
+
+    def async_run_compiler(self, start_time):
+        self.times['async_compiler_delay'] = time() - start_time
         try:
             compiler_prep = time()
-            # Wait for include dir to be prepared.
-            self.include_dirs_future.result()
             self.source_file = os.path.join(self.include_path, self.task['source'])
             if self.task['pch_file'] is not None:
                 while not self.file_repository.file_arrived(
@@ -163,8 +197,11 @@ class CompileSession:
                     send_compressed_file(sender.send_multipart, obj, copy=False)
             sender.disconnect()
         finally:
-            os.remove(object_file_name)
             self.session_done()
+            try:
+                os.remove(object_file_name)
+            except PermissionError:
+                pass
 
     def compiler_ready(self):
         assert hasattr(self, 'compiler_id')
@@ -180,7 +217,7 @@ class CompileSession:
         if self.task['pch_file'] is None:
             if self.header_state == self.STATE_HEADERS_ARRIVED:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                self.run_compiler(self.compile_thread_pool)
+                self.run_compiler()
             else:
                 self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
         else:
@@ -237,14 +274,17 @@ class CompileSession:
                     *self.task['pch_file'])
                 if required:
                     sender.send(b'YES')
-                    self.pch_desc = open(self.pch_file, 'wb')
+                    if not os.path.exists(os.path.dirname(self.pch_file)):
+                        os.makedirs(os.path.dirname(self.pch_file))
+                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
+                    self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()
                     self.state = self.STATE_SH_GET_PCH_DATA
                 else:
                     sender.send(b'NO')
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.run_compiler(self.compile_thread_pool)
+                        self.run_compiler()
                     else:
                         self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
             elif self.state == self.STATE_SH_GET_PCH_DATA:
@@ -258,7 +298,7 @@ class CompileSession:
                     self.file_repository.file_completed(*self.task['pch_file'])
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.run_compiler(self.compile_thread_pool)
+                        self.run_compiler()
                     else:
                         self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
             else:
@@ -283,9 +323,6 @@ class CompileSession:
         self.include_dirs = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
-        if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
-            self.times['waiting_for_mgr_data'] = 0
-            self.run_compiler(self.compile_thread_pool)
 
     def process_attached_msg(self, attacher_id, msg):
         self.prolong_lifetime()
@@ -310,7 +347,10 @@ class CompileSession:
             self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
+            future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
+            if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
+                self.times['waiting_for_mgr_data'] = 0
+                future.add_done_callback(lambda future : self.run_compiler())
 
 class CompileWorker(Process):
     def __init__(self, address, file_repository,compiler_repository,
@@ -329,7 +369,7 @@ class CompileWorker(Process):
         session = CompileSession(self.__file_repository,
             self.__header_repository, self.__compiler_repository,
             self.__cpu_usage_hwm, self.__task_counter,
-            self.__checksums, self.__compile_thread_pool,
+            self.__checksums, self.__compile_queue,
             self.__misc_thread_pool, self.scheduler)
         session.id = client_id
         return session
@@ -345,7 +385,11 @@ class CompileWorker(Process):
             del self.sessions[id]
 
     def run(self):
-        self.__compile_thread_pool = ThreadPoolExecutor(max_workers=cpu_count() + 1)
+        self.__compile_queue = CompileQueue()
+        compile_threads = [CompileThread(self.__compile_queue) for i in range(cpu_count() + 1)]
+        for compile_thread in compile_threads:
+            compile_thread.start()
+
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
         self.scheduler = sched.scheduler()

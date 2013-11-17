@@ -2,7 +2,7 @@
 from time import sleep
 
 from Common import bind_to_random_port
-from Server import CompileWorker, ServerManager
+from Server import CompileWorker
     
 from multiprocessing import cpu_count
 
@@ -41,24 +41,6 @@ Usage:
         assert isinstance(cpu_usage_hwm, int)
         if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
             raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
-    with ServerManager() as manager:
-        task_counter = manager.Counter()
-        file_repository = manager.FileRepository()
-        compiler_repository = manager.CompilerRepository()
 
-        worker = CompileWorker('tcp://*:{}'.format(port), file_repository,
-            compiler_repository, cpu_usage_hwm, task_counter)
-        worker.start()
-
-        import signal
-        signal.signal(signal.SIGBREAK, signal.default_int_handler)
-
-        try:
-            while True:
-                sys.stdout.write("Running {} tasks.\r".format(task_counter.get()))
-                sleep(1)
-        except KeyboardInterrupt:
-            pass
-
-        worker.join()
+    CompileWorker('tcp://*:{}'.format(port), cpu_usage_hwm).run()
 

@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 
 from .header_repository import HeaderRepository
+from .file_repository import FileRepository
+from .compiler_repository import CompilerRepository
 
 import subprocess
 
@@ -62,6 +64,14 @@ class CompileThread(Thread):
         while True:
             if not self.queue.execute_one():
                 break
+
+class Counter:
+    def __init__(self):
+        self.__count = 0
+
+    def inc(self): self.__count += 1
+    def dec(self): self.__count -= 1
+    def get(self): return self.__count
 
 class CompileSession:
     STATE_START = 0
@@ -352,15 +362,10 @@ class CompileSession:
                 self.times['waiting_for_mgr_data'] = 0
                 future.add_done_callback(lambda future : self.run_compiler())
 
-class CompileWorker(Process):
-    def __init__(self, address, file_repository,compiler_repository,
-        cpu_usage_hwm, task_counter):
-        Process.__init__(self)
+class CompileWorker:
+    def __init__(self, address, cpu_usage_hwm):
         self.__address = address
-        self.__file_repository = file_repository
-        self.__compiler_repository = compiler_repository
         self.__cpu_usage_hwm = cpu_usage_hwm
-        self.__task_counter = task_counter
         self.__checksums = {}
         self.workers = {}
         self.sessions = {}
@@ -368,7 +373,7 @@ class CompileWorker(Process):
     def create_session(self, client_id):
         session = CompileSession(self.__file_repository,
             self.__header_repository, self.__compiler_repository,
-            self.__cpu_usage_hwm, self.__task_counter,
+            self.__cpu_usage_hwm, self.__counter,
             self.__checksums, self.__compile_queue,
             self.__misc_thread_pool, self.scheduler)
         session.id = client_id
@@ -392,6 +397,10 @@ class CompileWorker(Process):
 
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
+        self.__file_repository = FileRepository()
+        self.__compiler_repository = CompilerRepository()
+        self.__counter = Counter()
+
         self.scheduler = sched.scheduler()
 
         import signal
@@ -425,6 +434,8 @@ class CompileWorker(Process):
         scheduler = sched.scheduler()
 
         while True:
+            sys.stdout.write("Running {} tasks.\r".format(self.__counter.get()))
+
             # Run any scheduled tasks.
             self.scheduler.run(False)
 

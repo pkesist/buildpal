@@ -42,10 +42,10 @@
     <Compile Include="Source\Manager\task_processor.py" />
     <Compile Include="Source\Manager\__init__.py" />
     <Compile Include="Source\Common\utils.py" />
+    <Compile Include="Source\Server\compiler_repository.py" />
     <Compile Include="Source\Server\compile_worker.py" />
     <Compile Include="Source\Server\file_repository.py" />
     <Compile Include="Source\Server\header_repository.py" />
-    <Compile Include="Source\Server\server_manager.py" />
     <Compile Include="Source\Server\__init__.py" />
   </ItemGroup>
   <ItemGroup>

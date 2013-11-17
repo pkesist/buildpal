@@ -26,7 +26,7 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     PathPart searchPath;
     PathPart relativePath;
 
-    clang::FileEntry const * entry = headerSearch_->LookupFile( include, false, 0, dirLookup, currentFile, &searchPath, &relativePath, 0, false );
+    clang::FileEntry const * entry = headerSearch_->LookupFile( include, isAngled, 0, dirLookup, currentFile, &searchPath, &relativePath, 0, false );
     if ( !entry )
         return;
 

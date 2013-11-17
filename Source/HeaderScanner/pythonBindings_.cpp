@@ -212,7 +212,11 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         return NULL;
     }
 
-    Preprocessor::HeaderRefs const headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( dir ), PyUnicode_AsUTF8( filename ) );
+    Preprocessor::HeaderRefs headers;
+
+    Py_BEGIN_ALLOW_THREADS
+    headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( dir ), PyUnicode_AsUTF8( filename ) );
+    Py_END_ALLOW_THREADS
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );

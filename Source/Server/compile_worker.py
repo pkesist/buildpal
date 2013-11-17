@@ -32,39 +32,6 @@ import queue
 
 zmq_ctx = zmq.Context()
 
-class CompileQueue(queue.Queue):
-    class CallProxy:
-        def __init__(self, callable, *args, **kwargs):
-            self.callable = callable
-            self.args = args
-            self.kwargs = kwargs
-
-        def __call__(self):
-            self.callable(*self.args, **self.kwargs)
-
-    def __init__(self):
-        super(CompileQueue, self).__init__()
-
-    def call(self, callable, *args, **kwargs):
-        self.put(self.CallProxy(callable, *args, **kwargs))
-
-    def execute_one(self):
-        callable = self.get()
-        if not callable:
-            return False
-        callable()
-        return True
-
-class CompileThread(Thread):
-    def __init__(self, queue):
-        super(CompileThread, self).__init__()
-        self.queue = queue
-
-    def run(self):
-        while True:
-            if not self.queue.execute_one():
-                break
-
 class Counter:
     def __init__(self):
         self.__count = 0
@@ -86,13 +53,21 @@ class CompileSession:
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
+    def verify(future):
+        # This will raise an exception if we have one.
+        # Otherwise we don't get any feedback from the
+        # worker thread.
+        future.result()
+
     def async(func):
         def wrapper(inst, runner, *args, **kwds):
-            return runner.submit(func, inst, *args, **kwds)
+            future = runner.submit(func, inst, *args, **kwds)
+            future.add_done_callback(CompileSession.verify)
+            return future
         return wrapper
 
     def __init__(self, file_repository, header_repository, compiler_repository,
-                 cpu_usage_hwm, task_counter, checksums, compile_queue,
+                 cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
                  misc_thread_pool, scheduler):
         self.state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
@@ -106,7 +81,7 @@ class CompileSession:
         self.include_path = tempfile.mkdtemp(dir=temp_dir)
         self.checksums = checksums
         self.times = {}
-        self.compile_queue = compile_queue
+        self.compile_thread_pool = compile_thread_pool
         self.misc_thread_pool = misc_thread_pool
         self.scheduler = scheduler
 
@@ -146,7 +121,7 @@ class CompileSession:
 
     def run_compiler(self):
         self.cancel_autodestruct()
-        self.compile_queue.call(self.async_run_compiler, time())
+        self.compile_thread_pool.submit(self.async_run_compiler, time()).add_done_callback(CompileSession.verify)
 
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
@@ -374,7 +349,7 @@ class CompileWorker:
         session = CompileSession(self.__file_repository,
             self.__header_repository, self.__compiler_repository,
             self.__cpu_usage_hwm, self.__counter,
-            self.__checksums, self.__compile_queue,
+            self.__checksums, self.__compile_thread_pool,
             self.__misc_thread_pool, self.scheduler)
         session.id = client_id
         return session
@@ -390,11 +365,7 @@ class CompileWorker:
             del self.sessions[id]
 
     def run(self):
-        self.__compile_queue = CompileQueue()
-        compile_threads = [CompileThread(self.__compile_queue) for i in range(cpu_count() + 1)]
-        for compile_thread in compile_threads:
-            compile_thread.start()
-
+        self.__compile_thread_pool = ThreadPoolExecutor(cpu_count() + 1)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
         self.__file_repository = FileRepository()
@@ -430,7 +401,7 @@ class CompileWorker:
         poller = zmq.Poller()
         poller.register(clients, zmq.POLLIN)
         poller.register(sessions, zmq.POLLIN)
-        
+
         scheduler = sched.scheduler()
 
         while True:
@@ -459,8 +430,6 @@ class CompileWorker:
                         if session:
                             self.workers[attacher_id] = ProcessAttachedMsg(session, attacher_id)
                             clients.send_multipart([attacher_id, b'SESSION_ATTACHED'])
-                        else:
-                            clients.send_multipart([attacher_id, b'UNKNOWN_SESSION'])
                     else:
                         worker = self.workers.get(client_id)
                         if worker:
@@ -468,3 +437,4 @@ class CompileWorker:
                 else:
                     assert sock is sessions
                     clients.send_multipart(sessions.recv_multipart())
+

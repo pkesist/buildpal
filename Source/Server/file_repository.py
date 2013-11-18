@@ -7,8 +7,8 @@ from hashlib import md5
 
 class FileRepository:
     def __init__(self):
-        os.makedirs(dir, exist_ok=True)
         self.__dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
+        os.makedirs(self.__dir, exist_ok=True)
         self.__lock = Lock()
         self.__files = {}
         self.__partial_files = {}

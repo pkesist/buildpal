@@ -7,19 +7,11 @@ from hashlib import md5
 
 class FileRepository:
     def __init__(self):
-        dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
         os.makedirs(dir, exist_ok=True)
-        self.__dir = tempfile.mkdtemp(dir=dir)
+        self.__dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
         self.__lock = Lock()
         self.__files = {}
         self.__partial_files = {}
-
-    def __del__(self):
-        try:
-            rmtree(self.__dir)
-            os.rmdir(self.__dir)
-        except Exception:
-            pass
 
     def register_file(self, filename, size, last_modified):
         key = (filename, size, last_modified)

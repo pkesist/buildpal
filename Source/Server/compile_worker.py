@@ -140,6 +140,7 @@ class CompileSession:
 
             object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
             os.close(object_file_handle)
+
             compiler_info = self.task['compiler_info']
             noLink = compiler_info.compile_no_link_option.make_value().make_str()
             output = compiler_info.object_name_option.make_value(
@@ -178,15 +179,13 @@ class CompileSession:
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
                 stdout, stderr, self.times)), pickle.dumps(time())])
             if retcode == 0:
-                with open(object_file_name, 'rb') as obj:
+                fh = os.open(object_file_name, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+                with os.fdopen(fh, 'rb') as obj:
                     send_compressed_file(sender.send_multipart, obj, copy=False)
             sender.disconnect()
         finally:
             self.session_done()
-            try:
-                os.remove(object_file_name)
-            except PermissionError:
-                pass
+            os.remove(object_file_name)
 
     def compiler_ready(self):
         assert hasattr(self, 'compiler_id')

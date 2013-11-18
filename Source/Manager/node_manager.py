@@ -17,7 +17,7 @@ class NodeManager:
         self.sockets_registered = {}
         self.sockets_ready = {}
         self.sockets_requested = {}
-        self.recycled_connections = {}
+        self.sockets_recycled = {}
         self.node_info = node_info
         self.__unique_id = 0
 
@@ -32,7 +32,7 @@ class NodeManager:
         return result
 
     def __connect_to_node(self, zmq_ctx, node_index):
-        recycled = self.recycled_connections.get(node_index)
+        recycled = self.sockets_recycled.get(node_index)
         if recycled:
             socket = recycled[0]
             del recycled[0]
@@ -47,7 +47,7 @@ class NodeManager:
                 print("Failed to connect to '{}'".format(node_address))
                 return None
         socket.send(b'CREATE_SESSION')
-        self.register(socket, node_index)
+        self.__register(socket, node_index)
         return socket
             
     def __best_node(self):
@@ -78,12 +78,14 @@ class NodeManager:
         return min(range(len(self.node_info)), key=cmp_to_key(cmp))
 
     def recycle(self, node_index, socket):
-        recycled = self.recycled_connections.setdefault(
+        recycled = self.sockets_recycled.setdefault(
             node_index, [])
+        old_len = len(self.sockets_recycled[node_index])
         assert socket not in recycled
         recycled.append(socket)
+        assert len(self.sockets_recycled[node_index]) == old_len + 1
 
-    def register(self, socket, node_index):
+    def __register(self, socket, node_index):
         self.sockets_registered[socket] = (node_index, self.STATE_SOCKET_OPEN)
         self.sockets_requested[node_index] = self.sockets_requested.get(node_index, 0) + 1
 
@@ -102,7 +104,7 @@ class NodeManager:
 
     def __node_connections(self, node_index):
         return self.sockets_requested.get(node_index, 0) + \
-            len(self.sockets_ready.setdefault(node_index, []))
+            len(self.sockets_ready.get(node_index, []))
 
     def handle_socket(self, socket):
         node_index, state = self.sockets_registered[socket]
@@ -122,4 +124,6 @@ class NodeManager:
             else:
                 assert accept == "REJECT"
                 del self.sockets_registered[socket]
+                # Add it to the recycled list.
+                self.sockets_recycled[node_index].append(socket)
                 return None

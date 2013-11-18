@@ -21,7 +21,7 @@ class CompileSession:
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 6
     STATE_RECEIVE_RESULT_FILE = 7
     STATE_POSTPROCESS = 8
-    STATE_WAIT_FOR_SESSION_DONE = 9
+    STATE_DONE = 9
 
     def __init__(self, compiler, executable, task, client_conn, preprocess_socket,
         preprocessor_id, compiler_info):
@@ -127,7 +127,8 @@ class CompileSession:
                 time_sent = pickle.loads(msg[1])
                 self.timer.add_time('serv_resp_travel_time', time() - time_sent)
                 self.client_conn.send([b'EXIT', b'-1'])
-                self.state = self.STATE_WAIT_FOR_SESSION_DONE
+                self.state = self.STATE_DONE
+                return True
             else:
                 time_sent = pickle.loads(msg[2])
                 self.timer.add_time('serv_resp_travel_time', time() - time_sent)
@@ -143,7 +144,8 @@ class CompileSession:
                 else:
                     self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                     self.node_info.add_tasks_completed()
-                    self.state = self.STATE_WAIT_FOR_SESSION_DONE
+                    self.state = self.STATE_DONE
+                    return True
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             more, data = msg
@@ -157,6 +159,6 @@ class CompileSession:
                 del self.output
                 self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed()
-                self.state = self.STATE_WAIT_FOR_SESSION_DONE
+                self.state = self.STATE_DONE
                 return True
         return False

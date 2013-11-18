@@ -1,6 +1,6 @@
 from Compilers import MSVCWrapper
 from Common import SimpleTimer, Rendezvous
-from Common import create_socket
+from Common import create_socket, recv_multipart
 
 from .compile_session import CompileSession
 from .node_info import NodeInfo
@@ -40,7 +40,7 @@ class TaskProcessor:
 
         def recv(self):
             try:
-                return self.socket.recv_multipart()
+                return recv_multipart(self.socket)
             except zmq.error.ZMQError:
                 # In case connection gets broken ZMQ raises an error.
                 pass
@@ -161,7 +161,7 @@ class TaskProcessor:
 
                     elif socket is preprocess_socket:
                         with self.timer.timeit('poller.preprocess'):
-                            msg = preprocess_socket.recv_multipart()
+                            msg = recv_multipart(preprocess_socket)
                             preprocessor_id = msg[0]
                             if msg[1] == b'PREPROCESSOR_READY':
                                 cprv.preprocessor_ready(preprocessor_id)
@@ -176,11 +176,11 @@ class TaskProcessor:
                                         csrv.server_ready(server_result)
                     elif socket is client_socket:
                         with self.timer.timeit('poller.client'):
-                            msg = client_socket.recv_multipart()
+                            msg = recv_multipart(client_socket)
                             client_id = msg[0]
                             assert len(msg) == 2
                             assert msg[1][-2:] == b'\x00\x01'
-                            parts = msg[1][:-2].split(b'\x00')
+                            parts = bytes(msg[1][:-2]).split(b'\x00')
                             session = sessions.get(Sessions.FROM_CLIENT, client_id)
                             if session:
                                 session.got_data_from_client(parts)
@@ -206,7 +206,7 @@ class TaskProcessor:
                             if result is not None:
                                 # Part of a session.
                                 session, node_index = result
-                                msg = socket.recv_multipart()
+                                msg = recv_multipart(socket)
                                 client_id = session.client_conn.id
                                 session_done = session.got_data_from_server(msg)
                                 if session_done:

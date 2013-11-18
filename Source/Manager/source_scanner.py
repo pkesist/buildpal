@@ -1,7 +1,7 @@
 from .scan_headers import collect_headers
 
 from Common import SimpleTimer, write_str_to_tar
-from Common import create_socket
+from Common import create_socket, recv_multipart
 
 import zmq
 import tarfile
@@ -54,7 +54,7 @@ class SourceScanner(Process):
             socks = dict(poller.poll())
             for sock, event in socks.items():
                 assert event == zmq.POLLIN
-                msg = sock.recv_multipart()
+                msg = recv_multipart(sock)
                 if sock is mgr_socket:
                     if state == self.STATE_WAITING_FOR_TASK:
                         tag, self.task = msg

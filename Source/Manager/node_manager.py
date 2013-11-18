@@ -109,7 +109,7 @@ class NodeManager:
     def handle_socket(self, socket):
         node_index, state = self.sockets_registered[socket]
         if state == self.STATE_SOCKET_OPEN:
-            session_created = socket.recv()
+            session_created = socket.recv(copy=False).buffer.cast('B')
             assert session_created == b'SESSION_CREATED'
             self.sockets_registered[socket] = node_index, self.STATE_SOCKET_RESPONDED
             return None

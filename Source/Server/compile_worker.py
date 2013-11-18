@@ -1,5 +1,5 @@
 from Common import send_compressed_file, SimpleTimer
-from Common import create_socket
+from Common import create_socket, recv_multipart
 
 from io import BytesIO
 from multiprocessing import Process, cpu_count
@@ -416,7 +416,7 @@ class CompileWorker:
             for sock, event in dict(poller.poll(1000)).items():
                 assert event == zmq.POLLIN
                 if sock is clients:
-                    msg = clients.recv_multipart()
+                    msg = recv_multipart(clients)
                     client_id = msg[0]
                     if msg[1] == b'CREATE_SESSION':
                         session = self.create_session(client_id)
@@ -439,5 +439,5 @@ class CompileWorker:
                             worker(msg[1:])
                 else:
                     assert sock is sessions
-                    clients.send_multipart(sessions.recv_multipart())
+                    clients.send_multipart(recv_multipart(sessions))
 

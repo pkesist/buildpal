@@ -416,9 +416,8 @@ class CompileWorker:
             for sock, event in dict(poller.poll(1000)).items():
                 assert event == zmq.POLLIN
                 if sock is clients:
-                    msg = recv_multipart(clients)
-                    client_id = msg[0]
-                    if msg[1] == b'CREATE_SESSION':
+                    client_id, *msg = recv_multipart(clients)
+                    if msg[0] == b'CREATE_SESSION':
                         session = self.create_session(client_id)
                         session.terminate = lambda client_id=client_id : self.terminate(client_id)
                         self.sessions[client_id] = session
@@ -426,17 +425,16 @@ class CompileWorker:
                         # TODO: Remove this, not needed.
                         clients.send_multipart([client_id, b'SESSION_CREATED'])
                         session.created()
-                    elif msg[1] == b'ATTACH_TO_SESSION':
-                        session_id = msg[2]
-                        attacher_id = msg[0]
+                    elif msg[0] == b'ATTACH_TO_SESSION':
+                        session_id = msg[1]
                         session = self.sessions.get(session_id)
                         if session:
-                            self.workers[attacher_id] = ProcessAttachedMsg(session, attacher_id)
-                            clients.send_multipart([attacher_id, b'SESSION_ATTACHED'])
+                            self.workers[client_id] = ProcessAttachedMsg(session, client_id)
+                            clients.send_multipart([client_id, b'SESSION_ATTACHED'])
                     else:
                         worker = self.workers.get(client_id)
                         if worker:
-                            worker(msg[1:])
+                            worker(msg)
                 else:
                     assert sock is sessions
                     clients.send_multipart(recv_multipart(sessions))

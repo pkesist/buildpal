@@ -157,12 +157,14 @@ class CompileSession:
                 # Similar to the PCH hack above.
                 sleep(1)
 
+            include_dirs = self.include_dirs_future.result()
+
             start = time()
             self.times['compiler_prep'] = start - compiler_prep
             command = (self.task['call'] + pch_switch +
                 [noLink, output] +
                 [compiler_info.include_option.make_value(incpath).make_str()
-                    for incpath in self.include_dirs] +
+                    for incpath in include_dirs] +
                 [self.source_file])
             retcode, stdout, stderr = self.compiler(command,
                 self.include_path)
@@ -174,6 +176,7 @@ class CompileSession:
             sender = self.Sender(self.id)
             sender.send_multipart([b'SERVER_FAILED', pickle.dumps(time())])
             sender.disconnect()
+            raise
         else:
             sender = self.Sender(self.id)
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
@@ -304,9 +307,10 @@ class CompileSession:
     @async
     def prepare_include_dirs(self, tar_data):
         shared_prepare_dir_timer = SimpleTimer()
-        self.include_dirs = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
+        result = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
+        return result
 
     def process_attached_msg(self, attacher_id, msg):
         self.prolong_lifetime()
@@ -331,10 +335,10 @@ class CompileSession:
             self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
-            future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
+            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.times['waiting_for_mgr_data'] = 0
-                future.add_done_callback(lambda future : self.run_compiler())
+                self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())
 
 class CompileWorker:
     def __init__(self, address, cpu_usage_hwm):

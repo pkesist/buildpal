@@ -261,7 +261,7 @@ class CompileSession:
                 if required:
                     sender.send(b'YES')
                     if not os.path.exists(os.path.dirname(self.pch_file)):
-                        os.makedirs(os.path.dirname(self.pch_file))
+                        os.makedirs(os.path.dirname(self.pch_file), exist_ok=True)
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()

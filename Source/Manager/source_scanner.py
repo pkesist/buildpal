@@ -1,4 +1,4 @@
-from .scan_headers import collect_headers
+from .scan_headers import collect_headers, cache_info
 
 from Common import SimpleTimer, write_str_to_tar
 from Common import create_socket, recv_multipart
@@ -62,7 +62,10 @@ class SourceScanner(Process):
                         self.task = pickle.loads(self.task)
                         timer = SimpleTimer()
                         self.header_info = list(self.header_info(self.task))
-                        mgr_socket.send_multipart([b'PREPROCESSING_DONE', pickle.dumps(timer.get())])
+                        hits, misses = cache_info()
+                        mgr_socket.send_multipart([b'PREPROCESSING_DONE',
+                            pickle.dumps(timer.get()),
+                            pickle.dumps((hits, misses))])
                         state = self.STATE_WAITING_FOR_SERVER
                     else:
                         assert state == self.STATE_WAITING_FOR_SERVER
@@ -179,7 +182,5 @@ class SourceScanner(Process):
         header_info = collect_headers(task['cwd'], task['source'],
             task['includes'], task['sysincludes'], task['macros'],
             ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-        for dir, file, relative, content in header_info:
-            input = BytesIO(content)
-            abs = os.path.join(dir, file)
-            yield dir, file, relative, content, cls.header_beginning(abs), adler32(content)
+        return ((dir, file, relative, content, cls.header_beginning(abs), \
+            adler32(content)) for dir, file, relative, content in header_info)

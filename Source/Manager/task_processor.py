@@ -67,6 +67,8 @@ class TaskProcessor:
         register_socket(client_socket)
         register_socket(preprocess_socket)
 
+        self.cache_info = {}
+
         compiler_info = {}
 
         node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
@@ -170,6 +172,8 @@ class TaskProcessor:
                                 if session:
                                     assert msg[1] == b'PREPROCESSING_DONE'
                                     self.timer.add_time('preprocessing.internal', pickle.loads(msg[2]))
+                                    hits, misses = pickle.loads(msg[3])
+                                    self.cache_info[preprocessor_id] = hits, misses
                                     csrv.client_ready((session, preprocessor_id, SimpleTimer()))
                                     server_result = node_manager.get_server_conn()
                                     if server_result:
@@ -256,6 +260,14 @@ class TaskProcessor:
             for name, tm, count, average in sorted_times:
                 print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
         print_times(self.timer.as_dict())
+        print("================")
+        total_hits = sum((s[0] for s in self.cache_info.values()))
+        total_misses = sum((s[1] for s in self.cache_info.values()))
+        total = total_hits + total_misses
+        if not total: total = 1
+        print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(total_hits,
+            total_misses, total_hits / total))
+        print("================")
         for index in range(len(node_info)):
             node = node_info[index]
             times = node.timer().as_dict()
@@ -267,7 +279,7 @@ class TaskProcessor:
             print_times(times)
             print("================")
             print("Server time difference - {}".format(times.get('server_time', (0, 0))[0] - times.get('server.server_time', (0, 0))[0]))
-            sum = 0
+            total = 0
             for x in (
                 'wait_for_header_list',
                 'process_hdr_list',
@@ -276,6 +288,6 @@ class TaskProcessor:
                 'async_compiler_delay',
                 'compiler_prep',
                 'compiler',):
-                sum += times.get('server.' + x, (0,0))[0]
-            print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - sum))
+                total += times.get('server.' + x, (0,0))[0]
+            print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - total))
         return True

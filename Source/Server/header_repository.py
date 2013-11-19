@@ -54,7 +54,7 @@ class HeaderRepository:
             filename = os.path.normpath(os.path.join(dir, name))
             upperdirs = os.path.dirname(filename)
             if upperdirs and not os.path.exists(upperdirs):
-                os.makedirs(upperdirs)
+                os.makedirs(upperdirs, exist_ok=True)
             # Do not inherit this handle.
             # This avoids a subprocess bug which is fixed in Python 3.4.
             fd = os.open(filename, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)

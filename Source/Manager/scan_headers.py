@@ -20,3 +20,6 @@ def collect_headers(dir, filename, includes, sysincludes, defines, ignored_heade
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)
     return preprocessor.scan_headers(ppc, dir, filename)
+
+def cache_info():
+    return preprocessor.cache_info()

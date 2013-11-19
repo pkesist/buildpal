@@ -4,10 +4,12 @@
 //------------------------------------------------------------------------------
 #include <clang/Frontend/CompilerInstance.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/ADT/OwningPtr.h>
 
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 namespace clang
@@ -15,8 +17,15 @@ namespace clang
     class HeaderSearch;
 }
 
+namespace llvm
+{
+    class MemoryBuffer;
+}
+
 class Cache;
 class HeaderTracker;
+
+typedef std::unordered_map<clang::FileEntry const *, llvm::OwningPtr<llvm::MemoryBuffer> > ContentCache;
 
 class PreprocessingContext
 {
@@ -104,6 +113,7 @@ public:
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
     clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
+    Cache const * cache() const { return cache_.get(); }
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
@@ -122,6 +132,7 @@ private:
 private:
     clang::CompilerInstance compiler_;
     llvm::OwningPtr<Cache> cache_;
+    std::unordered_map<clang::FileEntry const *, llvm::OwningPtr<llvm::MemoryBuffer> > contentCache_;
 };
 
 

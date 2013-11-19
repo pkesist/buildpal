@@ -1,3 +1,4 @@
+#include "headerCache_.hpp"
 #include "headerScanner_.hpp"
 
 #include <Python.h>
@@ -179,6 +180,16 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
     return 0;
 }
 
+PyObject * PyPreprocessor_cache_info( PyPreprocessor * self )
+{
+    assert( self->pp );
+    Cache const * cache( self->pp->cache() );
+    PyObject * tuple = PyTuple_New( 2 );
+    PyTuple_SET_ITEM( tuple, 0, PyLong_FromSize_t( cache ? cache->hits() : 0 ) );
+    PyTuple_SET_ITEM( tuple, 1, PyLong_FromSize_t( cache ? cache->misses() : 0 ) );
+    return tuple;
+}
+    
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "pp_ctx", "dir", "filename", NULL };
@@ -274,6 +285,7 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scan_headers", (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"cache_info"  , (PyCFunction)PyPreprocessor_cache_info      , METH_NOARGS                 , "Get cache statistics."},
     {"set_ms_ext"  , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"set_ms_mode" , (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}

@@ -34,8 +34,7 @@ public:
         :
         headerSearch_( headerSearch ),
         preprocessor_( preprocessor ),
-        cache_( cache ), 
-        counter_( 0 )
+        cache_( cache )
     {
     }
 
@@ -59,7 +58,8 @@ private:
             :
             header_( header ),
             cacheHit_( cacheHit ),
-            preprocessor_( preprocessor )
+            preprocessor_( preprocessor ),
+            includeDepth_( 0 )
         {
             if ( cacheHit_ )
                 includedHeaders_.push_back( cacheHit );
@@ -77,8 +77,8 @@ private:
         void macroDefined( llvm::StringRef macroName, llvm::StringRef macroDef )
         {
             assert( !fromCache() );
-            MacroRef const macro( std::make_pair( macroName, macroDef ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::defined, macroFromMacroRef( macro ) ) );
+            Macro const macro( createMacro( macroName, macroDef ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::defined, macro ) );
             MacroNames::const_iterator const undefIter( undefinedHere_.find( macroName ) );
             if ( undefIter != undefinedHere_.end() )
                 undefinedHere_.erase( undefIter );
@@ -89,12 +89,12 @@ private:
         void macroUndefined( llvm::StringRef macroName )
         {
             assert( !fromCache() );
-            MacroRef const macro( std::make_pair( macroName, undefinedMacroValue() ) );
-            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macroFromMacroRef( macro ) ) );
+            Macro const macro( createMacro( macroName, undefinedMacroValue() ) );
+            headerContent_.push_back( std::make_pair( MacroUsage::undefined, macro ) );
             MacroNames::const_iterator const defIter( definedHere_.find( macroName ) );
             if ( defIter != definedHere_.end() )
             {
-                usedMacros_.erase( macroName );
+                usedMacros_.erase( macro.first );
                 definedHere_.erase( defIter );
             }
             else
@@ -109,10 +109,10 @@ private:
             includedHeaders_.push_back( header );
         }
 
-        void addStuff( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
+        void propagateChildInfo( HeaderCtx const & child, bool ignoreHeaders )
         {
-            Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
-            Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
+            Macros::const_iterator       cacheIter = child.usedMacros().begin();
+            Macros::const_iterator const cacheEnd = child.usedMacros().end();
             MacroNames::const_iterator       definedIter = definedHere_.begin();
             MacroNames::const_iterator const definedEnd = definedHere_.end();
             while ( cacheIter != cacheEnd && definedIter != definedEnd )
@@ -120,7 +120,7 @@ private:
                 int const compareResult = definedIter->compare( macroName( *cacheIter ) );
                 if ( compareResult < 0 )
                 {
-                    usedMacros_.insert( macroRefFromMacro( *cacheIter ) );
+                    usedMacros_.insert( *cacheIter );
                     ++cacheIter;
                 }
                 else if ( compareResult > 0 )
@@ -133,29 +133,53 @@ private:
                     ++definedIter;
                 }
             }
-            std::transform( cacheIter, cacheEnd,
-                std::inserter( usedMacros_, usedMacros_.begin() ),
-                []( Macro const & macro )
+            std::copy( cacheIter, cacheEnd,
+                std::inserter( usedMacros_, usedMacros_.begin() ) );
+
+            std::copy( child.headerContent().begin(), child.headerContent().end(), std::back_inserter( headerContent_ ) );
+            if ( !ignoreHeaders )
+                std::copy( child.includedHeaders().begin(), child.includedHeaders().end(), std::back_inserter( includedHeaders_ ) );
+            includeDepth_ = std::max<unsigned>( includeDepth_, child.includeDepth_ + 1 );
+        }
+
+        void propagateChildInfo( CacheEntryPtr const & cacheEntry, bool ignoreHeaders )
+        {
+            Macros::const_iterator       cacheIter = cacheEntry->usedMacros().begin();
+            Macros::const_iterator const cacheEnd = cacheEntry->usedMacros().end();
+            MacroNames::const_iterator       definedIter = definedHere_.begin();
+            MacroNames::const_iterator const definedEnd = definedHere_.end();
+            while ( cacheIter != cacheEnd && definedIter != definedEnd )
+            {
+                int const compareResult = definedIter->compare( macroName( *cacheIter ) );
+                if ( compareResult < 0 )
                 {
-                    return macroRefFromMacro( macro );
+                    usedMacros_.insert( *cacheIter );
+                    ++cacheIter;
                 }
-            );
+                else if ( compareResult > 0 )
+                {
+                    ++definedIter;
+                }
+                else
+                {
+                    ++cacheIter;
+                    ++definedIter;
+                }
+            }
+            std::copy( cacheIter, cacheEnd,
+                std::inserter( usedMacros_, usedMacros_.begin() ) );
 
             headerContent_.push_back( cacheEntry );
             if ( !ignoreHeaders )
                 includedHeaders_.push_back( cacheEntry );
+            includeDepth_ = std::max( includeDepth_, cacheEntry->includeDepth() + 1 );
         }
 
-        void addHeaders( Headers const & headers )
-        {
-            std::copy( headers.begin(), headers.end(),
-                std::inserter( includedHeaders_, includedHeaders_.begin() ) );
-        }
-
-        MacroRefs const & usedMacros() const { assert( !fromCache() ); return usedMacros_; }
+        Macros const & usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedMacros_; }
         HeaderContent const & headerContent() const { return cacheHit_ ? cacheHit_->headerContent() : headerContent_; }
         Headers const & includedHeaders() const { return includedHeaders_; }
         HeaderFile const & header() { return header_; }
+        unsigned includeDepth() const { return includeDepth_; }
 
         CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
@@ -170,11 +194,12 @@ private:
         clang::Preprocessor const & preprocessor_;
         HeaderFile header_;
         CacheEntryPtr cacheHit_;
-        MacroRefs usedMacros_;
+        Macros usedMacros_;
         MacroNames definedHere_;
         MacroNames undefinedHere_;
         HeaderContent headerContent_;
         Headers includedHeaders_;
+        unsigned includeDepth_;
     };
     typedef std::vector<HeaderCtx> HeaderCtxStack;
 
@@ -187,7 +212,7 @@ private:
     MacroState const & macroState() const { return macroState_; }
     MacroState       & macroState()       { return macroState_; }
 
-    clang::FileEntry const * strippedEquivalent( clang::FileEntry const * );
+    bool isViableForCache( HeaderCtx const &, clang::FileEntry const * ) const;
 
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
@@ -196,18 +221,13 @@ private:
     typedef llvm::SmallString<1024> PathPart;
     typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, PathPart, PathPart> IncludeStackEntry;
     typedef std::vector<IncludeStackEntry> IncludeStack;
-    typedef std::unordered_map<clang::FileEntry const *, clang::FileEntry const *> FileMapping;
-
-    std::string uniqueFileName();
 
 private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     std::vector<std::string> buffers_;
-    FileMapping strippedEquivalent_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
-    unsigned int counter_;
     CacheEntryPtr cacheHit_;
     IncludeStack fileStack_;
     MacroState macroState_;

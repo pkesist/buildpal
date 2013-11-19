@@ -65,85 +65,9 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     else
     {
         // No match in cache. We will have to use the disk file.
-        // Create a stripped version of it containing only preprocessor directives.
-        //fileEntry = strippedEquivalent( entry );
         fileEntry = entry;
     }
 }
-
-std::string HeaderTracker::uniqueFileName()
-{
-    std::string result;
-    using namespace boost::spirit::karma;
-    generate( std::back_inserter( result ),
-        lit( "__stripped_file_" ) << uint_,
-        ++counter_ );
-    return result;
-}
-
-clang::FileEntry const * HeaderTracker::strippedEquivalent( clang::FileEntry const * file )
-{
-    FileMapping::const_iterator const iter( strippedEquivalent_.find( file ) );
-    if ( iter != strippedEquivalent_.end() )
-        return iter->second;
-
-    bool invalid;
-
-    assert( !sourceManager().isFileOverridden( file ) );
-    llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( file, &invalid );
-    assert( ( buffer == 0 ) == invalid );
-    if ( invalid )
-        buffer = sourceManager().getFileManager().getBufferForFile( file, 0 );
-    assert( buffer );
-
-    buffers_.resize( buffers_.size() + 1 );
-    buffers_.back().reserve( buffer->getBufferSize() / 2 );
-    llvm::raw_string_ostream ostream( buffers_.back() );
-    bool newLine = true;
-    bool skipLine = true;
-    char lastNonWs = 0;
-
-    char const * lineStart = buffer->getBufferStart();
-    char const * end = lineStart + buffer->getBufferSize();
-    for ( char const * pos = lineStart; pos != end; ++pos )
-    {
-        switch ( *pos )
-        {
-            case ' ':
-            case '\t':
-            case '\r':
-                break;
-
-            case '\n':
-                if ( lastNonWs != '\\' )
-                {
-                    newLine = true;
-                    if ( !skipLine )
-                        ostream << llvm::StringRef( lineStart, pos - lineStart + 1 );
-                    lineStart = pos + 1;
-                    skipLine = true;
-                }
-                break;
-
-            case '#':
-                if ( newLine ) skipLine = false;
-                newLine = false;
-                // Fall through.
-
-            default:
-                lastNonWs = *pos;
-                newLine = false;
-        }
-    }
-    if ( ( lineStart < end ) && !skipLine )
-        ostream << llvm::StringRef( lineStart, end - lineStart ) << "\n";
-    ostream << '\0';
-    clang::FileEntry const * replacement = sourceManager().getFileManager().getVirtualFile( uniqueFileName(), 0, 0 );
-    sourceManager().overrideFileContents( replacement, llvm::MemoryBuffer::getMemBuffer( ostream.str(), "", true ) );
-    strippedEquivalent_.insert( std::make_pair( file, replacement ) );
-    return replacement;
-}
-
 
 void HeaderTracker::headerSkipped()
 {
@@ -155,7 +79,6 @@ void HeaderTracker::headerSkipped()
     PathPart const & relPart( std::get<3>( currentEntry ) );
     fileStack_.pop_back();
 
-    //file = strippedEquivalent( file );
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
     assert( cacheHit_ == 0 );
     if ( !headerCtxStack().empty() )
@@ -222,6 +145,11 @@ void HeaderTracker::enterHeader()
     }
 }
 
+bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEntry const * file ) const
+{
+    return true;
+}
+
 void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ignoredHeaders )
 {
     assert( headerCtxStack().size() > 1 );
@@ -249,30 +177,22 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
         ignoredHeaders.find( std::get<0>( headerCtxStack().back().header() ) ) != ignoredHeaders.end()
     );
 
-    CacheEntryPtr cacheEntry;
-
-    if ( !cacheDisabled() )
+    HeaderCtx & parent( headerCtxStack()[ stackSize - 2 ] );
+    if ( !cacheDisabled() && !headerCtxStack().back().fromCache() && isViableForCache( headerCtxStack().back(), file ) )
     {
-        cacheEntry = headerCtxStack().back().cacheHit();
-        if ( !cacheEntry )
-            cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
+        CacheEntryPtr cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
+        parent.propagateChildInfo( cacheEntry, ignoreHeaders );
     }
-
-    HeaderCtx & includer( headerCtxStack()[ stackSize - 2 ] );
-    if ( cacheEntry )
+    else
     {
-        includer.addStuff( cacheEntry, ignoreHeaders );
-    }
-    else if ( !ignoreHeaders )
-    {
-        includer.addHeaders( headerCtxStack().back().includedHeaders() );
+        parent.propagateChildInfo( headerCtxStack().back(), ignoreHeaders );
     }
 }
 
 
 CacheEntryPtr HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
-    return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders() );
+    return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders(), includeDepth() );
 }
 
 Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
@@ -298,8 +218,6 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
             clang::FileEntry const * headerFile( std::get<2>( h ) );
             assert( headerFile );
             llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( headerFile, &invalid );
-            if ( invalid )
-                buffer = sourceManager_.getFileManager().getBufferForFile( headerFile, &error );
             assert( buffer );
             result_.insert(
                 HeaderRef(

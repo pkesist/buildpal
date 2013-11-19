@@ -38,17 +38,6 @@ namespace clang
     class FileEntry;
 }
 
-struct HashStrRef
-{
-    std::size_t operator()( llvm::StringRef str )
-    {
-        return boost::hash_range( str.data(), str.data() + str.size() );
-    }
-};
-
-typedef std::pair<llvm::StringRef, llvm::StringRef> MacroRef;
-typedef std::unordered_map<llvm::StringRef, llvm::StringRef, HashStrRef> MacroRefs;
-
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
     typedef boost::flyweight<base, \
@@ -66,17 +55,15 @@ typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::En
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
 
+inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
+{
+    return std::make_pair( MacroName( name ), MacroValue( value ) );
+}
+
 template<typename T>
 inline T fromDataAndSize( char const * data, std::size_t size )
 {
     return T( data, size );
-}
-
-inline Macro macroFromMacroRef( MacroRef const & macroRef )
-{
-    return std::make_pair(
-        MacroName( macroRef.first.data(), macroRef.first.size() ),
-        MacroValue( macroRef.second.data(), macroRef.second.size() ) );
 }
 
 inline llvm::StringRef macroName( Macro const & macro )
@@ -87,11 +74,6 @@ inline llvm::StringRef macroName( Macro const & macro )
 inline llvm::StringRef macroValue( Macro const & macro )
 {
     return macro.second.get();
-}
-
-inline MacroRef macroRefFromMacro( Macro const & macro )
-{
-    return std::make_pair( macroName( macro ), macroValue( macro ) );
 }
 
 inline llvm::StringRef undefinedMacroValue()
@@ -151,20 +133,22 @@ private:
     (
         unsigned uid,
         std::string const & uniqueVirtualFileName,
-        MacroRefs const & usedMacros,
+        Macros const & usedMacros,
         HeaderContent const & headerContent,
-        Headers const & headers
+        Headers const & headers,
+        unsigned includeDepth
+
     ) :
         uid_( uid ),
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
         refCount_( 0 ),
-        hitCount_( 0 )
+        hitCount_( 0 ),
+        includeDepth_( 0 )
     {
-        std::transform( usedMacros.begin(), usedMacros.end(),
-            std::inserter( usedMacros_, usedMacros_.begin() ),
-            []( MacroRef macroRef ) { return macroFromMacroRef( macroRef ); } );
+        std::copy( usedMacros.begin(), usedMacros.end(),
+            std::inserter( usedMacros_, usedMacros_.begin() ) );
     }
 
 public:
@@ -172,9 +156,10 @@ public:
     (
         unsigned uid,
         std::string const & uniqueVirtualFileName,
-        MacroRefs const & usedMacros,
+        Macros const & usedMacros,
         HeaderContent const & headerContent,
-        Headers const & headers
+        Headers const & headers,
+        unsigned includeDepth
     )
     {
         CacheEntry * result = new CacheEntry
@@ -183,7 +168,8 @@ public:
             uniqueVirtualFileName,
             usedMacros,
             headerContent,
-            headers
+            headers,
+            includeDepth
         );
         return CacheEntryPtr( result );
     }
@@ -192,6 +178,7 @@ public:
     void releaseFileEntry( clang::SourceManager & );
     void generateContent();
 
+    unsigned             includeDepth  () const { return includeDepth_; }
     Macros        const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
@@ -221,6 +208,7 @@ private:
     Headers headers_;
     std::size_t refCount_;
     std::size_t hitCount_;
+    unsigned includeDepth_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
@@ -236,13 +224,14 @@ public:
     CacheEntryPtr addEntry
     (
         clang::FileEntry const * file,
-        MacroRefs const & macros,
+        Macros const & macros,
         HeaderContent const & headerContent,
-        Headers const & headers
+        Headers const & headers,
+        unsigned includeDepth
     )
     {
         CacheEntryPtr result = CacheEntry::create( file->getUID(), uniqueFileName(),
-            macros, headerContent, headers );
+            macros, headerContent, headers, includeDepth );
         cacheContainer_.insert( result );
         return result;
     }

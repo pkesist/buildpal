@@ -28,7 +28,7 @@ class HeaderRepository:
         out_list = []
         checksums, lock = self.checksums.setdefault(machine_id, ({}, Lock()))
         dirs = set()
-        for dir, name, relative, checksum, size in in_list:
+        for dir, name, relative, checksum in in_list:
             key = (dir, name)
             dirs.add(self.map_dir(dir))
             if key not in checksums or checksums[key] != checksum:

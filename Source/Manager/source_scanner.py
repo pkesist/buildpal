@@ -32,7 +32,7 @@ class SourceScanner(Process):
         def create_filelist(self):
             filelist = []
             for dir, file, relative, content, header, checksum in self.header_info:
-                filelist.append((dir, file, relative, checksum, len(content) + len(header)))
+                filelist.append((dir, file, relative, checksum))
             return filelist
 
     STATE_WAITING_FOR_TASK = 0

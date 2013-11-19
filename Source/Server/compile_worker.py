@@ -321,8 +321,6 @@ class CompileSession:
             else:
                 self.times['wait_for_header_list'] = 0
             self.wait_for_headers = SimpleTimer()
-            if not msg[0] == b'TASK_FILE_LIST':
-                print("TASK_FILE_LIST", msg)
             assert msg[0] == b'TASK_FILE_LIST'
             filelist = pickle.loads(msg[1])
             self.header_state = self.STATE_WAITING_FOR_HEADERS

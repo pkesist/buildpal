@@ -79,7 +79,7 @@ class CompileSession:
         assert server_id
         self.preprocess_socket.send_multipart([self.preprocessor_id, b'SEND_TO_SERVER',
             server_id, pickle.dumps(self.node_info.index())], copy=False)
-        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info), pickle.dumps(time())])
+        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.node_info.add_tasks_sent()
         self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_SERVER_OK
@@ -124,14 +124,10 @@ class CompileSession:
             self.node_info.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
-                time_sent = pickle.loads(msg[1])
-                self.timer.add_time('serv_resp_travel_time', time() - time_sent)
                 self.client_conn.send([b'EXIT', b'-1'])
                 self.state = self.STATE_DONE
                 return True
             else:
-                time_sent = pickle.loads(msg[2])
-                self.timer.add_time('serv_resp_travel_time', time() - time_sent)
                 assert server_status == b'SERVER_DONE'
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
                 for name, duration in server_times.items():

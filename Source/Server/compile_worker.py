@@ -174,13 +174,13 @@ class CompileSession:
             del self.server_time_timer
         except Exception:
             sender = self.Sender(self.id)
-            sender.send_multipart([b'SERVER_FAILED', pickle.dumps(time())])
+            sender.send_multipart([b'SERVER_FAILED'])
             sender.disconnect()
             raise
         else:
             sender = self.Sender(self.id)
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
-                stdout, stderr, self.times)), pickle.dumps(time())])
+                stdout, stderr, self.times))])
             if retcode == 0:
                 fh = os.open(object_file_name, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
                 with os.fdopen(fh, 'rb') as obj:
@@ -231,9 +231,8 @@ class CompileSession:
                 self.task_counter.inc()
                 self.server_time_timer = SimpleTimer()
                 self.waiting_for_header_list = SimpleTimer()
-                assert len(msg) == 3 and msg[0] == b'SERVER_TASK'
+                assert len(msg) == 2 and msg[0] == b'SERVER_TASK'
                 self.task = pickle.loads(msg[1])
-                self.times['task_travel_time'] = time() - pickle.loads(msg[2])
                 self.compiler_id = self.task['compiler_info'].id()
                 has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
                 if has_compiler is None:

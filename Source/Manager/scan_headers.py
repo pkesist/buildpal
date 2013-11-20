@@ -1,9 +1,16 @@
 #! python3.3
 import preprocessing
+import threading
 
-preprocessor = preprocessing.Preprocessor(True)
+data = threading.local()
+
+def get_preprocessor():
+    if not hasattr(data, 'pp'):
+        data.pp = preprocessing.Preprocessor(True)
+    return data.pp
 
 def collect_headers(dir, filename, includes, sysincludes, defines, ignored_headers=[]):
+    preprocessor = get_preprocessor()
     preprocessor.set_ms_mode(True) # If MSVC.
     preprocessor.set_ms_ext(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
@@ -22,4 +29,4 @@ def collect_headers(dir, filename, includes, sysincludes, defines, ignored_heade
     return preprocessor.scan_headers(ppc, dir, filename)
 
 def cache_info():
-    return preprocessor.cache_info()
+    return get_preprocessor().cache_info()

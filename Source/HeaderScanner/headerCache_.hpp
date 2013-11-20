@@ -13,7 +13,7 @@
 #include <boost/flyweight/flyweight.hpp>
 #include <boost/flyweight/hashed_factory.hpp>
 #include <boost/flyweight/tag.hpp>
-#include <boost/flyweight/no_locking.hpp>
+#include <boost/flyweight/simple_locking.hpp>
 #include <boost/flyweight/no_tracking.hpp>
 #include <boost/flyweight/static_holder.hpp>
 #include <boost/flyweight/refcounted.hpp>
@@ -42,7 +42,6 @@ namespace clang
     struct name##Tag {}; \
     typedef boost::flyweight<base, \
         boost::flyweights::tag<name##Tag>, \
-        boost::flyweights::no_locking, \
         boost::flyweights::no_tracking> name
 
 DEFINE_FLYWEIGHT(std::string, Dir);

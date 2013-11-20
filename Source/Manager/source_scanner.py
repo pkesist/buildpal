@@ -9,124 +9,147 @@ import os
 import pickle
 from zlib import adler32
 
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from multiprocessing import Process
+from multiprocessing import Process, cpu_count
 
-class SourceScanner(Process):
-    def __init__(self, port, nodes):
-        self.__port = port
-        self.__nodes = nodes
-        return super().__init__()
+
+def header_beginning(filename):
+    return b''
+    # 'sourceannotations.h' header is funny. If you add a #line directive to
+    # it it will start tossing incomprehensible compiler erros. It would
+    # seem that cl.exe has some hardcoded logic for this header. Person
+    # responsible for this should be severely punished.
+    if 'sourceannotations.h' in filename:
+        return b''
+    pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
+    return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
+
+def header_info(task):
+    header_info = collect_headers(task['cwd'], task['source'],
+        task['includes'], task['sysincludes'], task['macros'],
+        ignored_headers=[task['pch_header']] if task['pch_header'] else [])
+    return ((dir, file, relative, content, header_beginning(abs), \
+        adler32(content)) for dir, file, relative, content in header_info)
+
+class SourceScanner:
+    def __init__(self, zmq_ctx, address, nodes, poller):
+        self.zmq_ctx = zmq_ctx
+
+        self.nodes = nodes
+        self.address = address
+
+        self.mgr_socket = create_socket(self.zmq_ctx, zmq.ROUTER)
+        self.mgr_socket.bind(address)
+
+        self.sessions_socket = create_socket(self.zmq_ctx, zmq.DEALER)
+        self.sessions_socket.bind('inproc://pp_sessions')
+
+        self.sockets = {}
+        self.client_sessions = {}
+        self.server_sessions = {}
+
+        self.executor = ThreadPoolExecutor(cpu_count() + 1)
+        self.poller = poller
+
+        self.poller.register(self.mgr_socket, zmq.POLLIN)
+        self.poller.register(self.sessions_socket, zmq.POLLIN)
+
+    def terminate(self):
+        self.executor.shutdown()
+        self.mgr_socket.unbind(self.address)
+        self.sessions_socket.unbind('inproc://pp_sessions')
+        self.poller.unregister(self.mgr_socket)
+        self.poller.unregister(self.sessions_socket)
 
     class Session:
-        STATE_ATTACHING_TO_SESSION = 1
-        STATE_SENDING_FILE_LIST = 2
+        STATE_WAITING_FOR_TASK = 1
+        STATE_WAITING_FOR_SERVER = 2
+        STATE_ATTACHING_TO_SESSION = 3
+        STATE_SENDING_FILE_LIST = 4
 
-        def __init__(self, task, header_info, node_index):
-            self.state = self.STATE_ATTACHING_TO_SESSION
+        def __init__(self, zmq_ctx, conn_id, task, executor):
+            self.state = self.STATE_WAITING_FOR_TASK
+            self.conn_id = conn_id
             self.task = task
-            self.header_info = header_info
+            executor.submit(self.calc_header_info, zmq_ctx)
+
+        def calc_header_info(self, zmq_ctx):
+            timer = SimpleTimer()
+            self.header_info = list(header_info(self.task))
             self.filelist = self.create_filelist()
-            self.node_index = node_index
+            hits, misses = cache_info()
+
+            self.state = self.STATE_WAITING_FOR_SERVER
+            s = create_socket(zmq_ctx, zmq.DEALER)
+            s.connect('inproc://pp_sessions')
+            s.send_multipart([self.conn_id,
+                b'PREPROCESSING_DONE',pickle.dumps(timer.get()),
+                pickle.dumps((hits, misses))])
+            s.disconnect('inproc://pp_sessions')
 
         def create_filelist(self):
-            filelist = []
-            for dir, file, relative, content, header, checksum in self.header_info:
-                filelist.append((dir, file, relative, checksum))
-            return filelist
+            return list((dir, file, relative, checksum) for dir, file, relative, \
+                content, header, checksum in self.header_info)
 
-    STATE_WAITING_FOR_TASK = 0
-    STATE_WAITING_FOR_SERVER = 1
-
-    def run(self):
-        zmq_ctx = zmq.Context()
-        mgr_socket = create_socket(zmq_ctx, zmq.DEALER)
-        mgr_socket.connect('tcp://localhost:{}'.format(self.__port))
-        mgr_socket.send(b'PREPROCESSOR_READY')
-        sockets = {}
-        server_sessions = {}
-        state = self.STATE_WAITING_FOR_TASK
-
-        poller = zmq.Poller()
-        poller.register(mgr_socket, zmq.POLLIN)
-
-        while True:
-            socks = dict(poller.poll())
-            for sock, event in socks.items():
-                assert event == zmq.POLLIN
-                msg = recv_multipart(sock)
-                if sock is mgr_socket:
-                    if state == self.STATE_WAITING_FOR_TASK:
-                        tag, self.task = msg
-                        assert tag == b'PREPROCESS_TASK'
-                        self.task = pickle.loads(self.task)
-                        timer = SimpleTimer()
-                        self.header_info = list(self.header_info(self.task))
-                        hits, misses = cache_info()
-                        mgr_socket.send_multipart([b'PREPROCESSING_DONE',
-                            pickle.dumps(timer.get()),
-                            pickle.dumps((hits, misses))])
-                        state = self.STATE_WAITING_FOR_SERVER
-                    else:
-                        assert state == self.STATE_WAITING_FOR_SERVER
-                        tag, server_id, node_index = msg
-                        assert tag == b'SEND_TO_SERVER'
-                        node_index = pickle.loads(node_index)
-                        available_sockets = sockets.setdefault(node_index, [])
-                        if available_sockets:
-                            socket = available_sockets[0]
-                            del available_sockets[0]
-                        else:
-                            socket = create_socket(zmq_ctx, zmq.DEALER)
-                            socket.connect(self.__nodes[node_index]['address'])
-                        socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
-                        poller.register(socket, zmq.POLLIN)
-                        assert socket not in server_sessions
-                        task = self.task
-                        header_info = self.header_info
-                        server_sessions[socket] = self.Session(self.task, self.header_info, node_index)
-                        del self.task
-                        del self.header_info
-                        state = self.STATE_WAITING_FOR_TASK
+    def handle(self, socket):
+        if socket is self.mgr_socket:
+            conn_id, *msg = recv_multipart(socket)
+            session = self.client_sessions.get(conn_id)
+            if not session:
+                assert msg[0] == b'PREPROCESS_TASK'
+                self.client_sessions[conn_id] = self.Session(self.zmq_ctx, conn_id, pickle.loads(msg[1]), self.executor)
+            else:
+                assert session.state == self.Session.STATE_WAITING_FOR_SERVER
+                tag, server_id, node_index = msg
+                assert tag == b'SEND_TO_SERVER'
+                node_index = pickle.loads(node_index)
+                session.node_index = node_index
+                available_sockets = self.sockets.setdefault(node_index, [])
+                if available_sockets:
+                    socket = available_sockets[0]
+                    del available_sockets[0]
                 else:
-                    assert sock in server_sessions
-                    session = server_sessions[sock]
-                    if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
-                        assert len(msg) == 1
-                        if msg[0] == b'SESSION_ATTACHED':
-                            sock.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
-                            session.wait_for_header_list_response = SimpleTimer()
-                            session.state = self.Session.STATE_SENDING_FILE_LIST
-                        else:
-                            assert msg[0] == b'UNKNOWN_SESSION'
-                            # Huh. Weird.
-                            poller.unregister(sock)
-                            sockets[session.node_index].append(sock)
-                            del server_sessions[sock]
+                    socket = create_socket(self.zmq_ctx, zmq.DEALER)
+                    socket.connect(self.nodes[node_index]['address'])
+                socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
+                self.poller.register(socket, zmq.POLLIN)
+                del self.client_sessions[session.conn_id]
+                assert socket not in self.server_sessions
+                self.server_sessions[socket] = session
+                session.state = self.Session.STATE_ATTACHING_TO_SESSION
+            return True
+        elif socket is self.sessions_socket:
+            self.mgr_socket.send_multipart(recv_multipart(self.sessions_socket), copy=False)
+            return True
+        elif socket in self.server_sessions:
+            session = self.server_sessions[socket]
+            msg = recv_multipart(socket)
+            if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
+                assert len(msg) == 1
+                if msg[0] == b'SESSION_ATTACHED':
+                    socket.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
+                    session.wait_for_header_list_response = SimpleTimer()
+                    session.state = self.Session.STATE_SENDING_FILE_LIST
+                else:
+                    assert msg[0] == b'UNKNOWN_SESSION'
+                    # Huh. Weird.
+                    self.poller.unregister(socket)
+                    self.sockets[session.node_index].append(socket)
+                    del self.server_sessions[socket]
 
-                    elif session.state == self.Session.STATE_SENDING_FILE_LIST:
-                        assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
-                        missing_files = pickle.loads(msg[1])
-                        new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                        sock.send_multipart([b'TASK_FILES', new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
-                        poller.unregister(sock)
-                        sockets[session.node_index].append(sock)
-                        del server_sessions[sock]
-                        
-                    else:
-                        raise Exception("Invalid state.")
-
-    @classmethod
-    def header_beginning(cls, filename):
-        return b''
-        # 'sourceannotations.h' header is funny. If you add a #line directive to
-        # it it will start tossing incomprehensible compiler erros. It would
-        # seem that cl.exe has some hardcoded logic for this header. Person
-        # responsible for this should be severely punished.
-        if 'sourceannotations.h' in filename:
-            return b''
-        pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
-        return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
+            elif session.state == self.Session.STATE_SENDING_FILE_LIST:
+                assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
+                missing_files = pickle.loads(msg[1])
+                new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
+                socket.send_multipart([b'TASK_FILES', new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
+                self.poller.unregister(socket)
+                self.sockets[session.node_index].append(socket)
+                del self.server_sessions[socket]
+            else:
+                raise Exception("Invalid state.")
+            return True
+        return False
 
     @classmethod
     def tar_with_new_headers(cls, task, in_filelist, header_info):
@@ -173,14 +196,6 @@ class SourceScanner(Process):
             rel_file = task['source']
             cpp_file = os.path.join(task['cwd'], rel_file)
             with open(cpp_file, 'rb') as src:
-                write_str_to_tar(out_tar, rel_file, src.read(), cls.header_beginning(cpp_file))
+                write_str_to_tar(out_tar, rel_file, src.read(), header_beginning(cpp_file))
         tar_buffer.seek(0)
         return tar_buffer
-
-    @classmethod
-    def header_info(cls, task):
-        header_info = collect_headers(task['cwd'], task['source'],
-            task['includes'], task['sysincludes'], task['macros'],
-            ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-        return ((dir, file, relative, content, cls.header_beginning(abs), \
-            adler32(content)) for dir, file, relative, content in header_info)

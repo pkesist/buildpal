@@ -56,16 +56,12 @@ class TaskProcessor:
         client_socket = create_socket(zmq_ctx, zmq.STREAM)
         client_socket.bind('tcp://*:{}'.format(self.__port))
 
-        preprocess_socket = create_socket(zmq_ctx, zmq.ROUTER)
-        preprocess_socket_port = bind_to_random_port(preprocess_socket)
-
         poller = zmq.Poller()
 
         register_socket = lambda socket : poller.register(socket, zmq.POLLIN)
         unregister_socket = lambda socket : poller.unregister(socket)
 
         register_socket(client_socket)
-        register_socket(preprocess_socket)
 
         self.cache_info = {}
 
@@ -73,10 +69,7 @@ class TaskProcessor:
 
         node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
 
-        scan_workers = [SourceScanner(preprocess_socket_port, self.__nodes) for i in range(cpu_count() * 2)]
-        for scan_worker in scan_workers:
-            scan_worker.start()
-
+        source_scanner = SourceScanner(zmq_ctx, 'inproc://preprocessor', self.__nodes, poller)
         class Sessions:
             FROM_CLIENT = 0
             FROM_PREPR  = 1
@@ -107,45 +100,23 @@ class TaskProcessor:
 
         self.timer = Timer()
 
-        class ClientPreprocessorRendezvous(Rendezvous):
-            def __init__(self, timer, sessions, compiler_info):
-                Rendezvous.__init__(self, 'preprocessor_ready', 'client_ready')
-                self.timer = timer
-                self.sessions = sessions
-                self.compiler_info = compiler_info
-
-            def match(self, preprocessor_id, client_tuple):
-                compiler, executable, task, client_conn, timer = client_tuple
-                self.timer.add_time('waiting.preprocessor', timer.get())
-                session = CompileSession(compiler, executable, task,
-                    client_conn, preprocess_socket,
-                    preprocessor_id, compiler_info)
-                sessions.register(Sessions.FROM_CLIENT,
-                    client_conn.id, session)
-                sessions.register(Sessions.FROM_PREPR,
-                    preprocessor_id, session)
-
-        cprv = ClientPreprocessorRendezvous(self.timer, sessions, compiler_info)
-
         class ClientServerRendezvous(Rendezvous):
-            def __init__(self, timer, sessions, node_info, cprv):
+            def __init__(self, timer, sessions, node_info):
                 Rendezvous.__init__(self, 'client_ready', 'server_ready')
                 self.node_info = node_info
                 self.sessions = sessions
-                self.cprv = cprv
                 self.timer = timer
 
             def match(self, client_tuple, server_tuple):
-                session, preprocessor_id, timer = client_tuple
+                session, pp_socket, timer = client_tuple
                 server_conn, node_index = server_tuple
                 self.timer.add_time('waiting.server', timer.get())
                 sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
-                sessions.unregister(Sessions.FROM_PREPR, preprocessor_id)
+                sessions.unregister(Sessions.FROM_PREPR, pp_socket)
                 session.preprocessing_done(server_conn, self.node_info[node_index])
                 self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
-                self.cprv.preprocessor_ready(preprocessor_id)
 
-        csrv = ClientServerRendezvous(self.timer, sessions, node_info, cprv)
+        csrv = ClientServerRendezvous(self.timer, sessions, node_info)
 
         scheduler = sched.scheduler()
 
@@ -156,28 +127,24 @@ class TaskProcessor:
                 for connection in node_connections:
                     register_socket(connection)
 
-                sockets = dict(poller.poll(1000))
-                for socket, flags in sockets.items():
+                for socket, flags in dict(poller.poll(1000)).items():
                     if flags != zmq.POLLIN:
                         continue
 
-                    elif socket is preprocess_socket:
-                        with self.timer.timeit('poller.preprocess'):
-                            msg = recv_multipart(preprocess_socket)
-                            preprocessor_id = msg[0]
-                            if msg[1] == b'PREPROCESSOR_READY':
-                                cprv.preprocessor_ready(preprocessor_id)
-                            else:
-                                session = sessions.get(Sessions.FROM_PREPR, preprocessor_id)
-                                if session:
-                                    assert msg[1] == b'PREPROCESSING_DONE'
-                                    self.timer.add_time('preprocessing.internal', pickle.loads(msg[2]))
-                                    hits, misses = pickle.loads(msg[3])
-                                    self.cache_info[preprocessor_id] = hits, misses
-                                    csrv.client_ready((session, preprocessor_id, SimpleTimer()))
-                                    server_result = node_manager.get_server_conn()
-                                    if server_result:
-                                        csrv.server_ready(server_result)
+                    if source_scanner.handle(socket):
+                        continue
+
+                    session = sessions.get(Sessions.FROM_PREPR, socket)
+                    if session:
+                        msg = recv_multipart(socket)
+                        assert msg[0] == b'PREPROCESSING_DONE'
+                        self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
+                        hits, misses = pickle.loads(msg[2])
+                        self.cache_info['xxx'] = hits, misses
+                        csrv.client_ready((session, socket, SimpleTimer()))
+                        server_result = node_manager.get_server_conn()
+                        if server_result:
+                            csrv.server_ready(server_result)
                     elif socket is client_socket:
                         with self.timer.timeit('poller.client'):
                             msg = recv_multipart(client_socket)
@@ -201,8 +168,15 @@ class TaskProcessor:
                                 compiler = MSVCWrapper()
                                 for task in create_tasks(client_conn, compiler,
                                     executable, cwd, sysincludes, command):
-                                    cprv.client_ready((compiler, executable, task,
-                                        client_conn, SimpleTimer()))
+                                    preprocess_socket = zmq_ctx.socket(zmq.DEALER)
+                                    preprocess_socket.connect('inproc://preprocessor')
+                                    session = CompileSession(compiler, executable, task,
+                                        client_conn, preprocess_socket, compiler_info)
+                                    sessions.register(Sessions.FROM_CLIENT,
+                                        client_conn.id, session)
+                                    sessions.register(Sessions.FROM_PREPR,
+                                        preprocess_socket, session)
+                                    register_socket(preprocess_socket)
                     else:
                         with self.timer.timeit('poller.server'):
                             # Connection to server node.
@@ -227,8 +201,7 @@ class TaskProcessor:
                                     csrv.server_ready((server_conn, node_index))
                 scheduler.run(False)
         finally:
-            for scan_worker in scan_workers:
-                scan_worker.terminate()
+            source_scanner.terminate()
 
     def print_stats(self, node_info):
         current = time()

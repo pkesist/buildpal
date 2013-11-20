@@ -24,12 +24,11 @@ class CompileSession:
     STATE_DONE = 9
 
     def __init__(self, compiler, executable, task, client_conn, preprocess_socket,
-        preprocessor_id, compiler_info):
+        compiler_info):
 
         self.task = task
         self.client_conn = client_conn
         self.preprocess_socket = preprocess_socket
-        self.preprocessor_id = preprocessor_id
         self.compiler = compiler
         self.compiler_info = compiler_info
         self.executable = executable
@@ -50,7 +49,7 @@ class CompileSession:
         self.task.compiler_info = self.compiler_info[self.executable]
         self.task.server_task_info['compiler_info'] = self.task.compiler_info
         self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
-        self.preprocess_socket.send_multipart([self.preprocessor_id, b'PREPROCESS_TASK',
+        self.preprocess_socket.send_multipart([b'PREPROCESS_TASK',
             pickle.dumps(self.task.preprocess_task_info)],
             copy=False)
         self.preprocessing_time = SimpleTimer()
@@ -77,13 +76,12 @@ class CompileSession:
         self.node_info = node_info
         server_id = self.server_conn.getsockopt(zmq.IDENTITY)
         assert server_id
-        self.preprocess_socket.send_multipart([self.preprocessor_id, b'SEND_TO_SERVER',
+        self.preprocess_socket.send_multipart([b'SEND_TO_SERVER',
             server_id, pickle.dumps(self.node_info.index())], copy=False)
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.node_info.add_tasks_sent()
         self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_SERVER_OK
-        del self.preprocessor_id
 
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_SERVER_OK:

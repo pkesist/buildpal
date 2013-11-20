@@ -4,9 +4,11 @@ import threading
 
 data = threading.local()
 
+cache = preprocessing.Cache()
+
 def get_preprocessor():
     if not hasattr(data, 'pp'):
-        data.pp = preprocessing.Preprocessor(True)
+        data.pp = preprocessing.Preprocessor(cache)
     return data.pp
 
 def collect_headers(dir, filename, includes, sysincludes, defines, ignored_headers=[]):
@@ -29,4 +31,4 @@ def collect_headers(dir, filename, includes, sysincludes, defines, ignored_heade
     return preprocessor.scan_headers(ppc, dir, filename)
 
 def cache_info():
-    return get_preprocessor().cache_info()
+    return cache.get_stats()

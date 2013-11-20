@@ -107,13 +107,12 @@ struct HeaderRef
 class Preprocessor
 {
 public:
-    explicit Preprocessor( bool useCache );
+    explicit Preprocessor( Cache * cache );
 
     typedef HeaderRef HeaderRef;
     typedef std::set<HeaderRef> HeaderRefs;
     HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
     clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
-    Cache const * cache() const { return cache_.get(); }
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
@@ -131,7 +130,7 @@ private:
 
 private:
     clang::CompilerInstance compiler_;
-    llvm::OwningPtr<Cache> cache_;
+    Cache * cache_;
     std::unordered_map<clang::FileEntry const *, llvm::OwningPtr<llvm::MemoryBuffer> > contentCache_;
 };
 

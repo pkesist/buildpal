@@ -108,15 +108,16 @@ class TaskProcessor:
                 self.timer = timer
 
             def match(self, client_tuple, server_tuple):
-                session, pp_socket, timer = client_tuple
+                session, timer = client_tuple
                 server_conn, node_index = server_tuple
                 self.timer.add_time('waiting.server', timer.get())
                 sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
-                sessions.unregister(Sessions.FROM_PREPR, pp_socket)
                 session.preprocessing_done(server_conn, self.node_info[node_index])
                 self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
 
         csrv = ClientServerRendezvous(self.timer, sessions, node_info)
+
+        pp_sockets = []
 
         scheduler = sched.scheduler()
 
@@ -141,7 +142,11 @@ class TaskProcessor:
                         self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
                         hits, misses = pickle.loads(msg[2])
                         self.cache_info['xxx'] = hits, misses
-                        csrv.client_ready((session, socket, SimpleTimer()))
+                        sessions.unregister(Sessions.FROM_PREPR, socket)
+                        unregister_socket(socket)
+                        assert socket not in pp_sockets
+                        pp_sockets.append(socket)
+                        csrv.client_ready((session, SimpleTimer()))
                         server_result = node_manager.get_server_conn()
                         if server_result:
                             csrv.server_ready(server_result)
@@ -168,8 +173,12 @@ class TaskProcessor:
                                 compiler = MSVCWrapper()
                                 for task in create_tasks(client_conn, compiler,
                                     executable, cwd, sysincludes, command):
-                                    preprocess_socket = zmq_ctx.socket(zmq.DEALER)
-                                    preprocess_socket.connect('inproc://preprocessor')
+                                    if pp_sockets:
+                                        preprocess_socket = pp_sockets[0]
+                                        del pp_sockets[0]
+                                    else:
+                                        preprocess_socket = zmq_ctx.socket(zmq.DEALER)
+                                        preprocess_socket.connect('inproc://preprocessor')
                                     session = CompileSession(compiler, executable, task,
                                         client_conn, preprocess_socket, compiler_info)
                                     sessions.register(Sessions.FROM_CLIENT,

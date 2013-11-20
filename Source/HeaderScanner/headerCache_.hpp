@@ -25,6 +25,8 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
 
+#include <atomic>
+#include <mutex>
 #include <list>
 #include <set>
 #include <string>
@@ -138,16 +140,15 @@ private:
         unsigned includeDepth
 
     ) :
+        refCount_( 0 ),
         uid_( uid ),
+        usedMacros_( usedMacros ),
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
-        refCount_( 0 ),
         hitCount_( 0 ),
         includeDepth_( 0 )
     {
-        std::copy( usedMacros.begin(), usedMacros.end(),
-            std::inserter( usedMacros_, usedMacros_.begin() ) );
     }
 
 public:
@@ -174,8 +175,7 @@ public:
     }
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
-    void releaseFileEntry( clang::SourceManager & );
-    void generateContent();
+    void generateContent( std::recursive_mutex & );
 
     unsigned             includeDepth  () const { return includeDepth_; }
     Macros        const & usedMacros   () const { return usedMacros_; }
@@ -191,21 +191,27 @@ private:
     friend void intrusive_ptr_add_ref( CacheEntry * );
     friend void intrusive_ptr_release( CacheEntry * );
 
-    void addRef() { ++refCount_; }
+    void addRef()
+    {
+        refCount_.fetch_add( 1, std::memory_order_relaxed );
+    }
+
     void decRef()
     {
-        refCount_--;
-        if ( refCount_ == 0 )
+        if ( refCount_.fetch_sub( 1, std::memory_order_release ) == 1 )
+        {
+            std::atomic_thread_fence( std::memory_order_acquire );
             delete this;
+        }
     }
 
 private:
+    mutable std::atomic<size_t> refCount_;
     unsigned uid_;
     std::string fileName_;
     Macros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
-    std::size_t refCount_;
     std::size_t hitCount_;
     unsigned includeDepth_;
     std::string buffer_;
@@ -218,28 +224,40 @@ inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
 class Cache
 {
 public:
-    Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
+    Cache() : counter_( 0 ), fileIdCounter_( 0 ), hits_( 0 ), misses_( 0 ) {}
 
     CacheEntryPtr addEntry
     (
-        clang::FileEntry const * file,
+        llvm::StringRef fileName,
         Macros const & macros,
         HeaderContent const & headerContent,
         Headers const & headers,
         unsigned includeDepth
     )
     {
-        CacheEntryPtr result = CacheEntry::create( file->getUID(), uniqueFileName(),
+        unsigned const uid( getFileId( fileName ) );
+        CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
             macros, headerContent, headers, includeDepth );
+        std::unique_lock<std::mutex> const lock( cacheMutex_ );
         cacheContainer_.insert( result );
         return result;
     }
 
     CacheEntryPtr findEntry
     (
-        unsigned uid,
+        llvm::StringRef fileName,
         MacroState const & macroState
     );
+
+    unsigned getFileId( llvm::StringRef name )
+    {
+        std::unique_lock<std::mutex> const fileIdsLock( fileIdsMutex_ );
+        FileIds::const_iterator const iter( fileIds_.find( name ) );
+        if ( iter != fileIds_.end() )
+            return iter->second;
+        fileIds_[ name ] = ++fileIdCounter_;
+        return fileIdCounter_;
+    }
 
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
@@ -275,19 +293,26 @@ private:
                 boost::multi_index::tag<ByUidAndHitCount>,
                 boost::multi_index::composite_key<
                     CacheEntryPtr,
-                    GetUid,
-                    GetHitCount
+                    GetUid
+                    //GetHitCount
                 >,
                 boost::multi_index::composite_key_compare<
-                    std::less<unsigned>,
-                    std::greater<std::size_t>
+                    std::less<unsigned>
+                    //std::greater<std::size_t>
                 >
             >
         >
     > CacheContainer;
 
+    typedef std::unordered_map<std::string, unsigned> FileIds;
+
 private:
     CacheContainer cacheContainer_;
+    std::mutex cacheMutex_;
+    FileIds fileIds_;
+    std::mutex fileIdsMutex_;
+    unsigned fileIdCounter_;
+    std::recursive_mutex generateContentMutex_;
     std::size_t counter_;
     std::size_t hits_;
     std::size_t misses_;

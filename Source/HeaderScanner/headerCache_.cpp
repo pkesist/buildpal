@@ -12,15 +12,19 @@
 
 clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
 {
-    clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
+    clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
 
     if ( !sourceManager.isFileOverridden( result ) )
         sourceManager.overrideFileContents( result, memoryBuffer_.get(), true );
     return result;
 }
 
-void CacheEntry::generateContent()
+void CacheEntry::generateContent( std::recursive_mutex & generateContentMutex )
 {
+    // Strictly speaking, this should be tested with lock held.
+    // However, that is expensive, and in the worst case we
+    // will get a false negative and generate content
+    // redundantly.
     if ( memoryBuffer_ )
         return;
 
@@ -28,8 +32,8 @@ void CacheEntry::generateContent()
     {
         typedef void result_type;
 
-        GenerateContent( llvm::raw_string_ostream & ostream )
-            : ostream_( ostream ) {}
+        GenerateContent( llvm::raw_string_ostream & ostream, std::recursive_mutex & generateContentMutex )
+            : ostream_( ostream ), generateContentMutex_( generateContentMutex ) {}
 
         void operator()( MacroWithUsage const & mwu )
         {
@@ -47,19 +51,23 @@ void CacheEntry::generateContent()
         void operator()( CacheEntryPtr const & ce )
         {
             if ( !ce->memoryBuffer_ )
-                ce->generateContent();
+                ce->generateContent( generateContentMutex_ );
             ostream_ << ce->buffer_;
         }
 
         llvm::raw_string_ostream & ostream_;
+        std::recursive_mutex & generateContentMutex_;
     };
     
-    llvm::raw_string_ostream defineStream( buffer_ );
-    GenerateContent contentGenerator( defineStream );
+    std::string tmpBuf;
+    llvm::raw_string_ostream defineStream( tmpBuf );
+    GenerateContent contentGenerator( defineStream, generateContentMutex );
     std::for_each( headerContent().begin(), headerContent().end(),
         [&]( HeaderEntry const & he ) { boost::apply_visitor( contentGenerator, he ); } );
     defineStream << '\0';
     defineStream.flush();
+    std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
+    buffer_.swap( tmpBuf );
     memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
 }
 
@@ -73,25 +81,19 @@ std::string Cache::uniqueFileName()
     return result;
 }
 
-void CacheEntry::releaseFileEntry( clang::SourceManager & sourceManager )
+CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & macroState )
 {
-    clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, fileName_.size(), 0 ) );
-    assert( result );
-    sourceManager.disableFileContentsOverride( result );
-}
-
-CacheEntryPtr Cache::findEntry( unsigned uid, MacroState const & macroState )
-{
-    std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
-        cacheContainer_.equal_range( uid );
-    for
-    (
-        CacheContainer::iterator iter = iterRange.first;
-        iter != iterRange.second;
-        ++iter
-    )
+    unsigned const uid( getFileId( fileName ) );
+    std::vector<CacheEntryPtr> entriesForUid;
     {
-        CacheEntryPtr const pEntry = *iter;
+        std::unique_lock<std::mutex> const lock( cacheMutex_ );
+        std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
+            cacheContainer_.equal_range( uid );
+        std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
+    }
+
+    for ( CacheEntryPtr pEntry : entriesForUid )
+    {
         if
         (
             std::find_if_not
@@ -111,8 +113,8 @@ CacheEntryPtr Cache::findEntry( unsigned uid, MacroState const & macroState )
         )
         {
             ++hits_;
-            cacheContainer_.modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
-            pEntry->generateContent();
+            pEntry->generateContent( generateContentMutex_ );
+            //cacheContainer_.modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
             return pEntry;
         }
     }

@@ -140,6 +140,99 @@ PyTypeObject PyPreprocessingContextType = {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+// -------
+// PyCache
+// -------
+//
+////////////////////////////////////////////////////////////////////////////////
+
+typedef struct {
+    PyObject_HEAD
+    Cache * cache;
+} PyCache;
+
+void PyCache_dealloc( PyCache * self )
+{
+    delete self->cache;
+    Py_TYPE(self)->tp_free( (PyObject *)self );
+}
+
+PyObject * PyCache_new( PyTypeObject * type, PyObject * args, PyObject * kwds )
+{
+    PyCache * self;
+    self = (PyCache *)type->tp_alloc( type, 0 );
+    return (PyObject *)self;
+}
+
+int PyCache_init( PyCache * self, PyObject * args, PyObject * kwds )
+{
+    delete self->cache;
+    self->cache = new Cache();
+    return 0;
+}
+
+
+PyObject * PyCache_getStats( PyCache * self, PyObject * args, PyObject * kwds )
+{
+    assert( self->cache );
+    PyObject * result = PyTuple_New( 2 );
+    PyTuple_SET_ITEM( result, 0, PyLong_FromSize_t( self->cache->hits() ) );
+    PyTuple_SET_ITEM( result, 1, PyLong_FromSize_t( self->cache->misses() ) );
+    return result;
+}
+
+
+PyMethodDef PyCache_methods[] =
+{
+    {"get_stats", (PyCFunction)PyCache_getStats, METH_VARARGS | METH_KEYWORDS, "Get cache statistics."},
+    {NULL}
+};
+
+
+PyTypeObject PyCacheType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "Preprocessor",             /* tp_name */
+    sizeof(PyCache),            /* tp_basicsize */
+    0,                          /* tp_itemsize */
+    (destructor)PyCache_dealloc,/* tp_dealloc */
+    0,                          /* tp_print */
+    0,                          /* tp_getattr */
+    0,                          /* tp_setattr */
+    0,                          /* tp_reserved */
+    0,                          /* tp_repr */
+    0,                          /* tp_as_number */
+    0,                          /* tp_as_sequence */
+    0,                          /* tp_as_mapping */
+    0,                          /* tp_hash  */
+    0,                          /* tp_call */
+    0,                          /* tp_str */
+    0,                          /* tp_getattro */
+    0,                          /* tp_setattro */
+    0,                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,         /* tp_flags */
+    "Cache object",             /* tp_doc */
+    0,                          /* tp_traverse */
+    0,                          /* tp_clear */
+    0,                          /* tp_richcompare */
+    0,                          /* tp_weaklistoffset */
+    0,                          /* tp_iter */
+    0,                          /* tp_iternext */
+    PyCache_methods,            /* tp_methods */
+    0,                          /* tp_members */
+    0,                          /* tp_getset */
+    0,                          /* tp_base */
+    0,                          /* tp_dict */
+    0,                          /* tp_descr_get */
+    0,                          /* tp_descr_set */
+    0,                          /* tp_dictoffset */
+    (initproc)PyCache_init,     /* tp_init */
+    0,                          /* tp_alloc */
+    PyCache_new,                /* tp_new */
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//
 // --------------
 // PyPreprocessor
 // --------------
@@ -149,10 +242,12 @@ PyTypeObject PyPreprocessingContextType = {
 typedef struct {
     PyObject_HEAD
     Preprocessor * pp;
+    PyObject * cache;
 } PyPreprocessor;
 
 void PyPreprocessor_dealloc( PyPreprocessor * self )
 {
+    Py_XDECREF( self->cache );
     delete self->pp;
     Py_TYPE(self)->tp_free( (PyObject *)self );
 }
@@ -166,30 +261,36 @@ PyObject * PyPreprocessor_new( PyTypeObject * type, PyObject * args, PyObject * 
 
 int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "use_cache", NULL };
-    PyObject * pUseCache = 0;
+    static char * kwlist[] = { "cache", NULL };
+    PyObject * pCache = 0;
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "|O:bool", kwlist, &pUseCache ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O", kwlist, &pCache ) )
     {
-        PyErr_SetString( PyExc_Exception, "Invalid boolean parameter." );
+        PyErr_SetString( PyExc_Exception, "Invalid cache parameter." );
         return -1;
     }
 
-    bool const useCache = !pUseCache || PyObject_IsTrue( pUseCache );
-    self->pp = new Preprocessor( useCache );
+    if ( !pCache || ( pCache == Py_None ) )
+    {
+        self->pp = new Preprocessor( 0 );
+        return 0;
+    }
+
+    if ( (PyTypeObject *)PyObject_Type( pCache ) != &PyCacheType )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid cache parameter." );
+        return -1;
+    }
+
+    PyCache const * pyCache( reinterpret_cast<PyCache *>( pCache ) );
+    assert( pyCache->cache );
+
+    self->cache = pCache;
+    Py_XINCREF( self->cache );
+    self->pp = new Preprocessor( pyCache->cache );
     return 0;
 }
 
-PyObject * PyPreprocessor_cache_info( PyPreprocessor * self )
-{
-    assert( self->pp );
-    Cache const * cache( self->pp->cache() );
-    PyObject * tuple = PyTuple_New( 2 );
-    PyTuple_SET_ITEM( tuple, 0, PyLong_FromSize_t( cache ? cache->hits() : 0 ) );
-    PyTuple_SET_ITEM( tuple, 1, PyLong_FromSize_t( cache ? cache->misses() : 0 ) );
-    return tuple;
-}
-    
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "pp_ctx", "dir", "filename", NULL };
@@ -285,7 +386,6 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
 PyMethodDef PyPreprocessor_methods[] =
 {
     {"scan_headers", (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
-    {"cache_info"  , (PyCFunction)PyPreprocessor_cache_info      , METH_NOARGS                 , "Get cache statistics."},
     {"set_ms_ext"  , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
     {"set_ms_mode" , (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}
@@ -347,6 +447,8 @@ PyMODINIT_FUNC PyInit_preprocessing(void)
 
     if ( PyType_Ready( &PyPreprocessingContextType ) < 0 )
         return NULL;
+    if ( PyType_Ready( &PyCacheType ) < 0 )
+        return NULL;
     if ( PyType_Ready( &PyPreprocessorType ) < 0 )
         return NULL;
     m = PyModule_Create( &preprocessingModule );
@@ -355,6 +457,8 @@ PyMODINIT_FUNC PyInit_preprocessing(void)
 
     Py_INCREF( &PyPreprocessingContextType );
     PyModule_AddObject( m, "PreprocessingContext", (PyObject *)&PyPreprocessingContextType );
+    Py_INCREF( &PyCacheType );
+    PyModule_AddObject( m, "Cache", (PyObject *)&PyCacheType );
     Py_INCREF( &PyPreprocessorType );
     PyModule_AddObject( m, "Preprocessor", (PyObject *)&PyPreprocessorType );
     return m;

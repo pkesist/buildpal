@@ -56,7 +56,7 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     (
         !cacheDisabled() &&
         headerSearch_->ShouldEnterIncludeFile( entry, false ) &&
-        ( cacheHit_ = cache().findEntry( entry->getUID(), macroState() ) )
+        ( cacheHit_ = cache().findEntry( entry->getName(), macroState() ) )
     )
     {
         // There is a hit in cache!
@@ -192,7 +192,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 
 CacheEntryPtr HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
-    return cache.addEntry( file, usedMacros(), headerContent(), includedHeaders(), includeDepth() );
+    return cache.addEntry( file->getName(), usedMacros(), headerContent(), includedHeaders(), includeDepth() );
 }
 
 Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()

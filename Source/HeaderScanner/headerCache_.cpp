@@ -114,7 +114,9 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & mac
         {
             ++hits_;
             pEntry->generateContent( generateContentMutex_ );
-            //cacheContainer_.modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
+            std::unique_lock<std::mutex> const lock( cacheMutex_ );
+            CacheContainer::index<ById>::type::iterator const iter = cacheContainer_.get<ById>().find( &*pEntry );
+            cacheContainer_.get<ById>().modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
             return pEntry;
         }
     }

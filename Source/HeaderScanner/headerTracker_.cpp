@@ -174,7 +174,7 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
     // their contents is a part of the PCH file.
     bool const ignoreHeaders
     (
-        ignoredHeaders.find( std::get<0>( headerCtxStack().back().header() ) ) != ignoredHeaders.end()
+        ignoredHeaders.find( std::get<1>( headerCtxStack().back().header() ) ) != ignoredHeaders.end()
     );
 
     HeaderCtx & parent( headerCtxStack()[ stackSize - 2 ] );

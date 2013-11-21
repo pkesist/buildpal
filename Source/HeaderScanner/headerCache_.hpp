@@ -266,7 +266,16 @@ private:
     std::string uniqueFileName();
 
 private:
-    struct GetUid
+    struct GetId
+    {
+        typedef CacheEntry * result_type;
+        result_type operator()( CacheEntryPtr const & c ) const
+        {
+            return &*c;
+        }
+    };
+
+    struct GetFileId
     {
         typedef unsigned result_type;
         result_type operator()( CacheEntryPtr const & c ) const
@@ -284,22 +293,27 @@ private:
         }
     };
 
-    struct ByUidAndHitCount {};
+    struct ById {};
+    struct ByFileIdAndHitCount {};
 
     typedef boost::multi_index_container<
         CacheEntryPtr,
         boost::multi_index::indexed_by<
             boost::multi_index::ordered_non_unique<
-                boost::multi_index::tag<ByUidAndHitCount>,
+                boost::multi_index::tag<ByFileIdAndHitCount>,
                 boost::multi_index::composite_key<
                     CacheEntryPtr,
-                    GetUid
-                    //GetHitCount
+                    GetFileId,
+                    GetHitCount
                 >,
                 boost::multi_index::composite_key_compare<
-                    std::less<unsigned>
-                    //std::greater<std::size_t>
+                    std::less<unsigned>,
+                    std::greater<std::size_t>
                 >
+            >,
+            boost::multi_index::hashed_unique<
+                boost::multi_index::tag<ById>,
+                GetId
             >
         >
     > CacheContainer;

@@ -36,7 +36,7 @@ namespace clang
 struct HeaderCtx
 {
 public:
-    explicit HeaderCtx( HeaderFile const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
+    explicit HeaderCtx( Header const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
         :
         header_( header ),
         cacheHit_( cacheHit ),
@@ -114,10 +114,10 @@ public:
         return headerContent;
     }
 
-    void addHeader( HeaderFile const & header )
+    void addHeader( Header const & header )
     {
         assert( !fromCache() );
-        includedHeaders_.push_back( header );
+        includedHeaders_.insert( header );
     }
 
     void dumpMacroState( std::ostream & ostream, std::string const & title ) const
@@ -179,19 +179,16 @@ public:
         // their contents is a part of the compiled PCH.
         if ( ignoredHeaders.find( std::get<1>( parent_->header() ) ) == ignoredHeaders.end() )
         {
-            if ( childCacheEntry )
-            {
-                parent_->includedHeaders_.push_back( childCacheEntry );
-            }
-            else
-            {
-                std::copy( includedHeaders().begin(), includedHeaders().end(), std::back_inserter( parent_->includedHeaders_ ) );
-            }
+            std::copy(
+                includedHeaders().begin(),
+                includedHeaders().end(),
+                std::inserter( parent_->includedHeaders_, parent_->includedHeaders_.begin() )
+            );
         }
     }
 
     Headers const & includedHeaders() const { return includedHeaders_; }
-    HeaderFile const & header() const { return header_; }
+    Header const & header() const { return header_; }
 
     CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
 
@@ -206,7 +203,7 @@ private:
     MacroState macroState_;
     clang::Preprocessor const & preprocessor_;
     HeaderCtx * parent_;
-    HeaderFile header_;
+    Header header_;
     CacheEntryPtr cacheHit_;
     MacroNames usedHere_;
     MacroNames definedHere_;
@@ -261,7 +258,6 @@ private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     std::vector<std::string> buffers_;
     clang::Preprocessor & preprocessor_;
-    std::recursive_mutex generateContentMutex_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
     CacheEntryPtr cacheHit_;

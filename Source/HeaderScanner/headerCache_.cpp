@@ -11,22 +11,38 @@
 #include <iostream>
 //------------------------------------------------------------------------------
 
-clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager, std::recursive_mutex & generateContentMutex )
+clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
     if ( !sourceManager.isFileOverridden( result ) )
-        sourceManager.overrideFileContents( result, cachedContent( generateContentMutex ), true );
+        sourceManager.overrideFileContents( result, cachedContent(), true );
     return result;
 }
 
-llvm::MemoryBuffer const * CacheEntry::cachedContent( std::recursive_mutex & generateContentMutex )
+struct SpinLock
+{
+    std::atomic<bool> & mutex_;
+    SpinLock( std::atomic<bool> & mutex ) : mutex_( mutex )
+    {
+        while ( mutex_.exchange( true, std::memory_order_acquire ) );
+    }
+
+    ~SpinLock()
+    {
+        mutex_.store( false, std::memory_order_release );
+    }
+};
+
+llvm::MemoryBuffer const * CacheEntry::cachedContent()
 {
     if ( !memoryBuffer_ )
     {
         std::string tmp;
         generateContent( tmp );
 
-        std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
+        SpinLock spinLock( contentLock_ );
+        if ( memoryBuffer_ )
+            return memoryBuffer_.get();
         buffer_.swap( tmp );
         memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
     }

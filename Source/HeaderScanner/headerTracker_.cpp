@@ -59,7 +59,7 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     )
     {
         // There is a hit in cache!
-        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager(), generateContentMutex_ );
+        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
     }
     else
     {
@@ -97,7 +97,7 @@ void HeaderTracker::headerSkipped()
             headerCtxStack().back().macroUsed( macroName );
         }
         headerCtxStack().back().addHeader
-        ( HeaderFile( std::make_tuple(
+        ( Header( std::make_tuple(
             fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
             fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
             file, headerLocation ) ) );
@@ -131,7 +131,7 @@ void HeaderTracker::enterHeader()
     HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
     PathPart const & dirPart( std::get<2>( currentEntry ) );
     PathPart const & relPart( std::get<3>( currentEntry ) );
-    HeaderFile header( std::make_tuple(
+    Header header( std::make_tuple(
         fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
         fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
         file, headerLocation ) );
@@ -163,16 +163,11 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
     // Propagate the results to the file which included us.
-    HeaderCtx & parent( headerCtxStack()[ stackSize - 2 ] );
     CacheEntryPtr cacheEntry;
     if ( !cacheDisabled() && !headerCtxStack().back().fromCache() && isViableForCache( headerCtxStack().back(), file ) )
-    {
         cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
-    }
     else
-    {
         cacheEntry = headerCtxStack().back().cacheHit();
-    }
     headerCtxStack().back().propagateToParent( ignoredHeaders, cacheEntry );
 }
 
@@ -192,40 +187,25 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
     } const cleanup( headerCtxStack() );
 
     Preprocessor::HeaderRefs result;
-    struct Inserter
-    {
-        typedef void result_type;
-        Inserter( Preprocessor::HeaderRefs & result, clang::SourceManager & sourceManager )
-            : result_( result ), sourceManager_( sourceManager ) {}
-
-        void operator()( HeaderFile const & h )
+    std::for_each(
+        headerCtxStack().back().includedHeaders().begin(),
+        headerCtxStack().back().includedHeaders().end(),
+        [&]( Header const & h )
         {
             std::string error;
             bool invalid;
             clang::FileEntry const * headerFile( std::get<2>( h ) );
             assert( headerFile );
-            llvm::MemoryBuffer const * buffer = sourceManager_.getMemoryBufferForFile( headerFile, &invalid );
+            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( headerFile, &invalid );
             assert( buffer );
-            result_.insert(
+            result.insert(
                 HeaderRef(
                     std::get<0>( h ).get(),
                     std::get<1>( h ).get(),
                     std::get<3>( h ),
                     buffer->getBufferStart(),
                     buffer->getBufferSize() ) );
-        }
-        void operator()( CacheEntryPtr const & ce )
-        {
-            std::for_each( ce->headers().begin(), ce->headers().end(),
-                [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
-        }
-        Preprocessor::HeaderRefs & result_;
-        clang::SourceManager & sourceManager_;
-    } inserter( result, preprocessor_.getSourceManager() );
-    std::for_each(
-        headerCtxStack().back().includedHeaders().begin(),
-        headerCtxStack().back().includedHeaders().end(),
-        [&]( Header const & h ) { boost::apply_visitor( inserter, h ); } );
+        } );
     return result;
 }
 

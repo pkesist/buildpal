@@ -7,7 +7,6 @@
 #include "headerScanner_.hpp"
 
 #include <boost/intrusive_ptr.hpp>
-#include <boost/variant.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/flyweight/flyweight.hpp>
@@ -53,8 +52,6 @@ DEFINE_FLYWEIGHT(std::string, HeaderName);
 DEFINE_FLYWEIGHT(std::string, MacroName);
 DEFINE_FLYWEIGHT(std::string, MacroValue);
 
-typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> HeaderFile;
-
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
 
@@ -92,8 +89,8 @@ inline bool isUndefinedMacroValue( llvm::StringRef value )
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
-typedef boost::variant<HeaderFile, CacheEntryPtr> Header;
-typedef std::vector<Header> Headers;
+typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> Header;
+typedef std::set<Header> Headers;
 typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
@@ -162,8 +159,8 @@ public:
         return CacheEntryPtr( result );
     }
 
-    clang::FileEntry const * getFileEntry( clang::SourceManager &, std::recursive_mutex & );
-    llvm::MemoryBuffer const * cachedContent( std::recursive_mutex & );
+    clang::FileEntry const * getFileEntry( clang::SourceManager & );
+    llvm::MemoryBuffer const * cachedContent();
 
     Macros        const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
@@ -202,6 +199,7 @@ private:
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t hitCount_;
+    std::atomic<bool> contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
@@ -251,26 +249,6 @@ public:
 
     void dumpEntry( CacheEntryPtr entry, std::ostream & ostream )
     {
-        struct DumpHeaders
-        {
-            typedef void result_type;
-
-            explicit DumpHeaders( std::ostream & ostream ) : ostream_( ostream ) {}
-
-            std::ostream & ostream_;
-
-            void operator()( HeaderFile const & header ) const
-            {
-                ostream_ << "    " << std::get<0>( header ).get() << ' ' << std::get<1>( header ).get() << '\n';
-            }
-
-            void operator()( CacheEntryPtr ce ) const
-            {
-                std::for_each( ce->headers().begin(), ce->headers().end(),
-                    [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
-            }
-        } const dumpHeaders( ostream );
-
         ostream << "    ----\n";
         ostream << "    Key:\n";
         ostream << "    ----\n";
@@ -281,7 +259,10 @@ public:
         ostream << "    --------\n";
         ostream << "    Headers:\n";
         ostream << "    --------\n";
-        dumpHeaders( entry );
+        for ( Header const & header : entry->headers() )
+        {
+            ostream << "    " << std::get<0>( header ).get() << ' ' << std::get<1>( header ).get() << '\n';
+        }
         ostream << "    --------\n";
         ostream << "    Content:\n";
         ostream << "    --------\n";

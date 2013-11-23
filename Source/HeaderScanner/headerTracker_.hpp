@@ -56,11 +56,13 @@ public:
 
     void macroDefined( llvm::StringRef macroName, llvm::StringRef macroValue )
     {
+        assert( !fromCache() );
         macroState_.defineMacro( macroName, macroValue );
     }
 
     void macroUndefined( llvm::StringRef macroName )
     {
+        assert( !fromCache() );
         if ( macroState_.find( macroName ) != macroState_.end() )
             macroState_.undefineMacro( macroName );
         else
@@ -139,27 +141,39 @@ public:
         {
             for ( Macro const & usedMacro : cacheHit_->usedMacros() )
                 parent_->macroUsed( usedMacro.first.get() );
+
+            for ( HeaderEntry const & headerEntry : cacheHit_->headerContent() )
+            {
+                if ( headerEntry.first == MacroUsage::defined )
+                    parent_->macroDefined( macroName( headerEntry.second ),
+                        macroValue( headerEntry.second ) );
+                else
+                {
+                    assert( headerEntry.first == MacroUsage::undefined );
+                    parent_->macroUndefined( macroName( headerEntry.second ) );
+                }
+            }
         }
         else
         {
             for ( llvm::StringRef usedMacro : usedHere_ )
                 parent_->macroUsed( usedMacro );
+
+            // If child header undefined a macro.
+            for ( llvm::StringRef undefinedMacro : undefinedHere_ )
+            {
+                // And did not re-define it.
+                if ( macroState_.find( undefinedMacro ) == macroState_.end() )
+                    // Undefine it in parent state.
+                    parent_->macroUndefined( undefinedMacro );
+            }
+
+            // Add all macro definitions from child (including redefinitions)
+            // to parent header macro state.
+            for ( MacroState::value_type const & entry : macroState_ )
+                parent_->macroDefined( entry.getKey(), entry.getValue() );
         }
-
-        // If child header undefined a macro.
-        for ( llvm::StringRef undefinedMacro : undefinedHere_ )
-        {
-            // And did not re-define it.
-            if ( macroState_.find( undefinedMacro ) == macroState_.end() )
-                // Undefine it in parent state.
-                parent_->macroUndefined( undefinedMacro );
-        }
-
-        // Add all macro definitions from child (including redefinitions)
-        // to parent header macro state.
-        for ( MacroState::value_type const & entry : macroState_ )
-            parent_->macroDefined( entry.getKey(), entry.getValue() );
-
+        
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.

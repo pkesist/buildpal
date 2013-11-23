@@ -26,14 +26,9 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent( std::recursive_mutex & gen
         std::string tmp;
         generateContent( tmp );
 
-        {
-            std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
-            buffer_.swap( tmp );
-            memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
-            // We no longer need header content.
-            //HeaderContent dummy( 0 );
-            //headerContent().swap( dummy );
-        }
+        std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
+        buffer_.swap( tmp );
+        memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
     }
     return memoryBuffer_.get();
 }

@@ -240,7 +240,7 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
 {
     if ( def->getMacroInfo()->isBuiltinMacro() )
         return;
-    if ( headerCtxStack().empty() || cacheDisabled() )
+    if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     llvm::StringRef const macroValue( macroValueFromDirective( preprocessor_, name, def ) );
     headerCtxStack().back().macroDefined( name, macroValue );
@@ -248,7 +248,7 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
 
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    if ( headerCtxStack().empty() || cacheDisabled() )
+    if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroUndefined( name );
 }

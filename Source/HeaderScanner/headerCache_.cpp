@@ -1,5 +1,6 @@
 //------------------------------------------------------------------------------
 #include "headerCache_.hpp"
+#include "headerTracker_.hpp"
 
 #include "utility_.hpp"
 
@@ -10,65 +11,54 @@
 #include <iostream>
 //------------------------------------------------------------------------------
 
-clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
+clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager, std::recursive_mutex & generateContentMutex )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
-
     if ( !sourceManager.isFileOverridden( result ) )
-        sourceManager.overrideFileContents( result, memoryBuffer_.get(), true );
+        sourceManager.overrideFileContents( result, cachedContent( generateContentMutex ), true );
     return result;
 }
 
-void CacheEntry::generateContent( std::recursive_mutex & generateContentMutex )
+llvm::MemoryBuffer const * CacheEntry::cachedContent( std::recursive_mutex & generateContentMutex )
 {
-    // Strictly speaking, this should be tested with lock held.
-    // However, that is expensive, and in the worst case we
-    // will get a false negative and generate content
-    // redundantly.
-    if ( memoryBuffer_ )
-        return;
-
-    struct GenerateContent
+    if ( !memoryBuffer_ )
     {
-        typedef void result_type;
+        std::string tmp;
+        generateContent( tmp );
 
-        GenerateContent( llvm::raw_string_ostream & ostream, std::recursive_mutex & generateContentMutex )
-            : ostream_( ostream ), generateContentMutex_( generateContentMutex ) {}
-
-        void operator()( MacroWithUsage const & mwu )
         {
-            if ( mwu.first == MacroUsage::defined )
+            std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
+            buffer_.swap( tmp );
+            memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
+            // We no longer need header content.
+            //HeaderContent dummy( 0 );
+            //headerContent().swap( dummy );
+        }
+    }
+    return memoryBuffer_.get();
+}
+
+void CacheEntry::generateContent( std::string & buffer )
+{
+    llvm::raw_string_ostream defineStream( buffer );
+    std::for_each(
+        headerContent().begin(),
+        headerContent().end(),
+        [&]( HeaderEntry const & he )
+        {
+            switch ( he.first )
             {
-                ostream_ << "#define " << macroName( mwu.second ) << macroValue( mwu.second ) << '\n';
-            }
-            else
-            {
-                assert( mwu.first == MacroUsage::undefined );
-                ostream_ << "#undef " << macroName( mwu.second ) << '\n';
+            case MacroUsage::defined:
+                defineStream << "#define " << macroName( he.second ) << macroValue( he.second ) << '\n';
+                break;
+            case MacroUsage::undefined:
+                defineStream << "#undef " << macroName( he.second ) << '\n';
+                break;
             }
         }
-
-        void operator()( CacheEntryPtr const & ce )
-        {
-            if ( !ce->memoryBuffer_ )
-                ce->generateContent( generateContentMutex_ );
-            ostream_ << ce->buffer_;
-        }
-
-        llvm::raw_string_ostream & ostream_;
-        std::recursive_mutex & generateContentMutex_;
-    };
-    
-    std::string tmpBuf;
-    llvm::raw_string_ostream defineStream( tmpBuf );
-    GenerateContent contentGenerator( defineStream, generateContentMutex );
-    std::for_each( headerContent().begin(), headerContent().end(),
-        [&]( HeaderEntry const & he ) { boost::apply_visitor( contentGenerator, he ); } );
+    );
     defineStream << '\0';
     defineStream.flush();
-    std::unique_lock<std::recursive_mutex> const generateContentLock( generateContentMutex );
-    buffer_.swap( tmpBuf );
-    memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
 }
 
 std::string Cache::uniqueFileName()
@@ -81,7 +71,7 @@ std::string Cache::uniqueFileName()
     return result;
 }
 
-CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & macroState )
+CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & headerCtx )
 {
     unsigned const uid( getFileId( fileName ) );
     std::vector<CacheEntryPtr> entriesForUid;
@@ -92,6 +82,18 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & mac
         std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
     }
 
+    struct MacroMatchesState
+    {
+        explicit MacroMatchesState( HeaderCtx const & headerCtx ) : headerCtx_( headerCtx ) {}
+
+        bool operator()( Macro const & macro ) const
+        {
+            return headerCtx_.getMacroValue( macroName( macro ) ) == macroValue( macro );
+        }
+
+        HeaderCtx const & headerCtx_;
+    };
+
     for ( CacheEntryPtr pEntry : entriesForUid )
     {
         if
@@ -100,20 +102,11 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, MacroState const & mac
             (
                 pEntry->usedMacros().begin(),
                 pEntry->usedMacros().end(),
-                [&]( Macro const & macro )
-                {
-                    MacroState::const_iterator const iter( macroState.find( macroName( macro ) ) );
-                    llvm::StringRef const value( macroValue( macro ) );
-                    return iter == macroState.end()
-                        ? isUndefinedMacroValue( value )
-                        : iter->getValue() == value
-                    ;
-                }
+                MacroMatchesState( headerCtx )
             ) == pEntry->usedMacros().end()
         )
         {
             ++hits_;
-            pEntry->generateContent( generateContentMutex_ );
             std::unique_lock<std::mutex> const lock( cacheMutex_ );
             CacheContainer::index<ById>::type::iterator const iter = cacheContainer_.get<ById>().find( &*pEntry );
             cacheContainer_.get<ById>().modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );

@@ -80,10 +80,8 @@ class NodeManager:
     def recycle(self, node_index, socket):
         recycled = self.sockets_recycled.setdefault(
             node_index, [])
-        old_len = len(self.sockets_recycled[node_index])
         assert socket not in recycled
         recycled.append(socket)
-        assert len(self.sockets_recycled[node_index]) == old_len + 1
 
     def __register(self, socket, node_index):
         self.sockets_registered[socket] = (node_index, self.STATE_SOCKET_OPEN)
@@ -124,6 +122,5 @@ class NodeManager:
             else:
                 assert accept == "REJECT"
                 del self.sockets_registered[socket]
-                # Add it to the recycled list.
-                self.sockets_recycled[node_index].append(socket)
+                self.recycle(node_index, socket)
                 return None

@@ -14,7 +14,6 @@
 
 void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
-    // Find the actual file being used.
     assert( !fileStack_.empty() );
     IncludeStackEntry currentEntry( fileStack_.back() );
     clang::FileEntry const * currentFile = std::get<0>( currentEntry );
@@ -56,11 +55,11 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     (
         !cacheDisabled() &&
         headerSearch_->ShouldEnterIncludeFile( entry, false ) &&
-        ( cacheHit_ = cache().findEntry( entry->getName(), macroState() ) )
+        ( cacheHit_ = cache().findEntry( entry->getName(), headerCtxStack().back() ) )
     )
     {
         // There is a hit in cache!
-        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
+        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager(), generateContentMutex_ );
     }
     else
     {
@@ -95,7 +94,7 @@ void HeaderTracker::headerSkipped()
             assert( directive );
 
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
-            headerCtxStack().back().macroUsed( macroName, macroState() );
+            headerCtxStack().back().macroUsed( macroName );
         }
         headerCtxStack().back().addHeader
         ( HeaderFile( std::make_tuple(
@@ -118,7 +117,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
         HeaderCtx( std::make_tuple(
             fromDataAndSize<Dir>( dir.data(), dir.size() ),
             fromDataAndSize<HeaderName>( relFilename.data(), relFilename.size() ),
-            mainFileEntry, HeaderLocation::regular ), CacheEntryPtr(), preprocessor_ ) );
+            mainFileEntry, HeaderLocation::regular ), CacheEntryPtr(), preprocessor_, 0 ) );
     PathPart dirPart( dir.data(), dir.data() + dir.size() );
     PathPart relPart( relFilename.data(), relFilename.data() + relFilename.size() );
     fileStack_.push_back( std::make_tuple( mainFileEntry, HeaderLocation::regular, dirPart, relPart ) );
@@ -129,7 +128,6 @@ void HeaderTracker::enterHeader()
     assert( !fileStack_.empty() );
     IncludeStackEntry const & currentEntry( fileStack_.back() );
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
-    assert( file );
     HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
     PathPart const & dirPart( std::get<2>( currentEntry ) );
     PathPart const & relPart( std::get<3>( currentEntry ) );
@@ -137,12 +135,9 @@ void HeaderTracker::enterHeader()
         fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
         fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
         file, headerLocation ) );
-    if ( file )
-    {
-        headerCtxStack().back().addHeader( header );
-        headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_ ) );
-        cacheHit_.reset();
-    }
+    headerCtxStack().back().addHeader( header );
+    headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_, &headerCtxStack().back() ) );
+    cacheHit_.reset();
 }
 
 bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEntry const * file ) const
@@ -150,7 +145,7 @@ bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEn
     return true;
 }
 
-void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ignoredHeaders )
+void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
 {
     assert( headerCtxStack().size() > 1 );
 
@@ -168,31 +163,23 @@ void HeaderTracker::leaveHeader( PreprocessingContext::IgnoredHeaders const & ig
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
     // Propagate the results to the file which included us.
-
-    // Sometimes we do not want to propagate headers upwards. More specifically,
-    // if we are in a PCH source header, headers it includes are not needed as
-    // their contents is a part of the PCH file.
-    bool const ignoreHeaders
-    (
-        ignoredHeaders.find( std::get<1>( headerCtxStack().back().header() ) ) != ignoredHeaders.end()
-    );
-
     HeaderCtx & parent( headerCtxStack()[ stackSize - 2 ] );
+    CacheEntryPtr cacheEntry;
     if ( !cacheDisabled() && !headerCtxStack().back().fromCache() && isViableForCache( headerCtxStack().back(), file ) )
     {
-        CacheEntryPtr cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
-        parent.propagateChildInfo( cacheEntry, ignoreHeaders );
+        cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
     }
     else
     {
-        parent.propagateChildInfo( headerCtxStack().back(), ignoreHeaders );
+        cacheEntry = headerCtxStack().back().cacheHit();
     }
+    headerCtxStack().back().propagateToParent( ignoredHeaders, cacheEntry );
 }
 
 
-CacheEntryPtr HeaderTracker::HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
+CacheEntryPtr HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
 {
-    return cache.addEntry( file->getName(), usedMacros(), headerContent(), includedHeaders(), includeDepth() );
+    return cache.addEntry( file->getName(), createCacheKey(), createHeaderContent(), includedHeaders() );
 }
 
 Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
@@ -246,24 +233,22 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroUsed( name, macroState() );
+    headerCtxStack().back().macroUsed( name );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
     if ( def->getMacroInfo()->isBuiltinMacro() )
         return;
-    llvm::StringRef const macroValue( macroValueFromDirective( preprocessor_, name, def ) );
-    macroState().defineMacro( name, macroValue );
-    if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
+    if ( headerCtxStack().empty() || cacheDisabled() )
         return;
+    llvm::StringRef const macroValue( macroValueFromDirective( preprocessor_, name, def ) );
     headerCtxStack().back().macroDefined( name, macroValue );
 }
 
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
-    macroState().undefineMacro( name );
-    if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
+    if ( headerCtxStack().empty() || cacheDisabled() )
         return;
     headerCtxStack().back().macroUndefined( name );
 }

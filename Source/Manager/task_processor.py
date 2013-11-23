@@ -8,6 +8,7 @@ from .source_scanner import SourceScanner
 from .timer import Timer
 from .task_creator import create_tasks
 from .node_manager import NodeManager
+from .scan_headers import dump_cache
 
 from Common import bind_to_random_port
 
@@ -146,6 +147,11 @@ class TaskProcessor:
                         unregister_socket(socket)
                         assert socket not in pp_sockets
                         pp_sockets.append(socket)
+                        ####
+                        #session.client_conn.send([b'EXIT', b'0'])
+                        #session.preprocess_socket.send_multipart([b'DROP'])
+                        #sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
+                        ####
                         csrv.client_ready((session, SimpleTimer()))
                         server_result = node_manager.get_server_conn()
                         if server_result:
@@ -210,6 +216,7 @@ class TaskProcessor:
                                     csrv.server_ready((server_conn, node_index))
                 scheduler.run(False)
         finally:
+            dump_cache()
             source_scanner.terminate()
 
     def print_stats(self, node_info):

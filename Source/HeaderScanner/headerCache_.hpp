@@ -35,6 +35,8 @@
 #include <unordered_set>
 #include <vector>
 
+struct HeaderCtx;
+
 namespace clang
 {
     class FileEntry;
@@ -88,12 +90,11 @@ inline bool isUndefinedMacroValue( llvm::StringRef value )
 }
 
 struct MacroUsage { enum Enum { defined, undefined }; };
-typedef std::pair<MacroUsage::Enum, Macro> MacroWithUsage;
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 typedef boost::variant<HeaderFile, CacheEntryPtr> Header;
 typedef std::vector<Header> Headers;
-typedef boost::variant<MacroWithUsage, CacheEntryPtr> HeaderEntry;
+typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
 struct MacroState : public llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocator>
@@ -106,16 +107,7 @@ struct MacroState : public llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocat
 
     void defineMacro( llvm::StringRef name, llvm::StringRef value )
     {
-        llvm::StringMapEntry<llvm::StringRef> * const entry(
-            llvm::StringMapEntry<llvm::StringRef>::Create(
-                name.data(), name.data() + name.size(),
-                getAllocator(), value ) );
-        bool const insertSuccess = insert( entry );
-        // It is OK to #define macro to its current value.
-        // If this assertion fires, you most likely messed up the header cache.
-        // UPDATE: Unfortunately, some libraries (e.g. OpenSSL) #define macros to
-        // the sytactically same value, but lexically different.
-        //assert( insertSuccess || macroState()[ name ] == macroDef );
+        operator[]( name ) = value;
     }
 
     void undefineMacro( llvm::StringRef name )
@@ -134,10 +126,9 @@ private:
     (
         unsigned uid,
         std::string const & uniqueVirtualFileName,
-        Macros const & usedMacros,
-        HeaderContent const & headerContent,
-        Headers const & headers,
-        unsigned includeDepth
+        Macros && usedMacros,
+        HeaderContent && headerContent,
+        Headers const & headers
 
     ) :
         refCount_( 0 ),
@@ -146,8 +137,7 @@ private:
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
-        hitCount_( 0 ),
-        includeDepth_( 0 )
+        hitCount_( 0 )
     {
     }
 
@@ -156,28 +146,25 @@ public:
     (
         unsigned uid,
         std::string const & uniqueVirtualFileName,
-        Macros const & usedMacros,
-        HeaderContent const & headerContent,
-        Headers const & headers,
-        unsigned includeDepth
+        Macros && usedMacros,
+        HeaderContent && headerContent,
+        Headers const & headers
     )
     {
         CacheEntry * result = new CacheEntry
         (
             uid,
             uniqueVirtualFileName,
-            usedMacros,
-            headerContent,
-            headers,
-            includeDepth
+            std::move( usedMacros ),
+            std::move( headerContent ),
+            headers
         );
         return CacheEntryPtr( result );
     }
 
-    clang::FileEntry const * getFileEntry( clang::SourceManager & );
-    void generateContent( std::recursive_mutex & );
+    clang::FileEntry const * getFileEntry( clang::SourceManager &, std::recursive_mutex & );
+    llvm::MemoryBuffer const * cachedContent( std::recursive_mutex & );
 
-    unsigned             includeDepth  () const { return includeDepth_; }
     Macros        const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
@@ -188,6 +175,8 @@ public:
     void incHitCount() { ++hitCount_; }
 
 private:
+    void generateContent( std::string & );
+
     friend void intrusive_ptr_add_ref( CacheEntry * );
     friend void intrusive_ptr_release( CacheEntry * );
 
@@ -213,7 +202,6 @@ private:
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t hitCount_;
-    unsigned includeDepth_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
@@ -229,15 +217,14 @@ public:
     CacheEntryPtr addEntry
     (
         llvm::StringRef fileName,
-        Macros const & macros,
-        HeaderContent const & headerContent,
-        Headers const & headers,
-        unsigned includeDepth
+        Macros && macros,
+        HeaderContent && headerContent,
+        Headers const & headers
     )
     {
         unsigned const uid( getFileId( fileName ) );
         CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
-            macros, headerContent, headers, includeDepth );
+            std::move( macros ), std::move( headerContent ), headers );
         std::unique_lock<std::mutex> const lock( cacheMutex_ );
         cacheContainer_.insert( result );
         return result;
@@ -246,7 +233,7 @@ public:
     CacheEntryPtr findEntry
     (
         llvm::StringRef fileName,
-        MacroState const & macroState
+        HeaderCtx const &
     );
 
     unsigned getFileId( llvm::StringRef name )
@@ -261,6 +248,74 @@ public:
 
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
+
+    void dumpEntry( CacheEntryPtr entry, std::ostream & ostream )
+    {
+        struct DumpHeaders
+        {
+            typedef void result_type;
+
+            explicit DumpHeaders( std::ostream & ostream ) : ostream_( ostream ) {}
+
+            std::ostream & ostream_;
+
+            void operator()( HeaderFile const & header ) const
+            {
+                ostream_ << "    " << std::get<0>( header ).get() << ' ' << std::get<1>( header ).get() << '\n';
+            }
+
+            void operator()( CacheEntryPtr ce ) const
+            {
+                std::for_each( ce->headers().begin(), ce->headers().end(),
+                    [this]( Header const & h ) { boost::apply_visitor( *this, h ); } );
+            }
+        } const dumpHeaders( ostream );
+
+        ostream << "    ----\n";
+        ostream << "    Key:\n";
+        ostream << "    ----\n";
+        for ( Macro const & macro : entry->usedMacros() )
+        {
+            ostream << "    " << macroName( macro ).str() << macroValue( macro ).str() << '\n';
+        }
+        ostream << "    --------\n";
+        ostream << "    Headers:\n";
+        ostream << "    --------\n";
+        dumpHeaders( entry );
+        ostream << "    --------\n";
+        ostream << "    Content:\n";
+        ostream << "    --------\n";
+        std::for_each(
+            entry->headerContent().begin(),
+            entry->headerContent().end(),
+            [&]( HeaderEntry const & he )
+            {
+                switch ( he.first )
+                {
+                case MacroUsage::defined:
+                    ostream << "    #define " << macroName( he.second ).str() << macroValue( he.second ).str() << '\n';
+                    break;
+                case MacroUsage::undefined:
+                    ostream << "    #undef " << macroName( he.second ).str() << '\n';
+                    break;
+                }
+            }
+        );
+    }
+
+    void dump( std::ostream & ostream )
+    {
+        for ( FileIds::value_type const & fileId : fileIds_ )
+        {
+            llvm::StringRef const filename( fileId.first );
+            ostream << "File '" << filename.str() << "'\n";
+            auto iterPair = cacheContainer_.equal_range( fileId.second );
+            for ( auto iter = iterPair.first; iter != iterPair.second; ++iter )
+            {
+                dumpEntry( *iter, ostream );
+            }
+        }
+    }
 
 private:
     std::string uniqueFileName();
@@ -326,7 +381,6 @@ private:
     FileIds fileIds_;
     std::mutex fileIdsMutex_;
     unsigned fileIdCounter_;
-    std::recursive_mutex generateContentMutex_;
     std::size_t counter_;
     std::size_t hits_;
     std::size_t misses_;

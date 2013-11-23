@@ -38,7 +38,7 @@ namespace
             llvm::StringRef dir,
             llvm::StringRef relFilename,
             clang::Preprocessor & preprocessor,
-            PreprocessingContext::IgnoredHeaders const & ignoredHeaders,
+            IgnoredHeaders const & ignoredHeaders,
             Preprocessor::HeaderRefs & includedHeaders
         )
             :
@@ -137,7 +137,7 @@ namespace
         llvm::StringRef dir_;
         llvm::StringRef relFilename_;
         Preprocessor::HeaderRefs & headers_;
-        PreprocessingContext::IgnoredHeaders const & ignoredHeaders_;
+        IgnoredHeaders const & ignoredHeaders_;
     };
 
     class DiagnosticConsumer : public clang::DiagnosticConsumer

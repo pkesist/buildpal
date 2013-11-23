@@ -3,6 +3,8 @@
 
 #include <Python.h>
 
+#include <fstream>
+
 #include <windows.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,6 +174,20 @@ int PyCache_init( PyCache * self, PyObject * args, PyObject * kwds )
 }
 
 
+PyObject * PyCache_dump( PyCache * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "filename", NULL };
+
+    PyObject * filename = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "O", kwlist, &filename ) )
+        return NULL;
+
+    std::ofstream output( PyUnicode_AsUTF8( filename ) );
+    self->cache->dump( output );
+    Py_RETURN_NONE;
+}
+
 PyObject * PyCache_getStats( PyCache * self, PyObject * args, PyObject * kwds )
 {
     assert( self->cache );
@@ -184,6 +200,7 @@ PyObject * PyCache_getStats( PyCache * self, PyObject * args, PyObject * kwds )
 
 PyMethodDef PyCache_methods[] =
 {
+    {"dump", (PyCFunction)PyCache_dump, METH_VARARGS | METH_KEYWORDS, "Dump cache content to file."},
     {"get_stats", (PyCFunction)PyCache_getStats, METH_VARARGS | METH_KEYWORDS, "Get cache statistics."},
     {NULL}
 };

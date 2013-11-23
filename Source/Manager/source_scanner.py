@@ -101,23 +101,27 @@ class SourceScanner:
                 self.client_sessions[conn_id] = self.Session(self.zmq_ctx, conn_id, pickle.loads(msg[1]), self.executor)
             else:
                 assert session.state == self.Session.STATE_WAITING_FOR_SERVER
-                tag, server_id, node_index = msg
-                assert tag == b'SEND_TO_SERVER'
-                node_index = pickle.loads(node_index)
-                session.node_index = node_index
-                available_sockets = self.sockets.setdefault(node_index, [])
-                if available_sockets:
-                    socket = available_sockets[0]
-                    del available_sockets[0]
+                if msg[0] == b'SEND_TO_SERVER':
+                    tag, server_id, node_index = msg
+                    assert tag == b'SEND_TO_SERVER'
+                    node_index = pickle.loads(node_index)
+                    session.node_index = node_index
+                    available_sockets = self.sockets.setdefault(node_index, [])
+                    if available_sockets:
+                        socket = available_sockets[0]
+                        del available_sockets[0]
+                    else:
+                        socket = create_socket(self.zmq_ctx, zmq.DEALER)
+                        socket.connect(self.nodes[node_index]['address'])
+                    socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
+                    self.poller.register(socket, zmq.POLLIN)
+                    del self.client_sessions[session.conn_id]
+                    assert socket not in self.server_sessions
+                    self.server_sessions[socket] = session
+                    session.state = self.Session.STATE_ATTACHING_TO_SESSION
                 else:
-                    socket = create_socket(self.zmq_ctx, zmq.DEALER)
-                    socket.connect(self.nodes[node_index]['address'])
-                socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
-                self.poller.register(socket, zmq.POLLIN)
-                del self.client_sessions[session.conn_id]
-                assert socket not in self.server_sessions
-                self.server_sessions[socket] = session
-                session.state = self.Session.STATE_ATTACHING_TO_SESSION
+                    assert msg[0] == b'DROP'
+                    del self.client_sessions[session.conn_id]
             return True
         elif socket is self.sessions_socket:
             self.mgr_socket.send_multipart(recv_multipart(self.sessions_socket), copy=False)

@@ -25,7 +25,7 @@ namespace llvm
 class Cache;
 class HeaderTracker;
 
-typedef std::unordered_map<clang::FileEntry const *, llvm::OwningPtr<llvm::MemoryBuffer> > ContentCache;
+typedef std::set<std::string> IgnoredHeaders;
 
 class PreprocessingContext
 {
@@ -49,7 +49,6 @@ public:
 
     typedef std::vector<std::pair<std::string, bool> > SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
-    typedef std::set<std::string> IgnoredHeaders;
 
     SearchPath     const & searchPath    () const { return searchPath_; }
     Defines        const & defines       () const { return defines_; }

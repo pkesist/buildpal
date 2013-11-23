@@ -3,11 +3,15 @@ import preprocessing
 import threading
 
 data = threading.local()
-
 cache = preprocessing.Cache()
+caches = [cache]
+#caches = set()
 
 def get_preprocessor():
     if not hasattr(data, 'pp'):
+        #data.cache = preprocessing.Cache()
+        #caches.add(data.cache)
+        #data.pp = preprocessing.Preprocessor(data.cache)
         data.pp = preprocessing.Preprocessor(cache)
     return data.pp
 
@@ -31,4 +35,11 @@ def collect_headers(dir, filename, includes, sysincludes, defines, ignored_heade
     return preprocessor.scan_headers(ppc, dir, filename)
 
 def cache_info():
-    return cache.get_stats()
+    stats = list(cache.get_stats() for cache in caches)
+    return (sum(hits for hits, _ in stats), sum(misses for _, misses in stats))
+
+def dump_cache():
+    counter = 0
+    for cache in caches:
+        cache.dump('cacheDump{}.txt'.format(counter))
+        counter += 1

@@ -120,17 +120,6 @@ public:
         includedHeaders_.insert( header );
     }
 
-    void dumpMacroState( std::ostream & ostream, std::string const & title ) const
-    {
-        ostream << "Macro state for header " << std::get<1>( header_ ).get() << " " << title << '\n';
-        for ( MacroState::value_type const & macroEntry : macroState_ )
-        {
-            ostream << macroEntry.getKey().str() << ' ' << macroEntry.getValue().str() << '\n';
-        }
-        if ( parent_ )
-            parent_->dumpMacroState( ostream, "PARENT" );
-    }
-
     void propagateToParent( IgnoredHeaders const & ignoredHeaders, CacheEntryPtr const childCacheEntry )
     {
         assert( parent_ );

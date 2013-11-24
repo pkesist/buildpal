@@ -5,21 +5,15 @@
 #define headerCache_HPP__A615CA5B_F047_45DE_8314_AF96E4F4FF86
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
+#include "utility_.hpp"
 
 #include <boost/intrusive_ptr.hpp>
 #include <boost/container/list.hpp>
 #include <boost/container/flat_map.hpp>
-#include <boost/flyweight/flyweight.hpp>
-#include <boost/flyweight/hashed_factory.hpp>
-#include <boost/flyweight/tag.hpp>
-#include <boost/flyweight/simple_locking.hpp>
-#include <boost/flyweight/no_tracking.hpp>
-#include <boost/flyweight/static_holder.hpp>
-#include <boost/flyweight/refcounted.hpp>
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/composite_key.hpp>
+#include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
-#include <boost/functional/hash.hpp>
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -41,16 +35,62 @@ namespace clang
     class FileEntry;
 }
 
+template <typename T, typename Tag=T>
+struct Storage : public std::unordered_set<T>
+{
+private:
+    SpinLockMutex mutex;
+    static Storage storage;
+
+public:
+    const_iterator insert( T const & t )
+    {
+        SpinLock const lock( mutex );
+        return std::unordered_set<T>::insert( t ).first;
+    }
+
+    static Storage & get() { return storage; }
+};
+
+template <typename T, typename Tag>
+Storage<T, Tag> Storage<T, Tag>::storage;
+
+template<typename T, typename Tag=T>
+struct Flyweight
+{
+    Flyweight( T const & t ) : iter_( Storage<T, Tag>::get().insert( t ) ) {}
+    template<typename A1>
+    Flyweight( A1 a1 ) : iter_( Storage<T, Tag>::get().insert( T( a1 ) ) ) {}
+    template<typename A1, typename A2>
+    Flyweight( A1 a1, A2 a2 ) : iter_( Storage<T, Tag>::get().insert( T( a1, a2 ) ) ) {}
+
+    Flyweight( Flyweight const & other ) : iter_( other.iter_ ) {}
+    Flyweight & operator=( Flyweight const & other ) { iter_ = other.iter_; return *this; }
+
+    T const & get() const { return *iter_; }
+    operator T const & () const { return get(); }
+
+    bool operator==( Flyweight<T, Tag> const & other )
+    {
+        return iter_ == other.iter_;
+    }
+
+private:
+    typename Storage<T, Tag>::const_iterator iter_;
+};
+
+template<typename T, typename Tag>
+bool operator<( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return a.get() < b.get(); }
+
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
-    typedef boost::flyweight<base, \
-        boost::flyweights::tag<name##Tag>, \
-        boost::flyweights::no_tracking> name
+    typedef Flyweight<base, name##Tag> name
 
 DEFINE_FLYWEIGHT(std::string, Dir);
 DEFINE_FLYWEIGHT(std::string, HeaderName);
 DEFINE_FLYWEIGHT(std::string, MacroName);
 DEFINE_FLYWEIGHT(std::string, MacroValue);
+
 
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
@@ -199,7 +239,7 @@ private:
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t hitCount_;
-    std::atomic<bool> contentLock_;
+    SpinLockMutex contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };

@@ -2,8 +2,6 @@
 #include "headerCache_.hpp"
 #include "headerTracker_.hpp"
 
-#include "utility_.hpp"
-
 #include <clang/Lex/Preprocessor.h>
 
 #include <boost/spirit/include/karma.hpp>
@@ -19,20 +17,6 @@ clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & source
     return result;
 }
 
-struct SpinLock
-{
-    std::atomic<bool> & mutex_;
-    SpinLock( std::atomic<bool> & mutex ) : mutex_( mutex )
-    {
-        while ( mutex_.exchange( true, std::memory_order_acquire ) );
-    }
-
-    ~SpinLock()
-    {
-        mutex_.store( false, std::memory_order_release );
-    }
-};
-
 llvm::MemoryBuffer const * CacheEntry::cachedContent()
 {
     if ( !memoryBuffer_ )
@@ -40,7 +24,7 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
         std::string tmp;
         generateContent( tmp );
 
-        SpinLock spinLock( contentLock_ );
+        SpinLock const spinLock( contentLock_ );
         if ( memoryBuffer_ )
             return memoryBuffer_.get();
         buffer_.swap( tmp );

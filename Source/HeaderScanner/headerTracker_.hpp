@@ -179,7 +179,7 @@ public:
     Headers const & includedHeaders() const { return includedHeaders_; }
     Header const & header() const { return header_; }
 
-    CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file, clang::SourceManager & ) const;
+    CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file ) const;
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
 

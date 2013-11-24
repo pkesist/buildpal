@@ -153,7 +153,6 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
     IncludeStackEntry const & currentEntry( fileStack_.back() );
     clang::FileEntry const * file( std::get<0>( currentEntry ) );
     fileStack_.pop_back();
-    assert( file );
     struct Cleanup
     {
         HeaderCtxStack & stack_;
@@ -165,14 +164,14 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
     // Propagate the results to the file which included us.
     CacheEntryPtr cacheEntry;
     if ( !cacheDisabled() && !headerCtxStack().back().fromCache() && isViableForCache( headerCtxStack().back(), file ) )
-        cacheEntry = headerCtxStack().back().addToCache( cache(), file, sourceManager() );
+        cacheEntry = headerCtxStack().back().addToCache( cache(), file );
     else
         cacheEntry = headerCtxStack().back().cacheHit();
     headerCtxStack().back().propagateToParent( ignoredHeaders, cacheEntry );
 }
 
 
-CacheEntryPtr HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file, clang::SourceManager & sourceManager ) const
+CacheEntryPtr HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file ) const
 {
     return cache.addEntry( file->getName(), createCacheKey(), createHeaderContent(), includedHeaders() );
 }

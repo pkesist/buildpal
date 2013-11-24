@@ -35,53 +35,6 @@ namespace clang
     class FileEntry;
 }
 
-template <typename T, typename Tag=T>
-struct Storage : public std::unordered_set<T>
-{
-private:
-    SpinLockMutex mutex;
-    static Storage storage;
-
-public:
-    const_iterator insert( T const & t )
-    {
-        SpinLock const lock( mutex );
-        return std::unordered_set<T>::insert( t ).first;
-    }
-
-    static Storage & get() { return storage; }
-};
-
-template <typename T, typename Tag>
-Storage<T, Tag> Storage<T, Tag>::storage;
-
-template<typename T, typename Tag=T>
-struct Flyweight
-{
-    Flyweight( T const & t ) : iter_( Storage<T, Tag>::get().insert( t ) ) {}
-    template<typename A1>
-    Flyweight( A1 a1 ) : iter_( Storage<T, Tag>::get().insert( T( a1 ) ) ) {}
-    template<typename A1, typename A2>
-    Flyweight( A1 a1, A2 a2 ) : iter_( Storage<T, Tag>::get().insert( T( a1, a2 ) ) ) {}
-
-    Flyweight( Flyweight const & other ) : iter_( other.iter_ ) {}
-    Flyweight & operator=( Flyweight const & other ) { iter_ = other.iter_; return *this; }
-
-    T const & get() const { return *iter_; }
-    operator T const & () const { return get(); }
-
-    bool operator==( Flyweight<T, Tag> const & other )
-    {
-        return iter_ == other.iter_;
-    }
-
-private:
-    typename Storage<T, Tag>::const_iterator iter_;
-};
-
-template<typename T, typename Tag>
-bool operator<( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return a.get() < b.get(); }
-
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
     typedef Flyweight<base, name##Tag> name

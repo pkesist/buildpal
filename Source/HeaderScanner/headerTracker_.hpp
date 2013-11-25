@@ -166,7 +166,7 @@ public:
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.
-        if ( ignoredHeaders.find( std::get<1>( parent_->header() ) ) == ignoredHeaders.end() )
+        if ( ignoredHeaders.find( parent_->header().name ) == ignoredHeaders.end() )
         {
             if ( fromCache() )
             {
@@ -252,9 +252,7 @@ private:
     clang::SourceManager & sourceManager() const;
 
 private:
-    typedef llvm::SmallString<1024> PathPart;
-    typedef std::tuple<clang::FileEntry const *, HeaderLocation::Enum, PathPart, PathPart> IncludeStackEntry;
-    typedef std::vector<IncludeStackEntry> IncludeStack;
+    typedef std::vector<Header> IncludeStack;
 
 private:
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;

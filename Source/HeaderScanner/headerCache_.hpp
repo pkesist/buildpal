@@ -37,7 +37,7 @@ namespace clang
 
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
-    typedef Flyweight<base, name##Tag> name
+    typedef Flyweight<base, name##Tag> name;
 
 DEFINE_FLYWEIGHT(std::string, Dir);
 DEFINE_FLYWEIGHT(std::string, HeaderName);
@@ -57,6 +57,12 @@ template<typename T>
 inline T fromDataAndSize( char const * data, std::size_t size )
 {
     return T( data, size );
+}
+
+template <typename T>
+inline T fromStringRef( llvm::StringRef x )
+{
+    return T( x.data(), x.size() );
 }
 
 inline llvm::StringRef macroName( Macro const & macro )
@@ -82,8 +88,23 @@ inline bool isUndefinedMacroValue( llvm::StringRef value )
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
-typedef std::tuple<Dir, HeaderName, clang::FileEntry const *, HeaderLocation::Enum> Header;
-typedef std::set<Header> Headers;
+struct Header
+{
+    Dir dir;
+    HeaderName name;
+    clang::FileEntry const * file;
+    HeaderLocation::Enum loc;
+};
+struct HeaderHash
+{
+    // Use file ptr to differentiate between headers.
+    std::size_t operator()( Header const & h )
+    {
+        return std::hash<clang::FileEntry const *>()( h.file );
+    }
+};
+inline bool operator==( Header const & l, Header const & r ) { return l.file == r.file; }
+typedef std::unordered_set<Header, HeaderHash> Headers;
 typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
@@ -254,7 +275,7 @@ public:
         ostream << "    --------\n";
         for ( Header const & header : entry->headers() )
         {
-            ostream << "    " << std::get<0>( header ).get() << ' ' << std::get<1>( header ).get() << '\n';
+            ostream << "    " << header.dir.get() << ' ' << header.name.get() << '\n';
         }
         ostream << "    --------\n";
         ostream << "    Content:\n";

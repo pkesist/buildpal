@@ -15,17 +15,17 @@
 void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
     assert( !fileStack_.empty() );
-    IncludeStackEntry currentEntry( fileStack_.back() );
-    clang::FileEntry const * currentFile = std::get<0>( currentEntry );
+    Header const & parentHeader( fileStack_.back() );
+    clang::FileEntry const * parentFile = parentHeader.file;
     clang::DirectoryLookup const * dirLookup( 0 );
-    HeaderLocation::Enum const parentLocation( std::get<1>( currentEntry ) );
-    PathPart const & parentSearchPath = std::get<2>( currentEntry );
-    PathPart const & parentRelative = std::get<3>( currentEntry );
+    HeaderLocation::Enum const parentLocation( parentHeader.loc );
+    Dir const & parentSearchPath = parentHeader.dir;
+    HeaderName const & parentRelative = parentHeader.name;
 
-    PathPart searchPath;
-    PathPart relativePath;
+    llvm::SmallString<1024> searchPath;
+    llvm::SmallString<1024> relativePath;
 
-    clang::FileEntry const * entry = headerSearch_->LookupFile( include, isAngled, 0, dirLookup, currentFile, &searchPath, &relativePath, 0, false );
+    clang::FileEntry const * entry = headerSearch_->LookupFile( include, isAngled, 0, dirLookup, parentFile, &searchPath, &relativePath, 0, false );
     if ( !entry )
         return;
 
@@ -43,13 +43,20 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
 
     if ( headerLocation == HeaderLocation::relative )
     {
-        searchPath = parentSearchPath;
-        relativePath = parentRelative;
+        searchPath = parentSearchPath.get();
+        relativePath = parentRelative.get();
         llvm::sys::path::remove_filename( relativePath );
         llvm::sys::path::append( relativePath, include );
     }
 
-    fileStack_.push_back( std::make_tuple( entry, headerLocation, searchPath, relativePath ) );
+    Header const header =
+    {
+        fromStringRef<Dir>( searchPath ),
+        fromStringRef<HeaderName>( relativePath ),
+        entry,
+        headerLocation
+    };
+    fileStack_.push_back( header );
 
     if
     (
@@ -71,21 +78,18 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
 void HeaderTracker::headerSkipped()
 {
     assert( !fileStack_.empty() );
-    IncludeStackEntry const & currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( std::get<0>( currentEntry ) );
-    HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
-    PathPart const & dirPart( std::get<2>( currentEntry ) );
-    PathPart const & relPart( std::get<3>( currentEntry ) );
+    assert( !headerCtxStack().empty() );
+    Header const header( fileStack_.back() );
     fileStack_.pop_back();
 
-    assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( file ) );
+    assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( header.file ) );
     assert( cacheHit_ == 0 );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
         {
             clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( file ) );
+            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( header.file ) );
             assert( !headerInfo.isImport );
             assert( !headerInfo.ControllingMacroID );
             assert( !headerInfo.isPragmaOnce );
@@ -96,11 +100,7 @@ void HeaderTracker::headerSkipped()
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName );
         }
-        headerCtxStack().back().addHeader
-        ( Header( std::make_tuple(
-            fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
-            fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
-            file, headerLocation ) ) );
+        headerCtxStack().back().addHeader( header );
     }
 }
 
@@ -113,30 +113,23 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    headerCtxStack().push_back(
-        HeaderCtx( std::make_tuple(
-            fromDataAndSize<Dir>( dir.data(), dir.size() ),
-            fromDataAndSize<HeaderName>( relFilename.data(), relFilename.size() ),
-            mainFileEntry, HeaderLocation::regular ), CacheEntryPtr(), preprocessor_, 0 ) );
-    PathPart dirPart( dir.data(), dir.data() + dir.size() );
-    PathPart relPart( relFilename.data(), relFilename.data() + relFilename.size() );
-    fileStack_.push_back( std::make_tuple( mainFileEntry, HeaderLocation::regular, dirPart, relPart ) );
+    Header const header =
+    {
+        fromStringRef<Dir>( dir ),
+        fromStringRef<HeaderName>( relFilename ),
+        mainFileEntry,
+        HeaderLocation::regular
+    };
+
+    fileStack_.push_back( header );
+    headerCtxStack().push_back( HeaderCtx( header, CacheEntryPtr(), preprocessor_, 0 ) );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
-    IncludeStackEntry const & currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( std::get<0>( currentEntry ) );
-    HeaderLocation::Enum const headerLocation( std::get<1>( currentEntry ) );
-    PathPart const & dirPart( std::get<2>( currentEntry ) );
-    PathPart const & relPart( std::get<3>( currentEntry ) );
-    Header header( std::make_tuple(
-        fromDataAndSize<Dir>( dirPart.data(), dirPart.size() ),
-        fromDataAndSize<HeaderName>( relPart.data(), relPart.size() ),
-        file, headerLocation ) );
-    headerCtxStack().back().addHeader( header );
-    headerCtxStack().push_back( HeaderCtx( header, cacheHit_, preprocessor_, &headerCtxStack().back() ) );
+    headerCtxStack().back().addHeader( fileStack_.back() );
+    headerCtxStack().push_back( HeaderCtx( fileStack_.back(), cacheHit_, preprocessor_, &headerCtxStack().back() ) );
     cacheHit_.reset();
 }
 
@@ -150,8 +143,7 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
     assert( headerCtxStack().size() > 1 );
 
     assert( !fileStack_.empty() );
-    IncludeStackEntry const & currentEntry( fileStack_.back() );
-    clang::FileEntry const * file( std::get<0>( currentEntry ) );
+    clang::FileEntry const * file( fileStack_.back().file );
     fileStack_.pop_back();
     struct Cleanup
     {
@@ -193,18 +185,17 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         {
             std::string error;
             bool invalid;
-            clang::FileEntry const * headerFile( std::get<2>( h ) );
-            assert( headerFile );
-            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( headerFile, &invalid );
+            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( h.file, &invalid );
             assert( buffer );
             result.insert(
                 HeaderRef(
-                    std::get<0>( h ).get(),
-                    std::get<1>( h ).get(),
-                    std::get<3>( h ),
+                    h.dir.get(),
+                    h.name.get(),
+                    h.loc,
                     buffer->getBufferStart(),
                     buffer->getBufferSize() ) );
-        } );
+        }
+    );
     return result;
 }
 

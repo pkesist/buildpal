@@ -64,7 +64,7 @@ class TaskProcessor:
 
         register_socket(client_socket)
 
-        self.cache_info = {}
+        self.cache_info = (0, 0)
 
         compiler_info = {}
 
@@ -101,6 +101,8 @@ class TaskProcessor:
 
         self.timer = Timer()
 
+        pp_sockets = []
+
         class ClientServerRendezvous(Rendezvous):
             def __init__(self, timer, sessions, node_info):
                 Rendezvous.__init__(self, 'client_ready', 'server_ready')
@@ -114,11 +116,11 @@ class TaskProcessor:
                 self.timer.add_time('waiting.server', timer.get())
                 sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
                 session.preprocessing_done(server_conn, self.node_info[node_index])
-                self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
+                assert session.preprocess_socket not in pp_sockets
+                pp_sockets.append(session.preprocess_socket)
+                del session.preprocess_socket
 
         csrv = ClientServerRendezvous(self.timer, sessions, node_info)
-
-        pp_sockets = []
 
         scheduler = sched.scheduler()
 
@@ -133,29 +135,36 @@ class TaskProcessor:
                     if flags != zmq.POLLIN:
                         continue
 
-                    if source_scanner.handle(socket):
-                        continue
+                    with self.timer.timeit("poller.preprocessor_out"):
+                        if source_scanner.handle(socket):
+                            continue
 
                     session = sessions.get(Sessions.FROM_PREPR, socket)
                     if session:
-                        msg = recv_multipart(socket)
-                        assert msg[0] == b'PREPROCESSING_DONE'
-                        self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
-                        hits, misses = pickle.loads(msg[2])
-                        self.cache_info['xxx'] = hits, misses
-                        sessions.unregister(Sessions.FROM_PREPR, socket)
-                        unregister_socket(socket)
-                        assert socket not in pp_sockets
-                        pp_sockets.append(socket)
-                        ####
-                        #session.client_conn.send([b'EXIT', b'0'])
-                        #session.preprocess_socket.send_multipart([b'DROP'])
-                        #sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
-                        ####
-                        csrv.client_ready((session, SimpleTimer()))
-                        server_result = node_manager.get_server_conn()
-                        if server_result:
-                            csrv.server_ready(server_result)
+                        with self.timer.timeit("poller.preprocessor_in"):
+                            assert socket is session.preprocess_socket
+                            msg = recv_multipart(socket)
+                            assert msg[0] == b'PREPROCESSING_DONE'
+                            self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
+                            self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
+                            hits, misses = pickle.loads(msg[2])
+                            self.cache_info = hits, misses
+                            # We will not be receiving throught this socket
+                            # anymore, but we still need it to send data to
+                            # server. It will be marked for reuse in
+                            # client-server randezvous.
+                            sessions.unregister(Sessions.FROM_PREPR, socket)
+                            unregister_socket(socket)
+                            just_preprocess = True
+                            if just_preprocess:
+                                session.client_conn.send([b'EXIT', b'0'])
+                                socket.send_multipart([b'DROP'])
+                                sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
+                            else:
+                                csrv.client_ready((session, SimpleTimer()))
+                                server_result = node_manager.get_server_conn()
+                                if server_result:
+                                    csrv.server_ready(server_result)
                     elif socket is client_socket:
                         with self.timer.timeit('poller.client'):
                             msg = recv_multipart(client_socket)
@@ -216,7 +225,6 @@ class TaskProcessor:
                                     csrv.server_ready((server_conn, node_index))
                 scheduler.run(False)
         finally:
-            dump_cache()
             source_scanner.terminate()
 
     def print_stats(self, node_info):
@@ -250,8 +258,8 @@ class TaskProcessor:
                 print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
         print_times(self.timer.as_dict())
         print("================")
-        total_hits = sum((s[0] for s in self.cache_info.values()))
-        total_misses = sum((s[1] for s in self.cache_info.values()))
+        total_hits = self.cache_info[0]
+        total_misses = self.cache_info[1]
         total = total_hits + total_misses
         if not total: total = 1
         print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(total_hits,

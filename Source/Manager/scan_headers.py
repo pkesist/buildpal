@@ -4,14 +4,10 @@ import threading
 
 data = threading.local()
 cache = preprocessing.Cache()
-caches = [cache]
-#caches = set()
+caches = {cache}
 
 def get_preprocessor():
     if not hasattr(data, 'pp'):
-        #data.cache = preprocessing.Cache()
-        #caches.add(data.cache)
-        #data.pp = preprocessing.Preprocessor(data.cache)
         data.pp = preprocessing.Preprocessor(cache)
     return data.pp
 

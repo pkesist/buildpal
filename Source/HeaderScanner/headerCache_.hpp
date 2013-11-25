@@ -15,6 +15,7 @@
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 
+#include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
 
@@ -53,12 +54,6 @@ inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
     return std::make_pair( MacroName( name ), MacroValue( value ) );
 }
 
-template<typename T>
-inline T fromDataAndSize( char const * data, std::size_t size )
-{
-    return T( data, size );
-}
-
 template <typename T>
 inline T fromStringRef( llvm::StringRef x )
 {
@@ -88,22 +83,39 @@ inline bool isUndefinedMacroValue( llvm::StringRef value )
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
+
 struct Header
 {
     Dir dir;
     HeaderName name;
-    clang::FileEntry const * file;
     HeaderLocation::Enum loc;
 };
+
+struct HeaderWithFileEntry
+{
+    Header header;
+    clang::FileEntry const * file;
+};
+
+
 struct HeaderHash
 {
-    // Use file ptr to differentiate between headers.
     std::size_t operator()( Header const & h )
     {
-        return std::hash<clang::FileEntry const *>()( h.file );
+        return llvm::hash_combine
+        (
+            llvm::hash_value( h.dir.get() ),
+            llvm::hash_value( h.name.get() )
+        );
     }
 };
-inline bool operator==( Header const & l, Header const & r ) { return l.file == r.file; }
+inline bool operator==( Header const & l, Header const & r )
+{
+    return l.dir == r.dir &&
+        l.name == r.name
+    ;
+}
+
 typedef std::unordered_set<Header, HeaderHash> Headers;
 typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;

@@ -244,12 +244,11 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
 
 Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )
 {
-    llvm::SmallVector<char, 100> buffer;
-    llvm::sys::path::append( buffer, dir );
-    llvm::sys::path::append( buffer, relFilename );
-    llvm::StringRef filename( buffer.data(), buffer.size() );
+    llvm::SmallString<1024 * 2> filename;
+    llvm::sys::path::append( filename, dir );
+    llvm::sys::path::append( filename, relFilename );
     clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
-    setupPreprocessor( ppc, filename );
+    setupPreprocessor( ppc, filename.str() );
     struct DiagnosticsSetup
     {
         DiagnosticsSetup( clang::DiagnosticConsumer & client,

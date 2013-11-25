@@ -6,6 +6,7 @@
 //------------------------------------------------------------------------------
 #include <llvm/ADT/StringRef.h>
 #include <atomic>
+#include <mutex>
 #include <unordered_set>
 //------------------------------------------------------------------------------
 
@@ -15,22 +16,29 @@ namespace clang
     class MacroDirective;
 }
 
-llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocessor, llvm::StringRef const macroName, clang::MacroDirective const * def );
+llvm::StringRef macroValueFromDirective(
+    clang::Preprocessor const & preprocessor,
+    llvm::StringRef const macroName,
+    clang::MacroDirective const * def
+);
 
 
-typedef std::atomic<bool> SpinLockMutex;
+struct SpinLockMutex : public std::atomic_flag
+{
+    SpinLockMutex() { clear( std::memory_order_relaxed ); }
+};
 
 struct SpinLock
 {
     SpinLockMutex & mutex_;
     SpinLock( SpinLockMutex & mutex ) : mutex_( mutex )
     {
-        while ( mutex_.exchange( true, std::memory_order_acquire ) );
+        while ( mutex_.test_and_set( std::memory_order_acquire ) );
     }
 
     ~SpinLock()
     {
-        mutex_.store( false, std::memory_order_release );
+        mutex_.clear( std::memory_order_release );
     }
 };
 
@@ -71,17 +79,15 @@ struct Flyweight
     T const & get() const { return *iter_; }
     operator T const & () const { return get(); }
 
-    bool operator==( Flyweight<T, Tag> const & other )
-    {
-        return iter_ == other.iter_;
-    }
-
 private:
     typename Storage::const_iterator iter_;
 };
 
 template<typename T, typename Tag>
 bool operator<( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return a.get() < b.get(); }
+
+template<typename T, typename Tag>
+bool operator==( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return &a.get() == &b.get(); }
 
 
 //------------------------------------------------------------------------------

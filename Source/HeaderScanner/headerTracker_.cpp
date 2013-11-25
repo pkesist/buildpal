@@ -15,8 +15,8 @@
 void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
     assert( !fileStack_.empty() );
-    Header const & parentHeader( fileStack_.back() );
-    clang::FileEntry const * parentFile = parentHeader.file;
+    Header const & parentHeader( fileStack_.back().header );
+    clang::FileEntry const * parentFile = fileStack_.back().file;
     clang::DirectoryLookup const * dirLookup( 0 );
     HeaderLocation::Enum const parentLocation( parentHeader.loc );
     Dir const & parentSearchPath = parentHeader.dir;
@@ -49,14 +49,16 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
         llvm::sys::path::append( relativePath, include );
     }
 
-    Header const header =
+    HeaderWithFileEntry const headerWithFileEntry =
     {
-        fromStringRef<Dir>( searchPath ),
-        fromStringRef<HeaderName>( relativePath ),
-        entry,
-        headerLocation
+        {
+            fromStringRef<Dir>( searchPath ),
+            fromStringRef<HeaderName>( relativePath ),
+            headerLocation
+        },
+        entry
     };
-    fileStack_.push_back( header );
+    fileStack_.push_back( headerWithFileEntry );
 
     if
     (
@@ -79,17 +81,17 @@ void HeaderTracker::headerSkipped()
 {
     assert( !fileStack_.empty() );
     assert( !headerCtxStack().empty() );
-    Header const header( fileStack_.back() );
+    HeaderWithFileEntry const hwf( fileStack_.back() );
     fileStack_.pop_back();
 
-    assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( header.file ) );
+    assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( hwf.file ) );
     assert( cacheHit_ == 0 );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
         {
             clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( header.file ) );
+            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
             assert( !headerInfo.isImport );
             assert( !headerInfo.ControllingMacroID );
             assert( !headerInfo.isPragmaOnce );
@@ -100,7 +102,7 @@ void HeaderTracker::headerSkipped()
             llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
             headerCtxStack().back().macroUsed( macroName );
         }
-        headerCtxStack().back().addHeader( header );
+        headerCtxStack().back().addHeader( hwf.header );
     }
 }
 
@@ -113,22 +115,24 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
-    Header const header =
+    HeaderWithFileEntry const hwf =
     {
-        fromStringRef<Dir>( dir ),
-        fromStringRef<HeaderName>( relFilename ),
-        mainFileEntry,
-        HeaderLocation::regular
+        {
+            fromStringRef<Dir>( dir ),
+            fromStringRef<HeaderName>( relFilename ),
+            HeaderLocation::regular
+        },
+        mainFileEntry
     };
 
-    fileStack_.push_back( header );
-    headerCtxStack().push_back( HeaderCtx( header, CacheEntryPtr(), preprocessor_, 0 ) );
+    fileStack_.push_back( hwf );
+    headerCtxStack().push_back( HeaderCtx( hwf, CacheEntryPtr(), preprocessor_, 0 ) );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
-    headerCtxStack().back().addHeader( fileStack_.back() );
+    headerCtxStack().back().addHeader( fileStack_.back().header );
     headerCtxStack().push_back( HeaderCtx( fileStack_.back(), cacheHit_, preprocessor_, &headerCtxStack().back() ) );
     cacheHit_.reset();
 }
@@ -183,9 +187,13 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         headerCtxStack().back().includedHeaders().end(),
         [&]( Header const & h )
         {
-            std::string error;
+            llvm::SmallString<2048> filename;
+            llvm::sys::path::append( filename, h.dir.get() );
+            llvm::sys::path::append( filename, h.name.get() );
+            clang::FileEntry const * file( sourceManager().getFileManager().getFile( filename.str(), false, true ) );
+            assert( file );
             bool invalid;
-            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( h.file, &invalid );
+            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( file, &invalid );
             assert( buffer );
             result.insert(
                 HeaderRef(

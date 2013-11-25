@@ -37,10 +37,6 @@ struct SpinLock
 template <typename T, typename Tag=T>
 struct FlyweightStorage : public std::unordered_set<T>
 {
-private:
-    SpinLockMutex mutex;
-    static FlyweightStorage storage;
-
 public:
     const_iterator insert( T const & t )
     {
@@ -49,6 +45,10 @@ public:
     }
 
     static FlyweightStorage & get() { return storage; }
+
+private:
+    SpinLockMutex mutex;
+    static FlyweightStorage storage;
 };
 
 template <typename T, typename Tag>

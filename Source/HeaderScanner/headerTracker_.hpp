@@ -168,11 +168,24 @@ public:
         // their contents is a part of the compiled PCH.
         if ( ignoredHeaders.find( std::get<1>( parent_->header() ) ) == ignoredHeaders.end() )
         {
-            std::copy(
-                includedHeaders().begin(),
-                includedHeaders().end(),
-                std::inserter( parent_->includedHeaders_, parent_->includedHeaders_.begin() )
-            );
+            if ( fromCache() )
+            {
+                std::copy
+                (
+                    cacheHit()->headers().begin(),
+                    cacheHit()->headers().end(),
+                    std::inserter( parent_->includedHeaders_, parent_->includedHeaders_.begin() )
+                );
+            }
+            else
+            {
+                std::copy
+                (
+                    includedHeaders().begin(),
+                    includedHeaders().end(),
+                    std::inserter( parent_->includedHeaders_, parent_->includedHeaders_.begin() )
+                );
+            }
         }
     }
 

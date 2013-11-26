@@ -4,7 +4,11 @@
 #ifndef utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 #define utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 //------------------------------------------------------------------------------
+#include <boost/thread/lock_algorithms.hpp>
+#include <boost/thread/shared_mutex.hpp>
+
 #include <llvm/ADT/StringRef.h>
+
 #include <atomic>
 #include <mutex>
 #include <unordered_set>
@@ -48,14 +52,24 @@ struct FlyweightStorage : public std::unordered_set<T>
 public:
     const_iterator insert( T const & t )
     {
-        SpinLock const lock( mutex );
+        {
+            boost::shared_lock<boost::shared_mutex> const sharedLock( mutex_ );
+            iterator result = find( t );
+            if ( result != end() )
+                return result;
+        }
+        boost::upgrade_lock<boost::shared_mutex> upgradeLock( mutex_ );
+        iterator result = find( t );
+        if ( result != end() )
+            return result;
+        boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
         return std::unordered_set<T>::insert( t ).first;
     }
 
     static FlyweightStorage & get() { return storage; }
 
 private:
-    SpinLockMutex mutex;
+    boost::shared_mutex mutex_;
     static FlyweightStorage storage;
 };
 

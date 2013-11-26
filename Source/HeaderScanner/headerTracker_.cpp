@@ -7,10 +7,50 @@
 #include <llvm/Support/Path.h>
 
 #include <boost/spirit/include/karma.hpp>
+#include <boost/thread/lock_algorithms.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
+#include <unordered_map>
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+
+namespace
+{
+    class ContentCache
+    {
+    public:
+        typedef std::unordered_map<std::string, llvm::MemoryBuffer const *> ContentMap;
+    
+        ~ContentCache()
+        {
+            for ( auto & value : contentMap_ )
+                delete value.second;
+        }
+
+        llvm::MemoryBuffer const * get( llvm::StringRef name ) const
+        {
+            boost::shared_lock<boost::shared_mutex> const readLock( contentMutex_ );
+            ContentMap::const_iterator const iter( contentMap_.find( name ) );
+            return iter != contentMap_.end() ? iter->second : 0;
+        }
+
+        llvm::MemoryBuffer const * getOrCreate( clang::FileManager & fm, clang::FileEntry const * file )
+        {
+            llvm::MemoryBuffer const * buffer( get( file->getName() ) );
+            if ( buffer )
+                return buffer;
+            buffer = fm.getBufferForFile( file );
+            boost::unique_lock<boost::shared_mutex> const writeLock( contentMutex_ );
+            contentMap_.insert( std::make_pair( file->getName(), buffer ) );
+            return buffer;
+        }
+
+    private:
+        mutable boost::shared_mutex contentMutex_;
+        ContentMap contentMap_;
+    } globalContentCache;
+}
 
 void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clang::FileEntry const * & fileEntry )
 {
@@ -28,6 +68,12 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     clang::FileEntry const * entry = headerSearch_->LookupFile( include, isAngled, 0, dirLookup, parentFile, &searchPath, &relativePath, 0, false );
     if ( !entry )
         return;
+
+    // Make sure this file is loaded through globalContentCache, so that it
+    // can be shared between different SourceManager instances.
+    llvm::MemoryBuffer const * buffer( globalContentCache.getOrCreate(
+        preprocessor().getFileManager(), entry ) );
+    sourceManager().overrideFileContents( entry, buffer, true );
 
     HeaderLocation::Enum const headerLocation = dirLookup == 0
         ? fileStack_.size() == 1
@@ -54,6 +100,7 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
         {
             fromStringRef<Dir>( searchPath ),
             fromStringRef<HeaderName>( relativePath ),
+            buffer,
             headerLocation
         },
         entry
@@ -120,20 +167,21 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
         {
             fromStringRef<Dir>( dir ),
             fromStringRef<HeaderName>( relFilename ),
+            0,
             HeaderLocation::regular
         },
         mainFileEntry
     };
 
     fileStack_.push_back( hwf );
-    headerCtxStack().push_back( HeaderCtx( hwf, CacheEntryPtr(), preprocessor_, 0 ) );
+    headerCtxStack().push_back( HeaderCtx( hwf.header, CacheEntryPtr(), preprocessor_, 0 ) );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
     headerCtxStack().back().addHeader( fileStack_.back().header );
-    headerCtxStack().push_back( HeaderCtx( fileStack_.back(), cacheHit_, preprocessor_, &headerCtxStack().back() ) );
+    headerCtxStack().push_back( HeaderCtx( fileStack_.back().header, cacheHit_, preprocessor_, &headerCtxStack().back() ) );
     cacheHit_.reset();
 }
 
@@ -187,21 +235,14 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         headerCtxStack().back().includedHeaders().end(),
         [&]( Header const & h )
         {
-            llvm::SmallString<2048> filename;
-            llvm::sys::path::append( filename, h.dir.get() );
-            llvm::sys::path::append( filename, h.name.get() );
-            clang::FileEntry const * file( sourceManager().getFileManager().getFile( filename.str(), false, true ) );
-            assert( file );
-            bool invalid;
-            llvm::MemoryBuffer const * buffer = sourceManager().getMemoryBufferForFile( file, &invalid );
-            assert( buffer );
+            assert( h.buffer );
             result.insert(
                 HeaderRef(
                     h.dir.get(),
                     h.name.get(),
                     h.loc,
-                    buffer->getBufferStart(),
-                    buffer->getBufferSize() ) );
+                    h.buffer->getBufferStart(),
+                    h.buffer->getBufferSize() ) );
         }
     );
     return result;

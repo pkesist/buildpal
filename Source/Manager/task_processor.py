@@ -155,7 +155,7 @@ class TaskProcessor:
                             # client-server randezvous.
                             sessions.unregister(Sessions.FROM_PREPR, socket)
                             unregister_socket(socket)
-                            just_preprocess = True
+                            just_preprocess = False
                             if just_preprocess:
                                 session.client_conn.send([b'EXIT', b'0'])
                                 socket.send_multipart([b'DROP'])

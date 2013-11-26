@@ -36,9 +36,9 @@ namespace clang
 struct HeaderCtx
 {
 public:
-    explicit HeaderCtx( HeaderWithFileEntry const & hwf, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
+    explicit HeaderCtx( Header const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
         :
-        hwf_( hwf ),
+        header_( header ),
         cacheHit_( cacheHit ),
         preprocessor_( preprocessor ),
         parent_( parent )
@@ -166,7 +166,7 @@ public:
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.
-        if ( ignoredHeaders.find( parent_->headerWithFileEntry().header.name ) == ignoredHeaders.end() )
+        if ( ignoredHeaders.find( parent_->header().name ) == ignoredHeaders.end() )
         {
             if ( fromCache() )
             {
@@ -190,7 +190,7 @@ public:
     }
 
     Headers const & includedHeaders() const { return includedHeaders_; }
-    HeaderWithFileEntry const & headerWithFileEntry() const { return hwf_; }
+    Header const & header() const { return header_; }
 
     CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file ) const;
 
@@ -205,7 +205,7 @@ private:
     MacroState macroState_;
     clang::Preprocessor const & preprocessor_;
     HeaderCtx * parent_;
-    HeaderWithFileEntry hwf_;
+    Header header_;
     CacheEntryPtr cacheHit_;
     MacroNames usedHere_;
     MacroNames definedHere_;

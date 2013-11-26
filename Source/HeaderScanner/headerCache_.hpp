@@ -88,6 +88,7 @@ struct Header
 {
     Dir dir;
     HeaderName name;
+    llvm::MemoryBuffer const * buffer;
     HeaderLocation::Enum loc;
 };
 

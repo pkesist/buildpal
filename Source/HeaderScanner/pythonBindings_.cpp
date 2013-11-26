@@ -341,7 +341,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         return NULL;
     }
 
-    Preprocessor::HeaderRefs headers;
+    Headers headers;
 
     Py_BEGIN_ALLOW_THREADS
     headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( dir ), PyUnicode_AsUTF8( filename ) );
@@ -349,17 +349,19 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
-    for ( Preprocessor::HeaderRefs::const_iterator iter = headers.begin(); iter != headers.end(); ++iter )
+    for ( Header const & header : headers )
     {
         PyObject * tuple = PyTuple_New( 4 );
-        PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( iter->directory.data(), iter->directory.size() ) );
-        PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( iter->relative.data(), iter->relative.size() ) );
+        PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( header.dir.get().data(), header.dir.get().size() ) );
+        PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( header.name.get().data(), header.name.get().size() ) );
 
-        PyObject * const isRelative( iter->location == HeaderLocation::relative ? Py_True : Py_False );
+        PyObject * const isRelative( header.loc == HeaderLocation::relative ? Py_True : Py_False );
         Py_INCREF( isRelative );
         PyTuple_SET_ITEM( tuple, 2, isRelative );
 
-        PyTuple_SET_ITEM( tuple, 3, PyMemoryView_FromMemory( const_cast<char *>( iter->data ), iter->size, PyBUF_READ ) );
+        char * const data( const_cast<char *>( header.buffer->getBufferStart() ) );
+        std::size_t const size( header.buffer->getBufferSize() );
+        PyTuple_SET_ITEM( tuple, 3, PyMemoryView_FromMemory( data, size, PyBUF_READ ) );
         PyTuple_SET_ITEM( result, index, tuple );
         ++index;
     }

@@ -39,7 +39,7 @@ namespace
             llvm::StringRef relFilename,
             clang::Preprocessor & preprocessor,
             IgnoredHeaders const & ignoredHeaders,
-            Preprocessor::HeaderRefs & includedHeaders
+            Headers & includedHeaders
         )
             :
             headerTracker_ ( headerTracker   ),
@@ -136,7 +136,7 @@ namespace
         clang::Preprocessor & preprocessor_;
         llvm::StringRef dir_;
         llvm::StringRef relFilename_;
-        Preprocessor::HeaderRefs & headers_;
+        Headers & headers_;
         IgnoredHeaders const & ignoredHeaders_;
     };
 
@@ -156,6 +156,18 @@ namespace
             //    case clang::DiagnosticsEngine::Error: std::cout << "Error: " << buffer.str().str() << '\n'; break;
             //    case clang::DiagnosticsEngine::Fatal: std::cout << "Fatal: " << buffer.str().str() << '\n'; break;
             //}
+        }
+    };
+
+    struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
+    {
+        // Prevent FileManager, HeaderSearch et al. to open files
+        // unexpectedly.
+        virtual clang::MemorizeStatCalls::LookupResult
+            getStat( char const * path, struct stat & statBuf,
+            bool isFile, int *  )
+        {
+            return clang::MemorizeStatCalls::getStat( path, statBuf, isFile, 0 );
         }
     };
 }  // anonymous namespace
@@ -185,7 +197,7 @@ Preprocessor::Preprocessor( Cache * cache )
     hsopts.Sysroot.clear();
 
     compiler().createFileManager();
-    compiler().getFileManager().addStatCache( new clang::MemorizeStatCalls() );
+    compiler().getFileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
@@ -242,7 +254,7 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
     return headerSearch;
 }
 
-Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )
+Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )
 {
     llvm::SmallString<1024 * 2> filename;
     llvm::sys::path::append( filename, dir );
@@ -268,7 +280,7 @@ Preprocessor::HeaderRefs Preprocessor::scanHeaders( PreprocessingContext const &
         compiler().getLangOpts(), preprocessor()
     );
 
-    HeaderRefs result;
+    Headers result;
 
     // Do not let #pragma once interfere with cache.
     preprocessor().setPragmasEnabled( false );

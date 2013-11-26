@@ -40,8 +40,13 @@ namespace
             llvm::MemoryBuffer const * buffer( get( file->getName() ) );
             if ( buffer )
                 return buffer;
+            boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
+            // Preform another search with upgrade ownership.
+            ContentMap::const_iterator const iter( contentMap_.find( file->getName() ) );
+            if ( iter != contentMap_.end() )
+                return iter->second;
             buffer = fm.getBufferForFile( file );
-            boost::unique_lock<boost::shared_mutex> const writeLock( contentMutex_ );
+            boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
             contentMap_.insert( std::make_pair( file->getName(), buffer ) );
             return buffer;
         }
@@ -69,11 +74,31 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     if ( !entry )
         return;
 
+    // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
+    // cached in our globalContentCache we will never read it, so its file
+    // handle will be leaked. We could do ::close(), but this seems like
+    // a wrong to do at this level. This is what
+    // MemorizeStatCalls_PreventOpenFile is about - with it, the file is not
+    // opened in LookupFile().
+    // I'd prefer if Clang just allowed me to call entry->closeFD(), or better
+    // yet - allowed me to disable opening the file in the first place.
+    llvm::MemoryBuffer const * buffer;
     // Make sure this file is loaded through globalContentCache, so that it
     // can be shared between different SourceManager instances.
-    llvm::MemoryBuffer const * buffer( globalContentCache.getOrCreate(
-        preprocessor().getFileManager(), entry ) );
-    sourceManager().overrideFileContents( entry, buffer, true );
+    if ( !sourceManager().isFileOverridden( entry ) )
+    {
+        buffer = globalContentCache.getOrCreate(
+            preprocessor().getFileManager(), entry );
+        sourceManager().overrideFileContents( entry, buffer, true );
+    }
+    else
+    {
+        buffer = sourceManager().getMemoryBufferForFile( entry, 0 );
+#ifndef NDEBUG
+        llvm::MemoryBuffer const * gccBuf = globalContentCache.get( entry->getName() );
+        assert( buffer == gccBuf );
+#endif
+    }
 
     HeaderLocation::Enum const headerLocation = dirLookup == 0
         ? fileStack_.size() == 1
@@ -220,7 +245,7 @@ CacheEntryPtr HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * fil
     return cache.addEntry( file->getName(), createCacheKey(), createHeaderContent(), includedHeaders() );
 }
 
-Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
+Headers HeaderTracker::exitSourceFile()
 {
     struct Cleanup
     {
@@ -229,22 +254,8 @@ Preprocessor::HeaderRefs HeaderTracker::exitSourceFile()
         ~Cleanup() { stack_.pop_back(); }
     } const cleanup( headerCtxStack() );
 
-    Preprocessor::HeaderRefs result;
-    std::for_each(
-        headerCtxStack().back().includedHeaders().begin(),
-        headerCtxStack().back().includedHeaders().end(),
-        [&]( Header const & h )
-        {
-            assert( h.buffer );
-            result.insert(
-                HeaderRef(
-                    h.dir.get(),
-                    h.name.get(),
-                    h.loc,
-                    h.buffer->getBufferStart(),
-                    h.buffer->getBufferSize() ) );
-        }
-    );
+    Headers result;
+    result.swap( headerCtxStack().back().includedHeaders() );
     return result;
 }
 

@@ -15,7 +15,6 @@
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 
-#include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
 
@@ -35,16 +34,6 @@ namespace clang
 {
     class FileEntry;
 }
-
-#define DEFINE_FLYWEIGHT(base, name) \
-    struct name##Tag {}; \
-    typedef Flyweight<base, name##Tag> name;
-
-DEFINE_FLYWEIGHT(std::string, Dir);
-DEFINE_FLYWEIGHT(std::string, HeaderName);
-DEFINE_FLYWEIGHT(std::string, MacroName);
-DEFINE_FLYWEIGHT(std::string, MacroValue);
-
 
 typedef boost::container::flat_map<MacroName, MacroValue> Macros;
 typedef Macros::value_type Macro;
@@ -84,14 +73,6 @@ struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 
-struct Header
-{
-    Dir dir;
-    HeaderName name;
-    llvm::MemoryBuffer const * buffer;
-    HeaderLocation::Enum loc;
-};
-
 struct HeaderWithFileEntry
 {
     Header header;
@@ -99,25 +80,6 @@ struct HeaderWithFileEntry
 };
 
 
-struct HeaderHash
-{
-    std::size_t operator()( Header const & h )
-    {
-        return llvm::hash_combine
-        (
-            llvm::hash_value( h.dir.get() ),
-            llvm::hash_value( h.name.get() )
-        );
-    }
-};
-inline bool operator==( Header const & l, Header const & r )
-{
-    return l.dir == r.dir &&
-        l.name == r.name
-    ;
-}
-
-typedef std::unordered_set<Header, HeaderHash> Headers;
 typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 

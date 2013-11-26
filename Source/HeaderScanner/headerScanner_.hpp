@@ -2,7 +2,10 @@
 #ifndef headerScanner_HPP__343F36C2_0715_4B15_865A_D86ABF67EF5B
 #define headerScanner_HPP__343F36C2_0715_4B15_865A_D86ABF67EF5B
 //------------------------------------------------------------------------------
+#include "utility_.hpp"
+
 #include <clang/Frontend/CompilerInstance.h>
+#include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/OwningPtr.h>
 
@@ -24,6 +27,54 @@ namespace llvm
 
 class Cache;
 class HeaderTracker;
+
+#define DEFINE_FLYWEIGHT(base, name) \
+    struct name##Tag {}; \
+    typedef Flyweight<base, name##Tag> name;
+
+DEFINE_FLYWEIGHT(std::string, Dir);
+DEFINE_FLYWEIGHT(std::string, HeaderName);
+DEFINE_FLYWEIGHT(std::string, MacroName);
+DEFINE_FLYWEIGHT(std::string, MacroValue);
+
+struct HeaderLocation
+{
+    enum Enum
+    {
+        relative,
+        regular,
+        system
+    };
+};
+
+struct Header
+{
+    Dir dir;
+    HeaderName name;
+    llvm::MemoryBuffer const * buffer;
+    HeaderLocation::Enum loc;
+};
+
+struct HeaderHash
+{
+    std::size_t operator()( Header const & h )
+    {
+        return llvm::hash_combine
+        (
+            llvm::hash_value( h.dir.get() ),
+            llvm::hash_value( h.name.get() )
+        );
+    }
+};
+
+inline bool operator==( Header const & l, Header const & r )
+{
+    return l.dir == r.dir &&
+        l.name == r.name
+    ;
+}
+
+typedef std::unordered_set<Header, HeaderHash> Headers;
 
 typedef std::set<std::string> IgnoredHeaders;
 
@@ -60,57 +111,12 @@ private:
     IgnoredHeaders ignoredHeaders_;
 };
 
-struct HeaderLocation
-{
-    enum Enum
-    {
-        relative,
-        regular,
-        system
-    };
-};
-
-struct HeaderRef
-{
-    HeaderRef(
-        llvm::StringRef dir,
-        llvm::StringRef rel,
-        HeaderLocation::Enum loc,
-        char const * d,
-        std::size_t s ) :
-        directory( dir ),
-        relative( rel ),
-        location( loc ),
-        data( d ),
-        size( s )
-    {
-    }
-
-    llvm::StringRef directory;
-    llvm::StringRef relative;
-    HeaderLocation::Enum location;
-    char const * data;
-    std::size_t size;
-
-    bool operator<( HeaderRef const & other ) const
-    {
-        return relative < other.relative;
-    }
-
-    bool operator==( HeaderRef const & other ) const
-    {
-        return relative == other.relative;
-    }
-};
-
 class Preprocessor
 {
 public:
     explicit Preprocessor( Cache * cache );
 
-    typedef HeaderRef HeaderRef;
-    typedef std::set<HeaderRef> HeaderRefs;
-    HeaderRefs scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
+    Headers scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
     clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }

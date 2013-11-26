@@ -166,7 +166,7 @@ public:
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.
-        if ( ignoredHeaders.find( parent_->header().name ) == ignoredHeaders.end() )
+        if ( ignoredHeaders.find( parent_->header_.name ) == ignoredHeaders.end() )
         {
             if ( fromCache() )
             {
@@ -190,7 +190,7 @@ public:
     }
 
     Headers const & includedHeaders() const { return includedHeaders_; }
-    Header const & header() const { return header_; }
+    Headers       & includedHeaders()       { return includedHeaders_; }
 
     CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file ) const;
 
@@ -225,7 +225,7 @@ public:
     }
 
     void enterSourceFile( clang::FileEntry const *, llvm::StringRef dirPart, llvm::StringRef relPart );
-    Preprocessor::HeaderRefs exitSourceFile();
+    Headers exitSourceFile();
 
     void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
     void headerSkipped();

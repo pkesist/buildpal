@@ -4,7 +4,6 @@ from Common import create_socket, recv_multipart
 from io import BytesIO
 from multiprocessing import Process, cpu_count
 from time import sleep, time
-from socket import getfqdn
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
@@ -293,20 +292,20 @@ class CompileSession:
             sender.disconnect()
 
     @async
-    def send_missing_files(self, filelist, attacher_id):
+    def send_missing_files(self, fqdn, filelist, attacher_id):
         try:
             sender = self.Sender(attacher_id)
             missing_files_timer = SimpleTimer()
-            missing_files, self.repo_transaction_id = self.header_repository.missing_files(getfqdn(), filelist)
+            missing_files, self.repo_transaction_id = self.header_repository.missing_files(fqdn, filelist)
             self.times['process_hdr_list'] = missing_files_timer.get()
             sender.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
         finally:
             sender.disconnect()
 
     @async
-    def prepare_include_dirs(self, tar_data):
+    def prepare_include_dirs(self, fqdn, tar_data):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.header_repository.prepare_dir(getfqdn(), tar_data, self.repo_transaction_id, self.include_path)
+        result = self.header_repository.prepare_dir(fqdn, tar_data, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result
@@ -321,18 +320,20 @@ class CompileSession:
                 self.times['wait_for_header_list'] = 0
             self.wait_for_headers = SimpleTimer()
             assert msg[0] == b'TASK_FILE_LIST'
-            filelist = pickle.loads(msg[1])
+            fqdn = msg[1]
+            filelist = pickle.loads(msg[2])
             self.header_state = self.STATE_WAITING_FOR_HEADERS
-            self.send_missing_files(self.misc_thread_pool, filelist, attacher_id)
+            self.send_missing_files(self.misc_thread_pool, fqdn, filelist, attacher_id)
         elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
             self.times['wait_for_headers'] = self.wait_for_headers.get()
             del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
-            tar_data = msg[1]
-            self.times['wait_hdr_list_result'] = pickle.loads(msg[2])
+            fqdn = msg[1]
+            tar_data = msg[2]
+            self.times['wait_hdr_list_result'] = pickle.loads(msg[3])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, tar_data)
+            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, tar_data)
             if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
                 self.times['waiting_for_mgr_data'] = 0
                 self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())

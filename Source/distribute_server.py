@@ -25,7 +25,7 @@ Usage:
 
     If no <ini-file> is specified, script will attept to use '{}'
     in the current directory.
-""").format(sys.argv[0], default_script)
+""".format(sys.argv[0], default_script))
         raise Exception("Ini file not found")
 
     config = configparser.SafeConfigParser(strict=False)

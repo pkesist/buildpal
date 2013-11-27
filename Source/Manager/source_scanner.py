@@ -8,6 +8,7 @@ import tarfile
 import os
 import pickle
 from zlib import adler32
+from socket import getfqdn
 
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -132,7 +133,7 @@ class SourceScanner:
             if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
                 assert len(msg) == 1
                 if msg[0] == b'SESSION_ATTACHED':
-                    socket.send_multipart([b'TASK_FILE_LIST', pickle.dumps(session.filelist)])
+                    socket.send_multipart([b'TASK_FILE_LIST', getfqdn().encode(), pickle.dumps(session.filelist)])
                     session.wait_for_header_list_response = SimpleTimer()
                     session.state = self.Session.STATE_SENDING_FILE_LIST
                 else:
@@ -146,7 +147,7 @@ class SourceScanner:
                 assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
                 missing_files = pickle.loads(msg[1])
                 new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                socket.send_multipart([b'TASK_FILES', new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
+                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
                 self.poller.unregister(socket)
                 self.sockets[session.node_index].append(socket)
                 del self.server_sessions[socket]

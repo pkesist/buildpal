@@ -12,7 +12,7 @@
 #include <set>
 #include <string>
 #include <tuple>
-#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace clang

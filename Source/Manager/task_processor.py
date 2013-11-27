@@ -160,6 +160,7 @@ class TaskProcessor:
                                 session.client_conn.send([b'EXIT', b'0'])
                                 socket.send_multipart([b'DROP'])
                                 sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
+                                sessions.unregister(Sessions.FROM_PREPR, socket)
                             else:
                                 csrv.client_ready((session, SimpleTimer()))
                                 server_result = node_manager.get_server_conn()

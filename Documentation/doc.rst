@@ -1,20 +1,10 @@
------------
+===========
 DistriBuild
+===========
+
 -----------
-
-(1.) Motivation.
-(2.) Features.
-(3.) Trade-offs.
-(4.) Requirements.
-(5.) Quick-start.
-(6.) Design.
-(7.) Benchmarks.
-(8.) Future development plans.
-
---------------------------------------------------------------------------------
-----------------
-(1.) Motivation.
-----------------
+Motivation.
+-----------
 
     DistriBuild is a tool for speeding up large C/C++ project builds.
 
@@ -24,38 +14,36 @@ DistriBuild
     However, unlike distcc, DistriBuild's primary target platform is Windows/
     Visual C++.
 
---------------------------------------------------------------------------------
---------------
-(2.) Features.
---------------
+---------
+Features.
+---------
 
-    Task rejection.
+    * Task rejection.
         Server may reject a task if it does not have enough resources. In this
         case the client will try another farm node. This allows you to run a lot
         of parallel tasks without the danger of suffocating the build farm or
         the local machine.
 
-    Build consistency.
+    * Build consistency.
         DistriBuild takes special care to use the same compiler on both the
         client and on the server.
         DistriBuild takes special care to preserve the client's compilation
         environment, so task distribution would not affect the produced objects.
 
-    PCH support.
+    * PCH support.
         DistriBuild supports pre-compiled headers. Precompiled headers are
         created locally, on the client machine and are transferred as needed to
         specific farm nodes.
 
-    Pump-mode.
+    * Pump-mode.
         DistriBuild collects all headers required by a source file and transfers
         this data to the farm node. For this part to be done properly,
         DistriBuild has to preprocess the source file, which is done using a bit
         modified Clang's preprocessor.
 
---------------------------------------------------------------------------------
-----------------
-(3.) Trade-offs.
-----------------
+-----------
+Trade-offs.
+-----------
 
     * Many farm nodes and PCH.
         * Precompiled headers are usually very large. Transferring them to
@@ -66,105 +54,99 @@ DistriBuild
           compilation - overhead added by DistriBuild might cause the overall
           compilation time to increase.
 
---------------------------------------------------------------------------------
-------------------
-(4.) Requirements.
-------------------
+-------------
+Requirements.
+-------------
 
     DistriBuild is written in Python (www.python.org). All machines need to have
     Pyhton installed. DistriBuild works only with Python 3.3+.
 
     Compiler needs to be installed on all used server & client machines.
 
---------------------------------------------------------------------------------
------------------
-(5.) Quick-start.
------------------
+------------
+Quick-start.
+------------
 
-    ------------------------------------------
-    Set up a server machine in the build farm.
-    ------------------------------------------
+    * Set up a server machine in the build farm.
+        * Install required external software, e.g. compiler & Python.
+        * Copy DistriBuid scripts.
+        * Configure hostname and port.
+        * Run distribute_server.py.
 
-    Install required external software, e.g. compiler & Python.
-    Copy DistriBuid scripts.
-    Configure hostname and port.
-    Run distribute_server.py.
+    * Set up a client machine.
+        * Install required external software, e.g. compiler & Python.
+        * Copy DistriBuid scripts.
 
-    ------------------------
-    Set up a client machine.
-    ------------------------
-
-    Install required external software, e.g. compiler & Python.
-    Copy DistriBuid scripts.
-
-    Set up the DistriBuild manager.
-        [keeps track of all the build process's global data]
-        [holds information about the used build farm]
-        [you can have multiple managers on the same machine]
-        - set up distribute_manager.ini
-        - run distribute_manager.py
+    * Set up the DistriBuild manager.
+        * [keeps track of all the build process's global data]
+        * [holds information about the used build farm]
+        * [you can have multiple managers on the same machine]
+        * set up distribute_manager.ini
+        * run distribute_manager.py
 
     The build environment is now set and you just need to call the compiler.
 
-    ---------------------
     Calling the compiler.
-    ---------------------
 
     Instead of calling 'cl.exe' you need to call 'msvc.py <manager_id>'. Your
     environment should already be configured for compilation, i.e. you should
     manually call the compiler setup script. msvc.py will try to locate the
     compiler executable on the system PATH.
 
---------------------------------------------------------------------------------
-------------
-(6.) Design.
-------------
+-------
+Design.
+-------
 
     * Why are sources not preprocessed on the host machine?
-        TODO
+        * TODO
 
     * Why use Clang?
-        TODO
+        * TODO
 
     * Why use ZeroMQ?
-        TODO
+        * TODO
 
     * Why is there a cache?
-        TODO
+        * TODO
 
     * Is cache optional?
-        TODO
+        * TODO
 
---------------------------------------------------------------------------------
-----------------
-(7.) Benchmarks.
-----------------
+-----------
+Benchmarks.
+-----------
 
-    * Currently DistriBuild is mainly tested by building Boost libraries
-      (www.boost.org).
+    * Currently DistriBuild is mainly tested by building Boost libraries (www.boost.org).
         * Boost libraries make heavy use of preprocessor, and are thus an ideal
           candidates for testing both speed and sanity.
     * Building Boost was done with the following command, after modifying
       Boost.Build to use DistriBuild's compiler instead of the native msvc
       compiler executable:
+
         bjam stage --stagedir=. -j ##
+
     * The host machine was not a farm node in distributed compilation.
     * Tested Boost library version: 1.54.
 
-    ------------------------------------------------------------
+    +---------------+------------+---------+---------+---------+
+    |               |            |         |         |         |
     | type          | parallel # | local   | 2 nodes | 3 nodes |
-    ------------------------------------------------------------
+    |               |            |         |         |         |
+    +===============+============+=========+=========+=========+
     | regular build | 4  tasks   | 7:32.09 |         |         |
+    +---------------+------------+---------+---------+---------+
     | distributed   | 4  tasks   |         | 8:20.54 | 7:56.79 |
+    +---------------+------------+---------+---------+---------+
     | distributed   | 16 tasks   |         | 5:07.55 | 4:14.09 |
+    +---------------+------------+---------+---------+---------+
     | distributed   | 32 tasks   |         | 4:27.89 | 3:57.90 |
+    +---------------+------------+---------+---------+---------+
     | distributed   | 40 tasks   |         | 4:22.89 | 4:01.11 |
-    ------------------------------------------------------------
+    +---------------+------------+---------+---------+---------+
 
---------------------------------------------------------------------------------
-------------------------------
-(8.) Future development plans.
-------------------------------
+-------------------------
+Future development plans.
+-------------------------
 
     * Support more platforms.
         * Support GCC on Windows (MinGW).
@@ -175,9 +157,12 @@ DistriBuild
     * Performance improvement. Currently the client is written in Python.
       Running many (30+) of these in parallel chokes the host machine, wasting
       cycles which would be better used for pumping new tasks.
+
         * Rewrite the client in C++.
 
     * Implement broken (invalid) connection detection using heart-beats.
-        * see http://zguide.zeromq.org/page:all#Chapter-Reliable-Request-Reply-Patterns
+        * see `ZeroMQ Guide <http://zguide.zeromq.org/page:all#Chapter-Reliable-Request-Reply-Patterns>`_.
 
---------------------------------------------------------------------------------
+-------------------------
+Bugs.
+-------------------------

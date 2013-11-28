@@ -158,7 +158,13 @@ int main( int argc, char * argv[] )
     GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
     unsigned short port = atoi( buffer );
 
-    boost::asio::ip::address localhost = boost::asio::ip::address::from_string("127.0.0.1");
+    boost::system::error_code addressError;
+    boost::asio::ip::address localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
+    if ( addressError )
+    {
+        std::cerr << "Could not resolve address: " << addressError.message() << '\n';
+        return -1;
+    }
     boost::asio::ip::tcp::endpoint endpoint;
     endpoint.address( localhost );
     endpoint.port( port );

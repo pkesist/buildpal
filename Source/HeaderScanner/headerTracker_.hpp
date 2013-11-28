@@ -224,7 +224,7 @@ public:
     {
     }
 
-    void enterSourceFile( clang::FileEntry const *, llvm::StringRef dirPart, llvm::StringRef relPart );
+    void enterSourceFile( clang::FileEntry const *, llvm::StringRef fileName );
     Headers exitSourceFile();
 
     void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );

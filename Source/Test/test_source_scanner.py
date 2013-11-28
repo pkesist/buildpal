@@ -1,5 +1,25 @@
-from Manager import collect_headers
+import preprocessing
+import threading
 import os
+
+def collect_headers(filename, includes=[], defines=[],
+        sysincludes=[], ignored_headers=[]):
+    cache = preprocessing.Cache()
+    preprocessor = preprocessing.Preprocessor(cache)
+    ppc = preprocessing.PreprocessingContext()
+    for path in includes:
+        ppc.add_include_path(path, False)
+    for path in sysincludes:
+        ppc.add_include_path(path, True)
+    for define in defines:
+        define = define.split('=')
+        assert len(define) == 1 or len(define) == 2
+        macro = define[0]
+        value = define[1] if len(define) == 2 else ""
+        ppc.add_macro(macro, value)
+    for ignored_header in ignored_headers:
+        ppc.add_ignored_header(ignored_header)
+    return preprocessor.scan_headers(ppc, filename)
 
 class Environment:
     def __init__(self, dir):
@@ -15,10 +35,9 @@ class Environment:
 
     def run(self, filename, includes=[], defines=[]):
         return set(x[1] for x in collect_headers(
-            self.dir,
-            filename,
-            [os.path.join(self.dir, i) for i in includes],
-            [], defines))
+            os.path.join(self.dir, filename),
+            includes=[os.path.join(self.dir, i) for i in includes],
+            defines=defines))
 
 def test_simple(tmpdir):
     env = Environment(tmpdir)
@@ -51,7 +70,7 @@ def test_macros(tmpdir):
 ''')
     assert env.run('test1.cpp') == {'a.h'}
 
-def test_header_guard(tmpdir, dump):
+def test_header_guard(tmpdir):
     env = Environment(tmpdir)
     env.make_file('aaa/a.h')
     env.make_file('aaa/x.h', '''

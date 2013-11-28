@@ -11,7 +11,7 @@ def get_preprocessor():
         data.pp = preprocessing.Preprocessor(cache)
     return data.pp
 
-def collect_headers(dir, filename, includes, sysincludes, defines, ignored_headers=[]):
+def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]):
     preprocessor = get_preprocessor()
     preprocessor.set_ms_mode(True) # If MSVC.
     preprocessor.set_ms_ext(True) # Should depend on Ze & Za compiler options.
@@ -28,7 +28,7 @@ def collect_headers(dir, filename, includes, sysincludes, defines, ignored_heade
         ppc.add_macro(macro, value)
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)
-    return preprocessor.scan_headers(ppc, dir, filename)
+    return preprocessor.scan_headers(ppc, filename)
 
 def cache_info():
     stats = list(cache.get_stats() for cache in caches)

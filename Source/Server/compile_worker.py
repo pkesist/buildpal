@@ -1,7 +1,7 @@
 from Common import send_compressed_file, SimpleTimer
 from Common import create_socket, recv_multipart
 
-from io import BytesIO
+from io import BytesIO, StringIO
 from multiprocessing import Process, cpu_count
 from time import sleep, time
 from struct import pack
@@ -73,8 +73,9 @@ class CompileSession:
 
     def process_failure(self, exception):
         assert self.state == self.STATE_WAIT_FOR_TASK_DATA
-        tb = io.StringIO()
+        tb = StringIO()
         traceback.print_exc(file=tb)
+        tb.seek(0)
         sender = self.Sender(self.id)
         sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
         sender.disconnect()
@@ -141,8 +142,11 @@ class CompileSession:
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
         try:
+            object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
+            os.close(object_file_handle)
+
             compiler_prep = time()
-            self.source_file = os.path.join(self.include_path, self.task['source'])
+            self.source_file = os.path.join(self.include_path, self.src_loc)
             if self.task['pch_file'] is not None:
                 while not self.file_repository.file_arrived(
                     *self.task['pch_file']):
@@ -153,19 +157,15 @@ class CompileSession:
                     # Just not worth the additional complexity.
                     sleep(1)
 
-            object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
-            os.close(object_file_handle)
-
             compiler_info = self.task['compiler_info']
-            noLink = compiler_info.compile_no_link_option.make_value().make_str()
-            output = compiler_info.object_name_option.make_value(
-                object_file_name).make_str()
+            noLink = compiler_info.compile_no_link_option.make_value().make_args()
+            output = compiler_info.object_name_option.make_value(object_file_name).make_args()
             pch_switch = []
             if self.task['pch_file']:
                 assert self.pch_file is not None
                 assert os.path.exists(self.pch_file)
-                pch_switch.append(
-                    compiler_info.pch_file_option.make_value(self.pch_file).make_str())
+                pch_switch.extend(
+                    compiler_info.pch_file_option.make_value(self.pch_file).make_args())
 
             while not self.compiler_repository.has_compiler(self.compiler_id):
                 # Compiler is being downloaded by another session.
@@ -173,14 +173,14 @@ class CompileSession:
                 sleep(1)
 
             include_dirs = self.include_dirs_future.result()
+            includes = []
+            for incpath in include_dirs:
+                includes.extend(compiler_info.include_option.make_value(incpath).make_args())
 
             start = time()
             self.times['compiler_prep'] = start - compiler_prep
             command = (self.task['call'] + pch_switch +
-                [noLink, output] +
-                [compiler_info.include_option.make_value(incpath).make_str()
-                    for incpath in include_dirs] +
-                [self.source_file])
+                noLink + output + includes + [self.source_file])
             retcode, stdout, stderr = self.compiler(command,
                 self.include_path)
             done = time()
@@ -343,7 +343,8 @@ class CompileSession:
             assert msg[0] == b'TASK_FILES'
             fqdn = msg[1]
             tar_data = msg[2]
-            self.times['wait_hdr_list_result'] = pickle.loads(msg[3])
+            self.src_loc = msg[3].tobytes().decode()
+            self.times['wait_hdr_list_result'] = pickle.loads(msg[4])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
             self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, tar_data)

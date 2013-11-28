@@ -27,6 +27,45 @@ def with_param(name, macros=[]):
         result.add_macro(macro)
     return result
 
+def with_space_param(name, macros=[]):
+    result = CompilerOption(name, suff=None, has_arg=True, separate_arg_with_space=True)
+    for macro in macros:
+        result.add_macro(macro)
+    return result
+
+class LinkOption(CompilerOption):
+    @classmethod
+    def name(cls):
+       return 'link'
+
+    class Value:
+        def __init__(self, option, args):
+            self.option = option
+            self.args = ['/link']
+            self.args.extend(args)
+
+        def make_args(self):
+            return self.args
+
+    def __init__(self):
+        return super().__init__('link', None, True, True)
+
+    def parse(self, option, iter):
+        import pdb
+        pdb.set_trace
+        if option[0] not in self.esc:
+            return None
+        if option[1:].lower() != 'link':
+            return None
+
+        args = []
+        try:
+            args.append(next(iter))
+        except StopIteration:
+            pass
+
+        return self.Value(self, args)
+
 
 class CompilerInfo:
     def __init__(self, toolset, executable, id, macros):
@@ -123,6 +162,12 @@ class MSVCWrapper(CompilerWrapper):
         for option in self.compilation_options:
             option.add_category(CompilationCategory)
             self.add_option(option)
+        # Linking
+        link_option = LinkOption()
+        link_option.add_category(LinkingCategory)
+        print(link_option.test_category(LinkingCategory))
+        self.add_option(link_option)
+
         # Options requiring special handling.
         for option in self.special_handling:
             option.add_category(SpecialHandlingCategory)
@@ -222,10 +267,11 @@ class MSVCWrapper(CompilerWrapper):
 
     def create_call(self, option_values):
         compile_call = ['cl.exe']
-        compile_call.extend(option.make_str() for option in
-            option_values.filter_options(CompilationCategory))
+        for option in option_values.filter_options(CompilationCategory):
+            compile_call.extend(option.make_args())
         macros = [token.val for token in option_values.filter_options(self.define_option())]
-        compile_call.extend(self.define_option().make_value(define).make_str() for define in macros)
+        for define in macros:
+            compile_call.extend(self.define_option().make_value(define).make_args())
         # Disable generating PDB files when compiling cpp into obj.
         # Store debug info in the obj file itself.
         if option_values.filter_options('Zi'):
@@ -358,4 +404,4 @@ class MSVCWrapper(CompilerWrapper):
         with_param    ('wd'), with_param    ('we'), with_param    ('wo'), with_param  ('w'),
         simple      ('Wall'), simple        ('WL'), simple        ('WX'), with_param  ('W'),
         simple        ('Yd'), with_param    ('Zm'), simple        ('LD'), simple      ('LN'),
-        with_param     ('F'), simple      ('link'), with_param('analyze')]
+        with_param     ('F'), with_param('analyze')]

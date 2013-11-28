@@ -310,15 +310,14 @@ int PyPreprocessor_init( PyPreprocessor * self, PyObject * args, PyObject * kwds
 
 PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, PyObject * kwds )
 {
-    static char * kwlist[] = { "pp_ctx", "dir", "filename", NULL };
+    static char * kwlist[] = { "pp_ctx", "filename", NULL };
 
     PyObject * pObject = 0;
-    PyObject * dir = 0;
     PyObject * filename = 0;
 
     assert( self->pp );
 
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OOO", kwlist, &pObject, &dir, &filename ) )
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "OO", kwlist, &pObject, &filename ) )
         return NULL;
 
     if ( !pObject || ( (PyTypeObject *)PyObject_Type( pObject ) != &PyPreprocessingContextType ) )
@@ -329,12 +328,6 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
 
     PyPreprocessingContext const * ppContext( reinterpret_cast<PyPreprocessingContext *>( pObject ) );
 
-    if ( dir && !PyUnicode_Check( dir ) )
-    {
-        PyErr_SetString( PyExc_Exception, "Expected a string as 'dir' parameter." );
-        return NULL;
-    }
-
     if ( filename && !PyUnicode_Check( filename ) )
     {
         PyErr_SetString( PyExc_Exception, "Expected a string as 'filename' parameter." );
@@ -344,7 +337,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     Headers headers;
 
     Py_BEGIN_ALLOW_THREADS
-    headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( dir ), PyUnicode_AsUTF8( filename ) );
+    headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ) );
     Py_END_ALLOW_THREADS
 
     PyObject * result = PyTuple_New( headers.size() );

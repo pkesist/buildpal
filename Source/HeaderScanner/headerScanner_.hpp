@@ -116,14 +116,14 @@ class Preprocessor
 public:
     explicit Preprocessor( Cache * cache );
 
-    Headers scanHeaders( PreprocessingContext const &, std::string const & dir, std::string const & relFilename );
+    Headers scanHeaders( PreprocessingContext const &, llvm::StringRef filename );
     clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
     void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
 
 private:
-    void setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename );
+    void setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
 
 private:
     clang::CompilerInstance       & compiler     ()       { return compiler_; }

@@ -112,14 +112,6 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
     // If including header is system header, then so are we.
     assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
-    if ( headerLocation == HeaderLocation::relative )
-    {
-        searchPath = parentSearchPath.get();
-        relativePath = parentRelative.get();
-        llvm::sys::path::remove_filename( relativePath );
-        llvm::sys::path::append( relativePath, include );
-    }
-
     HeaderWithFileEntry const headerWithFileEntry =
     {
         {
@@ -183,15 +175,15 @@ clang::SourceManager & HeaderTracker::sourceManager() const
     return preprocessor_.getSourceManager();
 }
 
-void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llvm::StringRef dir, llvm::StringRef relFilename )
+void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llvm::StringRef fileName )
 {
     assert( headerCtxStack().empty() );
     assert( mainFileEntry );
     HeaderWithFileEntry const hwf =
     {
         {
-            fromStringRef<Dir>( dir ),
-            fromStringRef<HeaderName>( relFilename ),
+            fromStringRef<Dir>( llvm::StringRef() ),
+            fromStringRef<HeaderName>( fileName ),
             0,
             HeaderLocation::regular
         },

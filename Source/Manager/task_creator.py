@@ -13,7 +13,7 @@ class OptionValues:
     def filter_options(self, filter):
         if type(filter) == type and issubclass(filter, Category):
             return (token for token in self.__values
-                if type(token.option) == CompilerOption and
+                if issubclass(type(token.option), CompilerOption) and
                 token.option.test_category(filter))
         elif isinstance(filter, CompilerOption):
             return (token for token in self.__values
@@ -31,7 +31,7 @@ class TaskCreator:
         self.__compiler = compiler_wrapper
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
-        self.__option_values = OptionValues(list(compiler_wrapper.parse_options(cwd, command[1:])))
+        self.__option_values = OptionValues(list(compiler_wrapper.parse_options(cwd, command)))
         self.__cwd = cwd
 
     def executable(self):
@@ -41,7 +41,12 @@ class TaskCreator:
         return self.__option_values
 
     def input_files(self):
-        return (input.make_str() for input in self.__option_values.free_options())
+        result = []
+        for input in self.__option_values.free_options():
+            list = input.make_args()
+            assert len(list) == 1
+            result.append(list[0])
+        return result
 
     def build_local(self):
         return bool(list(self.option_values().filter_options(BuildLocalCategory)))
@@ -85,19 +90,17 @@ class TaskCreator:
             pass
 
         def create_task(source):
-            if os.path.isabs(source):
-                source = os.path.relpath(source, self.__cwd)
+            if not os.path.isabs(source):
+                source = os.path.join(self.__cwd, source)
 
             task = Task()
             task.__dict__.update(
             {
                 'server_task_info' : {
                     'call' : compile_call,
-                    'source' : source,
                     'pch_file' : pch_file,
                 },
                 'preprocess_task_info' : {
-                    'cwd' : self.__cwd,
                     'source' : source,
                     'macros' : macros + builtin_macros,
                     'includes' : includes,
@@ -144,19 +147,22 @@ class TaskCreator:
             client_conn.send([b'COMPLETED', b'0', stdout, stderr])
             return
 
-        print("Linking...")
         objects = {}
         for task in self.tasks:
             objects[task.source] = task.output
 
         call = [self.executable()]
-        call.extend(o.make_str() for o in
-            self.option_values().filter_options(LinkingCategory))
+
         for input in self.input_files():
             if input in objects:
                 call.append(objects[input])
             else:
                 call.append(input)
+
+        # Link options must go last.
+        for o in self.option_values().filter_options(LinkingCategory):
+            call.extend(o.make_args())
+
         client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
 
 
@@ -165,7 +171,8 @@ def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):
                         command)
     if task_creator.build_local():
         call = [task_creator.executable()]
-        call.extend(option.make_str() for option in task_creator.option_values().all())
+        for option in task_creator.option_values().all():
+            call.extend(option.make_args())
         client_conn.send([b'EXECUTE_AND_EXIT\x00' + list2cmdline(call).encode() + b'\x00\x01'])
         return []
     return task_creator.create_tasks()

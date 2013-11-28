@@ -12,7 +12,7 @@ from socket import getfqdn
 
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from multiprocessing import Process, cpu_count
+from multiprocessing import cpu_count
 
 
 def header_beginning(filename):
@@ -27,8 +27,8 @@ def header_beginning(filename):
     return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
 
 def header_info(task):
-    header_info = collect_headers(task['cwd'], task['source'],
-        task['includes'], task['sysincludes'], task['macros'],
+    header_info = collect_headers(task['source'], task['includes'],
+        task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
     return ((dir, file, relative, content, header_beginning(abs), \
         adler32(content)) for dir, file, relative, content in header_info)
@@ -73,7 +73,9 @@ class SourceScanner:
             self.state = self.STATE_WAITING_FOR_TASK
             self.conn_id = conn_id
             self.task = task
-            executor.submit(self.calc_header_info, zmq_ctx)
+            def verify(future):
+                future.result()
+            executor.submit(self.calc_header_info, zmq_ctx).add_done_callback(verify)
 
         def calc_header_info(self, zmq_ctx):
             timer = SimpleTimer()
@@ -146,8 +148,8 @@ class SourceScanner:
             elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                 assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
                 missing_files = pickle.loads(msg[1])
-                new_tar = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), new_tar.read(), pickle.dumps(session.wait_for_header_list_response.get())])
+                new_tar, src_loc = self.tar_with_new_headers(session.task, missing_files, session.header_info)
+                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), new_tar.read(), src_loc.encode(), pickle.dumps(session.wait_for_header_list_response.get())])
                 self.poller.unregister(socket)
                 self.sockets[session.node_index].append(socket)
                 del self.server_sessions[socket]
@@ -159,9 +161,10 @@ class SourceScanner:
     @classmethod
     def tar_with_new_headers(cls, task, in_filelist, header_info):
         paths_to_include = []
-        relative_paths = {}
+        relative_includes = {}
         tar_buffer = BytesIO()
         rel_counter = 0
+        max_depth = 0
         with tarfile.open(mode='w', fileobj=tar_buffer) as out_tar:
             header_info_iter = iter(header_info)
             for in_name in in_filelist:
@@ -181,26 +184,32 @@ class SourceScanner:
                 # Handle '.' in include directive.
                 path_elements = [p for p in path_elements if p != '.']
                 # Handle '..' in include directive.
-                while '..' in path_elements:
-                    index = path_elements.index('..')
-                    if index == 0:
-                        depth += 1
-                        del path_elements[index]
+                if relative:
+                    while '..' in path_elements:
+                        index = path_elements.index('..')
+                        if index == 0:
+                            depth += 1
+                            if depth > max_depth:
+                                max_depth += 1
+                            del path_elements[index]
+                        else:
+                            del path_element[index - 1:index + 1]
+                    if depth:
+                        relative_includes.setdefault(depth - 1, []).append((dir, '/'.join(path_elements), content, header))
                     else:
-                        del path_element[index - 1:index + 1]
-                if depth:
-                    path_elements = ['_rel_includes'] + path_elements
-                    if not depth in relative_paths:
-                        # Add a dummy file which will create this structure.
-                        relative_paths[depth] = '_rel_includes/' + 'rel/' * depth
-                        paths_to_include.append(relative_paths[depth])
-                        write_str_to_tar(out_tar, relative_paths[depth] + 'dummy', b'')
-                write_str_to_tar(out_tar, '/'.join(path_elements), content, header)
+                        write_str_to_tar(out_tar, '/'.join(path_elements), content, header)
+                write_str_to_tar(out_tar, file, content, header)
+            
+            curr_dir = ''
+            for depth in range(max_depth):
+                curr_dir += 'dummy_rel/'
+                for dir, file, content, header in relative_includes[depth]:
+                    write_str_to_tar(out_tar, curr_dir + file, content, header)
             if paths_to_include:
                 write_str_to_tar(out_tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
-            rel_file = task['source']
-            cpp_file = os.path.join(task['cwd'], rel_file)
+            rel_file = curr_dir + os.path.basename(task['source'])
+            cpp_file = task['source']
             with open(cpp_file, 'rb') as src:
                 write_str_to_tar(out_tar, rel_file, src.read(), header_beginning(cpp_file))
         tar_buffer.seek(0)
-        return tar_buffer
+        return tar_buffer, rel_file

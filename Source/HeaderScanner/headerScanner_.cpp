@@ -35,8 +35,7 @@ namespace
         explicit HeaderScanner
         (
             HeaderTracker & headerTracker,
-            llvm::StringRef dir,
-            llvm::StringRef relFilename,
+            llvm::StringRef filename,
             clang::Preprocessor & preprocessor,
             IgnoredHeaders const & ignoredHeaders,
             Headers & includedHeaders
@@ -46,8 +45,7 @@ namespace
             preprocessor_  ( preprocessor    ),
             headers_       ( includedHeaders ),
             ignoredHeaders_( ignoredHeaders  ),
-            dir_           ( dir             ),
-            relFilename_   ( relFilename     )
+            filename_      ( filename        )
         {
         }
 
@@ -72,7 +70,7 @@ namespace
                 if ( !fileEntry )
                     return;
                 if ( fileId == preprocessor_.getSourceManager().getMainFileID() )
-                    headerTracker_.enterSourceFile( fileEntry, dir_, relFilename_ );
+                    headerTracker_.enterSourceFile( fileEntry, filename_ );
                 else
                     headerTracker_.enterHeader();
             }
@@ -134,8 +132,7 @@ namespace
     private:
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
-        llvm::StringRef dir_;
-        llvm::StringRef relFilename_;
+        llvm::StringRef filename_;
         Headers & headers_;
         IgnoredHeaders const & ignoredHeaders_;
     };
@@ -200,7 +197,7 @@ Preprocessor::Preprocessor( Cache * cache )
     compiler().getFileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 }
 
-void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, std::string const & filename )
+void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
     if ( compiler().hasSourceManager() )
         compiler().getSourceManager().clearIDTables();
@@ -254,13 +251,10 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
     return headerSearch;
 }
 
-Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string const & dir, std::string const & relFilename )
+Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
-    llvm::SmallString<1024 * 2> filename;
-    llvm::sys::path::append( filename, dir );
-    llvm::sys::path::append( filename, relFilename );
     clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
-    setupPreprocessor( ppc, filename.str() );
+    setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
     {
         DiagnosticsSetup( clang::DiagnosticConsumer & client,
@@ -287,7 +281,7 @@ Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, std::string
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_ );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, dir, relFilename,
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, filename,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 
     preprocessor().EnterMainSourceFile();

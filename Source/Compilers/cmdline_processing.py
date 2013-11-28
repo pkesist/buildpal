@@ -13,15 +13,19 @@ class CmdLineOption:
 
         def __str__(self):
             return ("<CmdLineOption.Value object: '{}'>"
-                .format(self.make_str()))
+                .format(self.make_args()))
 
-        def make_str(self):
-            return "{}{}{}{}{}".format(
+        def make_args(self):
+            opt = "{}{}{}".format(
                 self.esc or (self.option.def_esc() if self.option else ''),
                 self.option.name() if self.option else '',
-                self.suf or '',
-                self.sep or '',
-                self.val or '')
+                self.suf or '')
+            val = self.val or ''
+
+            if self.sep == ' ':
+                return (opt, val)
+            else:
+                return (opt + self.sep if self.sep else '' + val)
 
     def __init__(self, name, suff=None, has_arg=True, separate_arg_with_space=True):
         self.__name = name
@@ -76,8 +80,17 @@ class CmdLineOption:
         raise RuntimeError("Missing value for option '{}'.".format(option))
 
 class FreeOption:
-    def name(self): return ''
-    def def_esc(self): return ''
+    @classmethod
+    def name(cls):
+        return ''
+
+    class Value:
+        def __init__(self, str):
+            self.str = str
+            self.option = FreeOption()
+        
+        def make_args(self):
+            return [self.str]
         
 class CmdLineOptions:
     __options = {}
@@ -134,7 +147,7 @@ class CmdLineOptions:
                 yield token
 
     def __free_option(self, token):
-        return CmdLineOption.Value(FreeOption(), None, None, None, token)
+        return FreeOption.Value(token)
         
 
 class Category: pass

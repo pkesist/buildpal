@@ -63,7 +63,7 @@ class NodeInfo:
         self.__tasks_processing_about_to_change()
         self._tasks_completed += 1
 
-    def add_tasks_failed(self): self._add_tasks_failed += 1
+    def add_tasks_failed(self): self._tasks_failed += 1
 
     def add_total_time(self, value): self._total_time += value
 

@@ -122,8 +122,6 @@ class SourceScanner:
                     self.server_sessions[socket] = session
                     session.state = self.Session.STATE_ATTACHING_TO_SESSION
                 else:
-                    if msg[0] != b'DROP':
-                        print([m.tobytes() for m in msg])
                     assert msg[0] == b'DROP'
             return True
         elif socket is self.sessions_socket:

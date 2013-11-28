@@ -165,7 +165,6 @@ class MSVCWrapper(CompilerWrapper):
         # Linking
         link_option = LinkOption()
         link_option.add_category(LinkingCategory)
-        print(link_option.test_category(LinkingCategory))
         self.add_option(link_option)
 
         # Options requiring special handling.

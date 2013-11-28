@@ -22,6 +22,7 @@ class CompileSession:
     STATE_RECEIVE_RESULT_FILE = 7
     STATE_POSTPROCESS = 8
     STATE_DONE = 9
+    STATE_SERVER_FAILURE = 10
 
     def __init__(self, compiler, executable, task, client_conn, preprocess_socket,
         compiler_info):
@@ -122,8 +123,8 @@ class CompileSession:
             self.node_info.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
-                self.client_conn.send([b'EXIT', b'-1'])
-                self.state = self.STATE_DONE
+                self.node_info.add_tasks_failed()
+                self.state = self.STATE_SERVER_FAILURE
                 return True
             else:
                 assert server_status == b'SERVER_DONE'
@@ -136,7 +137,6 @@ class CompileSession:
                     self.state = self.STATE_RECEIVE_RESULT_FILE
                     self.receive_result_time = SimpleTimer()
                 else:
-                    self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                     self.node_info.add_tasks_completed()
                     self.state = self.STATE_DONE
                     return True
@@ -151,7 +151,6 @@ class CompileSession:
                 del self.receive_result_time
                 self.output.close()
                 del self.output
-                self.client_conn.send([b'COMPLETED', str(self.retcode).encode(), self.stdout, self.stderr])
                 self.node_info.add_tasks_completed()
                 self.state = self.STATE_DONE
                 return True

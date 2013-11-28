@@ -8,7 +8,6 @@ import os
 import re
 import sys
 import tempfile
-import winreg
 
 def simple(name, macros=[]): 
     result = CompilerOption(name, suff=None, has_arg=False)

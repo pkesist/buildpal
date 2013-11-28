@@ -108,16 +108,41 @@ class TaskCreator:
                 'pch_file' : pch_file,
                 'source' : source,
             })
+            task.task_done = lambda *args : self.task_done(task, *args)
             return task
-        return [create_task(source) for source in sources]
+        self.tasks = set(create_task(source) for source in sources)
+        self.completed_tasks = {}
+        return self.tasks
+
+    def task_done(self, task, client_conn, retcode, stdout, stderr):
+        assert task in self.tasks
+        assert task not in self.completed_tasks
+        self.completed_tasks[task] = (retcode, stdout, stderr)
+        stdout = ''
+        stderr = ''
+        if self.tasks == self.completed_tasks.keys():
+            self.postprocess(client_conn)
 
     def should_invoke_linker(self):
         return self.__compiler.compile_no_link_option() not in [
-            token.option for token in self.option_values()]
+            token.option for token in self.option_values().all()]
 
-    def postprocess(self):
+    def postprocess(self, client_conn):
+        error_code = None
+        stdout = b''
+        stderr = b''
+        for task, result in self.completed_tasks.items():
+            if result[0] != 0:
+                error_code = str(result[0]).encode()
+            stdout += result[1]
+            stderr += result[2]
+        if error_code:
+            client_conn.send([b'COMPLETED', error_code, stdout, stderr])
+            return
+
         if not self.should_invoke_linker():
-            return False, None
+            client_conn.send([b'COMPLETED', b'0', stdout, stderr])
+            return
 
         print("Linking...")
         objects = {}
@@ -132,8 +157,7 @@ class TaskCreator:
                 call.append(objects[input])
             else:
                 call.append(input)
-        print("Calling '{}'.".format(call))
-        return True, subprocess.call(call)
+        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
 
 
 def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):

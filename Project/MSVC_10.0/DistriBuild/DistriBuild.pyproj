@@ -47,6 +47,10 @@
     <Compile Include="Source\Server\file_repository.py" />
     <Compile Include="Source\Server\header_repository.py" />
     <Compile Include="Source\Server\__init__.py" />
+    <Compile Include="Source\setup_manager.py" />
+    <Compile Include="Source\setup_server.py" />
+    <Compile Include="Source\Test\test_compile.py" />
+    <Compile Include="Source\Test\test_source_scanner.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
@@ -56,10 +60,11 @@
     <Folder Include="Source\Manager\" />
     <Folder Include="Source\Common" />
     <Folder Include="Source\Compilers\" />
+    <Folder Include="Source\Test" />
     <Folder Include="Source\Server\" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Documentation\doc.txt" />
+    <Content Include="Documentation\doc.rst" />
     <Content Include="Source\Client\build-config.ini" />
     <Content Include="Source\Client\db_cl.cpp" />
     <Content Include="Source\Client\Jamroot.jam" />

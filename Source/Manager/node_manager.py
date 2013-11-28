@@ -4,7 +4,7 @@ import zmq
 from functools import cmp_to_key
 from struct import pack
 
-from Common import create_socket
+from Common import create_socket, recv_multipart
 
 class NodeManager:
     STATE_SOCKET_OPEN = 0
@@ -107,7 +107,8 @@ class NodeManager:
     def handle_socket(self, socket):
         node_index, state = self.sockets_registered[socket]
         if state == self.STATE_SOCKET_OPEN:
-            session_created = socket.recv(copy=False).buffer.cast('B')
+            msg = recv_multipart(socket)
+            session_created = msg[0]
             assert session_created == b'SESSION_CREATED'
             self.sockets_registered[socket] = node_index, self.STATE_SOCKET_RESPONDED
             return None

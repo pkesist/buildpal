@@ -1,5 +1,4 @@
-from .scan_headers import collect_headers, dump_cache
-import pytest
+from Manager import collect_headers
 import os
 
 class Environment:
@@ -86,7 +85,3 @@ def test_header_guard(tmpdir, dump):
 ''')
     assert env.run('test2.cpp', includes=['aaa']) == \
         {'a.h', 'x.h'}
-
-@pytest.fixture(scope='module')
-def dump(request):
-    request.addfinalizer(dump_cache)

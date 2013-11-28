@@ -50,7 +50,7 @@ class SourceScanner:
         self.client_sessions = {}
         self.server_sessions = {}
 
-        self.executor = ThreadPoolExecutor(cpu_count() + 1)
+        self.executor = ThreadPoolExecutor(2 * cpu_count())
         self.poller = poller
 
         self.poller.register(self.mgr_socket, zmq.POLLIN)

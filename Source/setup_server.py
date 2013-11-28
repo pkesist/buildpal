@@ -18,6 +18,7 @@ if not libzmq_pyd:
 
 buildOptions = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
 include_files=[(libzmq_pyd, '')],
+include_msvcr=True
 )
 
 base = 'Console'

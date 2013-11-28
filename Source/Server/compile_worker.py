@@ -22,6 +22,7 @@ import shutil
 import sched
 import sys
 import tarfile
+import traceback
 import tempfile
 import zipfile
 import zlib
@@ -43,27 +44,40 @@ class CompileSession:
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
-    STATE_SH_WAIT_FOR_TASK_DATA = 3
-    STATE_WAITING_FOR_COMPILER = 4
-    STATE_SH_CHECK_PCH_TAG = 5
-    STATE_SH_GET_PCH_DATA = 6
+    STATE_WAITING_FOR_COMPILER = 3
+    STATE_CHECK_PCH_TAG = 4
+    STATE_GET_PCH_DATA = 5
+    STATE_WAIT_FOR_TASK_DATA = 6
 
     STATE_WAITING_FOR_HEADER_LIST = 0
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
-    def verify(future):
+    def verify(self, future):
         # This will raise an exception if we have one.
         # Otherwise we don't get any feedback from the
         # worker thread.
-        future.result()
+        try:
+            future.result()
+        except Exception as e:
+            self.process_failure(e)
+            self.cancel_autodestruct()
+            self.session_done()
 
     def async(func):
-        def wrapper(inst, runner, *args, **kwds):
-            future = runner.submit(func, inst, *args, **kwds)
-            future.add_done_callback(CompileSession.verify)
+        def wrapper(self, runner, *args, **kwds):
+            future = runner.submit(func, self, *args, **kwds)
+            future.add_done_callback(self.verify)
             return future
         return wrapper
+
+    def process_failure(self, exception):
+        assert self.state == self.STATE_WAIT_FOR_TASK_DATA
+        tb = io.StringIO()
+        traceback.print_exc(file=tb)
+        sender = self.Sender(self.id)
+        sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
+        sender.disconnect()
 
     def __init__(self, file_repository, header_repository, compiler_repository,
                  cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
@@ -120,7 +134,9 @@ class CompileSession:
 
     def run_compiler(self):
         self.cancel_autodestruct()
-        self.compile_thread_pool.submit(self.async_run_compiler, time()).add_done_callback(CompileSession.verify)
+        self.compile_thread_pool.submit(
+            self.async_run_compiler, time()).add_done_callback(
+            self.verify)
 
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
@@ -171,11 +187,8 @@ class CompileSession:
             self.times['compiler'] = done - start
             self.times['server_time'] = self.server_time_timer.get()
             del self.server_time_timer
-        except Exception:
-            sender = self.Sender(self.id)
-            sender.send_multipart([b'SERVER_FAILED'])
-            sender.disconnect()
-            raise
+        except Exception as e:
+            self.process_failure(e)
         else:
             sender = self.Sender(self.id)
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
@@ -205,9 +218,9 @@ class CompileSession:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                 self.run_compiler()
             else:
-                self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
+                self.state = self.STATE_WAIT_FOR_TASK_DATA
         else:
-            self.state = self.STATE_SH_CHECK_PCH_TAG
+            self.state = self.STATE_CHECK_PCH_TAG
 
     def session_done(self):
         self.terminate()
@@ -252,7 +265,7 @@ class CompileSession:
                     del self.compiler_data
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
                     self.compiler_ready()
-            elif self.state == self.STATE_SH_CHECK_PCH_TAG:
+            elif self.state == self.STATE_CHECK_PCH_TAG:
                 tag = msg[0]
                 assert tag == b'NEED_PCH_FILE'
                 self.pch_file, required = self.file_repository.register_file(
@@ -264,15 +277,15 @@ class CompileSession:
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()
-                    self.state = self.STATE_SH_GET_PCH_DATA
+                    self.state = self.STATE_GET_PCH_DATA
                 else:
                     sender.send(b'NO')
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                         self.run_compiler()
                     else:
-                        self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
-            elif self.state == self.STATE_SH_GET_PCH_DATA:
+                        self.state = self.STATE_WAIT_FOR_TASK_DATA
+            elif self.state == self.STATE_GET_PCH_DATA:
                 more, data = msg
                 self.pch_desc.write(self.pch_decompressor.decompress(data))
                 if more == b'\x00':
@@ -285,7 +298,7 @@ class CompileSession:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                         self.run_compiler()
                     else:
-                        self.state = self.STATE_SH_WAIT_FOR_TASK_DATA
+                        self.state = self.STATE_WAIT_FOR_TASK_DATA
             else:
                 raise Exception("Invalid state.")
         finally:
@@ -334,7 +347,7 @@ class CompileSession:
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
             self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, tar_data)
-            if self.state == self.STATE_SH_WAIT_FOR_TASK_DATA:
+            if self.state == self.STATE_WAIT_FOR_TASK_DATA:
                 self.times['waiting_for_mgr_data'] = 0
                 self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())
 

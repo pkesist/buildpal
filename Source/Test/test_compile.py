@@ -26,7 +26,7 @@ node[0]=localhost:{}:4
         os.path.realpath(__file__)), '..', 'distribute_manager.py'))
     proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir, shell=True)
     def teardown():
-        proc.send_signal(signal.CTRL_BREAK_EVENT)
+        proc.terminate()
         proc.wait()
         shutil.rmtree(dir)
     request.addfinalizer(teardown)
@@ -45,7 +45,7 @@ port={}
         os.path.realpath(__file__)), '..', 'distribute_server.py'))
     proc = subprocess.Popen([sys.executable, srv_script], cwd=dir, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def teardown():
-        proc.send_signal(signal.CTRL_BREAK_EVENT)
+        proc.terminate()
         proc.wait()
         shutil.rmtree(dir)
     request.addfinalizer(teardown)
@@ -58,7 +58,7 @@ def db_cl():
 @pytest.fixture(scope='module')
 def vcvarsall():
     import winreg
-    versions = ['11.0', '10.0', '9.0']
+    versions = ['9.0', '10.0', '11.0']
     dir = None
     for version in versions:
         try:

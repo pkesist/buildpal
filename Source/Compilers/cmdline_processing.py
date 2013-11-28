@@ -23,9 +23,9 @@ class CmdLineOption:
             val = self.val or ''
 
             if self.sep == ' ':
-                return (opt, val)
+                return [opt, val]
             else:
-                return (opt + self.sep if self.sep else '' + val)
+                return [opt + (self.sep if self.sep else '') + val]
 
     def __init__(self, name, suff=None, has_arg=True, separate_arg_with_space=True):
         self.__name = name

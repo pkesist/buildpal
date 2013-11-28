@@ -124,6 +124,9 @@ class CompileSession:
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
                 self.node_info.add_tasks_failed()
+                self.retcode = -1
+                self.stdout = b''
+                self.stderr = msg[1].tobytes()
                 self.state = self.STATE_SERVER_FAILURE
                 return True
             else:

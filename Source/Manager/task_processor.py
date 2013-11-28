@@ -233,7 +233,15 @@ class TaskProcessor:
                                         session.task.task_done(session.client_conn,
                                         session.retcode, session.stdout, session.stderr)
                                     elif session.state == session.STATE_SERVER_FAILURE:
-                                        start_task(task)
+                                        if hasattr(task, 'retries'):
+                                            task.retries += 1
+                                        else:
+                                            task.retries = 1
+                                        if task.retries <= 3:
+                                            start_task(task)
+                                        else:
+                                            session.task.task_done(session.client_conn,
+                                                session.retcode, session.stdout, session.stderr)
                             else:
                                 # Not part of a session, handled by node_manager.
                                 node_index = node_manager.handle_socket(socket)

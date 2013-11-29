@@ -47,16 +47,14 @@ class CompileSession:
     STATE_WAITING_FOR_COMPILER = 3
     STATE_CHECK_PCH_TAG = 4
     STATE_GET_PCH_DATA = 5
-    STATE_WAIT_FOR_TASK_DATA = 6
+    STATE_TASK_READY = 6
+    STATE_FAILED = 7
 
     STATE_WAITING_FOR_HEADER_LIST = 0
     STATE_WAITING_FOR_HEADERS = 1
     STATE_HEADERS_ARRIVED = 2
 
     def verify(self, future):
-        # This will raise an exception if we have one.
-        # Otherwise we don't get any feedback from the
-        # worker thread.
         try:
             future.result()
         except Exception as e:
@@ -64,18 +62,22 @@ class CompileSession:
             self.cancel_autodestruct()
             self.session_done()
 
-    def async(func):
-        def wrapper(self, runner, *args, **kwds):
-            future = runner.submit(func, self, *args, **kwds)
-            future.add_done_callback(self.verify)
-            return future
-        return wrapper
+    def async(no_verify=False):
+        def async_helper(func):
+            def wrapper(self, runner, *args, **kwds):
+                future = runner.submit(func, self, *args, **kwds)
+                if not no_verify:
+                    future.add_done_callback(self.verify)
+                return future
+            return wrapper
+        return async_helper
 
     def process_failure(self, exception):
-        assert self.state == self.STATE_WAIT_FOR_TASK_DATA
+        assert self.task_state == self.STATE_TASK_READY
         tb = StringIO()
         traceback.print_exc(file=tb)
         tb.seek(0)
+        self.task_state = self.STATE_FAILED
         sender = self.Sender(self.id)
         sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
         sender.disconnect()
@@ -83,7 +85,7 @@ class CompileSession:
     def __init__(self, file_repository, header_repository, compiler_repository,
                  cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
                  misc_thread_pool, scheduler):
-        self.state = self.STATE_START
+        self.task_state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
         self.compiler_repository = compiler_repository
@@ -107,12 +109,12 @@ class CompileSession:
             pass
 
     def created(self):
-        assert self.state == self.STATE_START
+        assert self.task_state == self.STATE_START
         accept_task = not self.cpu_usage_hwm or psutil.cpu_percent() < self.cpu_usage_hwm
         sender = self.Sender(self.id)
         sender.send_pyobj('ACCEPT' if accept_task else 'REJECT')
         sender.disconnect()
-        self.state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
+        self.task_state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
         return accept_task
 
     class Sender:
@@ -218,9 +220,9 @@ class CompileSession:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                 self.run_compiler()
             else:
-                self.state = self.STATE_WAIT_FOR_TASK_DATA
+                self.task_state = self.STATE_TASK_READY
         else:
-            self.state = self.STATE_CHECK_PCH_TAG
+            self.task_state = self.STATE_CHECK_PCH_TAG
 
     def session_done(self):
         self.terminate()
@@ -239,7 +241,7 @@ class CompileSession:
         self.prolong_lifetime()
         try:
             sender = self.Sender(self.id)
-            if self.state == self.STATE_GET_TASK:
+            if self.task_state == self.STATE_GET_TASK:
                 self.task_counter.inc()
                 self.server_time_timer = SimpleTimer()
                 self.waiting_for_header_list = SimpleTimer()
@@ -250,12 +252,12 @@ class CompileSession:
                 if has_compiler is None:
                     # Never heard of it.
                     sender.send(b'NEED_COMPILER')
-                    self.state = self.STATE_WAITING_FOR_COMPILER
+                    self.task_state = self.STATE_WAITING_FOR_COMPILER
                     self.compiler_data = BytesIO()
                 else:
                     sender.send(b'READY')
                     self.compiler_ready()
-            elif self.state == self.STATE_WAITING_FOR_COMPILER:
+            elif self.task_state == self.STATE_WAITING_FOR_COMPILER:
                 more, data = msg
                 self.compiler_data.write(data)
                 if more == b'\x00':
@@ -265,7 +267,7 @@ class CompileSession:
                     del self.compiler_data
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
                     self.compiler_ready()
-            elif self.state == self.STATE_CHECK_PCH_TAG:
+            elif self.task_state == self.STATE_CHECK_PCH_TAG:
                 tag = msg[0]
                 assert tag == b'NEED_PCH_FILE'
                 self.pch_file, required = self.file_repository.register_file(
@@ -277,15 +279,15 @@ class CompileSession:
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()
-                    self.state = self.STATE_GET_PCH_DATA
+                    self.task_state = self.STATE_GET_PCH_DATA
                 else:
                     sender.send(b'NO')
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                         self.run_compiler()
                     else:
-                        self.state = self.STATE_WAIT_FOR_TASK_DATA
-            elif self.state == self.STATE_GET_PCH_DATA:
+                        self.task_state = self.STATE_TASK_READY
+            elif self.task_state == self.STATE_GET_PCH_DATA:
                 more, data = msg
                 self.pch_desc.write(self.pch_decompressor.decompress(data))
                 if more == b'\x00':
@@ -298,13 +300,13 @@ class CompileSession:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                         self.run_compiler()
                     else:
-                        self.state = self.STATE_WAIT_FOR_TASK_DATA
+                        self.task_state = self.STATE_TASK_READY
             else:
                 raise Exception("Invalid state.")
         finally:
             sender.disconnect()
 
-    @async
+    @async()
     def send_missing_files(self, fqdn, filelist, attacher_id):
         try:
             sender = self.Sender(attacher_id)
@@ -315,10 +317,10 @@ class CompileSession:
         finally:
             sender.disconnect()
 
-    @async
-    def prepare_include_dirs(self, fqdn, tar_data):
+    @async(no_verify=True)
+    def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.header_repository.prepare_dir(fqdn, tar_data, self.repo_transaction_id, self.include_path)
+        result = self.header_repository.prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result
@@ -342,13 +344,13 @@ class CompileSession:
             del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
             fqdn = msg[1]
-            tar_data = msg[2]
+            new_files = msg[2]
             self.src_loc = msg[3].tobytes().decode()
             self.times['wait_hdr_list_result'] = pickle.loads(msg[4])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, tar_data)
-            if self.state == self.STATE_WAIT_FOR_TASK_DATA:
+            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, pickle.loads(new_files))
+            if self.task_state == self.STATE_TASK_READY:
                 self.times['waiting_for_mgr_data'] = 0
                 self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())
 

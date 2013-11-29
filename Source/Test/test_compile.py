@@ -4,7 +4,6 @@ import sys
 import subprocess
 import tempfile
 import shutil
-import signal
 
 MGR_PORT=33221
 SRV_PORT=33222
@@ -64,7 +63,7 @@ def vcvarsall():
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                 r'SOFTWARE\Microsoft\VisualStudio\{}\Setup\VC'.
-                format('9.0')) as key:
+                format(version)) as key:
                 dir = winreg.QueryValueEx(key, 'ProductDir')[0]
                 break
         except:

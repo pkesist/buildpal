@@ -4,7 +4,6 @@ from Common import SimpleTimer, write_str_to_tar
 from Common import create_socket, recv_multipart
 
 import zmq
-import tarfile
 import os
 import pickle
 from zlib import adler32
@@ -146,8 +145,8 @@ class SourceScanner:
             elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                 assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
                 missing_files = pickle.loads(msg[1])
-                new_tar, src_loc = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), new_tar.read(), src_loc.encode(), pickle.dumps(session.wait_for_header_list_response.get())])
+                new_files, src_loc = self.tar_with_new_headers(session.task, missing_files, session.header_info)
+                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), pickle.dumps(new_files), src_loc.encode(), pickle.dumps(session.wait_for_header_list_response.get())])
                 self.poller.unregister(socket)
                 self.sockets[session.node_index].append(socket)
                 del self.server_sessions[socket]
@@ -158,56 +157,52 @@ class SourceScanner:
 
     @classmethod
     def tar_with_new_headers(cls, task, in_filelist, header_info):
-        paths_to_include = []
         relative_includes = {}
-        tar_buffer = BytesIO()
         rel_counter = 0
         max_depth = 0
-        with tarfile.open(mode='w', fileobj=tar_buffer) as out_tar:
-            header_info_iter = iter(header_info)
-            for in_name in in_filelist:
-                found = False
-                while not found:
-                    try:
-                        dir, file, relative, content, header, checksum = next(header_info_iter)
-                        if in_name == file:
-                            found = True
-                            break
-                    except StopIteration:
-                        print("Could not find information for", in_name)
-                        raise 
-                assert found
-                depth = 0
-                path_elements = file.split('/')
-                # Handle '.' in include directive.
-                path_elements = [p for p in path_elements if p != '.']
-                # Handle '..' in include directive.
-                if relative:
-                    while '..' in path_elements:
-                        index = path_elements.index('..')
-                        if index == 0:
-                            depth += 1
-                            if depth > max_depth:
-                                max_depth += 1
-                            del path_elements[index]
-                        else:
-                            del path_element[index - 1:index + 1]
-                    if depth:
-                        relative_includes.setdefault(depth - 1, []).append((dir, '/'.join(path_elements), content, header))
+        files = {}
+        header_info_iter = iter(header_info)
+        for in_name in in_filelist:
+            found = False
+            while not found:
+                try:
+                    dir, file, relative, content, header, checksum = next(header_info_iter)
+                    if in_name == file:
+                        found = True
+                        break
+                except StopIteration:
+                    print("Could not find information for", in_name)
+                    raise 
+            assert found
+            depth = 0
+            path_elements = file.split('/')
+            # Handle '.' in include directive.
+            path_elements = [p for p in path_elements if p != '.']
+            # Handle '..' in include directive.
+            if relative:
+                while '..' in path_elements:
+                    index = path_elements.index('..')
+                    if index == 0:
+                        depth += 1
+                        if depth > max_depth:
+                            max_depth += 1
+                        del path_elements[index]
                     else:
-                        write_str_to_tar(out_tar, '/'.join(path_elements), content, header)
-                write_str_to_tar(out_tar, file, content, header)
+                        del path_element[index - 1:index + 1]
+                if depth:
+                    relative_includes.setdefault(depth - 1, []).append((dir, '/'.join(path_elements), content, header))
+                else:
+                    files['/'.join(path_elements)] = header + content
+            else:
+                files[file] = header + content
             
-            curr_dir = ''
-            for depth in range(max_depth):
-                curr_dir += 'dummy_rel/'
-                for dir, file, content, header in relative_includes[depth]:
-                    write_str_to_tar(out_tar, curr_dir + file, content, header)
-            if paths_to_include:
-                write_str_to_tar(out_tar, 'include_paths.txt', "\n".join(paths_to_include).encode())
-            rel_file = curr_dir + os.path.basename(task['source'])
-            cpp_file = task['source']
-            with open(cpp_file, 'rb') as src:
-                write_str_to_tar(out_tar, rel_file, src.read(), header_beginning(cpp_file))
-        tar_buffer.seek(0)
-        return tar_buffer, rel_file
+        curr_dir = ''
+        for depth in range(max_depth):
+            curr_dir += 'dummy_rel/'
+            for dir, file, content, header in relative_includes[depth]:
+                files[curr_dir + file] = header + content
+        rel_file = curr_dir + os.path.basename(task['source'])
+        cpp_file = task['source']
+        with open(cpp_file, 'rb') as src:
+            files[rel_file] = header_beginning(cpp_file) + src.read()
+        return files, rel_file

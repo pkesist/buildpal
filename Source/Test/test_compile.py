@@ -15,7 +15,6 @@ def create_file(filename):
 def terminate_proc(proc):
     proc.kill()
     proc.communicate()
-    return True
 
 @pytest.fixture(scope='module')
 def run_manager(request):
@@ -34,8 +33,8 @@ node[0]=localhost:{}:4
         os.path.realpath(__file__)), '..', 'distribute_manager.py'))
     proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def teardown():
-        if terminate_proc(proc):
-            shutil.rmtree(dir)
+        terminate_proc(proc)
+        shutil.rmtree(dir)
     request.addfinalizer(teardown)
     return proc
 
@@ -52,8 +51,8 @@ port={}
         os.path.realpath(__file__)), '..', 'distribute_server.py'))
     proc = subprocess.Popen([sys.executable, srv_script], cwd=dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def teardown():
-        if terminate_proc(proc):
-            shutil.rmtree(dir)
+        terminate_proc(proc)
+        shutil.rmtree(dir)
     request.addfinalizer(teardown)
     return proc
 

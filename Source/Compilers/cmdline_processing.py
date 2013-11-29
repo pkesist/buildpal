@@ -6,26 +6,22 @@ class CmdLineOption:
     class Value:
         def __init__(self, option, esc, suf, sep, val):
             self.option = option
-            self.esc = esc
-            self.sep = sep
-            self.suf = suf
-            self.val = val
+            self.opt = "{}{}{}".format(
+                esc or (option.def_esc() if option else ''),
+                option.name() if option else '',
+                suf or '')
+            self.val = val or ''
+            self.sep = sep or ''
 
         def __str__(self):
             return ("<CmdLineOption.Value object: '{}'>"
                 .format(self.make_args()))
 
         def make_args(self):
-            opt = "{}{}{}".format(
-                self.esc or (self.option.def_esc() if self.option else ''),
-                self.option.name() if self.option else '',
-                self.suf or '')
-            val = self.val or ''
-
             if self.sep == ' ':
-                return [opt, val]
+                return [self.opt, self.val]
             else:
-                return [opt + (self.sep if self.sep else '') + val]
+                return [self.opt + self.sep + self.val]
 
     def __init__(self, name, suff=None, has_arg=True, separate_arg_with_space=True):
         self.__name = name
@@ -93,9 +89,8 @@ class FreeOption:
             return [self.str]
         
 class CmdLineOptions:
-    __options = {}
-
     def __init__(self, esc):
+        self.__options = {}
         if esc is None:
             raise RuntimeError("Command line option must have escape sequence defined.")
         if isinstance(esc, str):

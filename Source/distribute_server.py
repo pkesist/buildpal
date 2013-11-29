@@ -42,5 +42,12 @@ Usage:
         if cpu_usage_hwm <= 0 or cpu_usage_hwm > 100:
             raise RuntimeError("cpu_usage_hwm should be in range 1-100.")
 
-    CompileWorker('tcp://*:{}'.format(port), cpu_usage_hwm).run()
+    compile_worker = CompileWorker('tcp://*:{}'.format(port), cpu_usage_hwm)
+    try:
+        compile_worker.run()
+    except KeyboardInterrupt:
+        print("\nShutting down threads...")
+        compile_worker.shutdown()
+        print("Done.")
+        
 

@@ -59,10 +59,11 @@ class LinkOption(CompilerOption):
             return None
 
         args = []
-        try:
-            args.append(next(iter))
-        except StopIteration:
-            pass
+        while True:
+            try:
+                args.append(next(iter))
+            except StopIteration:
+                break
 
         return self.Value(self, args)
 
@@ -266,11 +267,10 @@ class MSVCWrapper(CompilerWrapper):
 
     def create_call(self, option_values):
         compile_call = ['cl.exe']
-        for option in option_values.filter_options(CompilationCategory):
-            compile_call.extend(option.make_args())
-        macros = [token.val for token in option_values.filter_options(self.define_option())]
-        for define in macros:
-            compile_call.extend(self.define_option().make_value(define).make_args())
+        for value in option_values.filter_options(CompilationCategory):
+            compile_call.extend(value.make_args())
+        for value in option_values.filter_options(self.define_option()):
+            compile_call.extend(value.make_args())
         # Disable generating PDB files when compiling cpp into obj.
         # Store debug info in the obj file itself.
         if option_values.filter_options('Zi'):

@@ -21,7 +21,6 @@ import signal
 import shutil
 import sched
 import sys
-import tarfile
 import traceback
 import tempfile
 import zipfile
@@ -453,3 +452,6 @@ class CompileWorker:
                     assert sock is sessions
                     clients.send_multipart(recv_multipart(sessions))
 
+    def shutdown(self):
+        self.__compile_thread_pool.shutdown()
+        self.__misc_thread_pool.shutdown()

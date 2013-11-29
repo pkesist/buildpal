@@ -1,6 +1,6 @@
 from .scan_headers import collect_headers, cache_info
 
-from Common import SimpleTimer, write_str_to_tar
+from Common import SimpleTimer
 from Common import create_socket, recv_multipart
 
 import zmq

@@ -161,10 +161,10 @@ namespace
         // Prevent FileManager, HeaderSearch et al. to open files
         // unexpectedly.
         virtual clang::MemorizeStatCalls::LookupResult
-            getStat( char const * path, struct stat & statBuf,
-            bool isFile, int *  )
+            getStat( char const * path, clang::FileData & fileData, bool isFile,
+            int * )
         {
-            return clang::MemorizeStatCalls::getStat( path, statBuf, isFile, 0 );
+            return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
         }
     };
 }  // anonymous namespace
@@ -233,7 +233,7 @@ clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::Searc
 {
     clang::HeaderSearch * headerSearch( new clang::HeaderSearch(
         &compiler().getHeaderSearchOpts(),
-        compiler().getFileManager(),
+        compiler().getSourceManager(),
         compiler().getDiagnostics(),
         compiler().getLangOpts(),
         &compiler().getTarget()));

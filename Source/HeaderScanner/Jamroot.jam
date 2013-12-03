@@ -19,8 +19,8 @@ project HeaderScanner : requirements <warnings>off
 ;
 
 alias clangLibs :
-    /clang//clangRewriteCore
-    /clang//clangRewriteFrontend
+    #/clang//clangRewriteCore
+    #/clang//clangRewriteFrontend
     /clang//clangFrontend
     /clang//clangDriver
     /clang//clangEdit
@@ -37,6 +37,7 @@ alias clangLibs :
     /clang//LLVMCore
     /clang//LLVMBitReader
     /clang//LLVMMCParser
+    /clang//LLVMTransformUtils
 ;
 
 alias preprocessing_stuff

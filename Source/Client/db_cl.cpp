@@ -3,10 +3,13 @@
 #include "boost/filesystem/convenience.hpp"
 #include "boost/filesystem/path.hpp"
 
+#include <llvm\Support\CommandLine.h>
+
 #include <cassert>
 #include <deque>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <sstream>
 
@@ -16,6 +19,21 @@ unsigned int compilerSize = sizeof(compiler) / sizeof(compiler[0]) - 1;
 char const compilerExeFilename[] = "cl.exe";
 
 typedef std::vector<boost::filesystem::path> PathList;
+
+namespace
+{
+  class StringSaver : public llvm::cl::StringSaver
+  {
+  public:
+      virtual const char * SaveString( char const * str )
+      {
+          return storage_.insert( str ).first->c_str();
+      }
+  private:
+      std::set<std::string> storage_;
+  };
+}
+
 
 PathList const & getPath()
 {
@@ -201,10 +219,20 @@ int main( int argc, char * argv[] )
     GetCurrentDirectory( currentPathSize, currentPathBuffer );
     req.push_back( boost::asio::buffer( currentPathBuffer, currentPathSize ) );
 
-    for ( int arg( 1 ); arg < argc; ++arg )
+
+    llvm::SmallVector<char const *, 16> newArgv;
+    for ( int i( 1 ); i < argc; ++i )
+        newArgv.push_back( argv[ i ] );
+
+    StringSaver saver;
+    
+    llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeGNUCommandLine, newArgv );
+
+    for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
     {
-        req.push_back( boost::asio::buffer( argv[arg], strlen( argv[arg] ) + 1 ) );
+        req.push_back( boost::asio::buffer( newArgv[ arg ], strlen( newArgv[arg] ) + 1 ) );
     }
+
     req.push_back( boost::asio::buffer( "\1", 1 ) );
     boost::system::error_code writeError;
     boost::asio::write( socket, req, writeError );

@@ -5,6 +5,7 @@ local release-variants = release profile ;
 exe db_cl
 :
     db_cl.cpp
+    /clang//LLVMSupport
     /boost//system/<link>static
     /boost//filesystem/<link>static
 :

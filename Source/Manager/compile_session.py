@@ -49,7 +49,6 @@ class CompileSession:
         assert self.executable in self.compiler_info
         self.task.compiler_info = self.compiler_info[self.executable]
         self.task.server_task_info['compiler_info'] = self.task.compiler_info
-        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros())
         self.preprocess_socket.send_multipart([b'PREPROCESS_TASK',
             pickle.dumps(self.task.preprocess_task_info)],
             copy=False)

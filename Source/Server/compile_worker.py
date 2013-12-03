@@ -159,14 +159,12 @@ class CompileSession:
                     sleep(1)
 
             compiler_info = self.task['compiler_info']
-            noLink = compiler_info.compile_no_link_option.make_value().make_args()
-            output = compiler_info.object_name_option.make_value(object_file_name).make_args()
+            output = compiler_info.set_object_name.format(object_file_name)
             pch_switch = []
             if self.task['pch_file']:
                 assert self.pch_file is not None
                 assert os.path.exists(self.pch_file)
-                pch_switch.extend(
-                    compiler_info.pch_file_option.make_value(self.pch_file).make_args())
+                pch_switch.append(compiler_info.set_pch_file.format(self.pch_file))
 
             while not self.compiler_repository.has_compiler(self.compiler_id):
                 # Compiler is being downloaded by another session.
@@ -174,14 +172,11 @@ class CompileSession:
                 sleep(1)
 
             include_dirs = self.include_dirs_future.result()
-            includes = []
-            for incpath in include_dirs:
-                includes.extend(compiler_info.include_option.make_value(incpath).make_args())
-
+            includes = [compiler_info.set_include_option.format(incpath) for incpath in include_dirs]
             start = time()
             self.times['compiler_prep'] = start - compiler_prep
             command = (self.task['call'] + pch_switch +
-                noLink + output + includes + [self.source_file])
+                includes + [output, self.source_file])
             retcode, stdout, stderr = self.compiler(command,
                 self.include_path)
             done = time()
@@ -207,7 +202,7 @@ class CompileSession:
         assert hasattr(self, 'compiler_id')
         self.compiler_exe = os.path.join(
             self.compiler_repository.compiler_dir(self.compiler_id),
-            self.task['compiler_info'].executable())
+            self.task['compiler_info'].executable)
         def spawn_compiler(command, cwd):
             command[0] = self.compiler_exe
             with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
@@ -246,7 +241,7 @@ class CompileSession:
                 self.waiting_for_header_list = SimpleTimer()
                 assert len(msg) == 2 and msg[0] == b'SERVER_TASK'
                 self.task = pickle.loads(msg[1])
-                self.compiler_id = self.task['compiler_info'].id()
+                self.compiler_id = self.task['compiler_info'].id
                 has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
                 if has_compiler is None:
                     # Never heard of it.

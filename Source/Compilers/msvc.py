@@ -1,185 +1,167 @@
+import parse_args
+
 from .cmdline_processing import *
 
 from Common import get_batch_file_environment_side_effects
 
-import subprocess
-
+import itertools
 import os
 import re
 import sys
 import tempfile
 
-def simple(name, macros=[]): 
-    result = CompilerOption(name, suff=None, has_arg=False)
-    for macro in macros:
-        result.add_macro(macro)
-    return result
+class CompileOptions:
+    def __init__(self, compiler_wrapper, options):
+        self.compiler = compiler_wrapper
+        arg_list = parse_args.ArgList(options)
+        self.option_names = arg_list.option_names()
+        self.option_values = arg_list.option_values()
+        self.arg_values = arg_list.arg_values()
+        self.value_dict = {}
+        self.arg_dict = {}
+        for x, y in zip(self.option_names, self.option_values):
+            self.value_dict.setdefault(x, []).append(y)
+        for x, y in zip(self.option_names, self.arg_values):
+            self.arg_dict.setdefault(x, []).append(y)
 
-def simple_w_minus(name, macros=[]):
-    result = CompilerOption(name, suff='-', has_arg=False)
-    for macro in macros:
-        result.add_macro(macro)
-    return result
+    def implicit_macros(self):
+        macros = []
+        add_extensions = True
+        for option_name, opt_value in zip(self.option_names, self.option_values):
+            if option_name == 'Za':
+                add_extensions = False
+            if option_name == 'Ze':
+                add_extensions = True
+            if option_name in self.compiler.implicit_macros():
+                macros.extend(self.compiler.implicit_macros()[option_name])
+        if add_extensions:
+            macros.append('_MSC_EXTENSIONS=1')
+        return macros
 
-def with_param(name, macros=[]):
-    result = CompilerOption(name, suff=None, has_arg=True, separate_arg_with_space=False)
-    for macro in macros:
-        result.add_macro(macro)
-    return result
+    def should_build_locally(self):
+        return any((x in self.compiler.build_local_options() for x in self.value_dict))
 
-def with_space_param(name, macros=[]):
-    result = CompilerOption(name, suff=None, has_arg=True, separate_arg_with_space=True)
-    for macro in macros:
-        result.add_macro(macro)
-    return result
+    def should_invoke_linker(self):
+        return self.value_dict.get(self.compiler.compile_no_link_option()) is None
 
-class LinkOption(CompilerOption):
-    @classmethod
-    def name(cls):
-       return 'link'
-
-    class Value:
-        def __init__(self, option, args):
-            self.option = option
-            self.args = ['/link']
-            self.args.extend(args)
-
-        def make_args(self):
-            return self.args
-
-    def __init__(self):
-        return super().__init__('link', None, True, True)
-
-    def parse(self, option, iter):
-        import pdb
-        pdb.set_trace
-        if option[0] not in self.esc:
+    def pch_header(self):
+        opt = self.value_dict.get(self.compiler.use_pch_option())
+        if not opt:
             return None
-        if option[1:].lower() != 'link':
+        assert len(opt[-1]) == 1
+        return opt[-1][0]
+
+    def pch_file(self):
+        opt = self.value_dict.get(self.compiler.pch_file_option())
+        if not opt:
             return None
+        assert len(opt[-1]) == 1
+        return opt[-1][0]
 
-        args = []
-        while True:
-            try:
-                args.append(next(iter))
-            except StopIteration:
-                break
+    def includes(self):
+        print(self.arg_values)
+        return list(itertools.chain(*self.value_dict.get(self.compiler.include_option(), [])))
 
-        return self.Value(self, args)
+    def defines(self):
+        return list(itertools.chain(*self.value_dict.get(self.compiler.define_option(), [])))
+
+    def create_server_call(self):
+        result = ['cl.exe', '/c']
+        exclude_opts = ['c', 'I', 'Fo', 'link', '<input>']
+        for name, value in zip(self.option_names, self.arg_values):
+            if name == 'Zi':
+                # Disable generating PDB files when compiling cpp into obj.
+                # Store debug info in the obj file itself.
+                result.append('/Z7')
+            elif name not in exclude_opts:
+                result.extend(value)
+        return result
+
+    def input_files(self):
+        return [x for x in itertools.chain(*self.value_dict.get('<input>'))
+            if self.compiler.is_source_file(x)]
+
+    def output_file(self):
+        result = self.value_dict.get(self.compiler.object_name_option())
+        if not result:
+            return None
+        print(result)
+        assert len(result[-1]) == 1
+        return result[-1][0]
+
+    def link_options(self):
+        return self.arg_dict.get(self.compiler.link_option())
 
 
 class CompilerInfo:
-    def __init__(self, toolset, executable, id, macros):
-        self.__toolset = toolset
-        self.__executable = executable
-        self.__id = id
-        self.__macros = macros
+    pass
 
-    def toolset(self): return self.__toolset
-    def executable(self): return self.__executable
-    def id(self): return self.__id
-    def macros(self): return self.__macros
 
-class CompilerWrapper(CmdLineOptions):
-    def preprocess_option(self): raise NotImplementedError()
-    def object_name_option(self): raise NotImplementedError()
-    def compile_no_link_option(self): raise NotImplementedError()
-    def define_option(self): raise NotImplementedError()
-    def include_option(self): raise NotImplementedError()
-    def use_pch_option(self): raise NotImplementedError()
-    def pch_file_option(self): raise NotImplementedError()
+class MSVCWrapper:
+    @classmethod
+    def object_name_option(cls): return 'Fo'
 
-    def __init__(self, esc):
-        super(CompilerWrapper, self).__init__(esc)
-        self.use_pch_option().add_category(CompilationCategory)
-        self.pch_file_option().add_category(PCHCategory)
-        self.compile_no_link_option().add_category(CompilationCategory)
-        self.include_option().add_category(PreprocessingCategory)
-        self.define_option().add_category(PreprocessingCategory)
-        self.add_option(self.compile_no_link_option())
-        self.add_option(self.object_name_option())
-        self.add_option(self.use_pch_option())
-        self.add_option(self.pch_file_option())
-        self.add_option(self.define_option())
-        self.add_option(self.include_option())
+    @classmethod
+    def set_object_name_option(cls): return '/Fo{}'
 
-    def compiler_info(self, executable):
-        raise NotImplementedError("Compiler identification not implemented.")
+    @classmethod
+    def compile_no_link_option(cls): return 'c'
 
-    def compiler_option_macros(self, option_values):
-        result = []
-        for option_value in (x for x in option_values
-            if type(x.option) == CompilerOption and
-            x.option.test_category(PreprocessingCategory)):
-            result += token.option.get_macros(token.val)
-        return result
+    @classmethod
+    def include_option(cls): return 'I'
 
-    def requires_preprocessing(self, file):
-        return False
+    @classmethod
+    def set_include_option(cls): return '/I{}'
 
-class MSVCWrapper(CompilerWrapper):
-    __preprocess_option = simple('E')
-    __object_name_option = with_param('Fo')
-    __compile_no_link_option = simple('c')
-    __include_option = with_param('I')
-    __define_option = with_param('D')
-    __use_pch_option = with_param('Yu')
-    __pch_file_option = with_param('Fp')
+    @classmethod
+    def define_option(cls): return 'D'
 
-    def preprocess_option(self): return self.__preprocess_option
-    def object_name_option(self): return self.__object_name_option
-    def compile_no_link_option(self): return self.__compile_no_link_option
-    def include_option(self): return self.__include_option
-    def define_option(self): return self.__define_option
-    def use_pch_option(self): return self.__use_pch_option
-    def pch_file_option(self): return self.__pch_file_option
+    @classmethod
+    def use_pch_option(cls): return 'Yu'
 
-    def __init__(self):
-        super(MSVCWrapper, self).__init__(esc = ['/', '-'])
+    @classmethod
+    def pch_file_option(cls): return 'Fp'
 
-        # Build Local
-        for option in self.build_local_options:
-            option.add_category(BuildLocalCategory)
-            self.add_option(option)
-        # Preprocessing
-        for option in self.preprocessing_options:
-            option.add_category(PreprocessingCategory)
-            self.add_option(option)
-        # PCH options which require local build.        
-        for option in self.pch_build_local_options:
-            option.add_category(BuildLocalCategory)
-            option.add_category(PCHCategory)
-            self.add_option(option)
-        # PCH options.
-        for option in self.pch_options:
-            option.add_category(PCHCategory)
-            self.add_option(option)
-        # Both preprocessing and compilation.
-        for option in self.preprocess_and_compile:
-            option.add_category(PreprocessingCategory)
-            option.add_category(CompilationCategory)
-            self.add_option(option)
-        # Compilation
-        for option in self.compilation_options:
-            option.add_category(CompilationCategory)
-            self.add_option(option)
-        # Linking
-        link_option = LinkOption()
-        link_option.add_category(LinkingCategory)
-        self.add_option(link_option)
+    @classmethod
+    def set_pch_file_option(cls): return '/Fp{}'
 
-        # Options requiring special handling.
-        for option in self.special_handling:
-            option.add_category(SpecialHandlingCategory)
-            self.add_option(option)
-        # Always.
-        for option in self.always:
-            option.add_category(PreprocessingCategory)
-            option.add_category(CompilationCategory)
-            option.add_category(LinkingCategory)
-            self.add_option(option)
+    @classmethod
+    def build_local_options(cls): 
+        return ['E', 'EP', 'P', 'Zg', 'Zs']
 
-    def requires_preprocessing(self, input):
+    @classmethod
+    def preprocessing_options(cls):
+        return ['AI', 'FU', 'D', 'FI', 'U' , 'I' , 'C', 'Fx', 'u' , 'X']
+
+    @classmethod
+    def link_option(cls):
+        return 'link'
+
+    @classmethod
+    def implicit_macros(cls):
+        return {
+        'EH'        : ['_CPPUNWIND'],
+        'MD'        : ['_MT', '_DLL'],
+        'MT'        : ['_MT'],
+        'MDd'       : ['_MT', '_DLL', '_DEBUG'],
+        'MTd'       : ['_MT', '_DEBUG'],
+        'GR'        : ['_CPPRTTI'],
+        'GX'        : ['_CPPUNWIND'],
+        'RTC'       : ['__MSVC_RUNTIME_CHECKS'],
+        'clr'       : ['__cplusplus_cli=200406'],
+        'Zl'        : ['_VC_NODEFAULTLIB'],
+        'Zc:whar_t' : ['_NATIVE_WCHAR_T_DEFINED'],
+        'openmp'    : ['_OPENMP'],
+        'Wp64'      : ['_Wp64'],
+        'LDd'       : ['_DEBUG'],
+    }
+
+    @classmethod
+    def parse_options(cls, options):
+        return CompileOptions(cls, options)
+
+    @classmethod
+    def is_source_file(cls, input):
         # FIXME: This should be handled better.
         # Currently we expect there is no /TC, /TP,
         # /Tc or /Tp options on the command line
@@ -238,44 +220,15 @@ class MSVCWrapper(CompilerWrapper):
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
-        result = CompilerInfo('msvc', os.path.split(executable)[1], version, macros)
-        result.pch_file_option = self.pch_file_option()
-        result.define_option = self.define_option()
-        result.include_option = self.include_option()
-        result.object_name_option = self.object_name_option()
-        result.compile_no_link_option = self.compile_no_link_option()
-        result.compiler_files = self.compiler_files[version[0][:5]]
-        return result
-
-    def compiler_option_macros(self, tokens):
-        result = []
-        add_extensions = True
-        for token in (token for token in tokens
-            if type(token.option) == CompilerOption and
-            token.option.test_category(PreprocessingCategory)):
-            option = token.option
-            if not option:
-                continue
-            if option.name() == 'Za':
-                add_extensions = False
-            if option.name() == 'Ze':
-                add_extensions = True
-            result += token.option.get_macros(token.val)
-        if add_extensions:
-            result.append('_MSC_EXTENSIONS=1')
-        return result
-
-    def create_call(self, option_values):
-        compile_call = ['cl.exe']
-        for value in option_values.filter_options(CompilationCategory):
-            compile_call.extend(value.make_args())
-        for value in option_values.filter_options(self.define_option()):
-            compile_call.extend(value.make_args())
-        # Disable generating PDB files when compiling cpp into obj.
-        # Store debug info in the obj file itself.
-        if option_values.filter_options('Zi'):
-            compile_call.append('/Z7')
-        return compile_call, self.compiler_option_macros(option_values.all())
+        compiler_info = CompilerInfo()
+        compiler_info.executable = os.path.basename(executable)
+        compiler_info.id = version
+        compiler_info.macros = macros
+        compiler_info.set_object_name = self.set_object_name_option()
+        compiler_info.set_pch_file = self.set_pch_file_option()
+        compiler_info.set_include_option = self.set_include_option()
+        compiler_info.compiler_files = self.compiler_files[version[0][:5]]
+        return compiler_info
 
     compiler_files = {
         b'15.00' : 
@@ -334,73 +287,4 @@ class MSVCWrapper(CompilerWrapper):
             b'1033/pgort110ui.dll',
             b'1033/pgoui.dll',
             b'1033/vcomp110ui.dll'],
-
        }
-
-    build_local_options = [
-        # If we run into these just run the damn thing locally
-        simple('E' ), simple('EP'), simple('P' ),
-        simple('Zg'), simple('Zs')]
-
-    preprocessing_options = [
-        with_param('AI'), with_param('FU'), with_param('D' ), with_param('FI'),
-        with_param('U' ), with_param('I' ), simple    ('C' ), simple    ('Fx'),
-        simple    ('u' ), simple    ('X' )]
-
-    pch_build_local_options = [
-        # If we are creating PCH file compile it locally. For now.
-        with_param('Yc')]
-
-    pch_options = [
-        with_param('Fp'), with_param('Yl'), simple('Y-')]
-
-    preprocess_and_compile = [
-        # These affect preprocessor.
-        with_param('EH' , ['_CPPUNWIND']),
-        simple    ('MD' , ['_MT', '_DLL']),
-        simple    ('MT' , ['_MT']),
-        simple    ('MDd', ['_MT', '_DLL', '_DEBUG']),
-        simple    ('MTd', ['_MT', '_DEBUG']),
-        simple_w_minus('GR', ['_CPPRTTI']),
-        simple_w_minus('GX', ['_CPPUNWIND']),
-        simple    ('RTC1', ['__MSVC_RUNTIME_CHECKS']),
-        simple    ('RTCc', ['__MSVC_RUNTIME_CHECKS']),
-        simple    ('RTCs', ['__MSVC_RUNTIME_CHECKS']),
-        simple    ('RTCu', ['__MSVC_RUNTIME_CHECKS']),
-        with_param('clr', ['__cplusplus_cli=200406']),
-        simple    ('Za'), # These two require special handling.
-        simple    ('Ze'), # /Ze is default, and must define _MSC_EXTENSIONS
-        simple    ('Zl', ['_VC_NODEFAULTLIB']),
-        with_param('Zc', [lambda val : '_NATIVE_WCHAR_T_DEFINED' if 'wchar_t' in val else None]),
-        simple    ('openmp', ['_OPENMP']),
-        simple    ('Wp64', ['_Wp64']),
-        simple    ('LDd', ['_DEBUG']),
-    ]
-
-    always = [ simple('nologo') ]
-
-    special_handling = [
-        simple      ('Zi'),
-        with_param  ('Fd')]
-
-    compilation_options = [
-        simple        ('O1'), simple        ('O2'), with_param    ('Ob'), simple      ('Od'),
-        simple        ('Og'), simple_w_minus('Oi'), simple        ('Os'), simple      ('Ot'),
-        simple        ('Ox'), simple_w_minus('Oy'), with_param    ('O' ), simple      ('GF'),
-        simple_w_minus('Gm'), simple_w_minus('Gy'), simple_w_minus('GS'), with_param  ('fp'),
-        simple        ('Qfast_transcendentals')   , simple_w_minus('GL'), simple      ('GA'),
-        simple        ('Ge'), with_param    ('Gs'), simple        ('Gh'), simple      ('GH'),
-        simple        ('GT'), simple        ('Gd'), simple        ('Gr'), simple      ('Gz'),
-        simple        ('GZ'), simple_w_minus('QIfist'), simple('hotpatch'), with_param('arch'),
-        simple        ('Qimprecise_fwaits')       , with_param    ('Fa'), with_param  ('FA'),
-        with_param    ('Fe'), with_param    ('Fm'), with_param    ('Fr'), with_param  ('FR'),
-        with_param   ('doc'), simple        ('Zi'), simple      ('Z7'),
-        with_param    ('Zp'), with_param    ('vd'), with_param    ('vm'), 
-        simple        ('?'),  simple      ('help'), simple    ('bigobj'), with_param  ('errorReport'),
-        simple        ('FC'), with_param    ('H') , simple         ('J'), with_param  ('MP'),
-        simple        ('showIncludes')            , with_param    ('Tc'), with_param  ('Tp'),
-        simple        ('TC'), simple        ('TP'), with_param     ('V'), simple      ('w'),
-        with_param    ('wd'), with_param    ('we'), with_param    ('wo'), with_param  ('w'),
-        simple      ('Wall'), simple        ('WL'), simple        ('WX'), with_param  ('W'),
-        simple        ('Yd'), with_param    ('Zm'), simple        ('LD'), simple      ('LN'),
-        with_param     ('F'), with_param('analyze')]

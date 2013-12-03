@@ -171,8 +171,7 @@ class SourceScanner:
                         found = True
                         break
                 except StopIteration:
-                    print("Could not find information for", in_name)
-                    raise 
+                    raise Exception("Could not find information for {}.",format(in_name))
             assert found
             depth = 0
             path_elements = file.split('/')

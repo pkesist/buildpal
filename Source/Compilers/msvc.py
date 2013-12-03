@@ -1,7 +1,5 @@
 import parse_args
 
-from .cmdline_processing import *
-
 from Common import get_batch_file_environment_side_effects
 
 import itertools

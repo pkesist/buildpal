@@ -225,8 +225,11 @@ int main( int argc, char * argv[] )
         newArgv.push_back( argv[ i ] );
 
     StringSaver saver;
-    
-    llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeGNUCommandLine, newArgv );
+    if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeGNUCommandLine, newArgv ) )
+    {
+        std::cerr << "FATAL: Failed to expand response files.";
+        return -1;
+    }
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
     {

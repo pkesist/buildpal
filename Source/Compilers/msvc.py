@@ -216,15 +216,15 @@ class MSVCWrapper:
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
-        compiler_info = CompilerInfo()
-        compiler_info.executable = os.path.basename(executable)
-        compiler_info.id = version
-        compiler_info.macros = macros
-        compiler_info.set_object_name = self.set_object_name_option()
-        compiler_info.set_pch_file = self.set_pch_file_option()
-        compiler_info.set_include_option = self.set_include_option()
-        compiler_info.compiler_files = self.compiler_files[version[0][:5]]
-        return compiler_info
+        return {
+            'executable' : os.path.basename(executable),
+            'id' : version,
+            'macros' : macros,
+            'set_object_name' : self.set_object_name_option(),
+            'set_pch_file' : self.set_pch_file_option(),
+            'set_include_option' : self.set_include_option(),
+            'compiler_files' : self.compiler_files[version[0][:5]],
+        }
 
     compiler_files = {
         b'15.00' : 

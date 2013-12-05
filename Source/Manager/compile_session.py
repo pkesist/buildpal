@@ -49,7 +49,7 @@ class CompileSession:
         assert self.executable in self.compiler_info
         self.task.compiler_info = self.compiler_info[self.executable]
         self.task.server_task_info['compiler_info'] = self.task.compiler_info
-        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info.macros)
+        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info['macros'])
         self.preprocess_socket.send_multipart([b'PREPROCESS_TASK',
             pickle.dumps(self.task.preprocess_task_info)],
             copy=False)
@@ -65,10 +65,10 @@ class CompileSession:
             stderr = msg[2]
             info = self.compiler.compiler_info(self.executable, stdout, stderr)
             self.compiler_info[self.executable] = info
-            self.client_conn.send([b'LOCATE_FILES'] + info.compiler_files)
+            self.client_conn.send([b'LOCATE_FILES'] + info['compiler_files'])
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
-            self.compiler_info[self.executable].files = msg
+            self.compiler_info[self.executable]['files'] = msg
             self.start_preprocessing()
 
     def preprocessing_done(self, server_conn, node_info):
@@ -89,11 +89,11 @@ class CompileSession:
             compiler_state = msg[0]
             if compiler_state == b'NEED_COMPILER':
                 ci = self.compiler_info[self.executable]
-                assert hasattr(ci, 'files')
-                assert hasattr(ci, 'compiler_files')
+                assert 'files' in ci
+                assert 'compiler_files' in ci
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
-                    for path, file in zip(ci.files, ci.compiler_files):
+                    for path, file in zip(ci['files'], ci['compiler_files']):
                         zip_file.write(path.decode(), file.decode())
                 zip_data.seek(0)
                 send_file(self.server_conn.send_multipart, zip_data)

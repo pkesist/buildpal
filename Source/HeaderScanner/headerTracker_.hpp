@@ -258,6 +258,7 @@ private:
     Cache * cache_;
     CacheEntryPtr cacheHit_;
     IncludeStack fileStack_;
+    std::vector<std::pair<clang::FileEntry const *, CacheEntryPtr> > usedCacheEntries_;
 };
 
 

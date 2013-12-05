@@ -3,6 +3,7 @@
 #include "headerTracker_.hpp"
 
 #include <clang/Lex/Preprocessor.h>
+#include <clang/Basic/MacroBuilder.h>
 
 #include <boost/spirit/include/karma.hpp>
 
@@ -24,6 +25,8 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
         std::string tmp;
         generateContent( tmp );
 
+        // Two threads concurrently generating content for the same cache
+        // entry should be a rare occasion, so spinlock.
         SpinLock const spinLock( contentLock_ );
         if ( memoryBuffer_ )
             return memoryBuffer_.get();
@@ -36,6 +39,7 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
 void CacheEntry::generateContent( std::string & buffer )
 {
     llvm::raw_string_ostream defineStream( buffer );
+    clang::MacroBuilder macroBuilder( defineStream );
     std::for_each(
         headerContent().begin(),
         headerContent().end(),
@@ -44,16 +48,40 @@ void CacheEntry::generateContent( std::string & buffer )
             switch ( he.first )
             {
             case MacroUsage::defined:
-                defineStream << "#define " << macroName( he.second ) << macroValue( he.second ) << '\n';
+                macroBuilder.defineMacro( macroName( he.second ), macroValue( he.second ) );
                 break;
             case MacroUsage::undefined:
-                defineStream << "#undef " << macroName( he.second ) << '\n';
+                macroBuilder.undefineMacro( macroName( he.second ) );
                 break;
             }
         }
     );
     defineStream << '\0';
     defineStream.flush();
+}
+
+CacheEntryPtr Cache::addEntry
+(
+    llvm::StringRef fileName,
+    Macros && macros,
+    HeaderContent && headerContent,
+    Headers const & headers
+)
+{
+    unsigned const uid( getFileId( fileName ) );
+    CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
+        std::move( macros ), std::move( headerContent ), headers, hits_ + misses_ );
+    std::unique_lock<std::mutex> const lock( cacheMutex_ );
+    cacheContainer_.insert( result );
+    if ( cacheContainer_.size() >= 1024 * 16 )
+    {
+        typedef CacheContainer::index<ByHitCountAndLastTimeHit>::type IndexType;
+        IndexType & index( cacheContainer_.get<ByHitCountAndLastTimeHit>() );
+        IndexType::iterator end( index.begin() );
+        std::advance( end, 4 * 1024 );
+        index.erase( index.begin(), end );
+    }
+    return result;
 }
 
 std::string Cache::uniqueFileName()
@@ -101,10 +129,10 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & head
             ) == pEntry->usedMacros().end()
         )
         {
-            ++hits_;
             std::unique_lock<std::mutex> const lock( cacheMutex_ );
             CacheContainer::index<ById>::type::iterator const iter = cacheContainer_.get<ById>().find( &*pEntry );
-            cacheContainer_.get<ById>().modify( iter, []( CacheEntryPtr p ) { p->incHitCount(); } );
+            cacheContainer_.get<ById>().modify( iter, [this]( CacheEntryPtr p ) { p->cacheHit( hits_ + misses_ ); } );
+            ++hits_;
             return pEntry;
         }
     }

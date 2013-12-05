@@ -115,7 +115,8 @@ private:
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
-        Headers const & headers
+        Headers const & headers,
+        std::size_t currentTime
 
     ) :
         refCount_( 0 ),
@@ -124,7 +125,8 @@ private:
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
-        hitCount_( 0 )
+        hitCount_( 0 ),
+        lastTimeHit_( currentTime )
     {
     }
 
@@ -135,7 +137,8 @@ public:
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
-        Headers const & headers
+        Headers const & headers,
+        unsigned currentTime
     )
     {
         CacheEntry * result = new CacheEntry
@@ -144,7 +147,8 @@ public:
             uniqueVirtualFileName,
             std::move( usedMacros ),
             std::move( headerContent ),
-            headers
+            headers,
+            currentTime
         );
         return CacheEntryPtr( result );
     }
@@ -158,8 +162,13 @@ public:
     Headers       const & headers      () const { return headers_; }
     unsigned uid() const { return uid_; }
     std::size_t hitCount() const { return hitCount_; }
+    std::size_t lastTimeHit() const { return lastTimeHit_; }
     
-    void incHitCount() { ++hitCount_; }
+    void cacheHit( unsigned int currentTime )
+    {
+        lastTimeHit_ = currentTime;
+        ++hitCount_;
+    }
 
 private:
     void generateContent( std::string & );
@@ -189,6 +198,7 @@ private:
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t hitCount_;
+    std::size_t lastTimeHit_;
     SpinLockMutex contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
@@ -208,15 +218,7 @@ public:
         Macros && macros,
         HeaderContent && headerContent,
         Headers const & headers
-    )
-    {
-        unsigned const uid( getFileId( fileName ) );
-        CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
-            std::move( macros ), std::move( headerContent ), headers );
-        std::unique_lock<std::mutex> const lock( cacheMutex_ );
-        cacheContainer_.insert( result );
-        return result;
-    }
+    );
 
     CacheEntryPtr findEntry
     (
@@ -319,12 +321,24 @@ private:
         }
     };
 
+    struct LastTimeHit
+    {
+        typedef std::size_t result_type;
+        result_type operator()( CacheEntryPtr const & c ) const
+        {
+            return c->lastTimeHit();
+        }
+    };
+
     struct ById {};
     struct ByFileIdAndHitCount {};
+    struct ByHitCountAndLastTimeHit {};
 
     typedef boost::multi_index_container<
         CacheEntryPtr,
         boost::multi_index::indexed_by<
+            // Index used when searching cache.
+            // Entries with more hits are searched first.
             boost::multi_index::ordered_non_unique<
                 boost::multi_index::tag<ByFileIdAndHitCount>,
                 boost::multi_index::composite_key<
@@ -337,6 +351,25 @@ private:
                     std::greater<std::size_t>
                 >
             >,
+            // Index used when deleting from cache.
+            // Entries with least hits will be removed.
+            // Older entries are removed first, to prevent deleting recent
+            // additions to cache.
+            boost::multi_index::ordered_non_unique<
+                boost::multi_index::tag<ByHitCountAndLastTimeHit>,
+                boost::multi_index::composite_key<
+                    CacheEntryPtr,
+                    GetHitCount,
+                    LastTimeHit
+                >,
+                boost::multi_index::composite_key_compare<
+                    std::less<std::size_t>,
+                    std::less<std::size_t>
+                >
+            >,
+            // Unique index is here so that we can update a specific element,
+            // without having to hold the lock on the container the entire
+            // time.
             boost::multi_index::hashed_unique<
                 boost::multi_index::tag<ById>,
                 GetId

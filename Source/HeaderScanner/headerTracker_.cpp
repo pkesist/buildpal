@@ -126,6 +126,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     {
         // There is a hit in cache!
         entry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
+        usedCacheEntries_.push_back( std::make_pair( entry, cacheHit_ ) );
     }
 }
 
@@ -236,6 +237,14 @@ Headers HeaderTracker::exitSourceFile()
 
     Headers result;
     result.swap( headerCtxStack().back().includedHeaders() );
+    // Undo cache overrides in source manager.
+    for ( std::pair<clang::FileEntry const *, CacheEntryPtr> const & usedEntries : usedCacheEntries_ )
+    {
+        assert( sourceManager().isFileOverridden( usedEntries.first ) );
+        sourceManager().disableFileContentsOverride( usedEntries.first );
+    }
+    // Remove ref from cache entries.
+    usedCacheEntries_.clear();
     return result;
 }
 

@@ -57,22 +57,13 @@ namespace
     } globalContentCache;
 }
 
-void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clang::FileEntry const * & fileEntry )
+void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, clang::FileEntry const * entry )
 {
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
     clang::FileEntry const * parentFile = fileStack_.back().file;
     clang::DirectoryLookup const * dirLookup( 0 );
     HeaderLocation::Enum const parentLocation( parentHeader.loc );
-    Dir const & parentSearchPath = parentHeader.dir;
-    HeaderName const & parentRelative = parentHeader.name;
-
-    llvm::SmallString<1024> searchPath;
-    llvm::SmallString<1024> relativePath;
-
-    clang::FileEntry const * entry = headerSearch_->LookupFile( include, isAngled, 0, dirLookup, parentFile, &searchPath, &relativePath, 0, false );
-    if ( !entry )
-        return;
 
     // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
     // cached in our globalContentCache we will never read it, so its file
@@ -104,12 +95,12 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
         ? fileStack_.size() == 1
             ? HeaderLocation::relative
             : parentLocation
-        : headerSearch_->getFileDirFlavor( entry ) == clang::SrcMgr::C_System
+        : preprocessor().getHeaderSearchInfo().getFileDirFlavor( entry ) == clang::SrcMgr::C_System
             ? HeaderLocation::system
             : HeaderLocation::regular
     ;
 
-    // If including header is system header, then so are we.
+    // Anything included from system header should also be system header.
     assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
     HeaderWithFileEntry const headerWithFileEntry =
@@ -123,21 +114,18 @@ void HeaderTracker::findFile( llvm::StringRef include, bool const isAngled, clan
         entry
     };
     fileStack_.push_back( headerWithFileEntry );
+}
 
+void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
+{
     if
     (
         !cacheDisabled() &&
-        headerSearch_->ShouldEnterIncludeFile( entry, false ) &&
         ( cacheHit_ = cache().findEntry( entry->getName(), headerCtxStack().back() ) )
     )
     {
         // There is a hit in cache!
-        fileEntry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
-    }
-    else
-    {
-        // No match in cache. We will have to use the disk file.
-        fileEntry = entry;
+        entry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
     }
 }
 

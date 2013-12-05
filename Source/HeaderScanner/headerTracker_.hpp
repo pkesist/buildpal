@@ -19,9 +19,6 @@
 #include <string>
 #include <set>
 #include <vector>
-
-#include <windows.h>
-#undef SearchPath
 //------------------------------------------------------------------------------
 
 namespace clang
@@ -216,9 +213,8 @@ private:
 class HeaderTracker
 {
 public:
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, clang::HeaderSearch * headerSearch, Cache * cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, Cache * cache )
         :
-        headerSearch_( headerSearch ),
         preprocessor_( preprocessor ),
         cache_( cache )
     {
@@ -227,7 +223,8 @@ public:
     void enterSourceFile( clang::FileEntry const *, llvm::StringRef fileName );
     Headers exitSourceFile();
 
-    void findFile( llvm::StringRef fileName, bool const isAngled, clang::FileEntry const * & fileEntry );
+    void inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, clang::FileEntry const * fileEntry );
+    void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();
     void enterHeader();
     void leaveHeader( IgnoredHeaders const & );
@@ -255,7 +252,6 @@ private:
     typedef std::vector<HeaderWithFileEntry> IncludeStack;
 
 private:
-    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     std::vector<std::string> buffers_;
     clang::Preprocessor & preprocessor_;
     HeaderCtxStack headerCtxStack_;

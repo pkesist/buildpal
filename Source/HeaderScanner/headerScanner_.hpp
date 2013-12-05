@@ -4,8 +4,18 @@
 //------------------------------------------------------------------------------
 #include "utility_.hpp"
 
-#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Basic/TargetInfo.h>
+#include <clang/Basic/DiagnosticOptions.h>
+#include <clang/Basic/DiagnosticIDs.h>
+#include <clang/Basic/FileManager.h>
+#include <clang/Basic/SourceManager.h>
+#include <clang/Lex/ModuleLoader.h>
+#include <clang/Lex/Preprocessor.h>
+#include <clang/Lex/PreprocessorOptions.h>
+#include <clang/Lex/HeaderSearch.h>
+#include <clang/Lex/HeaderSearchOptions.h>
 #include <llvm/ADT/Hashing.h>
+#include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/OwningPtr.h>
 
@@ -59,24 +69,32 @@ struct HeaderHash
 {
     std::size_t operator()( Header const & h )
     {
-        return llvm::hash_combine
-        (
-            llvm::hash_value( h.dir.get() ),
-            llvm::hash_value( h.name.get() )
-        );
+        return llvm::hash_value( h.buffer );
     }
 };
 
 inline bool operator==( Header const & l, Header const & r )
 {
-    return l.dir == r.dir &&
-        l.name == r.name
-    ;
+    return l.buffer == r.buffer;
 }
 
 typedef std::unordered_set<Header, HeaderHash> Headers;
 
 typedef std::set<std::string> IgnoredHeaders;
+
+struct DummyModuleLoader : public clang::ModuleLoader 
+{
+    virtual clang::ModuleLoadResult loadModule(
+        clang::SourceLocation,
+        clang::ModuleIdPath,
+        clang::Module::NameVisibilityKind,
+        bool IsInclusionDirective) { return clang::ModuleLoadResult(); }
+    virtual void makeModuleVisible(
+        clang::Module *,
+        clang::Module::NameVisibilityKind,
+        clang::SourceLocation,
+        bool Complain) {}
+};
 
 class PreprocessingContext
 {
@@ -117,26 +135,44 @@ public:
     explicit Preprocessor( Cache * cache );
 
     Headers scanHeaders( PreprocessingContext const &, llvm::StringRef filename );
-    clang::HeaderSearch * getHeaderSearch( PreprocessingContext::SearchPath const & searchPath );
 
-    void setMicrosoftMode( bool value ) { compiler().getLangOpts().MicrosoftMode = value ? 1 : 0; }
-    void setMicrosoftExt ( bool value ) { compiler().getLangOpts().MicrosoftExt = value ? 1 : 0; }
+    void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
+    void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
 private:
     void setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
 
 private:
-    clang::CompilerInstance       & compiler     ()       { return compiler_; }
-    clang::CompilerInstance const & compiler     () const { return compiler_; }
-    clang::SourceManager          & sourceManager()       { return compiler_.getSourceManager(); }
-    clang::SourceManager    const & sourceManager() const { return compiler_.getSourceManager(); }
-    clang::Preprocessor           & preprocessor ()       { return compiler_.getPreprocessor(); }
-    clang::Preprocessor     const & preprocessor () const { return compiler_.getPreprocessor(); }
+    clang::FileManager         & fileManager  ()       { return fileManager_; }
+    clang::FileManager   const & fileManager  () const { return fileManager_; }
+    clang::SourceManager       & sourceManager()       { return sourceManager_; }
+    clang::SourceManager const & sourceManager() const { return sourceManager_; }
+    clang::Preprocessor        & preprocessor ()       { return *preprocessor_; }
+    clang::Preprocessor  const & preprocessor () const { return *preprocessor_; }
 
 private:
-    clang::CompilerInstance compiler_;
+    typedef std::unordered_map<
+        clang::FileEntry const *,
+        llvm::OwningPtr<llvm::MemoryBuffer>
+    > ContentCache;
+
+private:
+    llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
+    clang::DiagnosticOptions diagOpts_;
+    llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diagEng_;
+    llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
+    llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
+    llvm::IntrusiveRefCntPtr<clang::TargetOptions> targetOpts_;
+    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo_;
+    llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
+    DummyModuleLoader moduleLoader_;
+    clang::FileSystemOptions fsOpts_;
+    clang::FileManager fileManager_;
+    clang::SourceManager sourceManager_;
+    clang::HeaderSearch headerSearch_;
+    llvm::OwningPtr<clang::Preprocessor> preprocessor_;
     Cache * cache_;
-    std::unordered_map<clang::FileEntry const *, llvm::OwningPtr<llvm::MemoryBuffer> > contentCache_;
+    ContentCache contentCache_;
 };
 
 

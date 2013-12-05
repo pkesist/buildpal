@@ -51,13 +51,23 @@ namespace
 
         virtual ~HeaderScanner() {}
 
-        virtual void FileStillNotFound( clang::SourceLocation FilenameLoc,
-            llvm::StringRef filename, bool isAngled,
-            clang::DirectoryLookup const * fromDir,
-            clang::DirectoryLookup const * & curDir,
-            clang::FileEntry const * & file)
+        virtual void InclusionDirective(
+            clang::SourceLocation hashLoc,
+            clang::Token const & includeTok,
+            llvm::StringRef fileName,
+            bool IsAngled,
+            clang::CharSourceRange filenameRange,
+            clang::FileEntry const * file,
+            llvm::StringRef SearchPath,
+            llvm::StringRef RelativePath,
+            clang::Module const * imported)
         {
-            headerTracker_.findFile( filename, isAngled, file );
+            headerTracker_.inclusionDirective( SearchPath, RelativePath, file );
+        }
+
+        virtual void ReplaceFile( clang::FileEntry const * & file ) override
+        {
+            headerTracker_.replaceFile( file );
         }
 
         virtual void FileChanged( clang::SourceLocation loc, FileChangeReason reason,
@@ -169,91 +179,87 @@ namespace
     };
 }  // anonymous namespace
 
+clang::TargetOptions * createTargetOptions()
+{
+    clang::TargetOptions * result = new clang::TargetOptions();
+    result->Triple = llvm::sys::getDefaultTargetTriple();
+    return result;
+}
+
 Preprocessor::Preprocessor( Cache * cache )
     :
+    diagID_       ( new clang::DiagnosticIDs() ),
+    diagEng_      ( new clang::DiagnosticsEngine( diagID_, &diagOpts_ ) ),
+    ppOpts_       ( new clang::PreprocessorOptions() ),
+    langOpts_     ( new clang::LangOptions() ),
+    targetOpts_   ( createTargetOptions() ),
+    targetInfo_   ( clang::TargetInfo::CreateTargetInfo( *diagEng_, &*targetOpts_) ),
+    hsOpts_       ( new clang::HeaderSearchOptions() ),
+    fileManager_  ( fsOpts_ ),
+    sourceManager_( *diagEng_, fileManager_, false ),
+    headerSearch_ ( hsOpts_, sourceManager_, *diagEng_, *langOpts_, &*targetInfo_ ),
     cache_( cache )
 {
-    // Create diagnostics.
-    compiler().createDiagnostics( new DiagnosticConsumer() );
-
-    // Create target info.
-    clang::CompilerInvocation * invocation = new clang::CompilerInvocation();
-    invocation->getTargetOpts().Triple = llvm::sys::getDefaultTargetTriple();
-    compiler().setInvocation( invocation );
-    compiler().setTarget(clang::TargetInfo::CreateTargetInfo(
-        compiler().getDiagnostics(), &compiler().getTargetOpts()));
-
-    clang::CompilerInvocation::setLangDefaults(
-        compiler().getLangOpts(), clang::IK_CXX);
-
+    diagEng_->setClient( new DiagnosticConsumer() );
+   
     // Configure the include paths.
-    clang::HeaderSearchOptions &hsopts = compiler().getHeaderSearchOpts();
-    hsopts.UseBuiltinIncludes = false;
-    hsopts.UseStandardSystemIncludes = false;
-    hsopts.UseStandardCXXIncludes = false;
-    hsopts.Sysroot.clear();
+    hsOpts_->UseBuiltinIncludes = false;
+    hsOpts_->UseStandardSystemIncludes = false;
+    hsOpts_->UseStandardCXXIncludes = false;
+    hsOpts_->Sysroot.clear();
 
-    compiler().createFileManager();
-    compiler().getFileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
+    fileManager_.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
-    if ( compiler().hasSourceManager() )
-        compiler().getSourceManager().clearIDTables();
-    else
-        compiler().createSourceManager( compiler().getFileManager() );
-
-    clang::FileEntry const * mainFileEntry = compiler().getFileManager().getFile( filename );
+    sourceManager_.clearIDTables();
+    clang::FileEntry const * mainFileEntry = fileManager().getFile( filename );
     if ( !mainFileEntry )
         throw std::runtime_error( "Could not find source file." );
     sourceManager().createMainFileID( mainFileEntry );
 
-    // Setup new preprocessor instance.
-    compiler().createPreprocessor();
-    clang::HeaderSearch & headers = preprocessor().getHeaderSearchInfo();
+    // Setup search path.
+    headerSearch_.ClearFileInfo();
+    std::vector<clang::DirectoryLookup> empty;
+    headerSearch_.SetSearchPaths( empty, 0, 0, false );
     
-    std::vector<clang::DirectoryLookup> dirs;
-    headers.SetSearchPaths( dirs, 0, 0, true );
+    for ( auto const & searchPath : ppc.searchPath() )
+    {
+        std::string const & path = searchPath.first;
+        bool const sysinclude = searchPath.second;
+        clang::DirectoryEntry const * entry = fileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
+        clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
+        headerSearch_.AddSearchPath( lookup, true );
+    }
 
-    // Setup predefines.
-    //   Clang always tries to define some macros, even if UsePredefines is off,
-    // so we cheat.
-    //std::string predefines( preprocessor().getPredefines() );
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );
     clang::MacroBuilder macroBuilder( predefinesStream );
     for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
         macroBuilder.defineMacro( iter->first, iter->second );
+
+    // Setup new preprocessor instance.
+    preprocessor_.reset
+    (
+        new clang::Preprocessor
+        (
+            ppOpts_,
+            *diagEng_,
+            *langOpts_,
+            &*targetInfo_,
+            sourceManager_,
+            headerSearch_,
+            moduleLoader_
+        )
+    );
+
     preprocessor().setPredefines( predefinesStream.str() );
     preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
-clang::HeaderSearch * Preprocessor::getHeaderSearch( PreprocessingContext::SearchPath const & searchPath )
-{
-    clang::HeaderSearch * headerSearch( new clang::HeaderSearch(
-        &compiler().getHeaderSearchOpts(),
-        compiler().getSourceManager(),
-        compiler().getDiagnostics(),
-        compiler().getLangOpts(),
-        &compiler().getTarget()));
-
-    // Setup search path.
-    for ( PreprocessingContext::SearchPath::const_iterator iter( searchPath.begin() ); iter != searchPath.end(); ++iter )
-    {
-        std::string const & path = iter->first;
-        bool const sysinclude = iter->second;
-        clang::DirectoryEntry const * entry = compiler().getFileManager().getDirectory( llvm::StringRef( path.c_str(), path.size() ) );
-        clang::DirectoryLookup lookup( entry, sysinclude ? clang::SrcMgr::C_System : clang::SrcMgr::C_User, false );
-        headerSearch->AddSearchPath( lookup, true );
-    }
-
-    return headerSearch;
-}
-
 Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
-    clang::PreprocessorOptions & ppOpts( compiler().getPreprocessorOpts() );
     setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
     {
@@ -270,8 +276,9 @@ Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::Strin
         clang::DiagnosticConsumer & client_;
     } const diagnosticsGuard
     (
-        *compiler().getDiagnostics().getClient(),
-        compiler().getLangOpts(), preprocessor()
+        *diagEng_->getClient(),
+        *langOpts_,
+        preprocessor()
     );
 
     Headers result;
@@ -280,12 +287,12 @@ Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::Strin
     preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
-    HeaderTracker headerTracker( preprocessor(), getHeaderSearch( ppc.searchPath() ), cache_ );
+    HeaderTracker headerTracker( preprocessor(), cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, filename,
         preprocessor(), ppc.ignoredHeaders(), result ) );
 
     preprocessor().EnterMainSourceFile();
-    if ( compiler().getDiagnostics().hasFatalErrorOccurred() )
+    if ( diagEng_->hasFatalErrorOccurred() )
         return result;
     while ( true )
     {

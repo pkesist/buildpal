@@ -57,7 +57,6 @@ class CompileOptions:
         return opt[-1][0]
 
     def includes(self):
-        print(self.arg_values)
         return list(itertools.chain(*self.value_dict.get(self.compiler.include_option(), [])))
 
     def defines(self):
@@ -83,7 +82,6 @@ class CompileOptions:
         result = self.value_dict.get(self.compiler.object_name_option())
         if not result:
             return None
-        print(result)
         assert len(result[-1]) == 1
         return result[-1][0]
 

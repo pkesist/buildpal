@@ -64,7 +64,7 @@ class CompileOptions:
 
     def create_server_call(self):
         result = ['cl.exe', '/c']
-        exclude_opts = ['c', 'I', 'Fo', 'link', '<input>']
+        exclude_opts = ['c', 'I', 'Fo', 'link', '<input>', 'Fp', 'Yc']
         for name, value in zip(self.option_names, self.arg_values):
             if name == 'Zi':
                 # Disable generating PDB files when compiling cpp into obj.
@@ -123,7 +123,7 @@ class MSVCWrapper:
 
     @classmethod
     def build_local_options(cls): 
-        return ['E', 'EP', 'P', 'Zg', 'Zs']
+        return ['E', 'EP', 'P', 'Zg', 'Zs', 'Yc']
 
     @classmethod
     def preprocessing_options(cls):

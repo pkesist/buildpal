@@ -244,36 +244,51 @@ public:
         ostream << "    ----\n";
         ostream << "    Key:\n";
         ostream << "    ----\n";
-        for ( Macro const & macro : entry->usedMacros() )
+        if ( entry->usedMacros().empty() )
+            ostream << "    Empty key\n";
+        else
         {
-            ostream << "    " << macroName( macro ).str() << macroValue( macro ).str() << '\n';
+            for ( Macro const & macro : entry->usedMacros() )
+            {
+                ostream << "    " << macroName( macro ).str() << macroValue( macro ).str() << '\n';
+            }
         }
         ostream << "    --------\n";
         ostream << "    Headers:\n";
         ostream << "    --------\n";
-        for ( Header const & header : entry->headers() )
+        if ( entry->headers().empty() )
+            ostream << "    No headers\n";
+        else
         {
-            ostream << "    " << header.dir.get() << ' ' << header.name.get() << '\n';
+            for ( Header const & header : entry->headers() )
+            {
+                ostream << "    " << header.dir.get() << ' ' << header.name.get() << '\n';
+            }
         }
         ostream << "    --------\n";
         ostream << "    Content:\n";
         ostream << "    --------\n";
-        std::for_each(
-            entry->headerContent().begin(),
-            entry->headerContent().end(),
-            [&]( HeaderEntry const & he )
-            {
-                switch ( he.first )
+        if ( entry->headers().empty() )
+            ostream << "    No content\n";
+        else
+        {
+            std::for_each(
+                entry->headerContent().begin(),
+                entry->headerContent().end(),
+                [&]( HeaderEntry const & he )
                 {
-                case MacroUsage::defined:
-                    ostream << "    #define " << macroName( he.second ).str() << macroValue( he.second ).str() << '\n';
-                    break;
-                case MacroUsage::undefined:
-                    ostream << "    #undef " << macroName( he.second ).str() << '\n';
-                    break;
+                    switch ( he.first )
+                    {
+                    case MacroUsage::defined:
+                        ostream << "    #define " << macroName( he.second ).str() << macroValue( he.second ).str() << '\n';
+                        break;
+                    case MacroUsage::undefined:
+                        ostream << "    #undef " << macroName( he.second ).str() << '\n';
+                        break;
+                    }
                 }
-            }
-        );
+            );
+        }
     }
 
     void dump( std::ostream & ostream )

@@ -4,7 +4,6 @@ import threading
 
 data = threading.local()
 cache = preprocessing.Cache()
-caches = {cache}
 
 def get_preprocessor():
     if not hasattr(data, 'pp'):
@@ -31,11 +30,8 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
     return preprocessor.scan_headers(ppc, filename)
 
 def cache_info():
-    stats = list(cache.get_stats() for cache in caches)
-    return (sum(hits for hits, _ in stats), sum(misses for _, misses in stats))
+    return cache.get_stats()
 
 def dump_cache():
-    counter = 0
-    for cache in caches:
-        cache.dump('cacheDump{}.txt'.format(counter))
-        counter += 1
+    print("Dumping cache.")
+    cache.dump('cacheDump.txt')

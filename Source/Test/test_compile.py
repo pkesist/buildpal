@@ -103,6 +103,23 @@ def test_relative(tmpdir, run_server, run_manager, vcvarsall, db_cl):
         stdout, stderr = proc.communicate()
         assert proc.returncode == 0
 
+def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, db_cl):
+    tmpdir = str(tmpdir)
+    cpp_file = os.path.join(tmpdir, 'a.cpp')
+    with create_file(cpp_file) as cpp:
+        cpp.write('''\
+#ifdef __cplusplus
+#include "doesnotexist.hpp"
+#endif
+''')
+    env = os.environ
+    env.update({'DB_MGR_PORT' : str(MGR_PORT)})
+    with subprocess.Popen([vcvarsall, '&&', db_cl, '/c', cpp_file],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
+        stdout, stderr = proc.communicate()
+        assert proc.returncode != 0
+
+
 def test_link(tmpdir, run_server, run_manager, vcvarsall, db_cl):
     tmpdir = str(tmpdir)
     cpp_file = os.path.join(tmpdir, 'linkme.cpp')

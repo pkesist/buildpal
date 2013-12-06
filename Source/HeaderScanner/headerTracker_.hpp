@@ -223,7 +223,7 @@ public:
     void enterSourceFile( clang::FileEntry const *, llvm::StringRef fileName );
     Headers exitSourceFile();
 
-    void inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, clang::FileEntry const * fileEntry );
+    void inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * fileEntry );
     void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();
     void enterHeader();
@@ -245,11 +245,13 @@ private:
 
     bool isViableForCache( HeaderCtx const &, clang::FileEntry const * ) const;
 
+public:
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
 
 private:
     typedef std::vector<HeaderWithFileEntry> IncludeStack;
+    typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
 
 private:
     std::vector<std::string> buffers_;
@@ -258,7 +260,7 @@ private:
     Cache * cache_;
     CacheEntryPtr cacheHit_;
     IncludeStack fileStack_;
-    std::vector<std::pair<clang::FileEntry const *, CacheEntryPtr> > usedCacheEntries_;
+    UsedCacheEntries usedCacheEntries_;
 };
 
 

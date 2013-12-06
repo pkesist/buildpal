@@ -3,7 +3,6 @@
 #include "headerTracker_.hpp"
 
 #include <clang/Lex/Preprocessor.h>
-#include <clang/Basic/MacroBuilder.h>
 
 #include <boost/spirit/include/karma.hpp>
 
@@ -39,7 +38,6 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
 void CacheEntry::generateContent( std::string & buffer )
 {
     llvm::raw_string_ostream defineStream( buffer );
-    clang::MacroBuilder macroBuilder( defineStream );
     std::for_each(
         headerContent().begin(),
         headerContent().end(),
@@ -48,10 +46,10 @@ void CacheEntry::generateContent( std::string & buffer )
             switch ( he.first )
             {
             case MacroUsage::defined:
-                macroBuilder.defineMacro( macroName( he.second ), macroValue( he.second ) );
+                defineStream << "#define " << macroName( he.second ) << macroValue( he.second ) << '\n';
                 break;
             case MacroUsage::undefined:
-                macroBuilder.undefineMacro( macroName( he.second ) );
+                defineStream << "#undef " << macroName( he.second ) << '\n';
                 break;
             }
         }

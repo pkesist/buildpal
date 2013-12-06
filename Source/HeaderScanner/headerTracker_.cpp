@@ -57,12 +57,11 @@ namespace
     } globalContentCache;
 }
 
-void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, clang::FileEntry const * entry )
+void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * entry )
 {
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
     clang::FileEntry const * parentFile = fileStack_.back().file;
-    clang::DirectoryLookup const * dirLookup( 0 );
     HeaderLocation::Enum const parentLocation( parentHeader.loc );
 
     // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
@@ -91,16 +90,17 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 #endif
     }
 
-    HeaderLocation::Enum const headerLocation = dirLookup == 0
-        ? fileStack_.size() == 1
-            ? HeaderLocation::relative
-            : parentLocation
+    HeaderLocation::Enum const headerLocation = ( fileStack_.back().header.dir.get() == searchPath ) && !isAngled
+        // This depends on the fact that source file location is 'relative'.
+        ? parentLocation 
         : preprocessor().getHeaderSearchInfo().getFileDirFlavor( entry ) == clang::SrcMgr::C_System
             ? HeaderLocation::system
             : HeaderLocation::regular
     ;
 
-    // Anything included from system header should also be system header.
+    // If parent is user include, this cannot be relative to source file.
+    assert( ( parentLocation != HeaderLocation::regular ) || ( headerLocation != HeaderLocation::relative ) );
+    // If parent is system, this must be system.
     assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
     HeaderWithFileEntry const headerWithFileEntry =
@@ -126,7 +126,9 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     {
         // There is a hit in cache!
         entry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
-        usedCacheEntries_.push_back( std::make_pair( entry, cacheHit_ ) );
+        std::pair<UsedCacheEntries::const_iterator, bool> const insertResult =
+            usedCacheEntries_.insert( std::make_pair( entry, cacheHit_ ) );
+        assert( insertResult.first->second == cacheHit_ );
     }
 }
 
@@ -134,7 +136,7 @@ void HeaderTracker::headerSkipped()
 {
     assert( !fileStack_.empty() );
     assert( !headerCtxStack().empty() );
-    HeaderWithFileEntry const hwf( fileStack_.back() );
+    HeaderWithFileEntry const & hwf( fileStack_.back() );
     fileStack_.pop_back();
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( hwf.file ) );
@@ -174,7 +176,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
             fromStringRef<Dir>( llvm::StringRef() ),
             fromStringRef<HeaderName>( fileName ),
             0,
-            HeaderLocation::regular
+            HeaderLocation::relative
         },
         mainFileEntry
     };
@@ -238,10 +240,10 @@ Headers HeaderTracker::exitSourceFile()
     Headers result;
     result.swap( headerCtxStack().back().includedHeaders() );
     // Undo cache overrides in source manager.
-    for ( std::pair<clang::FileEntry const *, CacheEntryPtr> const & usedEntries : usedCacheEntries_ )
+    for ( UsedCacheEntries::value_type const & entry : usedCacheEntries_ )
     {
-        assert( sourceManager().isFileOverridden( usedEntries.first ) );
-        sourceManager().disableFileContentsOverride( usedEntries.first );
+        assert( sourceManager().isFileOverridden( entry.first ) );
+        sourceManager().disableFileContentsOverride( entry.first );
     }
     // Remove ref from cache entries.
     usedCacheEntries_.clear();

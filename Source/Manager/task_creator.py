@@ -117,6 +117,6 @@ def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):
     task_creator = TaskCreator(executable, cwd, sysincludes,
                         compiler.parse_options(command))
     if task_creator.build_local():
-        client_conn.send([b'EXECUTE_AND_EXIT\x00' + command + b'\x00\x01'])
+        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(['cl.exe'] + command).encode()])
         return []
     return task_creator.create_tasks()

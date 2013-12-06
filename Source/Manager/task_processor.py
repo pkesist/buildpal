@@ -179,12 +179,16 @@ class TaskProcessor:
                             # client-server randezvous.
                             sessions.unregister(Sessions.FROM_PREPR, socket)
                             unregister_socket(socket)
-                            just_preprocess = False
-                            if just_preprocess:
+                            # Useful toggle for profiling preprocessor.
+                            DEBUG_JUST_PREPROCESS = False
+                            if DEBUG_JUST_PREPROCESS:
+                                # At this point preprocessing is done.
+                                # Notify client to exit with success errorcode,
+                                # so build can pump further tasks. The task will
+                                # not be actually compiled.
                                 session.client_conn.send([b'EXIT', b'0'])
                                 socket.send_multipart([b'DROP'])
                                 sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
-                                sessions.unregister(Sessions.FROM_PREPR, socket)
                             else:
                                 csrv.client_ready((session, SimpleTimer()))
                                 server_result = node_manager.get_server_conn()
@@ -207,7 +211,7 @@ class TaskProcessor:
                                 sysincludes = parts[2].decode()
                                 cwd = parts[3].decode()
                                 command = [x.decode() for x in parts[4:]]
-                                client_conn = self.SendProxy(client_socket, client_id)
+                                client_conn = self.SendProxy(client_socket, client_id.tobytes())
                                 client_conn.send([b'TASK_RECEIVED'])
                                 assert compiler_name == 'msvc'
                                 compiler = MSVCWrapper()

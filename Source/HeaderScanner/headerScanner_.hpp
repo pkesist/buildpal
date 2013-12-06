@@ -103,7 +103,10 @@ public:
     {
         if ( path.empty() )
             return;
-        searchPath_.push_back( std::make_pair( path, sysinclude ) );
+        if ( sysinclude )
+            systemSearchPath_.push_back( path );
+        else
+            userSearchPath_.push_back( path );
     }
 
     void addMacro( std::string const & name, std::string const & value )
@@ -116,15 +119,17 @@ public:
         ignoredHeaders_.insert( name );
     }
 
-    typedef std::vector<std::pair<std::string, bool> > SearchPath;
+    typedef std::vector<std::string> SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
 
-    SearchPath     const & searchPath    () const { return searchPath_; }
-    Defines        const & defines       () const { return defines_; }
-    IgnoredHeaders const & ignoredHeaders() const { return ignoredHeaders_; }
+    SearchPath     const & userSearchPath  () const { return userSearchPath_; }
+    SearchPath     const & systemSearchPath() const { return systemSearchPath_; }
+    Defines        const & defines         () const { return defines_; }
+    IgnoredHeaders const & ignoredHeaders  () const { return ignoredHeaders_; }
 
 private:
-    SearchPath searchPath_;
+    SearchPath userSearchPath_;
+    SearchPath systemSearchPath_;
     Defines defines_;
     IgnoredHeaders ignoredHeaders_;
 };
@@ -158,7 +163,6 @@ private:
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
-    clang::DiagnosticOptions diagOpts_;
     llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diagEng_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
     llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
@@ -169,7 +173,7 @@ private:
     clang::FileSystemOptions fsOpts_;
     clang::FileManager fileManager_;
     clang::SourceManager sourceManager_;
-    clang::HeaderSearch headerSearch_;
+    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     llvm::OwningPtr<clang::Preprocessor> preprocessor_;
     Cache * cache_;
     ContentCache contentCache_;

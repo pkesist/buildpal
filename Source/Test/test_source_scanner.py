@@ -74,30 +74,17 @@ def test_header_guard(tmpdir):
     env = Environment(tmpdir)
     env.make_file('aaa/a.h')
     env.make_file('aaa/x.h', '''
-#ifndef X_H
+#if !defined(X_H)
 #define X_H
 #include "a.h"
 #endif
 ''')
-    env.make_file('aaa/y.h', '''
-#ifndef Y_H
-#define Y_H
-#include "x.h"
-#endif
-''')
-    env.make_file('aaa/z.h', '''
-#ifndef Z_H
-#define Z_H
-#include "x.h"
-#endif
-''')
     env.make_file('test.cpp', '''
-#include "y.h"
-#include "z.h"
-#include "a.h"
+#include "x.h"
+#include "x.h"
 ''')
     assert env.run('test.cpp', includes=['aaa']) == \
-        {'a.h', 'x.h', 'y.h', 'z.h'}
+        {'a.h', 'x.h'}
 
     env.make_file('test2.cpp', '''
 #include "x.h"

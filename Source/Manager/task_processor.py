@@ -148,6 +148,36 @@ class TaskProcessor:
 
         scheduler = sched.scheduler()
 
+        class ClientData:
+            def __init__(self):
+                self.data = {}
+
+            def __get_message(self, client_id):
+                data = self.data.get(client_id, b'')
+                try:
+                    end_index = data.index(b'\x00\x01')
+                except ValueError:
+                    return None
+                result = data[:end_index].split(b'\x00')
+                data = data[end_index + 2:]
+                if data:
+                    self.data[client_id] = data
+                else:
+                    del self.data[client_id]
+                return result
+
+            def process_new_data(self, client_id, data):
+                self.data[client_id] = self.data.get(client_id, b'') + data.tobytes()
+                messages = []
+                while True:
+                    x = self.__get_message(client_id)
+                    if x is not None:
+                        messages.append(x)
+                    else:
+                        break
+                return messages
+        client_data = ClientData()
+
         try:
             while True:
                 self.print_stats(node_info)
@@ -196,28 +226,26 @@ class TaskProcessor:
                                     csrv.server_ready(server_result)
                     elif socket is client_socket:
                         with self.timer.timeit('poller.client'):
-                            msg = recv_multipart(client_socket)
-                            client_id = msg[0]
-                            assert len(msg) == 2
-                            assert msg[1][-2:] == b'\x00\x01'
-                            parts = bytes(msg[1][:-2]).split(b'\x00')
-                            session = sessions.get(Sessions.FROM_CLIENT, client_id)
-                            if session:
-                                session.got_data_from_client(parts)
-                            else:
-                                # Create new session.
-                                compiler_name = parts[0].decode()
-                                executable = parts[1].decode()
-                                sysincludes = parts[2].decode()
-                                cwd = parts[3].decode()
-                                command = [x.decode() for x in parts[4:]]
-                                client_conn = self.SendProxy(client_socket, client_id.tobytes())
-                                client_conn.send([b'TASK_RECEIVED'])
-                                assert compiler_name == 'msvc'
-                                compiler = MSVCWrapper()
-                                for task in create_tasks(client_conn, compiler,
-                                    executable, cwd, sysincludes, command):
-                                    start_task(task)
+                            client_id, data = recv_multipart(client_socket)
+                            messages = client_data.process_new_data(client_id, data)
+                            for msg in messages:
+                                session = sessions.get(Sessions.FROM_CLIENT, client_id)
+                                if session:
+                                    session.got_data_from_client(msg)
+                                else:
+                                    # Create new session.
+                                    compiler_name = msg[0].decode()
+                                    executable = msg[1].decode()
+                                    sysincludes = msg[2].decode()
+                                    cwd = msg[3].decode()
+                                    command = [x.decode() for x in msg[4:]]
+                                    client_conn = self.SendProxy(client_socket, client_id.tobytes())
+                                    client_conn.send([b'TASK_RECEIVED'])
+                                    assert compiler_name == 'msvc'
+                                    compiler = MSVCWrapper()
+                                    for task in create_tasks(client_conn, compiler,
+                                        executable, cwd, sysincludes, command):
+                                        start_task(task)
                     else:
                         with self.timer.timeit('poller.server'):
                             # Connection to server node.

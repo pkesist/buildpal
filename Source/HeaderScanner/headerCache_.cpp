@@ -69,7 +69,7 @@ CacheEntryPtr Cache::addEntry
     unsigned const uid( getFileId( fileName ) );
     CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
         std::move( macros ), std::move( headerContent ), headers, hits_ + misses_ );
-    std::unique_lock<std::mutex> const lock( cacheMutex_ );
+    boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
     cacheContainer_.insert( result );
     if ( cacheContainer_.size() >= 1024 * 16 )
     {
@@ -97,7 +97,7 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & head
     unsigned const uid( getFileId( fileName ) );
     std::vector<CacheEntryPtr> entriesForUid;
     {
-        std::unique_lock<std::mutex> const lock( cacheMutex_ );
+        boost::shared_lock<boost::shared_mutex> const lock( cacheMutex_ );
         std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
             cacheContainer_.equal_range( uid );
         std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
@@ -127,7 +127,7 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & head
             ) == pEntry->usedMacros().end()
         )
         {
-            std::unique_lock<std::mutex> const lock( cacheMutex_ );
+            boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
             CacheContainer::index<ById>::type::iterator const iter = cacheContainer_.get<ById>().find( &*pEntry );
             cacheContainer_.get<ById>().modify( iter, [this]( CacheEntryPtr p ) { p->cacheHit( hits_ + misses_ ); } );
             ++hits_;

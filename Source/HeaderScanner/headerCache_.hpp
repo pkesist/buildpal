@@ -14,7 +14,9 @@
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
-
+#include <boost/thread/lock_algorithms.hpp>
+#include <boost/thread/shared_mutex.hpp>
+  
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
@@ -228,11 +230,18 @@ public:
 
     unsigned getFileId( llvm::StringRef name )
     {
-        std::unique_lock<std::mutex> const fileIdsLock( fileIdsMutex_ );
+        {
+            boost::shared_lock<boost::shared_mutex> const sharedLock( fileIdsMutex_ );
+            FileIds::const_iterator const iter( fileIds_.find( name ) );
+            if ( iter != fileIds_.end() )
+                return iter->second;
+        }
+        boost::upgrade_lock<boost::shared_mutex> upgradeLock( fileIdsMutex_ );
         FileIds::const_iterator const iter( fileIds_.find( name ) );
         if ( iter != fileIds_.end() )
             return iter->second;
-        fileIds_[ name ] = ++fileIdCounter_;
+        boost::upgrade_to_unique_lock<boost::shared_mutex> const uniqueLock( upgradeLock );
+        fileIds_.insert( std::make_pair( name, ++fileIdCounter_ ) );
         return fileIdCounter_;
     }
 
@@ -396,9 +405,9 @@ private:
 
 private:
     CacheContainer cacheContainer_;
-    std::mutex cacheMutex_;
+    boost::shared_mutex cacheMutex_;
     FileIds fileIds_;
-    std::mutex fileIdsMutex_;
+    boost::shared_mutex fileIdsMutex_;;
     unsigned fileIdCounter_;
     std::size_t counter_;
     std::size_t hits_;

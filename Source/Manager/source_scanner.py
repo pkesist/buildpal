@@ -198,13 +198,13 @@ class SourceScanner:
         #
         #
         header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))
-        for in_name in in_filelist:
+        for entry in in_filelist:
             found = False
             while not found:
                 try:
                     dir, file, relative, content, header, checksum = \
                         next(header_info_iter)
-                    if in_name == file:
+                    if entry == (dir, file):
                         found = True
                         break
                 except StopIteration:

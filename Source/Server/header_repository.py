@@ -32,8 +32,8 @@ class HeaderRepository:
             for name, checksum in data:
                 key = (dir, name)
                 if key not in checksums or checksums[key] != checksum:
-                    needed_files[name] = dir, name, checksum
-                    out_list.append(name)
+                    needed_files[name] = dir, checksum
+                    out_list.append((dir, name))
         with self.session_lock:
             self.counter += 1
             self.session_data[self.counter] = needed_files, dirs
@@ -60,18 +60,18 @@ class HeaderRepository:
                 file.write(content)
 
         # Update headers.
-        for file, content in new_files.items():
-            if not file in needed_files:
+        for name, content in new_files.items():
+            if not name in needed_files:
                 # If not a part of needed_files, extract it directly to local_dir
                 # and do not remember it.
-                create_file_in_dir(local_dir, file, content)
+                create_file_in_dir(local_dir, name, content)
             else:
-                remote_dir, remote_name, checksum = needed_files[file]
+                remote_dir, checksum = needed_files[name]
                 shared_dir = self.map_dir(remote_dir)
-                filename = os.path.join(shared_dir, remote_name)
+                filename = os.path.join(shared_dir, name)
                 create_shared = False
                 create_local = False
-                key = (remote_dir, remote_name)
+                key = (remote_dir, name)
                 with lock:
                     old_checksum = checksums.get(key)
                     if old_checksum is None:
@@ -80,9 +80,9 @@ class HeaderRepository:
                     else:
                         create_local = old_checksum != checksum
                 if create_local:
-                    create_file_in_dir(local_dir, remote_name, content)
+                    create_file_in_dir(local_dir, name, content)
                 if create_shared:
-                    create_file_in_dir(shared_dir, remote_name, content)
+                    create_file_in_dir(shared_dir, name, content)
                     with lock:
                         checksums[key] = checksum
         return include_paths

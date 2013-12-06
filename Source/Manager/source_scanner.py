@@ -101,7 +101,11 @@ class SourceScanner:
             for dir, content in self.header_info:
                 dir_data = []
                 for file, relative, content, header, checksum in content:
-                    dir_data.append((file, relative, checksum))
+                    # Headers which are relative to source file are not
+                    # considered as candidates for server cache, and are
+                    # always sent together with the source file.
+                    if not relative:
+                        dir_data.append((file, checksum))
                 result.append((dir, dir_data))
             return tuple(result)
 

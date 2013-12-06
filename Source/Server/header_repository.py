@@ -29,11 +29,10 @@ class HeaderRepository:
         dirs = set()
         for dir, data in in_list:
             dirs.add(self.map_dir(dir))
-            for name, relative, checksum in data:
+            for name, checksum in data:
                 key = (dir, name)
                 if key not in checksums or checksums[key] != checksum:
-                    if not relative:
-                        needed_files[name] = dir, name, checksum
+                    needed_files[name] = dir, name, checksum
                     out_list.append(name)
         with self.session_lock:
             self.counter += 1

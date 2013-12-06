@@ -409,7 +409,7 @@ private:
     FileIds fileIds_;
     boost::shared_mutex fileIdsMutex_;;
     unsigned fileIdCounter_;
-    std::size_t counter_;
+    std::atomic<std::size_t> counter_;
     std::size_t hits_;
     std::size_t misses_;
 };

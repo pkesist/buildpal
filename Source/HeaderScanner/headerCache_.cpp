@@ -88,7 +88,7 @@ std::string Cache::uniqueFileName()
     using namespace boost::spirit::karma;
     generate( std::back_inserter( result ),
         lit( "__cached_file_" ) << uint_,
-        ++counter_ );
+        counter_.fetch_add( 1, std::memory_order_relaxed ) );
     return result;
 }
 

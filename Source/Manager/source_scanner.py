@@ -74,7 +74,8 @@ class SourceScanner:
             self.task = task
             def verify(future):
                 future.result()
-            executor.submit(self.calc_header_info, zmq_ctx).add_done_callback(verify)
+            executor.submit(self.calc_header_info, zmq_ctx).add_done_callback(
+                verify)
 
         def calc_header_info(self, zmq_ctx):
             timer = SimpleTimer()
@@ -91,8 +92,8 @@ class SourceScanner:
             s.disconnect('inproc://pp_sessions')
 
         def create_filelist(self):
-            return list((dir, file, relative, checksum) for dir, file, relative, \
-                content, header, checksum in self.header_info)
+            return list((dir, file, relative, checksum) for dir, file,
+                relative, content, header, checksum in self.header_info)
 
     def handle(self, socket):
         if socket is self.mgr_socket:
@@ -100,7 +101,8 @@ class SourceScanner:
             session = self.client_sessions.get(conn_id)
             if not session:
                 assert msg[0] == b'PREPROCESS_TASK'
-                self.client_sessions[conn_id] = self.Session(self.zmq_ctx, conn_id, pickle.loads(msg[1]), self.executor)
+                self.client_sessions[conn_id] = self.Session(self.zmq_ctx,
+                    conn_id, pickle.loads(msg[1]), self.executor)
             else:
                 assert session.state == self.Session.STATE_WAITING_FOR_SERVER
                 del self.client_sessions[conn_id]
@@ -124,7 +126,8 @@ class SourceScanner:
                     assert msg[0] == b'DROP'
             return True
         elif socket is self.sessions_socket:
-            self.mgr_socket.send_multipart(recv_multipart(self.sessions_socket), copy=False)
+            self.mgr_socket.send_multipart(recv_multipart(self.sessions_socket),
+                copy=False)
             return True
         elif socket in self.server_sessions:
             session = self.server_sessions[socket]
@@ -132,7 +135,8 @@ class SourceScanner:
             if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
                 assert len(msg) == 1
                 if msg[0] == b'SESSION_ATTACHED':
-                    socket.send_multipart([b'TASK_FILE_LIST', getfqdn().encode(), pickle.dumps(session.filelist)])
+                    socket.send_multipart([b'TASK_FILE_LIST',
+                        getfqdn().encode(), pickle.dumps(session.filelist)])
                     session.wait_for_header_list_response = SimpleTimer()
                     session.state = self.Session.STATE_SENDING_FILE_LIST
                 else:
@@ -145,8 +149,11 @@ class SourceScanner:
             elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                 assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
                 missing_files = pickle.loads(msg[1])
-                new_files, src_loc = self.tar_with_new_headers(session.task, missing_files, session.header_info)
-                socket.send_multipart([b'TASK_FILES', getfqdn().encode(), pickle.dumps(new_files), src_loc.encode(), pickle.dumps(session.wait_for_header_list_response.get())])
+                new_files, src_loc = self.task_files_bundle(
+                    session.task['source'], missing_files, session.header_info)
+                socket.send_multipart([b'TASK_FILES', getfqdn().encode(),
+                    pickle.dumps(new_files), src_loc.encode(), pickle.dumps(
+                    session.wait_for_header_list_response.get())])
                 self.poller.unregister(socket)
                 self.sockets[session.node_index].append(socket)
                 del self.server_sessions[socket]
@@ -156,7 +163,7 @@ class SourceScanner:
         return False
 
     @classmethod
-    def tar_with_new_headers(cls, task, in_filelist, header_info):
+    def task_files_bundle(cls, source_file, in_filelist, header_info):
         relative_includes = {}
         rel_counter = 0
         max_depth = 0
@@ -166,12 +173,14 @@ class SourceScanner:
             found = False
             while not found:
                 try:
-                    dir, file, relative, content, header, checksum = next(header_info_iter)
+                    dir, file, relative, content, header, checksum = \
+                        next(header_info_iter)
                     if in_name == file:
                         found = True
                         break
                 except StopIteration:
-                    raise Exception("Could not find information for {}.",format(in_name))
+                    raise Exception("Could not find information for {}.".format(
+                        in_name))
             assert found
             depth = 0
             path_elements = file.split('/')
@@ -189,7 +198,8 @@ class SourceScanner:
                     else:
                         del path_element[index - 1:index + 1]
                 if depth:
-                    relative_includes.setdefault(depth - 1, []).append((dir, '/'.join(path_elements), content, header))
+                    relative_includes.setdefault(depth - 1, []).append((dir,
+                        '/'.join(path_elements), content, header))
                 else:
                     files['/'.join(path_elements)] = header + content
             else:
@@ -200,8 +210,7 @@ class SourceScanner:
             curr_dir += 'dummy_rel/'
             for dir, file, content, header in relative_includes[depth]:
                 files[curr_dir + file] = header + content
-        rel_file = curr_dir + os.path.basename(task['source'])
-        cpp_file = task['source']
-        with open(cpp_file, 'rb') as src:
-            files[rel_file] = header_beginning(cpp_file) + src.read()
+        rel_file = curr_dir + os.path.basename(source_file)
+        with open(source_file, 'rb') as src:
+            files[rel_file] = header_beginning(source_file) + src.read()
         return files, rel_file

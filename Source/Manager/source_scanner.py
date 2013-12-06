@@ -3,11 +3,13 @@ from .scan_headers import collect_headers, cache_info
 from Common import SimpleTimer
 from Common import create_socket, recv_multipart
 
+from collections import defaultdict
 import zmq
 import os
 import pickle
 from zlib import adler32
 from socket import getfqdn
+from itertools import chain
 
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -29,8 +31,11 @@ def header_info(task):
     header_info = collect_headers(task['source'], task['includes'],
         task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-    return ((dir, file, relative, content, header_beginning(abs), \
-        adler32(content)) for dir, file, relative, content in header_info)
+    for dir, data in header_info:
+        for entry in data:
+            abs = os.path.join(dir, entry[0])
+            entry.extend((header_beginning(abs), adler32(entry[2])))
+    return header_info
 
 class SourceScanner:
     def __init__(self, zmq_ctx, address, nodes, poller):
@@ -79,7 +84,7 @@ class SourceScanner:
 
         def calc_header_info(self, zmq_ctx):
             timer = SimpleTimer()
-            self.header_info = list(header_info(self.task))
+            self.header_info = header_info(self.task)
             self.filelist = self.create_filelist()
             hits, misses = cache_info()
 
@@ -92,8 +97,13 @@ class SourceScanner:
             s.disconnect('inproc://pp_sessions')
 
         def create_filelist(self):
-            return list((dir, file, relative, checksum) for dir, file,
-                relative, content, header, checksum in self.header_info)
+            result = []
+            for dir, content in self.header_info:
+                dir_data = []
+                for file, relative, content, header, checksum in content:
+                    dir_data.append((file, relative, checksum))
+                result.append((dir, dir_data))
+            return tuple(result)
 
     def handle(self, socket):
         if socket is self.mgr_socket:
@@ -168,7 +178,22 @@ class SourceScanner:
         rel_counter = 0
         max_depth = 0
         files = {}
-        header_info_iter = iter(header_info)
+        # Iterate over
+        #
+        #    (dir1, [[a11, a12], [b11, b12]]),
+        #    (dir2, [[a21, a22], [b21, b22]]),
+        #    ....
+        #
+        # Like it was
+        #
+        #  (dir1, a11, a12),
+        #  (dir1, b11, b12),
+        #  (dir2, a21, a22),
+        #  (dir2, b21, b22),
+        #  ...
+        #
+        #
+        header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))
         for in_name in in_filelist:
             found = False
             while not found:

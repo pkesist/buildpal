@@ -1,6 +1,7 @@
 #! python3.3
 import preprocessing
 import threading
+from collections import defaultdict
 
 data = threading.local()
 cache = preprocessing.Cache()
@@ -27,7 +28,11 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
         ppc.add_macro(macro, value)
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)
-    return preprocessor.scan_headers(ppc, filename)
+    # Group result by dir.
+    result = defaultdict(list)
+    for dir, name, relative, buff in preprocessor.scan_headers(ppc, filename):
+        result[dir].append([name, relative, buff])
+    return tuple(result.items())
 
 def cache_info():
     return cache.get_stats()

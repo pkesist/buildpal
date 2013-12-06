@@ -27,13 +27,14 @@ class HeaderRepository:
         out_list = []
         checksums, lock = self.checksums.setdefault(machine_id, ({}, Lock()))
         dirs = set()
-        for dir, name, relative, checksum in in_list:
-            key = (dir, name)
+        for dir, data in in_list:
             dirs.add(self.map_dir(dir))
-            if key not in checksums or checksums[key] != checksum:
-                if not relative:
-                    needed_files[name] = dir, name, checksum
-                out_list.append(name)
+            for name, relative, checksum in data:
+                key = (dir, name)
+                if key not in checksums or checksums[key] != checksum:
+                    if not relative:
+                        needed_files[name] = dir, name, checksum
+                    out_list.append(name)
         with self.session_lock:
             self.counter += 1
             self.session_data[self.counter] = needed_files, dirs

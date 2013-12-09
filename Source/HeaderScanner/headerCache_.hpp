@@ -129,7 +129,6 @@ private:
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
         headers_( headers ),
-        hitCount_( 0 ),
         lastTimeHit_( currentTime )
     {
         contentLock_.clear();
@@ -166,13 +165,11 @@ public:
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
     FileId fileId() const { return fileId_; }
-    std::size_t hitCount() const { return hitCount_; }
     std::size_t lastTimeHit() const { return lastTimeHit_; }
     
     void cacheHit( unsigned int currentTime )
     {
         lastTimeHit_ = currentTime;
-        ++hitCount_;
     }
 
     std::size_t getRef()
@@ -207,7 +204,6 @@ private:
     Macros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
-    std::size_t hitCount_;
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
     std::string buffer_;
@@ -324,15 +320,6 @@ private:
         }
     };
 
-    struct GetHitCount
-    {
-        typedef std::size_t result_type;
-        result_type operator()( CacheEntryPtr const & c ) const
-        {
-            return c->hitCount();
-        }
-    };
-
     struct LastTimeHit
     {
         typedef std::size_t result_type;
@@ -343,20 +330,20 @@ private:
     };
 
     struct ById {};
-    struct ByFileIdAndHitCount {};
     struct ByLastTimeHit {};
+    struct ByFileIdAndLastTimeHit {};
 
     typedef boost::multi_index_container<
         CacheEntryPtr,
         boost::multi_index::indexed_by<
             // Index used when searching cache.
-            // Entries with more hits are searched first.
+            // Entries with recent hits are searched first.
             boost::multi_index::ordered_non_unique<
-                boost::multi_index::tag<ByFileIdAndHitCount>,
+                boost::multi_index::tag<ByFileIdAndLastTimeHit>,
                 boost::multi_index::composite_key<
                     CacheEntryPtr,
                     GetFileId,
-                    GetHitCount
+                    LastTimeHit
                 >,
                 boost::multi_index::composite_key_compare<
                     std::less<FileId>,

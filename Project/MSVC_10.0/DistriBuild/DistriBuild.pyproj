@@ -27,7 +27,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Source\Common\__init__.py" />
-    <Compile Include="Source\Compilers\cmdline_processing.py" />
     <Compile Include="Source\Compilers\msvc.py" />
     <Compile Include="Source\Compilers\__init__.py" />
     <Compile Include="Source\distribute_manager.py" />
@@ -60,15 +59,24 @@
     <Folder Include="Source\Manager\" />
     <Folder Include="Source\Common" />
     <Folder Include="Source\Compilers\" />
+    <Folder Include="Source\ArgParser\" />
     <Folder Include="Source\Test" />
     <Folder Include="Source\Server\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.rst" />
+    <Content Include="Source\ArgParser\build-config.ini" />
+    <Content Include="Source\ArgParser\clangOpts_.cpp" />
+    <Content Include="Source\ArgParser\clangOpts_.hpp" />
+    <Content Include="Source\ArgParser\Jamroot.jam" />
+    <Content Include="Source\ArgParser\argList_.cpp" />
+    <Content Include="Source\ArgParser\test.cpp" />
     <Content Include="Source\Client\build-config.ini" />
     <Content Include="Source\Client\db_cl.cpp" />
     <Content Include="Source\Client\Jamroot.jam" />
     <Content Include="Source\HeaderScanner\build-config.ini" />
+    <Content Include="Source\HeaderScanner\contentCache_.cpp" />
+    <Content Include="Source\HeaderScanner\contentCache_.hpp" />
     <Content Include="Source\HeaderScanner\headerCache_.cpp" />
     <Content Include="Source\HeaderScanner\headerCache_.hpp" />
     <Content Include="Source\HeaderScanner\headerScanner_.cpp" />

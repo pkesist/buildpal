@@ -143,7 +143,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCt
         HeaderCtx const & headerCtx_;
     };
 
-    for ( CacheEntryPtr pEntry : entriesForUid )
+    for ( CacheEntryPtr const & pEntry : entriesForUid )
     {
         if
         (
@@ -156,6 +156,9 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCt
         )
         {
             boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
+            // Note that we cannot use CacheContainer::iterator_to() to obtain
+            // the iterator to update. iterator_to() needs a reference to the
+            // actual value stored in the container, not a copy.
             typedef CacheContainer::index<ById>::type IndexByIdType;
             IndexByIdType & indexById( cacheContainer_.get<ById>() );
             IndexByIdType::iterator const iter = indexById.find( &*pEntry );

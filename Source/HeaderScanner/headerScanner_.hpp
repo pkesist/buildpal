@@ -41,11 +41,13 @@ class HeaderTracker;
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
     typedef Flyweight<base, name##Tag> name;
+    //struct name##Tag {}; \
+    //typedef boost::flyweights::flyweight<base, boost::flyweights::tag<name##Tag> > name;
 
-DEFINE_FLYWEIGHT(std::string, Dir);
-DEFINE_FLYWEIGHT(std::string, HeaderName);
-DEFINE_FLYWEIGHT(std::string, MacroName);
-DEFINE_FLYWEIGHT(std::string, MacroValue);
+DEFINE_FLYWEIGHT(llvm::SmallString<256>, Dir);
+DEFINE_FLYWEIGHT(llvm::SmallString<32>, HeaderName);
+DEFINE_FLYWEIGHT(llvm::SmallString<32>, MacroName);
+DEFINE_FLYWEIGHT(llvm::SmallString<64>, MacroValue);
 
 struct HeaderLocation
 {
@@ -62,6 +64,7 @@ struct Header
     Dir dir;
     HeaderName name;
     llvm::MemoryBuffer const * buffer;
+    std::size_t checksum;
     HeaderLocation::Enum loc;
 };
 
@@ -139,8 +142,7 @@ class Preprocessor
 public:
     explicit Preprocessor( Cache * cache );
 
-    Headers scanHeaders( PreprocessingContext const &, llvm::StringRef filename );
-
+    void scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers & );
     void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
@@ -148,18 +150,12 @@ private:
     void setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
 
 private:
-    clang::FileManager         & fileManager  ()       { return fileManager_; }
-    clang::FileManager   const & fileManager  () const { return fileManager_; }
-    clang::SourceManager       & sourceManager()       { return sourceManager_; }
-    clang::SourceManager const & sourceManager() const { return sourceManager_; }
+    clang::FileManager         & fileManager  ()       { return *fileManager_; }
+    clang::FileManager   const & fileManager  () const { return *fileManager_; }
+    clang::SourceManager       & sourceManager()       { return *sourceManager_; }
+    clang::SourceManager const & sourceManager() const { return *sourceManager_; }
     clang::Preprocessor        & preprocessor ()       { return *preprocessor_; }
     clang::Preprocessor  const & preprocessor () const { return *preprocessor_; }
-
-private:
-    typedef std::unordered_map<
-        clang::FileEntry const *,
-        llvm::OwningPtr<llvm::MemoryBuffer>
-    > ContentCache;
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
@@ -171,12 +167,11 @@ private:
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
     DummyModuleLoader moduleLoader_;
     clang::FileSystemOptions fsOpts_;
-    clang::FileManager fileManager_;
-    clang::SourceManager sourceManager_;
+    llvm::OwningPtr<clang::FileManager> fileManager_;
+    llvm::OwningPtr<clang::SourceManager> sourceManager_;
     llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
     llvm::OwningPtr<clang::Preprocessor> preprocessor_;
     Cache * cache_;
-    ContentCache contentCache_;
 };
 
 

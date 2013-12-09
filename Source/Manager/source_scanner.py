@@ -7,7 +7,6 @@ from collections import defaultdict
 import zmq
 import os
 import pickle
-from zlib import adler32
 from socket import getfqdn
 from itertools import chain
 
@@ -34,7 +33,7 @@ def header_info(task):
     for dir, data in header_info:
         for entry in data:
             abs = os.path.join(dir, entry[0])
-            entry.extend((header_beginning(abs), adler32(entry[2])))
+            entry.append(header_beginning(abs))
     return header_info
 
 class SourceScanner:
@@ -54,7 +53,7 @@ class SourceScanner:
         self.client_sessions = {}
         self.server_sessions = {}
 
-        self.executor = ThreadPoolExecutor(2 * cpu_count())
+        self.executor = ThreadPoolExecutor(4 * cpu_count())
         self.poller = poller
 
         self.poller.register(self.mgr_socket, zmq.POLLIN)
@@ -100,7 +99,7 @@ class SourceScanner:
             result = []
             for dir, content in self.header_info:
                 dir_data = []
-                for file, relative, content, header, checksum in content:
+                for file, relative, content, checksum, header in content:
                     # Headers which are relative to source file are not
                     # considered as candidates for server cache, and are
                     # always sent together with the source file.
@@ -202,7 +201,7 @@ class SourceScanner:
             found = False
             while not found:
                 try:
-                    dir, file, relative, content, header, checksum = \
+                    dir, file, relative, content, checksum, header = \
                         next(header_info_iter)
                     if entry == (dir, file):
                         found = True

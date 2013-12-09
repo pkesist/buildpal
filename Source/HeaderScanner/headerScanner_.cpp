@@ -200,8 +200,6 @@ Preprocessor::Preprocessor( Cache * cache )
     targetOpts_   ( createTargetOptions() ),
     targetInfo_   ( clang::TargetInfo::CreateTargetInfo( *diagEng_, &*targetOpts_) ),
     hsOpts_       ( new clang::HeaderSearchOptions() ),
-    fileManager_  ( fsOpts_ ),
-    sourceManager_( *diagEng_, fileManager_, false ),
     cache_( cache )
 {
     diagEng_->setClient( new DiagnosticConsumer() );
@@ -212,19 +210,23 @@ Preprocessor::Preprocessor( Cache * cache )
     hsOpts_->UseStandardCXXIncludes = false;
     hsOpts_->Sysroot.clear();
 
-    fileManager_.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 }
 
 void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
-    sourceManager_.clearIDTables();
+    // Initialize file manager.
+    fileManager_.reset( new clang::FileManager( fsOpts_ ) );
+    fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
     clang::FileEntry const * mainFileEntry = fileManager().getFile( filename );
     if ( !mainFileEntry )
         throw std::runtime_error( "Could not find source file." );
+
+    // Initialize source manager.
+    sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );
     sourceManager().createMainFileID( mainFileEntry );
 
     // Setup search path.
-    headerSearch_.reset( new clang::HeaderSearch( hsOpts_, sourceManager_, *diagEng_, *langOpts_, &*targetInfo_ ) );
+    headerSearch_.reset( new clang::HeaderSearch( hsOpts_, sourceManager(), *diagEng_, *langOpts_, &*targetInfo_ ) );
     std::vector<clang::DirectoryLookup> searchPath;
     for ( auto const & path : ppc.userSearchPath() )
     {
@@ -255,7 +257,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::St
             *diagEng_,
             *langOpts_,
             &*targetInfo_,
-            sourceManager_,
+            sourceManager(),
             *headerSearch_,
             moduleLoader_
         )
@@ -265,7 +267,7 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::St
     preprocessor().SetSuppressIncludeNotFoundError( true );
 }
 
-Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename )
+void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers & headers )
 {
     setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
@@ -288,19 +290,17 @@ Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::Strin
         preprocessor()
     );
 
-    Headers result;
-
     // Do not let #pragma once interfere with cache.
     preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, filename,
-        preprocessor(), ppc.ignoredHeaders(), result ) );
+        preprocessor(), ppc.ignoredHeaders(), headers ) );
 
     preprocessor().EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )
-        return result;
+        return;
     while ( true )
     {
         clang::Token token;
@@ -309,7 +309,6 @@ Headers Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::Strin
             break;
     }
     preprocessor().EndSourceFile();
-    return result;
 }
 
 

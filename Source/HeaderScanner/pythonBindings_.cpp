@@ -337,14 +337,14 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     Headers headers;
 
     Py_BEGIN_ALLOW_THREADS
-    headers = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ) );
+    self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers );
     Py_END_ALLOW_THREADS
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );
     for ( Header const & header : headers )
     {
-        PyObject * tuple = PyTuple_New( 4 );
+        PyObject * tuple = PyTuple_New( 5 );
         PyTuple_SET_ITEM( tuple, 0, PyUnicode_FromStringAndSize( header.dir.get().data(), header.dir.get().size() ) );
         PyTuple_SET_ITEM( tuple, 1, PyUnicode_FromStringAndSize( header.name.get().data(), header.name.get().size() ) );
 
@@ -355,6 +355,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         char * const data( const_cast<char *>( header.buffer->getBufferStart() ) );
         std::size_t const size( header.buffer->getBufferSize() );
         PyTuple_SET_ITEM( tuple, 3, PyMemoryView_FromMemory( data, size, PyBUF_READ ) );
+        PyTuple_SET_ITEM( tuple, 4, PyLong_FromSize_t( header.checksum ) );
         PyTuple_SET_ITEM( result, index, tuple );
         ++index;
     }

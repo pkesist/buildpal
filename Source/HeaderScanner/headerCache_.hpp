@@ -4,6 +4,7 @@
 #ifndef headerCache_HPP__A615CA5B_F047_45DE_8314_AF96E4F4FF86
 #define headerCache_HPP__A615CA5B_F047_45DE_8314_AF96E4F4FF86
 //------------------------------------------------------------------------------
+#include "contentCache_.hpp"
 #include "headerScanner_.hpp"
 #include "utility_.hpp"
 
@@ -22,7 +23,6 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <atomic>
-#include <mutex>
 #include <list>
 #include <set>
 #include <string>
@@ -49,7 +49,7 @@ inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
 template <typename T>
 inline T fromStringRef( llvm::StringRef x )
 {
-    return T( x.data(), x.size() );
+    return T( x );
 }
 
 inline llvm::StringRef macroName( Macro const & macro )
@@ -108,12 +108,14 @@ struct MacroState : public llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocat
 void intrusive_ptr_add_ref( CacheEntry * );
 void intrusive_ptr_release( CacheEntry * );
 
+typedef llvm::sys::fs::UniqueID FileId;
+
 class CacheEntry
 {
 private:
     CacheEntry
     (
-        unsigned uid,
+        FileId fileId,
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
@@ -122,7 +124,7 @@ private:
 
     ) :
         refCount_( 0 ),
-        uid_( uid ),
+        fileId_( fileId ),
         usedMacros_( usedMacros ),
         fileName_( uniqueVirtualFileName ),
         headerContent_( headerContent ),
@@ -130,12 +132,13 @@ private:
         hitCount_( 0 ),
         lastTimeHit_( currentTime )
     {
+        contentLock_.clear();
     }
 
 public:
     static CacheEntryPtr create
     (
-        unsigned uid,
+        FileId fileId,
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
@@ -145,7 +148,7 @@ public:
     {
         CacheEntry * result = new CacheEntry
         (
-            uid,
+            fileId,
             uniqueVirtualFileName,
             std::move( usedMacros ),
             std::move( headerContent ),
@@ -162,7 +165,7 @@ public:
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
-    unsigned uid() const { return uid_; }
+    FileId fileId() const { return fileId_; }
     std::size_t hitCount() const { return hitCount_; }
     std::size_t lastTimeHit() const { return lastTimeHit_; }
     
@@ -170,6 +173,11 @@ public:
     {
         lastTimeHit_ = currentTime;
         ++hitCount_;
+    }
+
+    std::size_t getRef()
+    {
+        return refCount_.load( std::memory_order_relaxed );
     }
 
 private:
@@ -194,17 +202,18 @@ private:
 
 private:
     mutable std::atomic<size_t> refCount_;
-    unsigned uid_;
+    FileId fileId_;
     std::string fileName_;
     Macros usedMacros_;
     HeaderContent headerContent_;
     Headers headers_;
     std::size_t hitCount_;
     std::size_t lastTimeHit_;
-    SpinLockMutex contentLock_;
+    std::atomic_flag contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
 };
+
 
 inline void intrusive_ptr_add_ref( CacheEntry * c ) { c->addRef(); }
 inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
@@ -216,7 +225,7 @@ public:
 
     CacheEntryPtr addEntry
     (
-        llvm::StringRef fileName,
+        llvm::sys::fs::UniqueID const & id,
         Macros && macros,
         HeaderContent && headerContent,
         Headers const & headers
@@ -224,26 +233,9 @@ public:
 
     CacheEntryPtr findEntry
     (
-        llvm::StringRef fileName,
+        llvm::sys::fs::UniqueID const & id,
         HeaderCtx const &
     );
-
-    unsigned getFileId( llvm::StringRef name )
-    {
-        {
-            boost::shared_lock<boost::shared_mutex> const sharedLock( fileIdsMutex_ );
-            FileIds::const_iterator const iter( fileIds_.find( name ) );
-            if ( iter != fileIds_.end() )
-                return iter->second;
-        }
-        boost::upgrade_lock<boost::shared_mutex> upgradeLock( fileIdsMutex_ );
-        FileIds::const_iterator const iter( fileIds_.find( name ) );
-        if ( iter != fileIds_.end() )
-            return iter->second;
-        boost::upgrade_to_unique_lock<boost::shared_mutex> const uniqueLock( upgradeLock );
-        fileIds_.insert( std::make_pair( name, ++fileIdCounter_ ) );
-        return fileIdCounter_;
-    }
 
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
@@ -271,7 +263,7 @@ public:
         {
             for ( Header const & header : entry->headers() )
             {
-                ostream << "    " << header.dir.get() << ' ' << header.name.get() << '\n';
+                ostream << "    " << header.dir.get().str().str() << ' ' << header.name.get().str().str() << '\n';
             }
         }
         ostream << "    --------\n";
@@ -302,19 +294,15 @@ public:
 
     void dump( std::ostream & ostream )
     {
-        for ( FileIds::value_type const & fileId : fileIds_ )
+        for ( CacheContainer::value_type const & entry : cacheContainer_ )
         {
-            llvm::StringRef const filename( fileId.first );
-            ostream << "File '" << filename.str() << "'\n";
-            auto iterPair = cacheContainer_.equal_range( fileId.second );
-            for ( auto iter = iterPair.first; iter != iterPair.second; ++iter )
-            {
-                dumpEntry( *iter, ostream );
-            }
+            dumpEntry( entry, ostream );
         }
     }
 
 private:
+    void cleanup();
+
     std::string uniqueFileName();
 
 private:
@@ -329,10 +317,10 @@ private:
 
     struct GetFileId
     {
-        typedef unsigned result_type;
+        typedef FileId result_type;
         result_type operator()( CacheEntryPtr const & c ) const
         {
-            return c->uid();
+            return c->fileId();
         }
     };
 
@@ -356,7 +344,7 @@ private:
 
     struct ById {};
     struct ByFileIdAndHitCount {};
-    struct ByHitCountAndLastTimeHit {};
+    struct ByLastTimeHit {};
 
     typedef boost::multi_index_container<
         CacheEntryPtr,
@@ -371,7 +359,7 @@ private:
                     GetHitCount
                 >,
                 boost::multi_index::composite_key_compare<
-                    std::less<unsigned>,
+                    std::less<FileId>,
                     std::greater<std::size_t>
                 >
             >,
@@ -380,16 +368,8 @@ private:
             // Older entries are removed first, to prevent deleting recent
             // additions to cache.
             boost::multi_index::ordered_non_unique<
-                boost::multi_index::tag<ByHitCountAndLastTimeHit>,
-                boost::multi_index::composite_key<
-                    CacheEntryPtr,
-                    GetHitCount,
-                    LastTimeHit
-                >,
-                boost::multi_index::composite_key_compare<
-                    std::less<std::size_t>,
-                    std::less<std::size_t>
-                >
+                boost::multi_index::tag<ByLastTimeHit>,
+                LastTimeHit
             >,
             // Unique index is here so that we can update a specific element,
             // without having to hold the lock on the container the entire
@@ -406,8 +386,6 @@ private:
 private:
     CacheContainer cacheContainer_;
     boost::shared_mutex cacheMutex_;
-    FileIds fileIds_;
-    boost::shared_mutex fileIdsMutex_;;
     unsigned fileIdCounter_;
     std::atomic<std::size_t> counter_;
     std::size_t hits_;

@@ -30,8 +30,8 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
         ppc.add_ignored_header(ignored_header)
     # Group result by dir.
     result = defaultdict(list)
-    for dir, name, relative, buff in preprocessor.scan_headers(ppc, filename):
-        result[dir].append([name, relative, buff])
+    for dir, name, relative, buff, checksum in preprocessor.scan_headers(ppc, filename):
+        result[dir].append([name, relative, buff, checksum])
     return tuple(result.items())
 
 def cache_info():

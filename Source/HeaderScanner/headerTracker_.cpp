@@ -1,5 +1,6 @@
 #include "headerTracker_.hpp"
 
+#include "contentCache_.hpp"
 #include "utility_.hpp"
 
 #include <clang/Lex/Preprocessor.h>
@@ -17,44 +18,57 @@
 
 namespace
 {
-    class ContentCache
+    #define BASE 65521UL
+    #define NMAX 5552
+
+    #define DO1(buf, i) { sum1 += (buf)[i]; sum2 += sum1; }
+    #define DO2(buf, i) DO1(buf, i); DO1(buf, i + 1);
+    #define DO4(buf, i) DO2(buf, i); DO2(buf, i + 2);
+    #define DO8(buf, i) DO4(buf, i); DO4(buf, i + 4);
+    #define DO16(buf) DO8(buf, 0); DO8(buf, 8);
+    #define MOD(a) a %= BASE
+
+    std::size_t bsc_adler32( char const * data, std::size_t size )
     {
-    public:
-        typedef std::unordered_map<std::string, llvm::MemoryBuffer const *> ContentMap;
-    
-        ~ContentCache()
+        unsigned int sum1 = 1;
+        unsigned int sum2 = 0;
+
+        while (size >= NMAX)
         {
-            for ( auto & value : contentMap_ )
-                delete value.second;
+            for (int i = 0; i < NMAX / 16; ++i)
+            {
+                DO16(data); data += 16;
+            }
+            MOD(sum1); MOD(sum2); size -= NMAX;
         }
 
-        llvm::MemoryBuffer const * get( llvm::StringRef name ) const
+        while (size >= 16)
         {
-            boost::shared_lock<boost::shared_mutex> const readLock( contentMutex_ );
-            ContentMap::const_iterator const iter( contentMap_.find( name ) );
-            return iter != contentMap_.end() ? iter->second : 0;
+            DO16(data); data += 16; size -= 16;
         }
 
-        llvm::MemoryBuffer const * getOrCreate( clang::FileManager & fm, clang::FileEntry const * file )
+        while (size > 0)
         {
-            llvm::MemoryBuffer const * buffer( get( file->getName() ) );
-            if ( buffer )
-                return buffer;
-            boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
-            // Preform another search with upgrade ownership.
-            ContentMap::const_iterator const iter( contentMap_.find( file->getName() ) );
-            if ( iter != contentMap_.end() )
-                return iter->second;
-            buffer = fm.getBufferForFile( file );
-            boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-            contentMap_.insert( std::make_pair( file->getName(), buffer ) );
-            return buffer;
+            DO1(data, 0); data += 1; size -= 1;
         }
 
-    private:
-        mutable boost::shared_mutex contentMutex_;
-        ContentMap contentMap_;
-    } globalContentCache;
+        MOD(sum1); MOD(sum2);
+
+        return sum1 | (sum2 << 16);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    //
+    // adler32()
+    // ---------
+    //
+    ////////////////////////////////////////////////////////////////////////////
+
+    std::size_t adler32( llvm::MemoryBuffer const * buffer )
+    {
+        return bsc_adler32( buffer->getBufferStart(), buffer->getBufferSize() );
+    }
 }
 
 void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * entry )
@@ -77,7 +91,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // can be shared between different SourceManager instances.
     if ( !sourceManager().isFileOverridden( entry ) )
     {
-        buffer = globalContentCache.getOrCreate(
+        buffer = ContentCache::singleton().getOrCreate(
             preprocessor().getFileManager(), entry );
         sourceManager().overrideFileContents( entry, buffer, true );
     }
@@ -85,7 +99,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     {
         buffer = sourceManager().getMemoryBufferForFile( entry, 0 );
 #ifndef NDEBUG
-        llvm::MemoryBuffer const * gccBuf = globalContentCache.get( entry->getName() );
+        llvm::MemoryBuffer const * gccBuf = ContentCache::singleton().get( entry->getUniqueID() );
         assert( buffer == gccBuf );
 #endif
     }
@@ -109,6 +123,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
             fromStringRef<Dir>( searchPath ),
             fromStringRef<HeaderName>( relativePath ),
             buffer,
+            adler32( buffer ),
             headerLocation
         },
         entry
@@ -121,7 +136,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     if
     (
         !cacheDisabled() &&
-        ( cacheHit_ = cache().findEntry( entry->getName(), headerCtxStack().back() ) )
+        ( cacheHit_ = cache().findEntry( entry->getUniqueID(), headerCtxStack().back() ) )
     )
     {
         // There is a hit in cache!
@@ -140,7 +155,7 @@ void HeaderTracker::headerSkipped()
     fileStack_.pop_back();
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( hwf.file ) );
-    assert( cacheHit_ == 0 );
+    assert( !cacheHit_ );
     if ( !headerCtxStack().empty() )
     {
         if ( !cacheDisabled() )
@@ -175,6 +190,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
         {
             fromStringRef<Dir>( llvm::StringRef() ),
             fromStringRef<HeaderName>( fileName ),
+            0,
             0,
             HeaderLocation::relative
         },
@@ -225,7 +241,7 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
 
 CacheEntryPtr HeaderCtx::addToCache( Cache & cache, clang::FileEntry const * file ) const
 {
-    return cache.addEntry( file->getName(), createCacheKey(), createHeaderContent(), includedHeaders() );
+    return cache.addEntry( file->getUniqueID(), createCacheKey(), createHeaderContent(), includedHeaders() );
 }
 
 Headers HeaderTracker::exitSourceFile()

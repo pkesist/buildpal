@@ -210,7 +210,7 @@ class TaskProcessor:
                             sessions.unregister(Sessions.FROM_PREPR, socket)
                             unregister_socket(socket)
                             # Useful toggle for profiling preprocessor.
-                            DEBUG_JUST_PREPROCESS = False
+                            DEBUG_JUST_PREPROCESS = True
                             if DEBUG_JUST_PREPROCESS:
                                 # At this point preprocessing is done.
                                 # Notify client to exit with success errorcode,

@@ -6,7 +6,7 @@
 
 #include <boost/spirit/include/karma.hpp>
 
-#include <iostream>
+#include <fstream>
 //------------------------------------------------------------------------------
 
 clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
@@ -26,7 +26,19 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
 
         // Two threads concurrently generating content for the same cache
         // entry should be a rare occasion, so spinlock.
-        SpinLock const spinLock( contentLock_ );
+        struct SpinLock
+        {
+            std::atomic_flag & mutex_;
+            SpinLock( std::atomic_flag & mutex ) : mutex_( mutex )
+            {
+                while ( mutex_.test_and_set( std::memory_order_acquire ) );
+            }
+
+            ~SpinLock()
+            {
+                mutex_.clear( std::memory_order_release );
+            }
+        } const spinLock( contentLock_ );
         if ( memoryBuffer_ )
             return memoryBuffer_.get();
         buffer_.swap( tmp );
@@ -60,25 +72,17 @@ void CacheEntry::generateContent( std::string & buffer )
 
 CacheEntryPtr Cache::addEntry
 (
-    llvm::StringRef fileName,
+    llvm::sys::fs::UniqueID const & fileId,
     Macros && macros,
     HeaderContent && headerContent,
     Headers const & headers
 )
 {
-    unsigned const uid( getFileId( fileName ) );
-    CacheEntryPtr result = CacheEntry::create( uid, uniqueFileName(),
+    CacheEntryPtr result = CacheEntry::create( fileId, uniqueFileName(),
         std::move( macros ), std::move( headerContent ), headers, hits_ + misses_ );
     boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
-    cacheContainer_.insert( result );
-    if ( cacheContainer_.size() >= 1024 * 16 )
-    {
-        typedef CacheContainer::index<ByHitCountAndLastTimeHit>::type IndexType;
-        IndexType & index( cacheContainer_.get<ByHitCountAndLastTimeHit>() );
-        IndexType::iterator end( index.begin() );
-        std::advance( end, 4 * 1024 );
-        index.erase( index.begin(), end );
-    }
+    auto insertResult = cacheContainer_.insert( result );
+    assert( insertResult.second );
     return result;
 }
 
@@ -92,14 +96,38 @@ std::string Cache::uniqueFileName()
     return result;
 }
 
-CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & headerCtx )
+void Cache::cleanup()
 {
-    unsigned const uid( getFileId( fileName ) );
+    unsigned int const currentTime = hits_ + misses_;
+    unsigned int const cacheCleanupPeriod = 1024 * 5;
+    unsigned int const historyLength = 4 * cacheCleanupPeriod;
+    if ( ( currentTime > historyLength ) && !( currentTime % cacheCleanupPeriod ) )
+    {
+        boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
+        typedef CacheContainer::index<ByLastTimeHit>::type IndexType;
+        IndexType & index( cacheContainer_.get<ByLastTimeHit>() );
+        // Remove everything what was not hit in the last cacheCleanupPeriod tries.
+        IndexType::iterator const end = index.lower_bound( currentTime - historyLength );
+        index.erase( index.begin(), end );
+    }
+}
+
+CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCtx const & headerCtx )
+{
+    struct CleanupOnExit
+    {
+        Cache & cache_;
+        CleanupOnExit( Cache & cache ) : cache_( cache ) {}
+        ~CleanupOnExit()
+        {
+            cache_.cleanup();
+        }
+    } cleanup( *this );
     std::vector<CacheEntryPtr> entriesForUid;
     {
         boost::shared_lock<boost::shared_mutex> const lock( cacheMutex_ );
         std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
-            cacheContainer_.equal_range( uid );
+            cacheContainer_.equal_range( fileId );
         std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
     }
 
@@ -127,9 +155,16 @@ CacheEntryPtr Cache::findEntry( llvm::StringRef fileName, HeaderCtx const & head
             ) == pEntry->usedMacros().end()
         )
         {
-            boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
-            CacheContainer::index<ById>::type::iterator const iter = cacheContainer_.get<ById>().find( &*pEntry );
-            cacheContainer_.get<ById>().modify( iter, [this]( CacheEntryPtr p ) { p->cacheHit( hits_ + misses_ ); } );
+            boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
+            typedef CacheContainer::index<ById>::type IndexByIdType;
+            IndexByIdType & indexById( cacheContainer_.get<ById>() );
+            IndexByIdType::iterator const iter = indexById.find( &*pEntry );
+            if ( iter != indexById.end() )
+            {
+                boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
+                unsigned int const currentTime = hits_ + misses_;
+                indexById.modify( iter, [=]( CacheEntryPtr p ) { p->cacheHit( currentTime ); } );
+            }
             ++hits_;
             return pEntry;
         }

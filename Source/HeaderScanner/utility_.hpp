@@ -6,6 +6,9 @@
 //------------------------------------------------------------------------------
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
 
 #include <llvm/ADT/StringRef.h>
 
@@ -26,106 +29,113 @@ llvm::StringRef macroValueFromDirective(
     clang::MacroDirective const * def
 );
 
-
-struct SpinLockMutex : public std::atomic_flag
-{
-    SpinLockMutex() { clear( std::memory_order_relaxed ); }
-};
-
-struct SpinLock
-{
-    SpinLockMutex & mutex_;
-    SpinLock( SpinLockMutex & mutex ) : mutex_( mutex )
-    {
-        while ( mutex_.test_and_set( std::memory_order_acquire ) );
-    }
-
-    ~SpinLock()
-    {
-        mutex_.clear( std::memory_order_release );
-    }
-};
-
 class RefCount
 {
 private:
-    RefCount( RefCount const & );
     RefCount & operator==( RefCount & );
 
 public:
-    RefCount( RefCount && r ) : refCount( r.refCount.load() ) {}
-    RefCount() : refCount( 0 ) {}
+    RefCount( RefCount const & r ) : refCount( r.refCount.load() ), delCount( r.refCount.load() ) {}
+    RefCount() : refCount( 0 ), delCount( 0 ) {}
 
     void addRef() const
     {
-        refCount.fetch_add( 1, std::memory_order_relaxed );
+        if ( refCount.fetch_add( 1 ) == 0 )
+            delCount.fetch_add( 1 );
     }
 
-    void decRef() const
+    bool decRef() const
     {
-        refCount.fetch_sub( 1, std::memory_order_relaxed );
+        return refCount.fetch_sub( 1 ) == 1;
+    }
+
+    bool checkDel() const
+    {
+        return delCount.fetch_sub( 1 ) == 1;
     }
 
     std::size_t getRef() const
     {
-        return refCount.load( std::memory_order_relaxed );
+        return refCount.load();
     }
 
     mutable std::atomic<std::size_t> refCount;
+    mutable std::atomic<std::size_t> delCount;
 };
 
+template<typename T>
+struct Value
+{
+    Value( T const & v ) : value( v ) {}
+
+    T value;
+    RefCount refCount;
+};
+
+template <typename T>
+struct Container : public boost::multi_index::multi_index_container
+<
+    Value<T>,
+    boost::multi_index::indexed_by
+    <
+        boost::multi_index::hashed_unique
+        <
+            boost::multi_index::member<Value<T>, T, &Value<T>::value>
+        >
+    >
+>
+{};
+
+
 template <typename T, typename Tag=T>
-struct FlyweightStorage : public std::unordered_map<T, RefCount>
+struct FlyweightStorage : public Container<T>
 {
 private: 
-    typedef std::unordered_map<T, RefCount> Base;
+    typedef Container<T> Base;
 
 public:
     FlyweightStorage() : counter_( 0 ) {}
 
-    const_iterator insert( T const & t )
+    Value<T> const * insert( T const & t )
     {
         {
             boost::shared_lock<boost::shared_mutex> const sharedLock( mutex_ );
             iterator result = find( t );
             if ( result != end() )
-                return result;
+            {
+                result->refCount.addRef();
+                return &*result;
+            }
         }
         boost::upgrade_lock<boost::shared_mutex> upgradeLock( mutex_ );
         iterator result = find( t );
         if ( result != end() )
-            return result;
-        boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-        std::pair<iterator, bool> const res = Base::insert( std::make_pair( t, RefCount() ) );
-        res.first->second.addRef();
-        counter_ += 1;
-        if ( ( counter_ % 10240 ) == 0 )
         {
-            const_iterator iter = begin();
-            while ( iter != end() )
-            {
-                if ( iter->second.getRef() == 0 )
-                    iter = Base::erase( iter );
-                else
-                    ++iter;
-            }
-            counter_ = 0;
+            result->refCount.addRef();
+            return &*result;
         }
-        return res.first;
+        boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
+        std::pair<iterator, bool> const res = Base::insert( Value<T>( t ) );
+        assert( res.second );
+        res.first->refCount.addRef();
+        return &*res.first;
+    }
+
+    void remove( Value<T> const * value )
+    {
+        if ( value->refCount.decRef() )
+        {
+            boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
+            if ( value->refCount.checkDel() )
+                erase( iterator_to( *value ) );
+        }
     }
 
     static FlyweightStorage & get() { return storage; }
 
 private:
-    void cleanup( const_iterator iter )
-    {
-        boost::unique_lock<boost::shared_mutex> const exclusiveLock( mutex_ );
-        Base::erase( iter );
-    }
-
-private:
     boost::shared_mutex mutex_;
-    std::size_t counter_;
+    std::atomic<std::size_t> counter_;
     static FlyweightStorage storage;
 };
 
@@ -138,41 +148,41 @@ struct Flyweight
     typedef FlyweightStorage<T, Tag> Storage;
     ~Flyweight()
     {
-        iter_->second.decRef();
+        Storage::get().remove( value_ );
     }
 
-    Flyweight( T const & t ) : iter_( Storage::get().insert( t ) )
+    Flyweight( T const & t ) : value_( Storage::get().insert( t ) )
     {
     }
 
     template<typename A1>
-    Flyweight( A1 a1 ) : iter_( Storage::get().insert( T( a1 ) ) )
+    Flyweight( A1 a1 ) : value_( Storage::get().insert( T( a1 ) ) )
     {
     }
 
     template<typename A1, typename A2>
-    Flyweight( A1 a1, A2 a2 ) : iter_( Storage::get().insert( T( a1, a2 ) ) )
+    Flyweight( A1 a1, A2 a2 ) : value_( Storage::get().insert( T( a1, a2 ) ) )
     {
     }
 
-    Flyweight( Flyweight const & other ) : iter_( other.iter_ )
+    Flyweight( Flyweight const & other ) : value_( other.value_ )
     {
-        iter_->second.addRef();
+        value_->refCount.addRef();
     }
 
     Flyweight & operator=( Flyweight const & other )
     {
-        iter_->second.decRef();
-        iter_ = other.iter_;
-        iter_->second.addRef();
+        value_->refCount.decRef();
+        value_ = other.value_;
+        value_->refCount.addRef();
         return *this;
     }
 
-    T const & get() const { return iter_->first; }
+    T const & get() const { return value_->value; }
     operator T const & () const { return get(); }
 
 private:
-    typename Storage::const_iterator iter_;
+    Value<T> const * value_;
 };
 
 template<typename T, typename Tag>

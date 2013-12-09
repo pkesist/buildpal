@@ -163,7 +163,7 @@ public:
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.
-        if ( ignoredHeaders.find( parent_->header_.name ) == ignoredHeaders.end() )
+        if ( ignoredHeaders.find( parent_->header_.name.get().str() ) == ignoredHeaders.end() )
         {
             if ( fromCache() )
             {

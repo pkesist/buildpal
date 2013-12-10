@@ -87,7 +87,7 @@ public:
             usedHere_.begin(),
             usedHere_.end(),
             std::inserter( result, result.begin() ),
-            [&, this]( llvm::StringRef macroName )
+            [this]( llvm::StringRef macroName )
             {
                 // When creating cache key we must use old macro values, as they
                 // were in parent at the time of inclusion.

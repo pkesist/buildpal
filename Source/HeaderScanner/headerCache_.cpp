@@ -143,7 +143,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCt
         HeaderCtx const & headerCtx_;
     };
 
-    for ( CacheEntryPtr const & pEntry : entriesForUid )
+    for ( CacheEntryPtr pEntry : entriesForUid )
     {
         if
         (

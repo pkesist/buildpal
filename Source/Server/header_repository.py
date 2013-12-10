@@ -60,13 +60,13 @@ class HeaderRepository:
                 file.write(content)
 
         # Update headers.
-        for name, content in new_files.items():
-            if not name in needed_files:
+        for (dir, name), content in new_files.items():
+            if not (dir, name) in needed_files:
                 # If not a part of needed_files, extract it directly to local_dir
                 # and do not remember it.
                 create_file_in_dir(local_dir, name, content)
             else:
-                remote_dir, checksum = needed_files[name]
+                remote_dir, checksum = needed_files[(dir, name)]
                 shared_dir = self.map_dir(remote_dir)
                 filename = os.path.join(shared_dir, name)
                 create_shared = False

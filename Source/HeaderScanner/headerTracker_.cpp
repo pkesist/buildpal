@@ -52,6 +52,8 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
             : HeaderLocation::regular
     ;
 
+    // Only files relative to source can have an empty search path.
+    assert( ( headerLocation == HeaderLocation::relative ) || !searchPath.empty() );
     // If parent is user include, this cannot be relative to source file.
     assert( ( parentLocation != HeaderLocation::regular ) || ( headerLocation != HeaderLocation::relative ) );
     // If parent is system, this must be system.

@@ -16,7 +16,6 @@ from multiprocessing import cpu_count
 
 
 def header_beginning(filename):
-    return b''
     # 'sourceannotations.h' header is funny. If you add a #line directive to
     # it it will start tossing incomprehensible compiler erros. It would
     # seem that cl.exe has some hardcoded logic for this header. Person
@@ -204,12 +203,15 @@ class SourceScanner:
                     dir, file, relative, content, checksum, header = \
                         next(header_info_iter)
                     if entry == (dir, file):
+                        assert not relative
                         found = True
+                        break
+                    elif relative:
                         break
                 except StopIteration:
                     raise Exception("Could not find information for {}.".format(
                         in_name))
-            assert found
+            assert found or relative
             depth = 0
             path_elements = file.split('/')
             # Handle '.' in include directive.
@@ -231,14 +233,15 @@ class SourceScanner:
                 else:
                     files['/'.join(path_elements)] = header + content
             else:
-                files[file] = header + content
+                files[(dir, file)] = header + content
             
         curr_dir = ''
         for depth in range(max_depth):
+            assert relative
             curr_dir += 'dummy_rel/'
             for dir, file, content, header in relative_includes[depth]:
-                files[curr_dir + file] = header + content
+                files[('', curr_dir + file)] = header + content
         rel_file = curr_dir + os.path.basename(source_file)
         with open(source_file, 'rb') as src:
-            files[rel_file] = header_beginning(source_file) + src.read()
+            files[(dir, rel_file)] = header_beginning(source_file) + src.read()
         return files, rel_file

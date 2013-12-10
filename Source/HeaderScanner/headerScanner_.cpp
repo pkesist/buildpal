@@ -231,13 +231,15 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::St
     for ( auto const & path : ppc.userSearchPath() )
     {
         clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
-        searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_User, false ) );
+        if ( entry )
+            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_User, false ) );
     }
 
     for ( auto const & path : ppc.systemSearchPath() )
     {
         clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
-        searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );
+        if ( entry );
+            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );
     }
 
     headerSearch_->SetSearchPaths( searchPath, 0, ppc.userSearchPath().size(), false );

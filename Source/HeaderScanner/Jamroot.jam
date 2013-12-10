@@ -13,6 +13,7 @@ variant profileWithAssert : releaseWithAssert : <profiling>on <debug-symbols>on 
 
 
 project HeaderScanner : requirements <warnings>off
+    #<optimization>off
     <toolset>msvc,<variant>$(release-variants):<define>_CRT_DISABLE_PERFCRIT_LOCKS
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /Ob2 /Oi /Ot /Oy /GF /GL /GS /GT /GR /Gy /WL "
     <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG "

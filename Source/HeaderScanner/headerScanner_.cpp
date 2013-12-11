@@ -212,7 +212,7 @@ Preprocessor::Preprocessor( Cache * cache )
 
 }
 
-void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
+std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
 {
     // Initialize file manager.
     fileManager_.reset( new clang::FileManager( fsOpts_ ) );
@@ -228,18 +228,25 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::St
     // Setup search path.
     headerSearch_.reset( new clang::HeaderSearch( hsOpts_, sourceManager(), *diagEng_, *langOpts_, &*targetInfo_ ) );
     std::vector<clang::DirectoryLookup> searchPath;
+    std::size_t searchPathId( 0 );
     for ( auto const & path : ppc.userSearchPath() )
     {
         clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
         if ( entry )
+        {
+            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
             searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_User, false ) );
+        }
     }
 
     for ( auto const & path : ppc.systemSearchPath() )
     {
         clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
         if ( entry );
+        {
+            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
             searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );
+        }
     }
 
     headerSearch_->SetSearchPaths( searchPath, 0, ppc.userSearchPath().size(), false );
@@ -267,11 +274,12 @@ void Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::St
 
     preprocessor().setPredefines( predefinesStream.str() );
     preprocessor().SetSuppressIncludeNotFoundError( true );
+    return searchPathId;
 }
 
 void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers & headers )
 {
-    setupPreprocessor( ppc, filename );
+    std::size_t const searchPathId = setupPreprocessor( ppc, filename );
     struct DiagnosticsSetup
     {
         DiagnosticsSetup( clang::DiagnosticConsumer & client,
@@ -296,7 +304,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
-    HeaderTracker headerTracker( preprocessor(), cache_ );
+    HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, filename,
         preprocessor(), ppc.ignoredHeaders(), headers ) );
 

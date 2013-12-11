@@ -32,7 +32,7 @@ llvm::StringRef macroValueFromDirective(
 class RefCount
 {
 private:
-    RefCount & operator==( RefCount & );
+    RefCount & operator=( RefCount & );
 
 public:
     RefCount( RefCount const & r ) : refCount( r.refCount.load() ), delCount( r.refCount.load() ) {}
@@ -123,6 +123,8 @@ public:
 
     void remove( Value<T> const * value )
     {
+        if ( !value )
+            return;
         if ( value->refCount.decRef() )
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
@@ -145,36 +147,42 @@ FlyweightStorage<T, Tag> FlyweightStorage<T, Tag>::storage;
 template<typename T, typename Tag=T>
 struct Flyweight
 {
+    template <typename U>
+    static Flyweight<T, Tag> create( U const & u )
+    {
+        return Flyweight<T, Tag>( T( u ) );
+    }
+
     typedef FlyweightStorage<T, Tag> Storage;
     ~Flyweight()
     {
         Storage::get().remove( value_ );
     }
 
-    Flyweight( T const & t ) : value_( Storage::get().insert( t ) )
+    Flyweight() : value_( 0 ) {}
+
+    explicit Flyweight( T const & t )
+        : value_( Storage::get().insert( t ) )
+    {}
+
+    Flyweight( Flyweight && other )
+        : value_( other.value_ )
     {
+        other.value_ = 0;
     }
 
-    template<typename A1>
-    Flyweight( A1 a1 ) : value_( Storage::get().insert( T( a1 ) ) )
-    {
-    }
-
-    template<typename A1, typename A2>
-    Flyweight( A1 a1, A2 a2 ) : value_( Storage::get().insert( T( a1, a2 ) ) )
-    {
-    }
-
-    Flyweight( Flyweight const & other ) : value_( other.value_ )
+    Flyweight( Flyweight const & other )
+        : value_( other.value_ )
     {
         value_->refCount.addRef();
     }
 
     Flyweight & operator=( Flyweight const & other )
     {
-        value_->refCount.decRef();
+        Storage::get().remove( value_ );
         value_ = other.value_;
-        value_->refCount.addRef();
+        if ( value_ )
+            value_->refCount.addRef();
         return *this;
     }
 

@@ -189,7 +189,7 @@ public:
     Headers const & includedHeaders() const { return includedHeaders_; }
     Headers       & includedHeaders()       { return includedHeaders_; }
 
-    CacheEntryPtr addToCache( Cache &, clang::FileEntry const * file ) const;
+    CacheEntryPtr addToCache( Cache &, std::size_t searchPathId, clang::FileEntry const * file ) const;
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
 
@@ -213,9 +213,10 @@ private:
 class HeaderTracker
 {
 public:
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, Cache * cache )
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::size_t searchPathId, Cache * cache )
         :
         preprocessor_( preprocessor ),
+        searchPathId_( searchPathId ),
         cache_( cache )
     {
     }
@@ -223,7 +224,9 @@ public:
     void enterSourceFile( clang::FileEntry const *, llvm::StringRef fileName );
     Headers exitSourceFile();
 
-    void inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * fileEntry );
+    void inclusionDirective( llvm::StringRef searchPath,
+        llvm::StringRef relativePath, bool isAngled,
+        clang::FileEntry const * );
     void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();
     void enterHeader();
@@ -256,6 +259,7 @@ private:
 private:
     std::vector<std::string> buffers_;
     clang::Preprocessor & preprocessor_;
+    std::size_t searchPathId_;
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
     CacheEntryPtr cacheHit_;

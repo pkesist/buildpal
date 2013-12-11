@@ -72,13 +72,15 @@ struct HeaderHash
 {
     std::size_t operator()( Header const & h )
     {
-        return llvm::hash_value( h.buffer );
+        return llvm::hash_combine(
+            llvm::hash_value( h.dir.get() ),
+            llvm::hash_value( h.name.get() ) );
     }
 };
 
 inline bool operator==( Header const & l, Header const & r )
 {
-    return l.buffer == r.buffer;
+    return l.dir == r.dir && l.name == r.name;
 }
 
 typedef std::unordered_set<Header, HeaderHash> Headers;
@@ -147,7 +149,7 @@ public:
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
 private:
-    void setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
+    std::size_t setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
 
 private:
     clang::FileManager         & fileManager  ()       { return *fileManager_; }

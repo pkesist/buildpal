@@ -73,12 +73,13 @@ void CacheEntry::generateContent( std::string & buffer )
 CacheEntryPtr Cache::addEntry
 (
     llvm::sys::fs::UniqueID const & fileId,
+    std::size_t searchPathId,
     Macros && macros,
     HeaderContent && headerContent,
     Headers const & headers
 )
 {
-    CacheEntryPtr result = CacheEntry::create( fileId, uniqueFileName(),
+    CacheEntryPtr result = CacheEntry::create( fileId, searchPathId, uniqueFileName(),
         std::move( macros ), std::move( headerContent ), headers, hits_ + misses_ );
     boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
     auto insertResult = cacheContainer_.insert( result );
@@ -112,7 +113,7 @@ void Cache::cleanup()
     }
 }
 
-CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCtx const & headerCtx )
+CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::size_t searchPathId, HeaderCtx const & headerCtx )
 {
     struct CleanupOnExit
     {
@@ -127,7 +128,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, HeaderCt
     {
         boost::shared_lock<boost::shared_mutex> const lock( cacheMutex_ );
         std::pair<CacheContainer::iterator, CacheContainer::iterator> const iterRange =
-            cacheContainer_.equal_range( fileId );
+            cacheContainer_.equal_range( boost::make_tuple( fileId, searchPathId ) );
         std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
     }
 

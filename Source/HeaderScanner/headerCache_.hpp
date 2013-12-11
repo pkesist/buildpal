@@ -46,12 +46,6 @@ inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
     return std::make_pair( MacroName( name ), MacroValue( value ) );
 }
 
-template <typename T>
-inline T fromStringRef( llvm::StringRef x )
-{
-    return T( x );
-}
-
 inline llvm::StringRef macroName( Macro const & macro )
 {
     return macro.first.get();
@@ -116,6 +110,7 @@ private:
     CacheEntry
     (
         FileId fileId,
+        std::size_t searchPathId,
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
@@ -124,6 +119,7 @@ private:
 
     ) :
         refCount_( 0 ),
+        searchPathId_( searchPathId ),
         fileId_( fileId ),
         usedMacros_( usedMacros ),
         fileName_( uniqueVirtualFileName ),
@@ -138,6 +134,7 @@ public:
     static CacheEntryPtr create
     (
         FileId fileId,
+        std::size_t searchPathId,
         std::string const & uniqueVirtualFileName,
         Macros && usedMacros,
         HeaderContent && headerContent,
@@ -148,6 +145,7 @@ public:
         CacheEntry * result = new CacheEntry
         (
             fileId,
+            searchPathId,
             uniqueVirtualFileName,
             std::move( usedMacros ),
             std::move( headerContent ),
@@ -165,6 +163,7 @@ public:
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
     FileId fileId() const { return fileId_; }
+    std::size_t searchPathId() const { return searchPathId_; }
     std::size_t lastTimeHit() const { return lastTimeHit_; }
     
     void cacheHit( unsigned int currentTime )
@@ -200,6 +199,7 @@ private:
 private:
     mutable std::atomic<size_t> refCount_;
     FileId fileId_;
+    std::size_t searchPathId_;
     std::string fileName_;
     Macros usedMacros_;
     HeaderContent headerContent_;
@@ -222,6 +222,7 @@ public:
     CacheEntryPtr addEntry
     (
         llvm::sys::fs::UniqueID const & id,
+        std::size_t searchPathId,
         Macros && macros,
         HeaderContent && headerContent,
         Headers const & headers
@@ -230,6 +231,7 @@ public:
     CacheEntryPtr findEntry
     (
         llvm::sys::fs::UniqueID const & id,
+        std::size_t searchPathId,
         HeaderCtx const &
     );
 
@@ -329,6 +331,15 @@ private:
         }
     };
 
+    struct SearchPathId
+    {
+        typedef std::size_t result_type;
+        result_type operator()( CacheEntryPtr const & c ) const
+        {
+            return c->searchPathId();
+        }
+    };
+
     struct ById {};
     struct ByLastTimeHit {};
     struct ByFileIdAndLastTimeHit {};
@@ -343,10 +354,12 @@ private:
                 boost::multi_index::composite_key<
                     CacheEntryPtr,
                     GetFileId,
+                    SearchPathId,
                     LastTimeHit
                 >,
                 boost::multi_index::composite_key_compare<
                     std::less<FileId>,
+                    std::less<std::size_t>,
                     std::greater<std::size_t>
                 >
             >,

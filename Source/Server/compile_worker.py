@@ -13,6 +13,7 @@ from .file_repository import FileRepository
 from .compiler_repository import CompilerRepository
 
 import subprocess
+import logging
 
 import os
 import pickle
@@ -376,6 +377,10 @@ class CompileWorker:
             del self.sessions[id]
 
     def run(self):
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)
+        root_logger.addHandler(logging.NullHandler())
+
         self.__compile_thread_pool = ThreadPoolExecutor(cpu_count() + 1)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()

@@ -1,5 +1,6 @@
 from io import BytesIO, FileIO
 
+import logging
 import os
 import shutil
 import tempfile
@@ -32,7 +33,7 @@ class HeaderRepository:
             for name, checksum in data:
                 key = (dir, name)
                 if key not in checksums or checksums[key] != checksum:
-                    needed_files[name] = dir, checksum
+                    needed_files[(dir, name)] = checksum
                     out_list.append((dir, name))
         with self.session_lock:
             self.counter += 1
@@ -60,13 +61,13 @@ class HeaderRepository:
                 file.write(content)
 
         # Update headers.
-        for (dir, name), content in new_files.items():
-            if not (dir, name) in needed_files:
+        for (remote_dir, name), content in new_files.items():
+            if not (remote_dir, name) in needed_files:
                 # If not a part of needed_files, extract it directly to local_dir
                 # and do not remember it.
                 create_file_in_dir(local_dir, name, content)
             else:
-                remote_dir, checksum = needed_files[(dir, name)]
+                checksum = needed_files[(remote_dir, name)]
                 shared_dir = self.map_dir(remote_dir)
                 filename = os.path.join(shared_dir, name)
                 create_shared = False

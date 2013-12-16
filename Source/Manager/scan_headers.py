@@ -24,7 +24,8 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
         define = define.split('=')
         assert len(define) == 1 or len(define) == 2
         macro = define[0]
-        value = define[1] if len(define) == 2 else ""
+        # /Dxxx is actually equivalent to /Dxxx=1.
+        value = define[1] if len(define) == 2 else "1"
         ppc.add_macro(macro, value)
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)

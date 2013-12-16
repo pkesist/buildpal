@@ -243,5 +243,5 @@ class SourceScanner:
                 files[('', curr_dir + file)] = header + content
         rel_file = curr_dir + os.path.basename(source_file)
         with open(source_file, 'rb') as src:
-            files[(dir, rel_file)] = header_beginning(source_file) + src.read()
+            files[('', rel_file)] = header_beginning(source_file) + src.read()
         return files, rel_file

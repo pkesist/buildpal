@@ -107,13 +107,6 @@ HMODULE WINAPI hookLoadLibraryW( wchar_t * lpFileName )
     return result;
 }
 
-struct APIHook
-{
-    char const * modName;
-    char const * funcName;
-    PROC newFunc;
-}
-
 static bool replaceEntry( char const * const pszCalleeModName, char const * const funcName, PROC pfnNew, HMODULE hmodCaller )
 {
     IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)hmodCaller; 
@@ -210,7 +203,7 @@ bool readMapping( HANDLE readHandle, std::string & f, std::string & s )
 {
     BOOL success;
     DWORD read;
-    char sizes[4];
+    unsigned char sizes[4];
     success = ReadFile( readHandle, sizes, 4, &read, 0 );
     assert( success );
     assert( read == 4 );

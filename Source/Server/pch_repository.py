@@ -1,11 +1,13 @@
 import os
 import tempfile
 
+import map_files
+
 from threading import Lock
 from shutil import rmtree
 from hashlib import md5
 
-class FileRepository:
+class PCHRepository:
     def __init__(self):
         self.__dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
         os.makedirs(self.__dir, exist_ok=True)
@@ -35,3 +37,4 @@ class FileRepository:
         with self.__lock:
             self.__files[key] = self.__partial_files[key]
             del self.__partial_files[key]
+            map_files.mapFile(filename, self.__files[key])

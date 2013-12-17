@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 
 from .header_repository import HeaderRepository
-from .file_repository import FileRepository
+from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
 
 import subprocess
@@ -82,7 +82,7 @@ class CompileSession:
         sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
         sender.disconnect()
 
-    def __init__(self, file_repository, header_repository, compiler_repository,
+    def __init__(self, pch_repository, header_repository, compiler_repository,
                  cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
                  misc_thread_pool, scheduler):
         self.task_state = self.STATE_START
@@ -90,7 +90,7 @@ class CompileSession:
         self.task_counter = task_counter
         self.compiler_repository = compiler_repository
         self.header_repository = header_repository
-        self.file_repository = file_repository
+        self.pch_repository = pch_repository
         self.cpu_usage_hwm = cpu_usage_hwm
         temp_dir = os.path.join(tempfile.gettempdir(), "DistriBuild", "Temp")
         os.makedirs(temp_dir, exist_ok=True)
@@ -150,7 +150,7 @@ class CompileSession:
             compiler_prep = time()
             self.source_file = os.path.join(self.include_path, self.src_loc)
             if self.task['pch_file'] is not None:
-                while not self.file_repository.file_arrived(
+                while not self.pch_repository.file_arrived(
                     *self.task['pch_file']):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state
@@ -165,7 +165,7 @@ class CompileSession:
             if self.task['pch_file']:
                 assert self.pch_file is not None
                 assert os.path.exists(self.pch_file)
-                pch_switch.append(compiler_info['set_pch_file'].format(self.pch_file))
+                pch_switch.append(compiler_info['set_pch_file'].format(self.task['pch_file'][0]))
 
             while not self.compiler_repository.has_compiler(self.compiler_id):
                 # Compiler is being downloaded by another session.
@@ -265,7 +265,7 @@ class CompileSession:
             elif self.task_state == self.STATE_CHECK_PCH_TAG:
                 tag = msg[0]
                 assert tag == b'NEED_PCH_FILE'
-                self.pch_file, required = self.file_repository.register_file(
+                self.pch_file, required = self.pch_repository.register_file(
                     *self.task['pch_file'])
                 if required:
                     sender.send(b'YES')
@@ -290,7 +290,7 @@ class CompileSession:
                     self.pch_desc.close()
                     del self.pch_desc
                     del self.pch_decompressor
-                    self.file_repository.file_completed(*self.task['pch_file'])
+                    self.pch_repository.file_completed(*self.task['pch_file'])
                     if self.header_state == self.STATE_HEADERS_ARRIVED:
                         self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                         self.run_compiler()
@@ -358,7 +358,7 @@ class CompileWorker:
         self.sessions = {}
 
     def create_session(self, client_id):
-        session = CompileSession(self.__file_repository,
+        session = CompileSession(self.__pch_repository,
             self.__header_repository, self.__compiler_repository,
             self.__cpu_usage_hwm, self.__counter,
             self.__checksums, self.__compile_thread_pool,
@@ -384,7 +384,7 @@ class CompileWorker:
         self.__compile_thread_pool = ThreadPoolExecutor(cpu_count() + 1)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
-        self.__file_repository = FileRepository()
+        self.__pch_repository = PCHRepository()
         self.__compiler_repository = CompilerRepository()
         self.__counter = Counter()
 

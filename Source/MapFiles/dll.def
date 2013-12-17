@@ -1,0 +1,10 @@
+LIBRARY map_files
+EXPORTS
+    hookAPI__internal @1
+    unhookAPI__internal @2
+    overrideFiles__internal @3
+    CreateProcessWithFSHookA @4
+    CreateProcessWithFSHookW @5
+    addFileMapping @6
+    removeFileMapping @7
+    clearFileMappings @8

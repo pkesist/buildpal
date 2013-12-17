@@ -1,4 +1,4 @@
-LIBRARY map_files
+LIBRARY map_files.pyd
 EXPORTS
     hookAPI__internal @1
     unhookAPI__internal @2

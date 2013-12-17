@@ -1,5 +1,6 @@
 //----------------------------------------------------------------------------
 #include "DLLInject.hpp"
+#include "remoteOps.hpp"
 
 #include <cassert>
 #include <Windows.h>
@@ -18,9 +19,10 @@ DLLInjector::DLLInjector( DWORD const processId, HMODULE module )
 
 DWORD DLLInjector::callRemoteProc( char const * const func, void * arg )
 {
-    PROC local = GetProcAddress( localModuleHandle_, func );
-    PTHREAD_START_ROUTINE remote = (PTHREAD_START_ROUTINE)
-        ((DWORD)moduleHandle_ + ((DWORD)local - (DWORD)localModuleHandle_));
+    LPTHREAD_START_ROUTINE const remote =
+        (LPTHREAD_START_ROUTINE)GetRemoteProcAddress(
+        processHandle_, moduleHandle_, func );
+    assert( remote );
 	HANDLE callRemoteProcThread = CreateRemoteThread( processHandle_, NULL,
         16 * 1024, remote, arg, 0, NULL );
 	::WaitForSingleObject( callRemoteProcThread, INFINITE );

@@ -420,8 +420,11 @@ class CompileWorker:
 
         scheduler = sched.scheduler()
 
+        print("Running server on '{}'.".format(self.__address))
+        print("Server CPU high-water mark is {}.".format(self.__cpu_usage_hwm))
+
         while True:
-            sys.stdout.write("Running {} tasks.\r".format(self.__counter.get()))
+            sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))
 
             # Run any scheduled tasks.
             self.scheduler.run(False)

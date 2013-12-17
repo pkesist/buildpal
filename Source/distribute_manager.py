@@ -43,7 +43,7 @@ if __name__ == "__main__":
                 server_port = int(value[port_index + 1 : max_tasks_index])
                 max_tasks = int(value[max_tasks_index + 1 : ])
             except ValueError:
-                server_portport = int(value[port_index + 1:])
+                server_port = int(value[port_index + 1:])
                 max_tasks = None
             nodes.append({
                 'address' : 'tcp://{}:{}'.format(value[:port_index], server_port),

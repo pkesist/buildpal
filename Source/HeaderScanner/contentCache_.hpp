@@ -41,8 +41,8 @@ public:
     ContentEntry( ContentEntry && other )
         :
         buffer( other.buffer.take() ),
-        checksum( checksum ),
-        modified( modified )
+        checksum( other.checksum ),
+        modified( other.modified )
     {
     }
 

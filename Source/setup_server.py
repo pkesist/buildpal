@@ -1,3 +1,4 @@
+#! python3.3
 import sys
 import os
 import site
@@ -7,17 +8,26 @@ from cx_Freeze import setup, Executable
 # fine tuning.
 site_packages = site.getsitepackages()
 
+files_to_locate= [('zmq', 'libzmq.pyd'), ('map_files_inj32.dll',), ('map_files_inj64.dll',)]
+
 possible_libzmq_locations = [os.path.join(s, 'zmq', 'libzmq.pyd') for s in site_packages]
-libzmq_pyd = None
-for p in (os.path.join(s, 'zmq', 'libzmq.pyd') for s in site_packages):
-    if os.path.exists(p):
-        libzmq_pyd = p
-        break
-if not libzmq_pyd:
-    raise Exception("Could not find 'libzmq.pyd'.")
+
+include_files=[]
+
+for f in files_to_locate:
+    found = False
+    for p in sys.path:
+        file = os.path.join(p, *f)
+        if os.path.exists(file):
+            include_files.append((file, ''))
+            found = True
+            break
+    if not found:
+        raise Exception("Could not locate '{}'.".format(os.path.join(*f)))
+
 
 buildOptions = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
-include_files=[(libzmq_pyd, '')],
+include_files=include_files,
 include_msvcr=True
 )
 

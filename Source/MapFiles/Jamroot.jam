@@ -12,21 +12,28 @@ variant profileWithAssert : releaseWithAssert : <profiling>on <debug-symbols>on 
 lib shlwapi : : <name>shlwapi ;
 
 
-pyd map_files :
-    remoteOps.cpp
-    dllInject.cpp
-    dll.cpp
-    pydll.cpp
-    shlwapi
-    /python_dev//pythonLib 
-    /boost//headers
+alias boostLibs :
+    /boost//system
+    /boost//locale
 :
-    <def-file>dll.def
-    <variant>$(release-variants):<source>/boost//system/<variant>release/<link>static
-    <variant>debug:<source>/boost//system/<variant>debug/<link>static
-    <variant>$(release-variants):<source>/boost//locale/<variant>release/<link>static
-    <variant>debug:<source>/boost//locale/<variant>debug/<link>static
+    <variant>$(release-variants):<variant>release
+    <link>static
+;
+
+lib map_files_inj32 : mapFilesInject.cpp dllInject.cpp remoteOps.cpp boostLibs shlwapi : <def-file>mapFilesInject32.def <link>shared ;
+lib map_files_inj64 : mapFilesInject.cpp dllInject.cpp remoteOps.cpp boostLibs shlwapi : <def-file>mapFilesInject64.def <link>shared <address-model>64 ;
+
+alias select_inject_module : map_files_inj32 ;
+alias select_inject_module : map_files_inj32 : <address-model>32 ;
+alias select_inject_module : map_files_inj64 : <address-model>64 ;
+
+pyd map_files :
+    pydll.cpp
+    /python_dev//pythonLib 
+    boostLibs
+    select_inject_module
 ;
 explicit map_files ;
 
-install _ : map_files : <variant>profileWithAssert <optimization>off <location>C:\\Python33\\DLLs ;
+
+install _ : map_files map_files_inj32 map_files_inj64 : <variant>profileWithAssert <location>C:\\Python33\\DLLs ;

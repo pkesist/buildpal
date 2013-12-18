@@ -10,19 +10,18 @@
 class DLLInjector
 {
 public:
-	explicit DLLInjector( DWORD const processId, HMODULE module );
+	explicit DLLInjector( DWORD const processId );
     ~DLLInjector();
 
     DWORD callRemoteProc( char const * const func, void * arg );
 
 private:
-    bool injectLibrary( HMODULE );
+    bool injectLibrary();
 	void loadLibrary( void * dllName );
 
 private:
 	HANDLE processHandle_;
 	HMODULE moduleHandle_;
-	HMODULE localModuleHandle_;
 };
 
 

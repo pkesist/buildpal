@@ -1,4 +1,4 @@
-#include "dll.hpp"
+#include "mapFilesInject.hpp"
 
 #include "DLLInject.hpp"
 
@@ -16,8 +16,6 @@
 #include <psapi.h>
 #include <shlwapi.h>
 
-extern "C" DWORD WINAPI hookAPI__internal( void * );
-extern "C" DWORD WINAPI unhookAPI__internal( void * );
 HMODULE WINAPI hookLoadLibraryA( char * );
 HMODULE WINAPI hookLoadLibraryW( wchar_t * );
 
@@ -26,25 +24,113 @@ typedef std::unordered_map<std::string, std::string> FileMapping;
 FileMapping fileMapping;
 HMODULE thisModule;
 
-std::string normalizePath( std::string const & path )
+namespace
 {
-    std::string tmp( path );
-    for ( char & c : tmp )
-        if ( c == '/' )
-            c = '\\';
-    char buffer[4 * MAX_PATH];
-    BOOL result = PathCanonicalize( buffer, tmp.c_str() );
-    assert( result );
-    char const * ptr = buffer;
-    if ( *ptr == '\\' )
-        ++ptr;
-    boost::locale::generator gen;
-    std::locale locale = gen("en_US.UTF-8");
-    return boost::locale::normalize(
-        boost::locale::to_lower( ptr, locale ),
-        boost::locale::norm_default,
-        locale
-    );
+    bool readMapping( HANDLE readHandle, std::string & f, std::string & s )
+    {
+        BOOL success;
+        DWORD read;
+        unsigned char sizes[4];
+        success = ReadFile( readHandle, sizes, 4, &read, 0 );
+        assert( success );
+        assert( read == 4 );
+        std::size_t const firstSize = ( sizes[1] << 8 ) + sizes[0];
+        std::size_t const secondSize = ( sizes[3] << 8 ) + sizes[2];
+        if ( firstSize == 0 || secondSize == 0 )
+            return false;
+        std::string first;
+        first.resize( firstSize );
+        success = ReadFile( readHandle, &first[0], firstSize, &read, 0 );
+        assert( success );
+        assert( read == firstSize );
+        std::string second;
+        second.resize( secondSize );
+        success = ReadFile( readHandle, &second[0], secondSize, &read, 0 );
+        assert( success );
+        assert( read == secondSize );
+        f.swap( first );
+        s.swap( second );
+        return true;
+    }
+
+    void writeMapping( HANDLE writeHandle, std::string const & first, std::string const & second )
+    {
+        assert( first.size() < 0xFFFF );
+        assert( second.size() < 0xFFFF );
+        char sizes[4];
+        sizes[0] = first.size() & 0xFF;
+        sizes[1] = first.size() >> 8;
+        sizes[2] = second.size() & 0xFF;
+        sizes[3] = second.size() >> 8;
+        DWORD written;
+        BOOL result;
+        result = WriteFile( writeHandle, sizes, 4, &written, 0 );
+        assert( result );
+        assert( written == 4 );
+        result = WriteFile( writeHandle, first.data(), first.size(), &written, 0 );
+        assert( result );
+        assert( written == first.size() );
+        result = WriteFile( writeHandle, second.data(), second.size(), &written, 0 );
+        assert( result );
+        assert( written == second.size() );
+    };
+
+    void writeEnd( HANDLE writeHandle )
+    {
+        char end[4] = { 0 };
+        DWORD written;
+        BOOL result;
+        result = WriteFile( writeHandle, end, 4, &written, 0 );
+        assert( result );
+        assert( written == 4 );
+    }
+
+    void hookProcess( HANDLE processHandle )
+    {
+	    DLLInjector dllInjector( ::GetProcessId( processHandle ) );
+        HANDLE pipeRead;
+        HANDLE pipeWrite;
+        BOOL result;
+        // Shared memory would be better.
+        result = CreatePipe( &pipeRead, &pipeWrite, 0, 0 );
+        assert( result );
+        HANDLE targetRead;
+        result = DuplicateHandle( GetCurrentProcess(), pipeRead,
+            processHandle, &targetRead, 0, FALSE,
+            DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
+        assert( result );
+        
+        for ( FileMapping::value_type const & filePair : fileMapping )
+            writeMapping( pipeWrite, filePair.first, filePair.second );
+        writeEnd( pipeWrite );
+
+        DWORD overrideResult = dllInjector.callRemoteProc( "overrideFiles__internal", targetRead );
+        assert( overrideResult == 0 );
+        CloseHandle( pipeWrite );
+        DWORD hookResult = dllInjector.callRemoteProc( "hookWinAPIs", 0 );
+        assert( hookResult == 0 );
+    }
+
+    std::string normalizePath( std::string const & path )
+    {
+        std::string tmp( path );
+        for ( char & c : tmp )
+            if ( c == '/' )
+                c = '\\';
+        char buffer[4 * MAX_PATH];
+        BOOL result = PathCanonicalize( buffer, tmp.c_str() );
+        assert( result );
+        char const * ptr = buffer;
+        if ( *ptr == '\\' )
+            ++ptr;
+        boost::locale::generator gen;
+        std::locale locale = gen("en_US.UTF-8");
+        return boost::locale::normalize(
+            boost::locale::to_lower( ptr, locale ),
+            boost::locale::norm_default,
+            locale
+        );
+    }
 }
 
 HANDLE WINAPI hookCreateFileA(
@@ -93,17 +179,85 @@ HANDLE WINAPI hookCreateFileW(
     );
 }
 
+extern "C" BOOL WINAPI createProcessWithFSHookA(
+  _In_opt_     char const * lpApplicationName,
+  _Inout_opt_  char * lpCommandLine,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+  _In_         BOOL bInheritHandles,
+  _In_         DWORD dwCreationFlags,
+  _In_opt_     LPVOID lpEnvironment,
+  _In_opt_     char const * lpCurrentDirectory,
+  _In_         LPSTARTUPINFOA lpStartupInfo,
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+)
+{
+    bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
+    BOOL result = CreateProcessA(
+        lpApplicationName,
+        lpCommandLine,
+        lpProcessAttributes,
+        lpThreadAttributes,
+        bInheritHandles,
+        dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
+        lpEnvironment,
+        lpCurrentDirectory,
+        lpStartupInfo,
+        lpProcessInformation);
+    if ( !fileMapping.empty() && result )
+    {
+        hookProcess( lpProcessInformation->hProcess );
+        if ( shouldResume )
+            ResumeThread( lpProcessInformation->hThread );
+    }
+    return result;
+}
+
+extern "C" BOOL WINAPI createProcessWithFSHookW(
+  _In_opt_     wchar_t const * lpApplicationName,
+  _Inout_opt_  wchar_t * lpCommandLine,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+  _In_         BOOL bInheritHandles,
+  _In_         DWORD dwCreationFlags,
+  _In_opt_     LPVOID lpEnvironment,
+  _In_opt_     wchar_t const * lpCurrentDirectory,
+  _In_         LPSTARTUPINFOW lpStartupInfo,
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+)
+{
+    bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
+    BOOL result = CreateProcessW(
+        lpApplicationName,
+        lpCommandLine,
+        lpProcessAttributes,
+        lpThreadAttributes,
+        bInheritHandles,
+        dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
+        lpEnvironment,
+        lpCurrentDirectory,
+        lpStartupInfo,
+        lpProcessInformation);
+    if ( !fileMapping.empty() && result )
+    {
+        hookProcess( lpProcessInformation->hProcess );
+        if ( shouldResume )
+            ResumeThread( lpProcessInformation->hThread );
+    }
+    return result;
+}
+
 HMODULE WINAPI hookLoadLibraryA( char * lpFileName )
 {
     HMODULE result = ::LoadLibraryA( lpFileName );
-    hookAPI__internal(0);
+    hookWinAPIs(0);
     return result;
 }
 
 HMODULE WINAPI hookLoadLibraryW( wchar_t * lpFileName )
 {
     HMODULE result = ::LoadLibraryW( lpFileName );
-    hookAPI__internal(0);
+    hookWinAPIs(0);
     return result;
 }
 
@@ -180,82 +334,27 @@ DWORD hookWinAPI( char const * calleeName, char const * funcName, PROC newProc )
     return replaced;
 }
 
-extern "C" DWORD WINAPI hookAPI__internal( void * )
+extern "C" DWORD WINAPI hookWinAPIs( void * )
 {
     hookWinAPI( "Kernel32.dll", "CreateFileA", (PROC)hookCreateFileA );
     hookWinAPI( "Kernel32.dll", "CreateFileW", (PROC)hookCreateFileW );
     hookWinAPI( "Kernel32.dll", "LoadLibraryA", (PROC)hookLoadLibraryA );
     hookWinAPI( "Kernel32.dll", "LoadLibraryW", (PROC)hookLoadLibraryW );
+    hookWinAPI( "Kernel32.dll", "CreateProcessA", (PROC)createProcessWithFSHookA );
+    hookWinAPI( "Kernel32.dll", "CreateProcessW", (PROC)createProcessWithFSHookW );
     return 0;
 }
 
-extern "C" DWORD WINAPI unhookAPI__internal( void * )
+extern "C" DWORD WINAPI unhookWinAPIs( void * )
 {
 	HMODULE kernelModule( ::GetModuleHandle( "Kernel32.dll" ) );
 	hookWinAPI( "Kernel32.dll", "CreateFileA", ::GetProcAddress( kernelModule, "CreateFileA" ) );
     hookWinAPI( "Kernel32.dll", "CreateFileW", ::GetProcAddress( kernelModule, "CreateFileW" ) );
     hookWinAPI( "Kernel32.dll", "LoadLibraryA", ::GetProcAddress( kernelModule, "LoadLibraryA" ) );
     hookWinAPI( "Kernel32.dll", "LoadLibraryW", ::GetProcAddress( kernelModule, "LoadLibraryW" ) );
+    hookWinAPI( "Kernel32.dll", "CreateProcessA", ::GetProcAddress( kernelModule, "CreateProcessA" ) );
+    hookWinAPI( "Kernel32.dll", "CreateProcessW", ::GetProcAddress( kernelModule, "CreateProcessW" ) );
     return 0;
-}
-
-bool readMapping( HANDLE readHandle, std::string & f, std::string & s )
-{
-    BOOL success;
-    DWORD read;
-    unsigned char sizes[4];
-    success = ReadFile( readHandle, sizes, 4, &read, 0 );
-    assert( success );
-    assert( read == 4 );
-    std::size_t const firstSize = ( sizes[1] << 8 ) + sizes[0];
-    std::size_t const secondSize = ( sizes[3] << 8 ) + sizes[2];
-    if ( firstSize == 0 || secondSize == 0 )
-        return false;
-    std::string first;
-    first.resize( firstSize );
-    success = ReadFile( readHandle, &first[0], firstSize, &read, 0 );
-    assert( success );
-    assert( read == firstSize );
-    std::string second;
-    second.resize( secondSize );
-    success = ReadFile( readHandle, &second[0], secondSize, &read, 0 );
-    assert( success );
-    assert( read == secondSize );
-    f.swap( first );
-    s.swap( second );
-    return true;
-}
-
-void writeMapping( HANDLE writeHandle, std::string const & first, std::string const & second )
-{
-    assert( first.size() < 0xFFFF );
-    assert( second.size() < 0xFFFF );
-    char sizes[4];
-    sizes[0] = first.size() & 0xFF;
-    sizes[1] = first.size() >> 8;
-    sizes[2] = second.size() & 0xFF;
-    sizes[3] = second.size() >> 8;
-    DWORD written;
-    BOOL result;
-    result = WriteFile( writeHandle, sizes, 4, &written, 0 );
-    assert( result );
-    assert( written == 4 );
-    result = WriteFile( writeHandle, first.data(), first.size(), &written, 0 );
-    assert( result );
-    assert( written == first.size() );
-    result = WriteFile( writeHandle, second.data(), second.size(), &written, 0 );
-    assert( result );
-    assert( written == second.size() );
-};
-
-void writeEnd( HANDLE writeHandle )
-{
-    char end[4] = { 0 };
-    DWORD written;
-    BOOL result;
-    result = WriteFile( writeHandle, end, 4, &written, 0 );
-    assert( result );
-    assert( written == 4 );
 }
 
 extern "C" DWORD WINAPI overrideFiles__internal( HANDLE readHandle )
@@ -288,101 +387,6 @@ extern "C" BOOL WINAPI clearFileMappings()
 {
     fileMapping.clear();
     return TRUE;
-}
-
-static void hookProcess( HANDLE processHandle )
-{
-	DLLInjector dllInjector( ::GetProcessId(
-        processHandle ), thisModule );
-    HANDLE pipeRead;
-    HANDLE pipeWrite;
-    BOOL result;
-    // Shared memory would be better.
-    result = CreatePipe( &pipeRead, &pipeWrite, 0, 0 );
-    assert( result );
-    HANDLE targetRead;
-    result = DuplicateHandle( GetCurrentProcess(), pipeRead,
-        processHandle, &targetRead, 0, FALSE,
-        DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
-    assert( result );
-        
-    for ( FileMapping::value_type const & filePair : fileMapping )
-        writeMapping( pipeWrite, filePair.first, filePair.second );
-    writeEnd( pipeWrite );
-
-    DWORD overrideResult = dllInjector.callRemoteProc( "overrideFiles__internal", targetRead );
-    assert( overrideResult == 0 );
-    CloseHandle( pipeWrite );
-    DWORD hookResult = dllInjector.callRemoteProc( "hookAPI__internal", 0 );
-    assert( hookResult == 0 );
-}
-
-extern "C" BOOL WINAPI CreateProcessWithFSHookA(
-  _In_opt_     char const * lpApplicationName,
-  _Inout_opt_  char * lpCommandLine,
-  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-  _In_         BOOL bInheritHandles,
-  _In_         DWORD dwCreationFlags,
-  _In_opt_     LPVOID lpEnvironment,
-  _In_opt_     char const * lpCurrentDirectory,
-  _In_         LPSTARTUPINFOA lpStartupInfo,
-  _Out_        LPPROCESS_INFORMATION lpProcessInformation
-)
-{
-    bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-    BOOL result = CreateProcessA(
-        lpApplicationName,
-        lpCommandLine,
-        lpProcessAttributes,
-        lpThreadAttributes,
-        bInheritHandles,
-        dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
-        lpEnvironment,
-        lpCurrentDirectory,
-        lpStartupInfo,
-        lpProcessInformation);
-    if ( !fileMapping.empty() && result )
-    {
-        hookProcess( lpProcessInformation->hProcess );
-        if ( shouldResume )
-            ResumeThread( lpProcessInformation->hThread );
-    }
-    return result;
-}
-
-extern "C" BOOL WINAPI CreateProcessWithFSHookW(
-  _In_opt_     wchar_t const * lpApplicationName,
-  _Inout_opt_  wchar_t * lpCommandLine,
-  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-  _In_         BOOL bInheritHandles,
-  _In_         DWORD dwCreationFlags,
-  _In_opt_     LPVOID lpEnvironment,
-  _In_opt_     wchar_t const * lpCurrentDirectory,
-  _In_         LPSTARTUPINFOW lpStartupInfo,
-  _Out_        LPPROCESS_INFORMATION lpProcessInformation
-)
-{
-    bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-    BOOL result = CreateProcessW(
-        lpApplicationName,
-        lpCommandLine,
-        lpProcessAttributes,
-        lpThreadAttributes,
-        bInheritHandles,
-        dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
-        lpEnvironment,
-        lpCurrentDirectory,
-        lpStartupInfo,
-        lpProcessInformation);
-    if ( !fileMapping.empty() && result )
-    {
-        hookProcess( lpProcessInformation->hProcess );
-        if ( shouldResume )
-            ResumeThread( lpProcessInformation->hThread );
-    }
-    return result;
 }
 
 BOOL WINAPI DllMain( HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )

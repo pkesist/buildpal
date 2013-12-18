@@ -1,0 +1,8 @@
+LIBRARY map_files_inj64.dll
+EXPORTS
+    hookWinAPIs @1
+    unhookWinAPIs @2
+    overrideFiles__internal @3
+    addFileMapping @4
+    removeFileMapping @5
+    clearFileMappings @6

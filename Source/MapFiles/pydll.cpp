@@ -1,4 +1,4 @@
-#include "dll.hpp"
+#include "mapFilesInject.hpp"
 
 #include <Python.h>
 
@@ -56,8 +56,19 @@ static PyModuleDef mapFiles = {
 
 PyMODINIT_FUNC PyInit_map_files(void)
 {
-    DWORD replaced = hookWinAPI("Kernel32.dll", "CreateProcessA", (PROC)CreateProcessWithFSHookA);
-    replaced = hookWinAPI("Kernel32.dll", "CreateProcessW", (PROC)CreateProcessWithFSHookW);
-    return PyModule_Create(&mapFiles);
+    return PyModule_Create( &mapFiles );
+}
+
+BOOL WINAPI DllMain( HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )
+{
+    if ( fdwReason == DLL_PROCESS_ATTACH )
+    {
+        hookWinAPIs( 0 );
+    }
+    else if ( fdwReason == DLL_PROCESS_DETACH )
+    {
+        unhookWinAPIs( 0 );
+    }
+    return TRUE;
 }
 

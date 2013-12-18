@@ -60,6 +60,7 @@
     <Folder Include="Source\Common" />
     <Folder Include="Source\Compilers\" />
     <Folder Include="Source\ArgParser\" />
+    <Folder Include="Source\MapFiles\" />
     <Folder Include="Source\Test" />
     <Folder Include="Source\Server\" />
   </ItemGroup>
@@ -87,6 +88,17 @@
     <Content Include="Source\HeaderScanner\pythonBindings_.cpp" />
     <Content Include="Source\HeaderScanner\utility_.cpp" />
     <Content Include="Source\HeaderScanner\utility_.hpp" />
+    <Content Include="Source\MapFiles\build-config.ini" />
+    <Content Include="Source\MapFiles\mapFilesInject.cpp" />
+    <Content Include="Source\MapFiles\mapFilesInject32.def" />
+    <Content Include="Source\MapFiles\mapFilesInject.hpp" />
+    <Content Include="Source\MapFiles\dllInject.cpp" />
+    <Content Include="Source\MapFiles\dllInject.hpp" />
+    <Content Include="Source\MapFiles\Jamroot.jam" />
+    <Content Include="Source\MapFiles\mapFilesInject64.def" />
+    <Content Include="Source\MapFiles\pydll.cpp" />
+    <Content Include="Source\MapFiles\remoteOps.cpp" />
+    <Content Include="Source\MapFiles\remoteOps.hpp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

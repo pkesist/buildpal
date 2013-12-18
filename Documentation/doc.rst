@@ -38,21 +38,8 @@ Features.
     * Pump-mode.
         DistriBuild collects all headers required by a source file and transfers
         this data to the farm node. For this part to be done properly,
-        DistriBuild has to preprocess the source file, which is done using a bit
-        modified Clang's preprocessor.
-
------------
-Trade-offs.
------------
-
-    * Many farm nodes and PCH.
-        * Precompiled headers are usually very large. Transferring them to
-          multiple farm nodes may add up to a significant overhead.
-
-    * Small (simple) sources.
-        * Simple and small sources are not good candidates for distributed
-          compilation - overhead added by DistriBuild might cause the overall
-          compilation time to increase.
+        DistriBuild has to preprocess the source file, which is done using 
+        (a bit modified) Clang's preprocessor.
 
 -------------
 Requirements.

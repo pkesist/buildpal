@@ -1,0 +1,32 @@
+local release-variants = profile release releaseWithAssert profileWithAssert ;
+
+variant releaseWithAssert
+:
+    <optimization>speed
+    <debug-symbols>off
+    <inlining>full
+    <runtime-debugging>off
+;
+variant profileWithAssert : releaseWithAssert : <profiling>on <debug-symbols>on ;
+
+lib shlwapi : : <name>shlwapi ;
+
+
+pyd map_files :
+    remoteOps.cpp
+    dllInject.cpp
+    dll.cpp
+    pydll.cpp
+    shlwapi
+    /python_dev//pythonLib 
+    /boost//headers
+:
+    <def-file>dll.def
+    <variant>$(release-variants):<source>/boost//system/<variant>release/<link>static
+    <variant>debug:<source>/boost//system/<variant>debug/<link>static
+    <variant>$(release-variants):<source>/boost//locale/<variant>release/<link>static
+    <variant>debug:<source>/boost//locale/<variant>debug/<link>static
+;
+explicit map_files ;
+
+install _ : map_files : <variant>profileWithAssert <optimization>off <location>C:\\Python33\\DLLs ;

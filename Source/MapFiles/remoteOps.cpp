@@ -178,9 +178,9 @@ PROC WINAPI GetRemoteProcAddress(
             std::string tempFunctionName;
  
             // Get the function name one character at a time because we don't know how long it is
-            for( unsigned int j = 0; ; ++j )
+            char tmpChar = 1;
+            for( unsigned int j = 0; tmpChar != 0; ++j )
             {
-                char tmpChar;
                 // Get next character
                 result = ::ReadProcessMemory( hProcess,
                     ( remoteModuleBaseVA + exportNameTable[i] + j ),
@@ -190,8 +190,6 @@ PROC WINAPI GetRemoteProcAddress(
                 assert( result );
  
                 tempFunctionName.push_back( tmpChar );
-                if ( tmpChar == '\0' )
-                    break;
             }
  
             // Does the name match?
@@ -215,18 +213,15 @@ PROC WINAPI GetRemoteProcAddress(
     std::string tempForwardString;
 
     /* Get the forwarder string one character at a time because we don't know how long it is */
-    for( unsigned int i = 0; ; ++i )
+    char tmpChar = 1;
+    for( unsigned int i = 0; tmpChar != '\0'; ++i )
     {
-        char tmpChar;
         result = ::ReadProcessMemory(hProcess,
             ( remoteModuleBaseVA + funcOffset + i ),
             &tmpChar, sizeof(tmpChar), NULL);
         assert( result );
  
         tempForwardString.push_back( tmpChar ); // Add it to the string
-
-        if( tmpChar == '\0' )
-            break;
     }
  
     /* Find the dot that seperates the module name and the function name/ordinal */

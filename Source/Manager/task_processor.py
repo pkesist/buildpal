@@ -93,7 +93,11 @@ class TaskProcessor:
                 return result
 
             def unregister(self, type, key):
-                del self.session[type][key]
+                try:
+                    del self.session[type][key]
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
 
         sessions = Sessions()
 
@@ -262,7 +266,7 @@ class TaskProcessor:
                                     unregister_socket(socket)
                                     node_manager.recycle(node_index, socket)
                                     if session.state == session.STATE_DONE:
-                                        session.task.task_done(session.client_conn,
+                                        session.task.completed(session.client_conn,
                                         session.retcode, session.stdout, session.stderr)
                                     elif session.state == session.STATE_SERVER_FAILURE:
                                         if hasattr(task, 'retries'):
@@ -272,7 +276,7 @@ class TaskProcessor:
                                         if task.retries <= 3:
                                             start_task(task)
                                         else:
-                                            session.task.task_done(session.client_conn,
+                                            session.task.completed(session.client_conn,
                                                 session.retcode, session.stdout, session.stderr)
                             else:
                                 # Not part of a session, handled by node_manager.

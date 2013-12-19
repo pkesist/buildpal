@@ -157,7 +157,6 @@ class SourceScanner:
                     self.poller.unregister(socket)
                     self.sockets[session.node_index].append(socket)
                     del self.server_sessions[socket]
-
             elif session.state == self.Session.STATE_SENDING_FILE_LIST:
                 assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
                 missing_files = pickle.loads(msg[1])

@@ -35,13 +35,17 @@ class TaskCreator:
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
         class Task:
-            pass
+            def __init__(self, task_creator):
+                self.task_creator = task_creator
+
+            def completed(self, *args):
+                self.task_creator.task_done(self, *args)
 
         def create_task(source):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
 
-            task = Task()
+            task = Task(self)
             task.__dict__.update(
             {
                 'server_task_info' : {
@@ -59,7 +63,6 @@ class TaskCreator:
                 'pch_file' : pch_file,
                 'source' : source,
             })
-            task.task_done = lambda *args : self.task_done(task, *args)
             return task
         self.tasks = set(create_task(source) for source in sources)
         self.completed_tasks = {}

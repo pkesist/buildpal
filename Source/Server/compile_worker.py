@@ -62,11 +62,11 @@ class CompileSession:
             self.cancel_autodestruct()
             self.session_done()
 
-    def async(no_verify=False):
+    def async(verify=True):
         def async_helper(func):
             def wrapper(self, runner, *args, **kwds):
                 future = runner.submit(func, self, *args, **kwds)
-                if not no_verify:
+                if verify:
                     future.add_done_callback(self.verify)
                 return future
             return wrapper
@@ -110,7 +110,7 @@ class CompileSession:
 
     def created(self):
         assert self.task_state == self.STATE_START
-        accept_task = not self.cpu_usage_hwm or psutil.cpu_percent() < self.cpu_usage_hwm
+        accept_task = not self.cpu_usage_hwm or self.cpu_usage_hwm >= 100 or psutil.cpu_percent() < self.cpu_usage_hwm
         sender = self.Sender(self.id)
         sender.send_pyobj('ACCEPT' if accept_task else 'REJECT')
         sender.disconnect()
@@ -312,7 +312,7 @@ class CompileSession:
         finally:
             sender.disconnect()
 
-    @async(no_verify=True)
+    @async(verify=False)
     def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
         result = self.header_repository.prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
@@ -421,7 +421,8 @@ class CompileWorker:
         scheduler = sched.scheduler()
 
         print("Running server on '{}'.".format(self.__address))
-        print("Server CPU high-water mark is {}.".format(self.__cpu_usage_hwm))
+        if self.__cpu_usage_hwm:
+            print("Server CPU high-water mark is {}.".format(self.__cpu_usage_hwm))
 
         while True:
             sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))

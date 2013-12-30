@@ -10,7 +10,6 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <boost/container/list.hpp>
-#include <boost/container/flat_map.hpp>
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/hashed_index.hpp>
@@ -38,8 +37,8 @@ namespace clang
     class FileEntry;
 }
 
-typedef boost::container::flat_map<MacroName, MacroValue> Macros;
-typedef Macros::value_type Macro;
+typedef std::pair<MacroName, MacroValue> Macro;
+typedef std::vector<Macro> Macros;
 
 inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
 {

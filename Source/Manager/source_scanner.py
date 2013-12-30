@@ -5,6 +5,7 @@ from Common import create_socket, recv_multipart
 
 from collections import defaultdict
 import zmq
+import zlib
 import os
 import pickle
 from socket import getfqdn
@@ -163,7 +164,7 @@ class SourceScanner:
                 new_files, src_loc = self.task_files_bundle(
                     session.task['source'], missing_files, session.header_info)
                 socket.send_multipart([b'TASK_FILES', getfqdn().encode(),
-                    pickle.dumps(new_files), src_loc.encode(), pickle.dumps(
+                    zlib.compress(pickle.dumps(new_files)), src_loc.encode(), pickle.dumps(
                     session.wait_for_header_list_response.get())])
                 self.poller.unregister(socket)
                 self.sockets[session.node_index].append(socket)

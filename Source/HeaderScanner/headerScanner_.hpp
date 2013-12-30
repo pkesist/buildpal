@@ -45,9 +45,9 @@ class HeaderTracker;
     //typedef boost::flyweights::flyweight<base, boost::flyweights::tag<name##Tag> > name;
 
 DEFINE_FLYWEIGHT(llvm::SmallString<256>, Dir);
-DEFINE_FLYWEIGHT(llvm::SmallString<32>, HeaderName);
-DEFINE_FLYWEIGHT(llvm::SmallString<32>, MacroName);
-DEFINE_FLYWEIGHT(llvm::SmallString<64>, MacroValue);
+DEFINE_FLYWEIGHT(llvm::SmallString<64>, HeaderName);
+DEFINE_FLYWEIGHT(llvm::SmallString<64>, MacroName);
+DEFINE_FLYWEIGHT(llvm::SmallString<64 + 32>, MacroValue);
 
 struct HeaderLocation
 {

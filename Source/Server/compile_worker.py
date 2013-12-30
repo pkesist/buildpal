@@ -244,7 +244,32 @@ class CompileSession:
 
             compiler_prep = time()
             self.source_file = os.path.join(self.include_path, self.src_loc)
-            if self.task['pch_file'] is not None:
+
+            compiler_info = self.task['compiler_info']
+            output = compiler_info['set_object_name'].format(object_file_name)
+            pch_switch = []
+            overrides = {}
+            if self.task['pch_file']:
+                if '/GL' in command:
+                    # TODO: MSVC specific, remove from here.
+                    # In case /GL command line option is present, PCH file will
+                    # not be fully resolved during compilation. Instead,
+                    # resulting .obj file will have a reference to it, and
+                    # consequently PCH file will be needed at link phase.
+                    # The problem we face is that PCH path on slave machine
+                    # will not be the same as the client machine. This is why
+                    # we mimic the client's PCH path on the slave.
+                    # The filesystem hook used here is implemented using
+                    # DLL injection/API hooking, so is entirely in userland.
+                    # It affects compiler performance, so is used only when
+                    # absolutely necessary.
+                    overrides[self.task['pch_file'][0]] = self.pch_file
+                    self.pch_file = self.task['pch_file'][0]
+                assert self.pch_file is not None
+                assert os.path.exists(self.pch_file)
+                pch_switch.append(compiler_info['set_pch_file'].format(
+                    self.pch_file
+                ))
                 while not self.pch_repository.file_arrived(
                     *self.task['pch_file']):
                     # The PCH file is being downloaded by another session.
@@ -253,18 +278,6 @@ class CompileSession:
                     # state would require inter-session communication.
                     # Just not worth the additional complexity.
                     sleep(1)
-
-            compiler_info = self.task['compiler_info']
-            output = compiler_info['set_object_name'].format(object_file_name)
-            pch_switch = []
-            overrides = {}
-            if self.task['pch_file']:
-                overrides[self.task['pch_file'][0]] = self.pch_file
-                assert self.pch_file is not None
-                assert os.path.exists(self.pch_file)
-                pch_switch.append(compiler_info['set_pch_file'].format(
-                    self.task['pch_file'][0]
-                ))
 
             while not self.compiler_repository.has_compiler(self.compiler_id):
                 # Compiler is being downloaded by another session.

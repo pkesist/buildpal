@@ -17,7 +17,6 @@ import logging
 
 import os
 import pickle
-import psutil
 import signal
 import shutil
 import sched
@@ -28,7 +27,7 @@ import zipfile
 import zlib
 import zmq
 import queue
-
+import map_files
 
 zmq_ctx = zmq.Context()
 
@@ -39,6 +38,104 @@ class Counter:
     def inc(self): self.__count += 1
     def dec(self): self.__count -= 1
     def get(self): return self.__count
+
+class Popen(subprocess.Popen):
+    def __init__(self, overrides, *args, **kwargs):
+        assert sys.platform == "win32"
+        self.overrides = overrides
+        super(Popen, self).__init__(*args, **kwargs)
+
+    def _execute_child(self, args, executable, preexec_fn, close_fds,
+                        pass_fds, cwd, env,
+                        startupinfo, creationflags, shell,
+                        p2cread, p2cwrite,
+                        c2pread, c2pwrite,
+                        errread, errwrite,
+                        unused_restore_signals, unused_start_new_session):
+        """Execute program (MS Windows version)"""
+
+        assert not pass_fds, "pass_fds not supported on Windows."
+
+        if not isinstance(args, str):
+            args = subprocess.list2cmdline(args)
+
+        # Process startup details
+        if startupinfo is None:
+            startupinfo = subprocess.STARTUPINFO()
+        if -1 not in (p2cread, c2pwrite, errwrite):
+            startupinfo.dwFlags |= subprocess._winapi.STARTF_USESTDHANDLES
+            startupinfo.hStdInput = p2cread
+            startupinfo.hStdOutput = c2pwrite
+            startupinfo.hStdError = errwrite
+
+        if shell:
+            startupinfo.dwFlags |= subprocess._winapi.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess._winapi.SW_HIDE
+            comspec = os.environ.get("COMSPEC", "cmd.exe")
+            args = '{} /c "{}"'.format (comspec, args)
+            if (subprocess._winapi.GetVersion() >= 0x80000000 or
+                    os.path.basename(comspec).lower() == "command.com"):
+                # Win9x, or using command.com on NT. We need to
+                # use the w9xpopen intermediate program. For more
+                # information, see KB Q150956
+                # (http://web.archive.org/web/20011105084002/http://support.microsoft.com/support/kb/articles/Q150/9/56.asp)
+                w9xpopen = self._find_w9xpopen()
+                args = '"%s" %s' % (w9xpopen, args)
+                # Not passing CREATE_NEW_CONSOLE has been known to
+                # cause random failures on win9x.  Specifically a
+                # dialog: "Your program accessed mem currently in
+                # use at xxx" and a hopeful warning about the
+                # stability of your system.  Cost is Ctrl+C won't
+                # kill children.
+                creationflags |= subprocess._winapi.CREATE_NEW_CONSOLE
+
+        # Start the process
+        try:
+            if self.overrides:
+                hp, ht, pid, tid = map_files.createProcess(executable, args,
+                                            # no special security
+                                            None, None,
+                                            int(not close_fds),
+                                            creationflags,
+                                            env,
+                                            cwd,
+                                            startupinfo, self.overrides)
+            else:
+                hp, ht, pid, tid = subprocess._winapi.CreateProcess(executable, args,
+                                            # no special security
+                                            None, None,
+                                            int(not close_fds),
+                                            creationflags,
+                                            env,
+                                            cwd,
+                                            startupinfo)
+        except subprocess.pywintypes.error as e:
+            # Translate pywintypes.error to WindowsError, which is
+            # a subclass of OSError.  FIXME: We should really
+            # translate errno using _sys_errlist (or similar), but
+            # how can this be done from Python?
+            raise subprocess.WindowsError(*e.args)
+        finally:
+            # Child is launched. Close the parent's copy of those pipe
+            # handles that only the child should have open.  You need
+            # to make sure that no handles to the write end of the
+            # output pipe are maintained in this process or else the
+            # pipe will not close when the child process exits and the
+            # ReadFile will hang.
+            if p2cread != -1:
+                p2cread.Close()
+            if c2pwrite != -1:
+                c2pwrite.Close()
+            if errwrite != -1:
+                errwrite.Close()
+            if hasattr(self, '_devnull'):
+                os.close(self._devnull)
+
+        # Retain the process handle, but close the thread handle
+        self._child_created = True
+        self._handle = subprocess.Handle(hp)
+        self.pid = pid
+        subprocess._winapi.CloseHandle(ht)
 
 class CompileSession:
     STATE_START = 0
@@ -83,15 +180,14 @@ class CompileSession:
         sender.disconnect()
 
     def __init__(self, pch_repository, header_repository, compiler_repository,
-                 cpu_usage_hwm, task_counter, checksums, compile_thread_pool,
-                 misc_thread_pool, scheduler):
+                 task_counter, checksums, compile_thread_pool, misc_thread_pool,
+                 scheduler):
         self.task_state = self.STATE_START
         self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
         self.task_counter = task_counter
         self.compiler_repository = compiler_repository
         self.header_repository = header_repository
         self.pch_repository = pch_repository
-        self.cpu_usage_hwm = cpu_usage_hwm
         temp_dir = os.path.join(tempfile.gettempdir(), "DistriBuild", "Temp")
         os.makedirs(temp_dir, exist_ok=True)
         self.include_path = tempfile.mkdtemp(dir=temp_dir)
@@ -110,10 +206,9 @@ class CompileSession:
 
     def created(self):
         assert self.task_state == self.STATE_START
-        accept_task = not self.cpu_usage_hwm or self.cpu_usage_hwm >= 100 or psutil.cpu_percent() < self.cpu_usage_hwm
         sender = self.Sender(self.id)
+        accept_task = True
         sender.send_pyobj('ACCEPT' if accept_task else 'REJECT')
-        sender.disconnect()
         self.task_state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
         return accept_task
 
@@ -162,10 +257,14 @@ class CompileSession:
             compiler_info = self.task['compiler_info']
             output = compiler_info['set_object_name'].format(object_file_name)
             pch_switch = []
+            overrides = {}
             if self.task['pch_file']:
+                overrides[self.task['pch_file'][0]] = self.pch_file
                 assert self.pch_file is not None
                 assert os.path.exists(self.pch_file)
-                pch_switch.append(compiler_info['set_pch_file'].format(self.task['pch_file'][0]))
+                pch_switch.append(compiler_info['set_pch_file'].format(
+                    self.task['pch_file'][0]
+                ))
 
             while not self.compiler_repository.has_compiler(self.compiler_id):
                 # Compiler is being downloaded by another session.
@@ -179,7 +278,7 @@ class CompileSession:
             command = (self.task['call'] + pch_switch +
                 includes + [output, self.source_file])
             retcode, stdout, stderr = self.compiler(command,
-                self.include_path)
+                self.include_path, overrides)
             done = time()
             self.times['compiler'] = done - start
             self.times['server_time'] = self.server_time_timer.get()
@@ -204,9 +303,9 @@ class CompileSession:
         self.compiler_exe = os.path.join(
             self.compiler_repository.compiler_dir(self.compiler_id),
             self.task['compiler_info']['executable'])
-        def spawn_compiler(command, cwd):
+        def spawn_compiler(command, cwd, overrides={}):
             command[0] = self.compiler_exe
-            with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            with Popen(overrides, command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
                 output = proc.communicate()
                 return proc.returncode, output[0], output[1]
         self.compiler = spawn_compiler
@@ -339,20 +438,20 @@ class CompileSession:
             del self.wait_for_headers
             assert msg[0] == b'TASK_FILES'
             fqdn = msg[1]
-            new_files = msg[2]
+            new_files = pickle.loads(zlib.decompress(msg[2]))
             self.src_loc = msg[3].tobytes().decode()
             self.times['wait_hdr_list_result'] = pickle.loads(msg[4])
             self.header_state = self.STATE_HEADERS_ARRIVED
             self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, pickle.loads(new_files))
+            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, new_files)
             if self.task_state == self.STATE_TASK_READY:
                 self.times['waiting_for_mgr_data'] = 0
                 self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())
 
 class CompileWorker:
-    def __init__(self, address, cpu_usage_hwm):
+    def __init__(self, address, compile_slots):
         self.__address = address
-        self.__cpu_usage_hwm = cpu_usage_hwm
+        self.__compile_slots = compile_slots
         self.__checksums = {}
         self.workers = {}
         self.sessions = {}
@@ -360,8 +459,7 @@ class CompileWorker:
     def create_session(self, client_id):
         session = CompileSession(self.__pch_repository,
             self.__header_repository, self.__compiler_repository,
-            self.__cpu_usage_hwm, self.__counter,
-            self.__checksums, self.__compile_thread_pool,
+            self.__counter, self.__checksums, self.__compile_thread_pool,
             self.__misc_thread_pool, self.scheduler)
         session.id = client_id
         return session
@@ -381,7 +479,7 @@ class CompileWorker:
         root_logger.setLevel(logging.DEBUG)
         root_logger.addHandler(logging.NullHandler())
 
-        self.__compile_thread_pool = ThreadPoolExecutor(cpu_count() + 1)
+        self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository()
         self.__pch_repository = PCHRepository()
@@ -421,8 +519,7 @@ class CompileWorker:
         scheduler = sched.scheduler()
 
         print("Running server on '{}'.".format(self.__address))
-        if self.__cpu_usage_hwm:
-            print("Server CPU high-water mark is {}.".format(self.__cpu_usage_hwm))
+        print("Using {} compilation slots.".format(self.__compile_slots))
 
         while True:
             sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))

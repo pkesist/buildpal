@@ -6,3 +6,5 @@ EXPORTS
     addFileMapping @4
     removeFileMapping @5
     clearFileMappings @6
+    createProcessWithOverridesA @7
+    createProcessWithOverridesW @8

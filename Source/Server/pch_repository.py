@@ -1,8 +1,6 @@
 import os
 import tempfile
 
-import map_files
-
 from threading import Lock
 from shutil import rmtree
 from hashlib import md5
@@ -37,4 +35,3 @@ class PCHRepository:
         with self.__lock:
             self.__files[key] = self.__partial_files[key]
             del self.__partial_files[key]
-            map_files.mapFile(filename, self.__files[key])

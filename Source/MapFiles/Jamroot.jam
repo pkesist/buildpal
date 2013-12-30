@@ -29,9 +29,9 @@ alias select_inject_module : map_files_inj64 : <address-model>64 ;
 
 pyd map_files :
     pydll.cpp
+    select_inject_module
     /python_dev//pythonLib 
     boostLibs
-    select_inject_module
 ;
 explicit map_files ;
 

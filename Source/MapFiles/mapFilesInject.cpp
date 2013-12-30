@@ -8,7 +8,6 @@
 #include <cassert>
 #include <iostream>
 #include <string>
-#include <unordered_map>
 #include <codecvt>
 #include <locale>
 
@@ -18,8 +17,6 @@
 
 HMODULE WINAPI hookLoadLibraryA( char * );
 HMODULE WINAPI hookLoadLibraryW( wchar_t * );
-
-typedef std::unordered_map<std::string, std::string> FileMapping;
 
 FileMapping fileMapping;
 HMODULE thisModule;
@@ -179,7 +176,7 @@ HANDLE WINAPI hookCreateFileW(
     );
 }
 
-extern "C" BOOL WINAPI createProcessWithFSHookA(
+extern "C" BOOL WINAPI createProcessWithOverridesA(
   _In_opt_     char const * lpApplicationName,
   _Inout_opt_  char * lpCommandLine,
   _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -189,7 +186,8 @@ extern "C" BOOL WINAPI createProcessWithFSHookA(
   _In_opt_     LPVOID lpEnvironment,
   _In_opt_     char const * lpCurrentDirectory,
   _In_         LPSTARTUPINFOA lpStartupInfo,
-  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation,
+               FileMapping const & fileMapping
 )
 {
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -213,7 +211,7 @@ extern "C" BOOL WINAPI createProcessWithFSHookA(
     return result;
 }
 
-extern "C" BOOL WINAPI createProcessWithFSHookW(
+extern "C" BOOL WINAPI createProcessWithOverridesW(
   _In_opt_     wchar_t const * lpApplicationName,
   _Inout_opt_  wchar_t * lpCommandLine,
   _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -223,7 +221,8 @@ extern "C" BOOL WINAPI createProcessWithFSHookW(
   _In_opt_     LPVOID lpEnvironment,
   _In_opt_     wchar_t const * lpCurrentDirectory,
   _In_         LPSTARTUPINFOW lpStartupInfo,
-  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation,
+               FileMapping const & fileMapping
 )
 {
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -246,6 +245,45 @@ extern "C" BOOL WINAPI createProcessWithFSHookW(
     }
     return result;
 }
+
+extern "C" BOOL WINAPI createProcessWithFSHookA(
+  _In_opt_     char const * lpApplicationName,
+  _Inout_opt_  char * lpCommandLine,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+  _In_         BOOL bInheritHandles,
+  _In_         DWORD dwCreationFlags,
+  _In_opt_     LPVOID lpEnvironment,
+  _In_opt_     char const * lpCurrentDirectory,
+  _In_         LPSTARTUPINFO lpStartupInfo,
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+)
+{
+    return createProcessWithOverridesA( lpApplicationName, lpCommandLine,
+        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+        dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+        lpStartupInfo, lpProcessInformation, fileMapping );
+}
+
+extern "C" BOOL WINAPI createProcessWithFSHookW(
+  _In_opt_     wchar_t const * lpApplicationName,
+  _Inout_opt_  wchar_t * lpCommandLine,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+  _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+  _In_         BOOL bInheritHandles,
+  _In_         DWORD dwCreationFlags,
+  _In_opt_     LPVOID lpEnvironment,
+  _In_opt_     wchar_t const * lpCurrentDirectory,
+  _In_         LPSTARTUPINFOW lpStartupInfo,
+  _Out_        LPPROCESS_INFORMATION lpProcessInformation
+)
+{
+    return createProcessWithOverridesW( lpApplicationName, lpCommandLine,
+        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+        dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+        lpStartupInfo, lpProcessInformation, fileMapping );
+}
+
 
 HMODULE WINAPI hookLoadLibraryA( char * lpFileName )
 {

@@ -54,7 +54,7 @@ namespace
     {
         assert( first.size() < 0xFFFF );
         assert( second.size() < 0xFFFF );
-        char sizes[4];
+        unsigned char sizes[4];
         sizes[0] = first.size() & 0xFF;
         sizes[1] = first.size() >> 8;
         sizes[2] = second.size() & 0xFF;
@@ -82,7 +82,7 @@ namespace
         assert( written == 4 );
     }
 
-    void hookProcess( HANDLE processHandle )
+    void hookProcess( HANDLE processHandle, FileMapping const & fileMapping )
     {
 	    DLLInjector dllInjector( ::GetProcessId( processHandle ) );
         HANDLE pipeRead;
@@ -204,7 +204,7 @@ extern "C" BOOL WINAPI createProcessWithOverridesA(
         lpProcessInformation);
     if ( !fileMapping.empty() && result )
     {
-        hookProcess( lpProcessInformation->hProcess );
+        hookProcess( lpProcessInformation->hProcess, fileMapping );
         if ( shouldResume )
             ResumeThread( lpProcessInformation->hThread );
     }
@@ -239,7 +239,7 @@ extern "C" BOOL WINAPI createProcessWithOverridesW(
         lpProcessInformation);
     if ( !fileMapping.empty() && result )
     {
-        hookProcess( lpProcessInformation->hProcess );
+        hookProcess( lpProcessInformation->hProcess, fileMapping );
         if ( shouldResume )
             ResumeThread( lpProcessInformation->hThread );
     }

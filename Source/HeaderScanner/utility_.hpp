@@ -8,7 +8,7 @@
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/hashed_index.hpp>
-#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/mem_fun.hpp>
 
 #include <llvm/ADT/StringRef.h>
 
@@ -40,23 +40,23 @@ public:
 
     void addRef() const
     {
-        if ( refCount.fetch_add( 1 ) == 0 )
-            delCount.fetch_add( 1 );
+        if ( refCount.fetch_add( 1, std::memory_order_relaxed ) == 0 )
+            delCount.fetch_add( 1, std::memory_order_relaxed );
     }
 
     bool decRef() const
     {
-        return refCount.fetch_sub( 1 ) == 1;
+        return refCount.fetch_sub( 1, std::memory_order_relaxed ) == 1;
     }
 
     bool checkDel() const
     {
-        return delCount.fetch_sub( 1 ) == 1;
+        return delCount.fetch_sub( 1, std::memory_order_relaxed ) == 1;
     }
 
     std::size_t getRef() const
     {
-        return refCount.load();
+        return refCount.load( std::memory_order_relaxed );
     }
 
     mutable std::atomic<std::size_t> refCount;
@@ -66,7 +66,9 @@ public:
 template<typename T>
 struct Value
 {
-    Value( T const & v ) : value( v ) {}
+    Value( llvm::StringRef r ) : value( r ) {}
+
+    llvm::StringRef str() const { return value.str(); }
 
     T value;
     RefCount refCount;
@@ -80,7 +82,7 @@ struct Container : public boost::multi_index::multi_index_container
     <
         boost::multi_index::hashed_unique
         <
-            boost::multi_index::member<Value<T>, T, &Value<T>::value>
+            boost::multi_index::const_mem_fun<Value<T>, llvm::StringRef, &Value<T>::str>
         >
     >
 >
@@ -96,11 +98,11 @@ private:
 public:
     FlyweightStorage() : counter_( 0 ) {}
 
-    Value<T> const * insert( T const & t )
+    Value<T> const * insert( llvm::StringRef s )
     {
         {
             boost::shared_lock<boost::shared_mutex> const sharedLock( mutex_ );
-            iterator result = find( t );
+            iterator result = find( s );
             if ( result != end() )
             {
                 result->refCount.addRef();
@@ -108,14 +110,14 @@ public:
             }
         }
         boost::upgrade_lock<boost::shared_mutex> upgradeLock( mutex_ );
-        iterator result = find( t );
+        iterator result = find( s );
         if ( result != end() )
         {
             result->refCount.addRef();
             return &*result;
         }
         boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-        std::pair<iterator, bool> const res = Base::insert( Value<T>( t ) );
+        std::pair<iterator, bool> const res = Base::insert( Value<T>( s ) );
         assert( res.second );
         res.first->refCount.addRef();
         return &*res.first;
@@ -123,8 +125,6 @@ public:
 
     void remove( Value<T> const * value )
     {
-        if ( !value )
-            return;
         if ( value->refCount.decRef() )
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
@@ -147,22 +147,17 @@ FlyweightStorage<T, Tag> FlyweightStorage<T, Tag>::storage;
 template<typename T, typename Tag=T>
 struct Flyweight
 {
-    template <typename U>
-    static Flyweight<T, Tag> create( U const & u )
-    {
-        return Flyweight<T, Tag>( T( u ) );
-    }
-
     typedef FlyweightStorage<T, Tag> Storage;
     ~Flyweight()
     {
-        Storage::get().remove( value_ );
+        if ( value_ )
+            Storage::get().remove( value_ );
     }
 
     Flyweight() : value_( 0 ) {}
 
-    explicit Flyweight( T const & t )
-        : value_( Storage::get().insert( t ) )
+    explicit Flyweight( llvm::StringRef s )
+        : value_( Storage::get().insert( s ) )
     {}
 
     Flyweight( Flyweight && other )
@@ -179,7 +174,8 @@ struct Flyweight
 
     Flyweight & operator=( Flyweight const & other )
     {
-        Storage::get().remove( value_ );
+        if ( value_ )
+            Storage::get().remove( value_ );
         value_ = other.value_;
         if ( value_ )
             value_->refCount.addRef();

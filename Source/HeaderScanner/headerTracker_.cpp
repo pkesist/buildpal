@@ -71,8 +71,8 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     HeaderWithFileEntry const headerWithFileEntry =
     {
         {
-            Dir::create( searchPath ),
-            HeaderName::create( relativePath ),
+            Dir( searchPath ),
+            HeaderName( relativePath ),
             contentEntry.buffer.get(),
             contentEntry.checksum,
             headerLocation
@@ -140,8 +140,8 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     HeaderWithFileEntry const hwf =
     {
         {
-            Dir::create( "" ),
-            HeaderName::create( fileName ),
+            Dir( "" ),
+            HeaderName( fileName ),
             0,
             0,
             HeaderLocation::relative

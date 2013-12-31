@@ -9,8 +9,6 @@
 #include "headerCache_.hpp"
 #include "utility_.hpp"
 
-#include <boost/container/flat_set.hpp>
-
 #include <llvm/ADT/SmallString.h>
 
 #include <deque>
@@ -18,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include <set>
+#include <unordered_set>
 #include <vector>
 //------------------------------------------------------------------------------
 
@@ -196,7 +195,15 @@ public:
     bool fromCache() const { return cacheHit_; }
 
 private:
-    typedef boost::container::flat_set<llvm::StringRef> MacroNames;
+    struct StrRefHash
+    {
+        std::size_t operator()( llvm::StringRef const & s )
+        {
+            return llvm::hash_value( s );
+        }
+    };
+
+    typedef std::unordered_set<llvm::StringRef, StrRefHash> MacroNames;
 
 private:
     MacroState macroState_;

@@ -141,7 +141,6 @@ PyMethodDef PyArgList_methods[] =
     {"option_names" , (PyCFunction)PyArgList_optionNames, METH_NOARGS, "Get a list of option names."},
     {"option_values", (PyCFunction)PyArgList_optionValues, METH_NOARGS, "Get a list of option values."},
     {"arg_values", (PyCFunction)PyArgList_argValues, METH_NOARGS, "Get a list of command line arguments."},
-    //{"set_ms_mode" , (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
     {NULL}
 };
 

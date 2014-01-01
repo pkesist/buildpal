@@ -10,6 +10,7 @@
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/mem_fun.hpp>
 
+#include <boost/functional/hash_fwd.hpp>
 #include <llvm/ADT/StringRef.h>
 
 #include <atomic>
@@ -35,13 +36,13 @@ private:
     RefCount & operator=( RefCount & );
 
 public:
-    RefCount( RefCount const & r ) : refCount( r.refCount.load() ), delCount( r.refCount.load() ) {}
-    RefCount() : refCount( 0 ), delCount( 0 ) {}
+    RefCount( RefCount const & r ) : refCount( r.refCount.load() ), deleters( r.deleters ) {}
+    RefCount() : refCount( 0 ), deleters( 0 ) {}
 
     void addRef() const
     {
         if ( refCount.fetch_add( 1, std::memory_order_relaxed ) == 0 )
-            delCount.fetch_add( 1, std::memory_order_relaxed );
+            ++deleters;
     }
 
     bool decRef() const
@@ -49,18 +50,13 @@ public:
         return refCount.fetch_sub( 1, std::memory_order_relaxed ) == 1;
     }
 
-    bool checkDel() const
+    bool decDel() const
     {
-        return delCount.fetch_sub( 1, std::memory_order_relaxed ) == 1;
-    }
-
-    std::size_t getRef() const
-    {
-        return refCount.load( std::memory_order_relaxed );
+        return --deleters == 0;
     }
 
     mutable std::atomic<std::size_t> refCount;
-    mutable std::atomic<std::size_t> delCount;
+    mutable std::size_t deleters;
 };
 
 template<typename T>
@@ -74,6 +70,14 @@ struct Value
     RefCount refCount;
 };
 
+struct HashStrRef
+{
+    std::size_t operator()( llvm::StringRef const strRef ) const
+    {
+        return boost::hash_range( strRef.data(), strRef.data() + strRef.size() );
+    }
+};
+
 template <typename T>
 struct Container : public boost::multi_index::multi_index_container
 <
@@ -82,7 +86,8 @@ struct Container : public boost::multi_index::multi_index_container
     <
         boost::multi_index::hashed_unique
         <
-            boost::multi_index::const_mem_fun<Value<T>, llvm::StringRef, &Value<T>::str>
+            boost::multi_index::const_mem_fun<Value<T>, llvm::StringRef, &Value<T>::str>,
+            HashStrRef
         >
     >
 >
@@ -96,8 +101,6 @@ private:
     typedef Container<T> Base;
 
 public:
-    FlyweightStorage() : counter_( 0 ) {}
-
     Value<T> const * insert( llvm::StringRef s )
     {
         {
@@ -128,7 +131,7 @@ public:
         if ( value->refCount.decRef() )
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
-            if ( value->refCount.checkDel() )
+            if ( value->refCount.decDel() )
                 erase( iterator_to( *value ) );
         }
     }
@@ -137,7 +140,6 @@ public:
 
 private:
     boost::shared_mutex mutex_;
-    std::atomic<std::size_t> counter_;
     static FlyweightStorage storage;
 };
 
@@ -148,11 +150,6 @@ template<typename T, typename Tag=T>
 struct Flyweight
 {
     typedef FlyweightStorage<T, Tag> Storage;
-    ~Flyweight()
-    {
-        if ( value_ )
-            Storage::get().remove( value_ );
-    }
 
     Flyweight() : value_( 0 ) {}
 
@@ -172,6 +169,12 @@ struct Flyweight
         value_->refCount.addRef();
     }
 
+    ~Flyweight()
+    {
+        if ( value_ )
+            Storage::get().remove( value_ );
+    }
+
     Flyweight & operator=( Flyweight const & other )
     {
         if ( value_ )
@@ -183,17 +186,17 @@ struct Flyweight
     }
 
     T const & get() const { return value_->value; }
+
     operator T const & () const { return get(); }
+
+    bool operator==( Flyweight<T, Tag> const & other ) const
+    {
+        return value_ == other.value_;
+    }
 
 private:
     Value<T> const * value_;
 };
-
-template<typename T, typename Tag>
-bool operator<( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return a.get() < b.get(); }
-
-template<typename T, typename Tag>
-bool operator==( Flyweight<T, Tag> const & a, Flyweight<T, Tag> const & b ) { return &a.get() == &b.get(); }
 
 
 //------------------------------------------------------------------------------

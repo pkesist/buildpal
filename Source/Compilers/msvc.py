@@ -75,8 +75,7 @@ class CompileOptions:
         return result
 
     def input_files(self):
-        return [x for x in itertools.chain(*self.value_dict.get('<input>'))
-            if self.compiler.is_source_file(x)]
+        return list(x for x in itertools.chain(*self.value_dict.get('<input>')))
 
     def output_file(self):
         result = self.value_dict.get(self.compiler.object_name_option())
@@ -155,13 +154,6 @@ class MSVCWrapper:
     @classmethod
     def parse_options(cls, options):
         return CompileOptions(cls, options)
-
-    @classmethod
-    def is_source_file(cls, input):
-        # FIXME: This should be handled better.
-        # Currently we expect there is no /TC, /TP,
-        # /Tc or /Tp options on the command line
-        return os.path.splitext(input)[1].lower() in ['.c', '.cpp', '.cxx']
 
     placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
 

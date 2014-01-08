@@ -99,6 +99,12 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
 {
     clang::HeaderSearch & hs( preprocessor().getHeaderSearchInfo() );
     clang::HeaderSearch const & cHs( hs );
+    // Here we handle the case where header with #pragma once is included
+    // implicitly, via a cache entry. In this case Clang will not skip
+    // this header in usual manner, so we must cheat it to include an
+    // empty file.
+    // TODO: Try avoiding calling (expensive) macroForPragmaOnce() on every
+    // (non-skipped) include directive.
     if
     (
         headerCtxStack().back().getMacroValue(
@@ -110,6 +116,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
         if ( !sourceManager().isFileOverridden( result ) )
             sourceManager().overrideFileContents( result, llvm::MemoryBuffer::getMemBuffer( "" ) );
         entry = result;
+        replacement_ = result;
         return;
     }
 
@@ -122,6 +129,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     {
         // There is a hit in cache!
         entry = cacheHit_->getFileEntry( sourceManager() );
+        replacement_ = entry;
         std::pair<UsedCacheEntries::const_iterator, bool> const insertResult =
             usedCacheEntries_.insert( std::make_pair( entry, cacheHit_ ) );
         assert( insertResult.first->second == cacheHit_ );
@@ -183,20 +191,24 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 
     fileStack_.push_back( hwf );
 
-    headerCtxStack().push_back( HeaderCtx( hwf.header, CacheEntryPtr(), preprocessor_, 0 ) );
+    headerCtxStack().push_back( HeaderCtx( hwf.header, 0, CacheEntryPtr(), preprocessor_, 0 ) );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
     headerCtxStack().back().addHeader( fileStack_.back().header );
-    headerCtxStack().push_back( HeaderCtx( fileStack_.back().header, cacheHit_, preprocessor_, &headerCtxStack().back() ) );
+    headerCtxStack().push_back( HeaderCtx( fileStack_.back().header, replacement_, cacheHit_, preprocessor_, &headerCtxStack().back() ) );
+    replacement_ = 0;
     cacheHit_.reset();
 }
 
 bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEntry const * file ) const
 {
-    return true;
+    // Headers which have overridden content are poor candidates for caching.
+    // Currently these are cache-generated headers themselves, and empty
+    // header used to implement #pragma once support.
+    return headerCtx.replacement() == 0;
 }
 
 void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
@@ -210,13 +222,12 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
     PopBackGuard<HeaderCtxStack> const popHeaderCtxStack( headerCtxStack_ );
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
-    // Propagate the results to the file which included us.
-    CacheEntryPtr cacheEntry;
-    if ( !cacheDisabled() && !headerCtxStack().back().fromCache() && isViableForCache( headerCtxStack().back(), file ) )
-        cacheEntry = headerCtxStack().back().addToCache( cache(), searchPathId_, file );
-    else
-        cacheEntry = headerCtxStack().back().cacheHit();
-    headerCtxStack().back().propagateToParent( ignoredHeaders, cacheEntry );
+    if ( cacheDisabled() )
+        return;
+
+    if ( isViableForCache( headerCtxStack().back(), file ) )
+        headerCtxStack().back().addToCache( cache(), searchPathId_, file );
+    headerCtxStack().back().propagateToParent( ignoredHeaders );
 }
 
 
@@ -269,5 +280,5 @@ void HeaderTracker::pragmaOnce()
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroDefined( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ), "1" );
+    headerCtxStack().back().macroDefined( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ), " 1" );
 }

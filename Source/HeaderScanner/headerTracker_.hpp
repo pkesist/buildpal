@@ -32,11 +32,12 @@ namespace clang
 struct HeaderCtx
 {
 public:
-    explicit HeaderCtx( Header const & header, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
+    explicit HeaderCtx( Header const & header, clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
         :
         header_( header ),
         cacheHit_( cacheHit ),
         preprocessor_( preprocessor ),
+        replacement_( replacement ),
         parent_( parent )
     {
     }
@@ -116,7 +117,7 @@ public:
         includedHeaders_.insert( header );
     }
 
-    void propagateToParent( IgnoredHeaders const & ignoredHeaders, CacheEntryPtr const childCacheEntry )
+    void propagateToParent( IgnoredHeaders const & ignoredHeaders )
     {
         assert( parent_ );
         assert( !parent_->fromCache() );
@@ -193,12 +194,14 @@ public:
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
 
     bool fromCache() const { return cacheHit_; }
+    clang::FileEntry const * replacement() const { return replacement_; }
 
 private:
     typedef std::unordered_set<llvm::StringRef, HashString> MacroNames;
 
 private:
     clang::Preprocessor const & preprocessor_;
+    clang::FileEntry const * replacement_;
     HeaderCtx * parent_;
     Header header_;
     CacheEntryPtr cacheHit_;
@@ -215,6 +218,7 @@ public:
         :
         preprocessor_( preprocessor ),
         searchPathId_( searchPathId ),
+        replacement_( 0 ),
         cache_( cache )
     {
     }
@@ -264,6 +268,7 @@ private:
     HeaderCtxStack headerCtxStack_;
     Cache * cache_;
     CacheEntryPtr cacheHit_;
+    clang::FileEntry const * replacement_;
     IncludeStack fileStack_;
     UsedCacheEntries usedCacheEntries_;
 };

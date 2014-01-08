@@ -26,8 +26,6 @@
 #include <set>
 #include <string>
 #include <tuple>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 struct HeaderCtx;
@@ -157,10 +155,23 @@ public:
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
     llvm::MemoryBuffer const * cachedContent();
 
+    bool usesBuffer( llvm::MemoryBuffer const * buffer ) const
+    {
+        return std::find_if(
+            headers_.begin(),
+            headers_.end(),
+            [=]( Header const & header )
+            {
+                return header.buffer == buffer;
+            }
+        ) != headers_.end();
+    }
+
     Macros        const & usedMacros   () const { return usedMacros_; }
     HeaderContent       & headerContent()       { return headerContent_; }
     HeaderContent const & headerContent() const { return headerContent_; }
     Headers       const & headers      () const { return headers_; }
+
     FileId fileId() const { return fileId_; }
     std::size_t searchPathId() const { return searchPathId_; }
     std::size_t lastTimeHit() const { return lastTimeHit_; }
@@ -216,7 +227,7 @@ inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
 class Cache
 {
 public:
-    Cache() : counter_( 0 ), fileIdCounter_( 0 ), hits_( 0 ), misses_( 0 ) {}
+    Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
 
     CacheEntryPtr addEntry
     (
@@ -233,6 +244,8 @@ public:
         std::size_t searchPathId,
         HeaderCtx const &
     );
+
+    void invalidate( ContentEntry const & );
 
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
@@ -380,12 +393,9 @@ private:
         >
     > CacheContainer;
 
-    typedef std::unordered_map<std::string, unsigned> FileIds;
-
 private:
     CacheContainer cacheContainer_;
     boost::shared_mutex cacheMutex_;
-    unsigned fileIdCounter_;
     std::atomic<std::size_t> counter_;
     std::size_t hits_;
     std::size_t misses_;

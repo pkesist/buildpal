@@ -46,29 +46,29 @@ public:
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was not also
         // defined here.
-        if ( macroState_.find( macroName ) == macroState_.end() )
+        if ( definedHere_.find( macroName ) == definedHere_.end() )
             usedHere_.insert( macroName );
     }
 
     void macroDefined( llvm::StringRef macroName, llvm::StringRef macroValue )
     {
         assert( !fromCache() );
-        macroState_.defineMacro( macroName, macroValue );
+        definedHere_.defineMacro( macroName, macroValue );
     }
 
     void macroUndefined( llvm::StringRef macroName )
     {
         assert( !fromCache() );
-        if ( macroState_.find( macroName ) != macroState_.end() )
-            macroState_.undefineMacro( macroName );
+        if ( definedHere_.find( macroName ) != definedHere_.end() )
+            definedHere_.undefineMacro( macroName );
         else
             undefinedHere_.insert( macroName );
     }
 
     llvm::StringRef getMacroValue( llvm::StringRef name ) const
     {
-        MacroState::const_iterator const stateIter( macroState_.find( name ) );
-        if ( stateIter != macroState_.end() )
+        MacroState::const_iterator const stateIter( definedHere_.find( name ) );
+        if ( stateIter != definedHere_.end() )
             return stateIter->getValue();
         if ( undefinedHere_.find( name ) != undefinedHere_.end() )
             return undefinedMacroValue();
@@ -103,7 +103,7 @@ public:
         {
             headerContent.push_back( std::make_pair( MacroUsage::undefined, createMacro( undefinedMacro, undefinedMacroValue() ) ) );
         }
-        for ( MacroState::value_type const & value : macroState_ )
+        for ( MacroState::value_type const & value : definedHere_ )
         {
             headerContent.push_back( std::make_pair( MacroUsage::defined, createMacro( value.getKey(), value.getValue() ) ) );
         }
@@ -148,14 +148,14 @@ public:
             for ( llvm::StringRef undefinedMacro : undefinedHere_ )
             {
                 // And did not re-define it.
-                if ( macroState_.find( undefinedMacro ) == macroState_.end() )
+                if ( definedHere_.find( undefinedMacro ) == definedHere_.end() )
                     // Undefine it in parent state.
                     parent_->macroUndefined( undefinedMacro );
             }
 
             // Add all macro definitions from child (including redefinitions)
             // to parent header macro state.
-            for ( MacroState::value_type const & entry : macroState_ )
+            for ( MacroState::value_type const & entry : definedHere_ )
                 parent_->macroDefined( entry.getKey(), entry.getValue() );
         }
         
@@ -195,24 +195,15 @@ public:
     bool fromCache() const { return cacheHit_; }
 
 private:
-    struct StrRefHash
-    {
-        std::size_t operator()( llvm::StringRef const & s )
-        {
-            return llvm::hash_value( s );
-        }
-    };
-
-    typedef std::unordered_set<llvm::StringRef, StrRefHash> MacroNames;
+    typedef std::unordered_set<llvm::StringRef, HashString> MacroNames;
 
 private:
-    MacroState macroState_;
     clang::Preprocessor const & preprocessor_;
     HeaderCtx * parent_;
     Header header_;
     CacheEntryPtr cacheHit_;
+    MacroState definedHere_;
     MacroNames usedHere_;
-    MacroNames definedHere_;
     MacroNames undefinedHere_;
     Headers includedHeaders_;
 };
@@ -238,6 +229,7 @@ public:
     void headerSkipped();
     void enterHeader();
     void leaveHeader( IgnoredHeaders const & );
+    void pragmaOnce();
 
     void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
@@ -263,8 +255,10 @@ private:
     typedef std::vector<HeaderWithFileEntry> IncludeStack;
     typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
 
+    llvm::StringRef macroForPragmaOnce( llvm::sys::fs::UniqueID const & );
+
 private:
-    std::vector<std::string> buffers_;
+    std::unordered_set<std::string> tmpStrings_;
     clang::Preprocessor & preprocessor_;
     std::size_t searchPathId_;
     HeaderCtxStack headerCtxStack_;

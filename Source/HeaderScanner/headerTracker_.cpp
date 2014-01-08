@@ -11,19 +11,32 @@
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
 
-#include <unordered_map>
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 
-template <typename T>
-struct PopBackGuard
+namespace
 {
-    PopBackGuard( T & t ) : t_( t ) {}
-    ~PopBackGuard() { t_.pop_back(); }
+    template <typename T>
+    struct PopBackGuard
+    {
+        PopBackGuard( T & t ) : t_( t ) {}
+        ~PopBackGuard() { t_.pop_back(); }
 
-    T & t_;
-};
+        T & t_;
+    };
+
+}
+
+llvm::StringRef HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val )
+{
+    std::string result;
+    using namespace boost::spirit::karma;
+    generate( std::back_inserter( result ),
+        lit( "____pragma_once__" ) << ulong_long << lit("_") << ulong_long,
+        val.getDevice(), val.getFile() );
+    return *tmpStrings_.insert( result ).first;
+}
 
 void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * entry )
 {
@@ -43,7 +56,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // Make sure this file is loaded through globalContentCache, so that it
     // can be shared between different SourceManager instances.
     ContentEntry const & contentEntry = ContentCache::singleton().getOrCreate(
-            preprocessor().getFileManager(), entry );
+            preprocessor().getFileManager(), entry, cache() );
     if ( !sourceManager().isFileOverridden( entry ) )
     {
         sourceManager().overrideFileContents( entry, contentEntry.buffer.get(), true );
@@ -84,6 +97,22 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 
 void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
 {
+    clang::HeaderSearch & hs( preprocessor().getHeaderSearchInfo() );
+    clang::HeaderSearch const & cHs( hs );
+    if
+    (
+        headerCtxStack().back().getMacroValue(
+            macroForPragmaOnce( entry->getUniqueID() ) ) !=
+            undefinedMacroValue()
+    )
+    {
+        clang::FileEntry const * result( sourceManager().getFileManager().getVirtualFile( "__empty_file", 0, 0 ) );
+        if ( !sourceManager().isFileOverridden( result ) )
+            sourceManager().overrideFileContents( result, llvm::MemoryBuffer::getMemBuffer( "" ) );
+        entry = result;
+        return;
+    }
+
     if
     (
         !cacheDisabled() &&
@@ -92,7 +121,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     )
     {
         // There is a hit in cache!
-        entry = cacheHit_->getFileEntry( preprocessor().getSourceManager() );
+        entry = cacheHit_->getFileEntry( sourceManager() );
         std::pair<UsedCacheEntries::const_iterator, bool> const insertResult =
             usedCacheEntries_.insert( std::make_pair( entry, cacheHit_ ) );
         assert( insertResult.first->second == cacheHit_ );
@@ -114,14 +143,17 @@ void HeaderTracker::headerSkipped()
         {
             clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
             clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
-            assert( !headerInfo.isImport );
             assert( !headerInfo.ControllingMacroID );
-            assert( !headerInfo.isPragmaOnce );
-            assert( headerInfo.ControllingMacro );
-            clang::MacroDirective const * directive( preprocessor().getMacroDirectiveHistory( headerInfo.ControllingMacro ) );
-            assert( directive );
-
-            llvm::StringRef const & macroName( headerInfo.ControllingMacro->getName() );
+            llvm::StringRef macroName;
+            if ( headerInfo.isPragmaOnce )
+            {
+                macroName = macroForPragmaOnce( hwf.file->getUniqueID() );
+            }
+            else
+            {
+                assert( headerInfo.ControllingMacro );
+                macroName = headerInfo.ControllingMacro->getName();
+            }
             headerCtxStack().back().macroUsed( macroName );
         }
         headerCtxStack().back().addHeader( hwf.header );
@@ -231,4 +263,11 @@ void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective 
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     headerCtxStack().back().macroUndefined( name );
+}
+
+void HeaderTracker::pragmaOnce()
+{
+    if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
+        return;
+    headerCtxStack().back().macroDefined( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ), "1" );
 }

@@ -10,10 +10,6 @@
 #include <clang/Basic/TokenKinds.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/Basic/FileManager.h>
-#include <clang/Frontend/PreprocessorOutputOptions.h>
-#include <clang/Frontend/FrontendActions.h>
-#include <clang/Frontend/TextDiagnosticBuffer.h>
-#include <clang/Frontend/Utils.h>
 #include <clang/Lex/HeaderSearch.h>
 #include <clang/Lex/HeaderSearchOptions.h>
 #include <clang/Lex/Preprocessor.h>
@@ -144,6 +140,15 @@ namespace
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
         }
 
+        virtual void PragmaDirective( clang::SourceLocation Loc, clang::PragmaIntroducerKind introducer ) LLVM_OVERRIDE
+        {
+            clang::Token const token( preprocessor_.LookAhead( 0 ) );
+            if ( token.is( clang::tok::identifier ) && token.getIdentifierInfo()->getName() == "once" )
+            {
+                headerTracker_.pragmaOnce();
+            }
+        }
+
     private:
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
@@ -194,7 +199,8 @@ clang::TargetOptions * createTargetOptions()
 Preprocessor::Preprocessor( Cache * cache )
     :
     diagID_       ( new clang::DiagnosticIDs() ),
-    diagEng_      ( new clang::DiagnosticsEngine( diagID_, new clang::DiagnosticOptions() ) ),
+    diagOpts_     ( new clang::DiagnosticOptions() ),
+    diagEng_      ( new clang::DiagnosticsEngine( diagID_, &*diagOpts_ ) ),
     ppOpts_       ( new clang::PreprocessorOptions() ),
     langOpts_     ( new clang::LangOptions() ),
     targetOpts_   ( createTargetOptions() ),
@@ -300,8 +306,6 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         preprocessor()
     );
 
-    // Do not let #pragma once interfere with cache.
-    preprocessor().setPragmasEnabled( false );
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );

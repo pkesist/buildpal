@@ -250,7 +250,7 @@ class CompileSession:
             pch_switch = []
             overrides = {}
             if self.task['pch_file']:
-                if '/GL' in command:
+                if '/GL' in self.task['call']:
                     # TODO: MSVC specific, remove from here.
                     # In case /GL command line option is present, PCH file will
                     # not be fully resolved during compilation. Instead,

@@ -72,9 +72,10 @@ struct HeaderHash
 {
     std::size_t operator()( Header const & h )
     {
+        HashString hs;
         return llvm::hash_combine(
-            llvm::hash_value( h.dir.get() ),
-            llvm::hash_value( h.name.get() ) );
+            hs( h.dir.get() ),
+            hs( h.name.get() ) );
     }
 };
 
@@ -161,6 +162,7 @@ private:
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
+    llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
     llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diagEng_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
     llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;

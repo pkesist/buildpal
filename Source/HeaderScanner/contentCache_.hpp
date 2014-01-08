@@ -27,6 +27,8 @@ struct HashUniqueFileId
     }
 };
 
+class Cache;
+
 class ContentEntry
 {
 private:
@@ -51,6 +53,7 @@ public:
         buffer.reset( other.buffer.take() );
         checksum = other.checksum;
         modified = other.modified;
+        return *this;
     }
 
     llvm::OwningPtr<llvm::MemoryBuffer> buffer;
@@ -70,27 +73,7 @@ public:
         return iter != contentMap_.end() ? &iter->second : 0;
     }
 
-    ContentEntry const & getOrCreate( clang::FileManager & fm, clang::FileEntry const * file )
-    {
-        // TODO: In case content entry is out of date update it.
-        // If checksum mismatches - drop cache.
-        llvm::sys::fs::UniqueID const uniqueID = file->getUniqueID();
-        ContentEntry const  * contentEntry( get( uniqueID ) );
-        if ( contentEntry )
-            return *contentEntry;
-        boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
-        // Preform another search with upgrade ownership.
-        ContentMap::const_iterator const iter( contentMap_.find( uniqueID ) );
-        if ( iter != contentMap_.end() )
-            return iter->second;
-        llvm::MemoryBuffer * buffer = fm.getBufferForFile( file );
-        assert( buffer );
-        boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-        std::pair<ContentMap::iterator, bool> const insertResult(
-            contentMap_.insert( std::make_pair( uniqueID,
-            ContentEntry( buffer, file->getModificationTime() ) ) ) );
-        return insertResult.first->second;
-    }
+    ContentEntry const & getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache & );
 
 public:
     static ContentCache & singleton() { return singleton_; }

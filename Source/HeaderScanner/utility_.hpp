@@ -70,11 +70,11 @@ struct Value
     RefCount refCount;
 };
 
-struct HashStrRef
+struct HashString
 {
-    std::size_t operator()( llvm::StringRef const strRef ) const
+    inline std::size_t operator()( llvm::StringRef ref ) const
     {
-        return boost::hash_range( strRef.data(), strRef.data() + strRef.size() );
+        return boost::hash_range( ref.data(), ref.data() + ref.size() );
     }
 };
 
@@ -87,7 +87,7 @@ struct Container : public boost::multi_index::multi_index_container
         boost::multi_index::hashed_unique
         <
             boost::multi_index::const_mem_fun<Value<T>, llvm::StringRef, &Value<T>::str>,
-            HashStrRef
+            HashString
         >
     >
 >

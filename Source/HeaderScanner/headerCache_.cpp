@@ -66,7 +66,6 @@ void CacheEntry::generateContent( std::string & buffer )
             }
         }
     );
-    defineStream << '\0';
     defineStream.flush();
 }
 
@@ -111,6 +110,20 @@ void Cache::cleanup()
         IndexType::iterator const end = index.lower_bound( currentTime - historyLength );
         index.erase( index.begin(), end );
     }
+}
+
+void Cache::invalidate( ContentEntry const & contentEntry )
+{
+    boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
+    std::vector<CacheEntryPtr const *> entriesToRemove;
+    std::for_each( cacheContainer_.begin(), cacheContainer_.end(),
+        [&]( CacheEntryPtr const & entry )
+        {
+            if ( entry->usesBuffer( contentEntry.buffer.get() ) )
+                entriesToRemove.push_back( &entry );
+        });
+    for ( CacheEntryPtr const * entry : entriesToRemove )
+        cacheContainer_.erase( cacheContainer_.iterator_to( *entry ) );
 }
 
 CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::size_t searchPathId, HeaderCtx const & headerCtx )

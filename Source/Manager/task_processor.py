@@ -268,7 +268,8 @@ class TaskProcessor:
                                     if session.state == session.STATE_DONE:
                                         session.task.completed(session.client_conn,
                                         session.retcode, session.stdout, session.stderr)
-                                    elif session.state == session.STATE_SERVER_FAILURE:
+                                    else:
+                                        assert session.state == session.STATE_SERVER_FAILURE
                                         if hasattr(task, 'retries'):
                                             task.retries += 1
                                         else:

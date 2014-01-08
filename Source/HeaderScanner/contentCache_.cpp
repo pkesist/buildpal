@@ -1,5 +1,7 @@
 //------------------------------------------------------------------------------
 #include "contentCache_.hpp"
+
+#include "headerCache_.hpp"
 //------------------------------------------------------------------------------
 
 ContentCache ContentCache::singleton_;
@@ -65,5 +67,31 @@ ContentEntry::ContentEntry( llvm::MemoryBuffer * b, time_t const mod )
     buffer( b ), checksum( adler32( b ) ), modified( mod )
 {
 }
+
+ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache & cache )
+{
+    llvm::sys::fs::UniqueID const uniqueID = file->getUniqueID();
+    ContentEntry const  * contentEntry( get( uniqueID ) );
+    if ( contentEntry )
+    {
+        if ( contentEntry->modified == file->getModificationTime() )
+            return *contentEntry;
+        boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
+        cache.invalidate( *contentEntry );
+        contentMap_[ uniqueID ] = ContentEntry( fm.getBufferForFile( file, 0, true ), file->getModificationTime() );
+        return contentMap_[ uniqueID ];
+    }
+    boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
+    // Preform another search with upgrade ownership.
+    ContentMap::const_iterator const iter( contentMap_.find( uniqueID ) );
+    if ( iter != contentMap_.end() )
+        return iter->second;
+    boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
+    std::pair<ContentMap::iterator, bool> const insertResult(
+        contentMap_.insert( std::make_pair( uniqueID,
+        ContentEntry( fm.getBufferForFile( file, 0, true ), file->getModificationTime() ) ) ) );
+    return insertResult.first->second;
+}
+
 
 //------------------------------------------------------------------------------

@@ -220,7 +220,7 @@ class TaskProcessor:
                                 # Notify client to exit with success errorcode,
                                 # so build can pump further tasks. The task will
                                 # not be actually compiled.
-                                session.client_conn.send([b'EXIT', b'0'])
+                                session.client_conn.send([b'EXIT', b'0', b'', b''])
                                 socket.send_multipart([b'DROP'])
                                 sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
                             else:

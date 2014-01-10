@@ -18,10 +18,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for '
         'distribute_manager.py')
     parser.add_argument('--port', dest='port', type=int, default=6064,
-        help='TCP port on which server will listen.')
+        help='TCP port on which server will listen. (default=6064)')
     parser.add_argument('--slots', dest='compile_slots', type=int,
-        default=cpu_count(), help='Number of compiler slots, i.e. how many '
-        'compiler processes can be run simultaneously on this server')
+        default=cpu_count(), help='Number of compiler slots, i.e. number '
+        'of compiler processes that can run concurrently. (default=number of cores)')
     opts = parser.parse_args()
 
     if opts.compile_slots is not None and (opts.compile_slots <= 0 or

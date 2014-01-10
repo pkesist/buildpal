@@ -90,11 +90,11 @@ class TaskCreator:
             stdout += result[1]
             stderr += result[2]
         if error_code:
-            client_conn.send([b'COMPLETED', error_code, stdout, stderr])
+            client_conn.send([b'EXIT', error_code, stdout, stderr])
             return
 
         if not self.should_invoke_linker():
-            client_conn.send([b'COMPLETED', b'0', stdout, stderr])
+            client_conn.send([b'EXIT', b'0', stdout, stderr])
             return
 
         objects = {}

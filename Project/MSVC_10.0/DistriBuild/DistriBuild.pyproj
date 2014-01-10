@@ -26,6 +26,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Documentation\conf.py" />
     <Compile Include="Source\Common\__init__.py" />
     <Compile Include="Source\Compilers\msvc.py" />
     <Compile Include="Source\Compilers\__init__.py" />
@@ -66,6 +67,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\doc.rst" />
+    <Content Include="Documentation\index.rst" />
     <Content Include="Source\ArgParser\build-config.ini" />
     <Content Include="Source\ArgParser\clangOpts_.cpp" />
     <Content Include="Source\ArgParser\clangOpts_.hpp" />

@@ -389,18 +389,6 @@ int main( int argc, char * argv[] )
         }
         else if ( ( requestSize == 4 ) && strncmp( request, "EXIT", 4 ) == 0 )
         {
-            assert( receiver.parts() == 2 );
-            char const * exitCode;
-            std::size_t exitCodeSize;
-            receiver.getPart( 1, &exitCode, &exitCodeSize );
-
-            char * buffer = static_cast<char *>( _alloca( exitCodeSize + 1 ) );
-            std::memcpy( buffer, exitCode, exitCodeSize );
-            buffer[ exitCodeSize ] = 0;
-            return atoi( buffer );
-        }
-        else if ( ( requestSize == 9 ) && strncmp( request, "COMPLETED", 9 ) == 0 )
-        {
             assert( receiver.parts() == 4 );
             char const * retcode;
             std::size_t retcodeSize;
@@ -423,38 +411,6 @@ int main( int argc, char * argv[] )
             if ( stdErrSize )
                 std::cerr << std::string( stdErr, stdErrSize );
             return result;
-        }
-        else if ( ( requestSize == 6 ) && strncmp( request, "GETENV", 6 ) == 0 )
-        {
-            assert( receiver.parts() == 2 );
-            char const * var;
-            std::size_t varSize;
-            receiver.getPart( 1, &var, &varSize );
-            char * ztVar = static_cast<char *>( _alloca( varSize + 1 ) );
-            std::memcpy( ztVar, var, varSize );
-            ztVar[ varSize ] = 0;
-
-            DWORD size = GetEnvironmentVariable( ztVar, NULL, 0 );
-
-            if ( size > 1024 )
-            {
-                std::cerr << "Invalid environment variable value.\n";
-                return -1;
-            }
-
-            char * buffer = static_cast<char *>( alloca( size ) );
-            GetEnvironmentVariable( ztVar, buffer, size );
-
-            std::vector<boost::asio::const_buffer> res;
-            res.push_back( boost::asio::buffer( buffer, size + 1 ) );
-            res.push_back( boost::asio::buffer( "\1", 1 ) );
-            boost::system::error_code writeError;
-            boost::asio::write( socket, res, writeError );
-            if ( writeError )
-            {
-                std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
-                exit( 1 );
-            }
         }
         else if ( ( requestSize == 12 ) && strncmp( request, "LOCATE_FILES", 12 ) == 0 )
         {

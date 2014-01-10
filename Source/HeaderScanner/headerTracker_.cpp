@@ -105,13 +105,10 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     // empty file.
     // TODO: Try avoiding calling (expensive) macroForPragmaOnce() on every
     // (non-skipped) include directive.
-    if
-    (
-        headerCtxStack().back().getMacroValue(
-            macroForPragmaOnce( entry->getUniqueID() ) ) !=
-            undefinedMacroValue()
-    )
+    llvm::StringRef const pragmaOnceMacro = macroForPragmaOnce( entry->getUniqueID() );
+    if ( headerCtxStack().back().getMacroValue( pragmaOnceMacro ) != undefinedMacroValue() )
     {
+        headerCtxStack().back().macroUsed( pragmaOnceMacro );
         clang::FileEntry const * result( sourceManager().getFileManager().getVirtualFile( "__empty_file", 0, 0 ) );
         if ( !sourceManager().isFileOverridden( result ) )
             sourceManager().overrideFileContents( result, llvm::MemoryBuffer::getMemBuffer( "" ) );
@@ -145,27 +142,27 @@ void HeaderTracker::headerSkipped()
 
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( hwf.file ) );
     assert( !cacheHit_ );
-    if ( !headerCtxStack().empty() )
+    if ( headerCtxStack().empty() )
+        return;
+
+    if ( !cacheDisabled() )
     {
-        if ( !cacheDisabled() )
+        clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
+        clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
+        assert( !headerInfo.ControllingMacroID );
+        llvm::StringRef macroName;
+        if ( headerInfo.isPragmaOnce )
         {
-            clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-            clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
-            assert( !headerInfo.ControllingMacroID );
-            llvm::StringRef macroName;
-            if ( headerInfo.isPragmaOnce )
-            {
-                macroName = macroForPragmaOnce( hwf.file->getUniqueID() );
-            }
-            else
-            {
-                assert( headerInfo.ControllingMacro );
-                macroName = headerInfo.ControllingMacro->getName();
-            }
-            headerCtxStack().back().macroUsed( macroName );
+            macroName = macroForPragmaOnce( hwf.file->getUniqueID() );
         }
-        headerCtxStack().back().addHeader( hwf.header );
+        else
+        {
+            assert( headerInfo.ControllingMacro );
+            macroName = headerInfo.ControllingMacro->getName();
+        }
+        headerCtxStack().back().macroUsed( macroName );
     }
+    headerCtxStack().back().addHeader( hwf.header );
 }
 
 clang::SourceManager & HeaderTracker::sourceManager() const
@@ -280,5 +277,7 @@ void HeaderTracker::pragmaOnce()
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroDefined( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ), " 1" );
+    llvm::StringRef const pragmaOnceMacro( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
+    headerCtxStack().back().macroUsed( pragmaOnceMacro );
+    headerCtxStack().back().macroDefined( pragmaOnceMacro, " 1" );
 }

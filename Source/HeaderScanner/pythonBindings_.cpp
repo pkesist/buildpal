@@ -335,10 +335,31 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
 
     Headers headers;
-
-    Py_BEGIN_ALLOW_THREADS
-    self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers );
-    Py_END_ALLOW_THREADS
+    PyThreadState * _save;
+    try
+    {
+        Py_UNBLOCK_THREADS
+        self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers );
+    }
+    catch ( std::runtime_error const & error )
+    {
+        Py_BLOCK_THREADS
+        PyErr_SetString( PyExc_RuntimeError, error.what() );
+        return NULL;
+    }
+    catch ( std::exception const & error )
+    {
+        Py_BLOCK_THREADS
+        PyErr_SetString( PyExc_Exception, error.what() );
+        return NULL;
+    }
+    catch ( ... )
+    {
+        Py_BLOCK_THREADS
+        PyErr_SetString( PyExc_Exception, "Unhandled exception" );
+        return NULL;
+    }
+    Py_BLOCK_THREADS
 
     PyObject * result = PyTuple_New( headers.size() );
     unsigned int index( 0 );

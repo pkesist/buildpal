@@ -66,7 +66,6 @@
     <Folder Include="Source\Server\" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Documentation\doc.rst" />
     <Content Include="Documentation\index.rst" />
     <Content Include="Source\ArgParser\build-config.ini" />
     <Content Include="Source\ArgParser\clangOpts_.cpp" />

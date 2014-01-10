@@ -41,15 +41,11 @@ node[0]=localhost:{}:4
 @pytest.fixture(scope='module')
 def run_server(request):
     dir = tempfile.mkdtemp()
-    ini_file = os.path.join(dir, 'distribute_server.ini')
-    with create_file(ini_file) as ini:
-        ini.write("""\
-[Server]
-port={}
-""".format(SRV_PORT))
     srv_script = os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'distribute_server.py'))
-    proc = subprocess.Popen([sys.executable, srv_script], cwd=dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen([sys.executable, srv_script,
+            '--port={}'.format(SRV_PORT)], cwd=dir, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
     def teardown():
         terminate_proc(proc)
         shutil.rmtree(dir)
@@ -80,11 +76,11 @@ def vcvarsall():
     return os.path.join(dir, 'vcvarsall.bat')
 
 
-#def test_dummy(tmpdir, vcvarsall, db_cl):
-#    with subprocess.Popen([vcvarsall, '&&', db_cl, 'silly_option'],
-#        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-#        stdout, stderr = proc.communicate()
-#        assert proc.returncode != 0
+def test_dummy(tmpdir, vcvarsall, db_cl):
+    with subprocess.Popen([vcvarsall, '&&', db_cl, 'silly_option'],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+        stdout, stderr = proc.communicate()
+        assert proc.returncode != 0
 
 def test_relative(tmpdir, run_server, run_manager, vcvarsall, db_cl):
     tmpdir = str(tmpdir)

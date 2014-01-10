@@ -91,3 +91,45 @@ def test_header_guard(tmpdir):
 ''')
     assert env.run('test2.cpp', includes=['aaa']) == \
         {'a.h', 'x.h'}
+
+def test_pragma_once(tmpdir):
+    env = Environment(tmpdir)
+    env.make_file('xxx.h')
+    env.make_file('yyy.h')
+    env.make_file('a.h', '''
+#ifdef USE_PRAGMA_ONCE
+#pragma once
+#endif
+#ifndef XXX
+#define XXX
+#else
+#define YYY
+#endif
+''')
+    env.make_file('test.cpp', '''
+#include "a.h"
+#include "a.h"
+#ifdef XXX
+#include "xxx.h"
+#endif
+#ifdef YYY
+// we must never get here
+#include "yyy.h"
+#endif
+''')
+
+    assert env.run('test.cpp', defines=['USE_PRAGMA_ONCE=1']) \
+        == {'a.h', 'xxx.h'}
+    assert env.run('test.cpp') == {'a.h', 'xxx.h', 'yyy.h'}
+
+    env.make_file('test2.cpp', '''
+#define XXX
+#include "a.h"
+#ifdef YYY
+#include "yyy.h"
+#endif
+''')
+    assert env.run('test2.cpp', defines=['USE_PRAGMA_ONCE=1']) \
+        == {'a.h', 'yyy.h'}
+    assert env.run('test2.cpp') == {'a.h', 'yyy.h'}
+

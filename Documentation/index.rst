@@ -57,92 +57,117 @@ Features
 Requirements
 ============
 
-DistriBuild Server and Manager are written and tested with Python 3.3.
-
-It *will not* work with Python 2.x.
-
-It *might* work with Python 3.0 - 3.2
+DistriBuild Server and Manager are written and tested with Python 3.3. It *will not* work with Python 2.x. It *might* work with Python 3.0 - 3.2
 
 Quick-start
 ===========
 
 Setting up the Server (slave) node
-""""""""""""""""""""""""""""""""""
+----------------------------------
 
 * Install DistriBuild Server.
 * Run distribute_server.py (distribute_server.exe).
     * You can pass the TCP port for server to listen on.
-    * You can set the number of slots.
+    * You can set the number of jobs.
 
 Run ``distribute_server.py -h`` for more information.
 
 ::
 
-    usage: distribute_server.py [-h] [--port PORT] [--slots COMPILE_SLOTS]
+    usage: distribute_server.py [-h] [--port #] [--jobs #]
+
+    Command line parameters for distribute_server.py
+
+    optional arguments:
+      -h, --help      show this help message and exit
+      --port #, -p #  TCP port on which server will listen. (default=6064)
+      --jobs #, -j #  Number of jobs, i.e. number of compiler processes that can
+                      run concurrently. (default=number of cores)
+
+Setting up the Client
+---------------------
+
+* Install DistriBuild Manager.
+* Create :file:`distribute_manager.ini`.
+    * This file must contain configuration for the Manager, namely -- it should
+      specify TCP port on which the Manager should listen on, and enumerate
+      Server nodes used for compilation.
+
+.. code-block:: ini
+
+    [Manager]
+    port=6060
+
+    [Default Profile]
+    node[0]=machine0:6064
+    node[1]=machine1:6064
+    node[2]=machine2:6064
+
+* Run :file:`distribute_manager.py` (:file:`distribute_manager.exe`), optionally
+  passing the name of .ini file, and profile to use. The default .ini file is
+  :file:`distribute_manager.ini` in the current directory. Default profile name
+  is `Default Profile`.
+
+::
+
+    usage: distribute_manager.py [-h] [--ini INI_FILE] [profile]
 
     Command line parameters for distribute_manager.py
 
+    positional arguments:
+      profile         Profile to use. Must be present in the .ini file.
+
     optional arguments:
-      -h, --help            show this help message and exit
-      --port PORT           TCP port on which server will listen. (default=6064)
-      --slots COMPILE_SLOTS
-                            Number of compiler slots, i.e. number of compiler
-                            processes that can run concurrently. (default=number
-                            of cores)
+      -h, --help      show this help message and exit
+      --ini INI_FILE  Specify .ini file.
 
-Setting up the Client
-"""""""""""""""""""""
-
-* Install Distribuild Manager.
-
-* Create distribute_manager.ini.
-    * This file must contain port for manager to use.
-    * It should list all possible profiles to use.
-
-* Run distribute_manager.py (distribute_manager.exe), optionally passing the name of .ini file, and profile to use.
-    * Defaults are `distribute_manager.ini` in the current directory, and `Default Profile` profile.
 
 * Call the compiler
     * Set the environment variable DB_MGR_PORT to the port on which the manager is running on.
-    * Replace the ``cl.exe`` call with ``db_cl.exe``.
-    * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. ``db_cl.exe``
+    * Replace the :file:`cl.exe` call with :file:`db_cl.exe`.
+    * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. :file:`db_cl.exe`
       will use its current environment to determine which compiler should be used.
-
 
 Client
 ======
 
-The Client process (``db_cl.exe``) is a thin client - contains very little
-compiler-specific knowledge. This is because:
+The Client (:file:`db_cl.exe`) works as a drop-in replacement for the real
+compiler (:file:`cl.exe`). It is designed to be very thin - it contains
+almost no compiler-specific knowledge. It sends the command line and any other
+relevant environment information to the Manager. After that, it acts as a
+puppet -- it enters an event loop in which it processes commands sent by the
+Manager. These commands can be:
 
-    * There is only one Client executable for different compiler toolchains.
-    * It has a small footprint, as usually you will run dosens of these clients concurrently.
+* ``EXECUTE_AND_EXIT(cmdline)``
+    Client creates a process from the given `cmdline` command line and
+    exits with the return code from that process. Used e.g. when the Manager
+    determines that the call should be completed locally, without
+    distributing it to slave nodes.
+* ``EXECUTE_GET_OUTPUT(cmdline)``
+    Client creates a process from the given `cmdline` command line, 
+    captures return code, stdout, stderr and sends them back to the
+    manager. This is used by Manager to determine compiler version.
+* ``EXIT(retcode, stdout, stderr)``
+    Client prints `stdout` to standard output, `stderr` to standard
+    error and exits with `retcode` return code.
+* ``LOCATE_FILES(file1, file2, ...)``
+    For each argument `fileN`, Client locates the file (using first its
+    current directory, and then PATH environment variable). Client returns
+    the list of absolute path names to the manager. Used to locate compiler
+    files when manager needs to send them to one of the slaves.
 
-The Client works as a drop-in replacement for the real compiler (``cl.exe``).
+.. note::
 
-**Workflow**
-    * Connect to localhost, using port specified in DB_MGR_PORT environment variable.
-    * Send system include path, current working directory, and command line to the manager.
-    * Start the event loop and process commands as they are sent by the Manager.
-    * These commands can be:
-        * ``EXECUTE_AND_EXIT(cmdline)``
-            Client creates a process from the given `cmdline` command line and
-            exits with the return code from that process. Used when the Manager
-            determines that the call can be completed locally, without
-            distributing it to slave nodes.
-        * ``EXECUTE_GET_OUTPUT(cmdline)``
-            Client creates a process from the given `cmdline` command line, 
-            captures return code, stdout, stderr and sends them back to the
-            manager. This is used to determine compiler version.
-        * ``EXIT(retcode, stdout, stderr)``
-            Client prints `stdout` to standard output, `stderr` to standard error and exits with `retcode` return code.
-        * ``LOCATE_FILES(file1, file2, ...)``
-            For each argument `fileN`, Client locates the file (using first its current directory, and then PATH environment variable).
-            Client returns the list of absolute path names to the manager.
-            Used to locate compiler files when manager needs to send them to one of the slaves.
-    * TODO: EXECUTE_XXX commands can currently run any process.
-        * Not needed, as they always run the compiler executable.
-        * Change it so that only command line arguments are sent, and the executable is implied.
+    In order for Client to work, the Manager must already be listening on
+    the same machine, and DB_MGR_PORT must be set to its TCP port. Otherwise the
+    Client will fail with appropriate error message.
+
+.. todo:: Change client commands to be more secure
+
+    ``EXECUTE_GET_OUTPUT`` and ``EXECUTE_AND_EXIT`` commands can currently run
+    any process. This is not needed, as they always run the compiler
+    executable. Change it so that only command line arguments are sent, and the
+    executable is implied.
 
 
 Server
@@ -219,7 +244,7 @@ Runs locally, on the client machine.
 * `Boost <http://www.boost.org>`_
 
     Used by all C++ parts of the project.
-        * *Boost.ASIO* for Client's (``db_cl.exe``) TCP communication.
+        * *Boost.ASIO* for Client's (:file:`db_cl.exe`) TCP communication.
         * *Boost.MultiIndex* for Managers header cache.
         * *Boost.Spirit* as an alternative to ``atoi``/``itoa``/etc.
         * *Boost.Thread* for read-write mutexes.

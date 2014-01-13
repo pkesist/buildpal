@@ -16,12 +16,12 @@ default_script = 'distribute_server.ini'
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for '
-        'distribute_manager.py')
-    parser.add_argument('--port', dest='port', type=int, default=6064,
+        'distribute_server')
+    parser.add_argument('--port', '-p', metavar="#", dest='port', type=int, default=6064,
         help='TCP port on which server will listen. (default=6064)')
-    parser.add_argument('--slots', dest='compile_slots', type=int,
-        default=cpu_count(), help='Number of compiler slots, i.e. number '
-        'of compiler processes that can run concurrently. (default=number of cores)')
+    parser.add_argument('--jobs', '-j', metavar="#", dest='compile_slots', type=int,
+        default=cpu_count(), help='Number of jobs, i.e. number of compiler '
+        'processes that can run concurrently. (default=number of cores)')
     opts = parser.parse_args()
 
     if opts.compile_slots is not None and (opts.compile_slots <= 0 or

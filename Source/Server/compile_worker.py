@@ -532,7 +532,7 @@ class CompileWorker:
         scheduler = sched.scheduler()
 
         print("Running server on '{}'.".format(self.__address))
-        print("Using {} compilation slots.".format(self.__compile_slots))
+        print("Using {} job slots.".format(self.__compile_slots))
 
         while True:
             sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))

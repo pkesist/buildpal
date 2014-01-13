@@ -113,13 +113,17 @@ def test_pragma_once(tmpdir):
 #include "xxx.h"
 #endif
 #ifdef YYY
-// we must never get here
 #include "yyy.h"
 #endif
 ''')
 
     assert env.run('test.cpp', defines=['USE_PRAGMA_ONCE=1']) \
-        == {'a.h', 'xxx.h'}
+            == {'a.h', 'xxx.h'}
+    assert env.run('test.cpp') == {'a.h', 'xxx.h', 'yyy.h'}
+
+    # Run it again, to make sure cache works
+    assert env.run('test.cpp', defines=['USE_PRAGMA_ONCE=1']) \
+            == {'a.h', 'xxx.h'}
     assert env.run('test.cpp') == {'a.h', 'xxx.h', 'yyy.h'}
 
     env.make_file('test2.cpp', '''

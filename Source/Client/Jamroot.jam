@@ -6,7 +6,9 @@ exe db_cl
 :
     db_cl.cpp
     /clang//LLVMSupport
+    /boost//chrono/<link>static
     /boost//system/<link>static
+    /boost//timer/<link>static
     /boost//filesystem/<link>static
 :
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"

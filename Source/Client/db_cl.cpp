@@ -2,8 +2,10 @@
 #include "boost/utility/string_ref.hpp"
 #include "boost/filesystem/convenience.hpp"
 #include "boost/filesystem/path.hpp"
+#include "boost/spirit/include/qi.hpp"
+#include <boost/timer/timer.hpp>
 
-#include <llvm\Support\CommandLine.h>
+#include <llvm/Support/CommandLine.h>
 
 #include <cassert>
 #include <deque>
@@ -91,9 +93,9 @@ std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
 class MsgReceiver
 {
 public:
-    explicit MsgReceiver( boost::asio::ip::tcp::socket & socket )
+    explicit MsgReceiver( boost::asio::ip::tcp::socket & sock )
         :
-        socket_( socket ),
+        socket_( sock ),
         currentSize_( 0 )
     {
     }
@@ -147,8 +149,51 @@ private:
     std::size_t currentSize_;
 };
 
+template <typename Parser, typename Attribute>
+bool parse( char const * buffer, Parser const & parser, typename Attribute & val )
+{
+    char const * end = buffer + strlen( buffer );
+    return boost::spirit::qi::parse( buffer, end, parser, val ) && ( buffer == end );
+}
+
+int createProcess( char * commandLine )
+{
+    STARTUPINFO startupInfo = { sizeof(startupInfo) };
+    PROCESS_INFORMATION processInfo;
+
+    BOOL const apiResult = CreateProcess(
+        NULL,
+        commandLine,
+        NULL,
+        NULL,
+        FALSE,
+        CREATE_NEW_PROCESS_GROUP,
+        NULL,
+        NULL,
+        &startupInfo,
+        &processInfo
+    );
+
+    if ( apiResult )
+    {
+        ::WaitForSingleObject( processInfo.hProcess, INFINITE );
+        int result;
+        GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
+        CloseHandle( processInfo.hProcess );
+        CloseHandle( processInfo.hThread );
+        return result;
+    }
+    else
+    {
+        std::cerr << "ERROR: CreateProcess()\n";
+        return -1;
+    }
+}
+
+
 int main( int argc, char * argv[] )
 {
+    boost::timer::auto_cpu_timer t( std::cout, "Command took %w seconds.\n" );
     boost::filesystem::path compilerExecutable;
     if ( !findOnPath( getPath(), compilerExeFilename, compilerExecutable ) )
     {
@@ -156,6 +201,7 @@ int main( int argc, char * argv[] )
         return -1;
     }
 
+    bool runLocally = false;
     DWORD size = GetEnvironmentVariable("DB_MGR_PORT", NULL, 0 );
     if ( size == 0 )
     {
@@ -163,38 +209,106 @@ int main( int argc, char * argv[] )
             std::cerr << "You must define DB_MGR_PORT environment variable.\n";
         else
             std::cerr << "Failed to get DB_MGR_PORT environment variable.\n";
-        return -1;
+        runLocally = true;
     }
 
-    if ( size > 256 )
+    if ( !runLocally && ( size > 256 ) )
     {
         std::cerr << "Invalid DB_MGR_PORT environment variable value.\n";
-        return -1;
+        runLocally = true;
     }
 
-    char * buffer = static_cast<char *>( alloca( size ) );
-    GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
-    unsigned short port = atoi( buffer );
-
-    boost::system::error_code addressError;
-    boost::asio::ip::address localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
-    if ( addressError )
+    unsigned short port;
+    if ( !runLocally )
     {
-        std::cerr << "Could not resolve address: " << addressError.message() << '\n';
-        return -1;
+        char * buffer = static_cast<char *>( alloca( size ) );
+        GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
+
+        if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
+        {
+            std::cerr << "Failed to parse DB_MGR_PORT environment variable value.\n";
+            runLocally = true;
+        }
     }
-    boost::asio::ip::tcp::endpoint endpoint;
-    endpoint.address( localhost );
-    endpoint.port( port );
+
+    boost::asio::ip::address localhost;
+    if ( !runLocally )
+    {
+        boost::system::error_code addressError;
+        localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
+        if ( addressError )
+        {
+            std::cerr << "Could not resolve address: " << addressError.message() << '\n';
+            runLocally = true;
+        }
+    }
 
     boost::asio::io_service ioService;
-    boost::asio::ip::tcp::socket socket( ioService );
-    boost::system::error_code connectError;
-    socket.connect( endpoint, connectError );
-    if ( connectError )
+    boost::asio::ip::tcp::socket sock( ioService );
+    if ( !runLocally )
     {
-        std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
-        return -1;
+        boost::asio::ip::tcp::endpoint endpoint;
+        endpoint.address( localhost );
+        endpoint.port( port );
+
+        boost::system::error_code connectError;
+        sock.connect( endpoint, connectError );
+        if ( connectError )
+        {
+            std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
+            runLocally = true;
+        }
+    }
+
+    if ( runLocally )
+    {
+        std::cout << "Running command locally...\n";
+        char const * commandLine = GetCommandLine();
+        std::size_t len = strlen( commandLine );
+        char const * argsPos = commandLine;
+
+        bool inQuote = false;
+        bool foundNonSpace = false;
+        bool escape = false;
+
+        for ( ; ; ++argsPos )
+        {
+            bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
+            if ( *argsPos == '\\' )
+            {
+                escape = !escape;
+            }
+
+            else if ( isSpace )
+            {
+                if ( foundNonSpace && !inQuote )
+                    break;
+                escape = false;
+            }
+
+            else if ( *argsPos == '"' && !escape )
+            {
+                inQuote = !inQuote;
+            }
+            else
+            {
+                foundNonSpace = true;
+                escape = false;
+            }
+        }
+
+        std::size_t const argsLen = len - ( argsPos - commandLine );
+        std::size_t const commandLineSize = sizeof(compilerExeFilename) - 1 + argsLen;
+
+        // Create a copy on the stack as required by CreateProcess.
+        std::size_t pos( 0 );
+        char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
+        std::memcpy( buffer, compilerExeFilename, sizeof(compilerExeFilename) - 1 );
+        pos += sizeof(compilerExeFilename) - 1;
+        std::memcpy( buffer + pos, argsPos, argsLen );
+        buffer[ commandLineSize ] = 0;
+
+        return createProcess( buffer );
     }
 
     std::vector<boost::asio::const_buffer> req;
@@ -238,9 +352,9 @@ int main( int argc, char * argv[] )
 
     req.push_back( boost::asio::buffer( "\1", 1 ) );
     boost::system::error_code writeError;
-    boost::asio::write( socket, req, writeError );
+    boost::asio::write( sock, req, writeError );
 
-    MsgReceiver receiver( socket );
+    MsgReceiver receiver( sock );
     {
         receiver.getMessage();
         assert( receiver.parts() == 1 );
@@ -271,36 +385,7 @@ int main( int argc, char * argv[] )
             std::memcpy( buffer, commandLine, commandLineSize );
             buffer[ commandLineSize ] = 0;
 
-            STARTUPINFO startupInfo = { sizeof(startupInfo) };
-            PROCESS_INFORMATION processInfo;
-
-            BOOL const apiResult = CreateProcess(
-                NULL,
-                buffer,
-                NULL,
-                NULL,
-                FALSE,
-                CREATE_NEW_PROCESS_GROUP,
-                NULL,
-                NULL,
-                &startupInfo,
-                &processInfo
-            );
-
-            if ( apiResult )
-            {
-                ::WaitForSingleObject( processInfo.hProcess, INFINITE );
-                int result;
-                GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-                CloseHandle( processInfo.hProcess );
-                CloseHandle( processInfo.hThread );
-                return result;
-            }
-            else
-            {
-                std::cerr << "ERROR: CreateProcess()\n";
-                return -1;
-            }
+            return createProcess( buffer );
         }
         else if ( ( requestSize == 18 ) && strncmp( request, "EXECUTE_GET_OUTPUT", 18 ) == 0 )
         {
@@ -368,7 +453,7 @@ int main( int argc, char * argv[] )
                 res.push_back( boost::asio::buffer( stdErr.get(), stdErrSize + 1 ) );
                 res.push_back( boost::asio::buffer( "\1", 1 ) );
                 boost::system::error_code writeError;
-                boost::asio::write( socket, res, writeError );
+                boost::asio::write( sock, res, writeError );
                 if ( writeError )
                 {
                     std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
@@ -397,7 +482,12 @@ int main( int argc, char * argv[] )
             char * buffer = static_cast<char *>( _alloca( retcodeSize + 1 ) );
             std::memcpy( buffer, retcode, retcodeSize );
             buffer[ retcodeSize ] = 0;
-            int const result = atoi( buffer );
+            int result;
+            if ( !parse( buffer, boost::spirit::int_, result ) )
+            {
+                std::cerr << "Failed to parse exit code.\n";
+                result = -1;
+            }
 
             char const * stdOut;
             std::size_t stdOutSize;
@@ -435,7 +525,7 @@ int main( int argc, char * argv[] )
             }
             res.push_back( boost::asio::buffer( "\1", 1 ) );
             boost::system::error_code writeError;
-            boost::asio::write( socket, res, writeError );
+            boost::asio::write( sock, res, writeError );
             if ( writeError )
             {
                 std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";

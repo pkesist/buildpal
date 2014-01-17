@@ -37,4 +37,3 @@ exe argParser
 explicit argParser ;
 
 install _ : parse_args : <variant>profileWithAssert : <location>C:\\Python33\\DLLs ;
-install __ : argParser : <location>. ;

@@ -91,7 +91,7 @@ class SourceScanner:
             s = create_socket(zmq_ctx, zmq.DEALER)
             s.connect('inproc://pp_sessions')
             s.send_multipart([self.conn_id,
-                b'PREPROCESSING_DONE',pickle.dumps(timer.get()),
+                b'PREPROCESSING_DONE', pickle.dumps(timer.get()),
                 pickle.dumps((hits, misses))])
             s.disconnect('inproc://pp_sessions')
 

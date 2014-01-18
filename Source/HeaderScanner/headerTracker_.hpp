@@ -32,7 +32,11 @@ namespace clang
 struct HeaderCtx
 {
 public:
-    explicit HeaderCtx( Header const & header, clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit, clang::Preprocessor const & preprocessor, HeaderCtx * parent )
+    explicit HeaderCtx( Header const & header,
+        clang::FileEntry const * replacement,
+        CacheEntryPtr const & cacheHit,
+        clang::Preprocessor const & preprocessor,
+        HeaderCtx * parent )
         :
         header_( header ),
         cacheHit_( cacheHit ),

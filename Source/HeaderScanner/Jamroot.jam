@@ -49,4 +49,5 @@ pyd preprocessing_d : preprocessing_stuff : <variant>debug ;
 explicit preprocessing ;
 explicit preprocessing_d ;
 
-install ppinstall : preprocessing : <variant>profileWithAssert <location>C:\\Python33\\DLLs ;
+local PYTHONDIR = [ python_dev.python-dir ] ;
+install ppinstall : preprocessing : <variant>profileWithAssert <location>$(PYTHONDIR)/DLLs ;

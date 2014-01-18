@@ -23,10 +23,6 @@ from multiprocessing import cpu_count, Semaphore
 from time import time
 
 class TaskProcessor:
-    def __init__(self, nodes, port):
-        self.__port = port
-        self.__nodes = nodes
-
     class SendProxy:
         def __init__(self, socket, id):
             self.socket = socket
@@ -52,254 +48,265 @@ class TaskProcessor:
         def recv_pyobj(self):
             return pickle.loads(self.recv()[0])
 
-    def run(self):
-        zmq_ctx = zmq.Context()
-        client_socket = create_socket(zmq_ctx, zmq.STREAM)
-        client_socket.bind('tcp://*:{}'.format(self.__port))
+    class Sessions:
+        FROM_CLIENT = 0
+        FROM_PREPR  = 1
+        FROM_SERVER = 2
 
-        poller = zmq.Poller()
+        def __init__(self):
+            self.session = {self.FROM_CLIENT : {}, self.FROM_PREPR : {},
+                            self.FROM_SERVER : {}}
 
-        register_socket = lambda socket : poller.register(socket, zmq.POLLIN)
-        unregister_socket = lambda socket : poller.unregister(socket)
+        def register(self, type, key, *val):
+            self.session[type][key] = val
 
-        register_socket(client_socket)
+        def get(self, type, key):
+            result = self.session[type].get(key)
+            if result is None:
+                return None
+            assert isinstance(result, tuple)
+            if len(result) == 1:
+                return result[0]
+            return result
 
+        def unregister(self, type, key):
+            try:
+                del self.session[type][key]
+            except Exception:
+                import traceback
+                traceback.print_exc()
+
+    class PreprocessorSockets:
+        def __init__(self, zmq_ctx):
+            self.pp_sockets = []
+            self.zmq_ctx = zmq_ctx
+
+        def get_socket(self):
+            if self.pp_sockets:
+                preprocess_socket = self.pp_sockets[0]
+                del self.pp_sockets[0]
+            else:
+                preprocess_socket = self.zmq_ctx.socket(zmq.DEALER)
+                preprocess_socket.connect('inproc://preprocessor')
+            return preprocess_socket
+
+        def return_socket(self, socket):
+            assert socket not in self.pp_sockets
+            self.pp_sockets.append(socket)
+
+    class ClientServerRendezvous(Rendezvous):
+        def __init__(self, timer, sessions, node_info, pp_sockets):
+            Rendezvous.__init__(self, 'client_ready', 'server_ready')
+            self.node_info = node_info
+            self.sessions = sessions
+            self.timer = timer
+            self.pp_sockets = pp_sockets
+
+        def match(self, client_tuple, server_tuple):
+            session, timer = client_tuple
+            server_conn, node_index = server_tuple
+            self.timer.add_time('waiting.server', timer.get())
+            self.sessions.register(TaskProcessor.Sessions.FROM_SERVER, server_conn, session, node_index)
+            session.preprocessing_done(server_conn, self.node_info[node_index])
+            self.pp_sockets.return_socket(session.preprocess_socket)
+            del session.preprocess_socket
+
+    class ClientData:
+        def __init__(self):
+            self.data = {}
+
+        def __get_message(self, client_id):
+            data = self.data.get(client_id, b'')
+            try:
+                end_index = data.index(b'\x00\x01')
+            except ValueError:
+                return None
+            result = data[:end_index].split(b'\x00')
+            data = data[end_index + 2:]
+            if data:
+                self.data[client_id] = data
+            else:
+                del self.data[client_id]
+            return result
+
+        def process_new_data(self, client_id, data):
+            self.data[client_id] = self.data.get(client_id, b'') + data.tobytes()
+            messages = []
+            while True:
+                x = self.__get_message(client_id)
+                if x is not None:
+                    messages.append(x)
+                else:
+                    break
+            return messages
+
+    def __init__(self, nodes, port):
+        self.__port = port
+        self.__nodes = nodes
         self.cache_info = (0, 0)
-
-        compiler_info = {}
-
-        node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
-
-        source_scanner = SourceScanner(zmq_ctx, 'inproc://preprocessor', self.__nodes, poller)
-        class Sessions:
-            FROM_CLIENT = 0
-            FROM_PREPR  = 1
-            FROM_SERVER = 2
-
-            def __init__(self):
-                self.session = {self.FROM_CLIENT : {}, self.FROM_PREPR : {},
-                                self.FROM_SERVER : {}}
-
-            def register(self, type, key, *val):
-                self.session[type][key] = val
-
-            def get(self, type, key):
-                result = self.session[type].get(key)
-                if result is None:
-                    return None
-                assert isinstance(result, tuple)
-                if len(result) == 1:
-                    return result[0]
-                return result
-
-            def unregister(self, type, key):
-                try:
-                    del self.session[type][key]
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-
-        sessions = Sessions()
-
-        node_manager = NodeManager(node_info)
-
+        self.compiler_info = {}
         self.timer = Timer()
+        self.node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
+        self.sessions = self.Sessions()
+        self.node_manager = NodeManager(self.node_info)
 
-        class PreprocessorSockets:
-            def __init__(self):
-                self.pp_sockets = []
+        self.poller = zmq.Poller()
 
-            def get_socket(self):
-                if self.pp_sockets:
-                    preprocess_socket = self.pp_sockets[0]
-                    del self.pp_sockets[0]
-                else:
-                    preprocess_socket = zmq_ctx.socket(zmq.DEALER)
-                    preprocess_socket.connect('inproc://preprocessor')
-                return preprocess_socket
+        self.zmq_ctx = zmq.Context()
+        self.source_scanner = SourceScanner(self.zmq_ctx,
+            'inproc://preprocessor', self.__nodes, self.poller)
 
-            def return_socket(self, socket):
-                assert socket not in self.pp_sockets
-                self.pp_sockets.append(socket)
+        self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
+        self.client_socket.bind('tcp://*:{}'.format(self.__port))
+        self.register_socket(self.client_socket)
 
-        pp_sockets = PreprocessorSockets()
+        self.pp_sockets = self.PreprocessorSockets(self.zmq_ctx)
+        self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
+            self.node_info, self.pp_sockets)
+        self.client_data = self.ClientData()
 
-        class ClientServerRendezvous(Rendezvous):
-            def __init__(self, timer, sessions, node_info):
-                Rendezvous.__init__(self, 'client_ready', 'server_ready')
-                self.node_info = node_info
-                self.sessions = sessions
-                self.timer = timer
+    def register_socket(self, socket):
+        self.poller.register(socket, zmq.POLLIN)
 
-            def match(self, client_tuple, server_tuple):
-                session, timer = client_tuple
-                server_conn, node_index = server_tuple
-                self.timer.add_time('waiting.server', timer.get())
-                sessions.register(Sessions.FROM_SERVER, server_conn, session, node_index)
-                session.preprocessing_done(server_conn, self.node_info[node_index])
-                pp_sockets.return_socket(session.preprocess_socket)
-                del session.preprocess_socket
+    def unregister_socket(self, socket):
+        self.poller.unregister(socket)
 
-        csrv = ClientServerRendezvous(self.timer, sessions, node_info)
+    def run_poller(self):
+        for connection in self.node_manager.spawn_connections(self.zmq_ctx):
+            self.register_socket(connection)
 
-        def start_task(task):
-            pp_socket = pp_sockets.get_socket()
-            session = CompileSession(compiler, executable, task, client_conn,
-                pp_socket, compiler_info)
-            sessions.register(Sessions.FROM_CLIENT, client_conn.id, session)
-            sessions.register(Sessions.FROM_PREPR, pp_socket, session)
-            register_socket(pp_socket)
+        for socket, flags in dict(self.poller.poll(1000)).items():
+            assert flags == zmq.POLLIN
+            self.handle_socket(socket)
 
-        scheduler = sched.scheduler()
-
-        class ClientData:
-            def __init__(self):
-                self.data = {}
-
-            def __get_message(self, client_id):
-                data = self.data.get(client_id, b'')
-                try:
-                    end_index = data.index(b'\x00\x01')
-                except ValueError:
-                    return None
-                result = data[:end_index].split(b'\x00')
-                data = data[end_index + 2:]
-                if data:
-                    self.data[client_id] = data
-                else:
-                    del self.data[client_id]
-                return result
-
-            def process_new_data(self, client_id, data):
-                self.data[client_id] = self.data.get(client_id, b'') + data.tobytes()
-                messages = []
-                while True:
-                    x = self.__get_message(client_id)
-                    if x is not None:
-                        messages.append(x)
-                    else:
-                        break
-                return messages
-        client_data = ClientData()
+    def run(self):
+        self.ima_lil_file = open("jorgula.txt", "wt")
 
         try:
             while True:
-                self.print_stats(node_info)
-                node_connections = node_manager.spawn_connections(zmq_ctx)
-                for connection in node_connections:
-                    register_socket(connection)
-
-                for socket, flags in dict(poller.poll(1000)).items():
-                    if flags != zmq.POLLIN:
-                        continue
-
-                    with self.timer.timeit("poller.preprocessor_out"):
-                        if source_scanner.handle(socket):
-                            continue
-
-                    session = sessions.get(Sessions.FROM_PREPR, socket)
-                    if session:
-                        with self.timer.timeit("poller.preprocessor_in"):
-                            assert socket is session.preprocess_socket
-                            msg = recv_multipart(socket)
-                            assert msg[0] == b'PREPROCESSING_DONE'
-                            self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
-                            self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
-                            hits, misses = pickle.loads(msg[2])
-                            self.cache_info = hits, misses
-                            # We will not be receiving throught this socket
-                            # anymore, but we still need it to send data to
-                            # server. It will be marked for reuse in
-                            # client-server randezvous.
-                            sessions.unregister(Sessions.FROM_PREPR, socket)
-                            unregister_socket(socket)
-                            # Useful toggle for profiling preprocessor.
-                            DEBUG_JUST_PREPROCESS = False
-                            if DEBUG_JUST_PREPROCESS:
-                                # At this point preprocessing is done.
-                                # Notify client to exit with success errorcode,
-                                # so build can pump further tasks. The task will
-                                # not be actually compiled.
-                                session.client_conn.send([b'EXIT', b'0', b'', b''])
-                                socket.send_multipart([b'DROP'])
-                                sessions.unregister(Sessions.FROM_CLIENT, session.client_conn.id)
-                            else:
-                                csrv.client_ready((session, SimpleTimer()))
-                                server_result = node_manager.get_server_conn()
-                                if server_result:
-                                    csrv.server_ready(server_result)
-                    elif socket is client_socket:
-                        with self.timer.timeit('poller.client'):
-                            client_id, data = recv_multipart(client_socket)
-                            messages = client_data.process_new_data(client_id, data)
-                            for msg in messages:
-                                session = sessions.get(Sessions.FROM_CLIENT, client_id)
-                                if session:
-                                    session.got_data_from_client(msg)
-                                else:
-                                    # Create new session.
-                                    compiler_name = msg[0].decode()
-                                    executable = msg[1].decode()
-                                    sysincludes = msg[2].decode()
-                                    cwd = msg[3].decode()
-                                    command = [x.decode() for x in msg[4:]]
-                                    client_conn = self.SendProxy(client_socket, client_id.tobytes())
-                                    client_conn.send([b'TASK_RECEIVED'])
-                                    assert compiler_name == 'msvc'
-                                    compiler = MSVCWrapper()
-                                    for task in create_tasks(client_conn, compiler,
-                                        executable, cwd, sysincludes, command):
-                                        start_task(task)
-                    else:
-                        with self.timer.timeit('poller.server'):
-                            # Connection to server node.
-                            result = sessions.get(Sessions.FROM_SERVER, socket)
-                            if result is not None:
-                                # Part of a session.
-                                session, node_index = result
-                                msg = recv_multipart(socket)
-                                client_id = session.client_conn.id
-                                session_done = session.got_data_from_server(msg)
-                                if session_done:
-                                    sessions.unregister(Sessions.FROM_SERVER, socket)
-                                    sessions.unregister(Sessions.FROM_CLIENT, client_id)
-                                    unregister_socket(socket)
-                                    node_manager.recycle(node_index, socket)
-                                    if session.state == session.STATE_DONE:
-                                        session.task.completed(session.client_conn,
-                                        session.retcode, session.stdout, session.stderr)
-                                    else:
-                                        assert session.state == session.STATE_SERVER_FAILURE
-                                        if hasattr(task, 'retries'):
-                                            task.retries += 1
-                                        else:
-                                            task.retries = 1
-                                        if task.retries <= 3:
-                                            start_task(task)
-                                        else:
-                                            session.task.completed(session.client_conn,
-                                                session.retcode, session.stdout, session.stderr)
-                            else:
-                                # Not part of a session, handled by node_manager.
-                                node_index = node_manager.handle_socket(socket)
-                                if node_index is not None and csrv.first():
-                                    server_conn, node_index = node_manager.get_server_conn(node_index)
-                                    assert server_conn
-                                    csrv.server_ready((server_conn, node_index))
-                scheduler.run(False)
+                self.print_stats()
+                self.run_poller()
         finally:
-            source_scanner.terminate()
+            self.ima_lil_file.close()
+            self.source_scanner.terminate()
 
-    def print_stats(self, node_info):
-        current = time()
-        if hasattr(self, 'last_time') and (current - self.last_time < 2):
-            return False
-        self.last_time = current
+    def handle_socket(self, socket):
+        with self.timer.timeit("poller.preprocessor_out"):
+            if self.source_scanner.handle(socket):
+                return
+
+        session = self.sessions.get(self.Sessions.FROM_PREPR, socket)
+        if session:
+            with self.timer.timeit("poller.preprocessor_in"):
+                assert socket is session.preprocess_socket
+                msg = recv_multipart(socket)
+                assert msg[0] == b'PREPROCESSING_DONE'
+                self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
+                self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
+                self.ima_lil_file.write("Preprocessing '{}' took {}.\n".format(
+                    session.task.source, session.preprocessing_time.get()))
+                hits, misses = pickle.loads(msg[2])
+                self.cache_info = hits, misses
+                # We will not be receiving throught this socket
+                # anymore, but we still need it to send data to
+                # server. It will be marked for reuse in
+                # client-server randezvous.
+                self.sessions.unregister(self.Sessions.FROM_PREPR, socket)
+                self.unregister_socket(socket)
+                # Useful toggle for profiling preprocessor.
+                DEBUG_JUST_PREPROCESS = False
+                if DEBUG_JUST_PREPROCESS:
+                    # At this point preprocessing is done.
+                    # Notify client to exit with success errorcode,
+                    # so build can pump further tasks. The task will
+                    # not be actually compiled.
+                    session.client_conn.send([b'EXIT', b'0', b'', b''])
+                    socket.send_multipart([b'DROP'])
+                    self.sessions.unregister(self.Sessions.FROM_CLIENT, session.client_conn.id)
+                else:
+                    self.csrv.client_ready((session, SimpleTimer()))
+                    server_result = self.node_manager.get_server_conn()
+                    if server_result:
+                        self.csrv.server_ready(server_result)
+        elif socket is self.client_socket:
+            with self.timer.timeit('poller.client'):
+                client_id, data = recv_multipart(self.client_socket)
+                messages = self.client_data.process_new_data(client_id, data)
+                for msg in messages:
+                    session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
+                    if session:
+                        session.got_data_from_client(msg)
+                    else:
+                        # Create new session.
+                        compiler_name = msg[0].decode()
+                        executable = msg[1].decode()
+                        sysincludes = msg[2].decode()
+                        cwd = msg[3].decode()
+                        command = [x.decode() for x in msg[4:]]
+                        client_conn = self.SendProxy(self.client_socket, client_id.tobytes())
+                        client_conn.send([b'TASK_RECEIVED'])
+                        assert compiler_name == 'msvc'
+                        compiler = MSVCWrapper()
+                        for task in create_tasks(client_conn, compiler,
+                            executable, cwd, sysincludes, command):
+                            self.start_task(task, compiler, executable, client_conn)
+        else:
+            with self.timer.timeit('poller.server'):
+                # Connection to server node.
+                result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
+                if result is not None:
+                    # Part of a session.
+                    session, node_index = result
+                    msg = recv_multipart(socket)
+                    client_id = session.client_conn.id
+                    session_done = session.got_data_from_server(msg)
+                    if session_done:
+                        self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
+                        self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
+                        self.unregister_socket(socket)
+                        self.node_manager.recycle(node_index, socket)
+                        if session.state == session.STATE_DONE:
+                            session.task.completed(session.client_conn,
+                            session.retcode, session.stdout, session.stderr)
+                        else:
+                            assert session.state == session.STATE_SERVER_FAILURE
+                            if hasattr(task, 'retries'):
+                                task.retries += 1
+                            else:
+                                task.retries = 1
+                            if task.retries <= 3:
+                                self.start_task(task, session.compiler, session.executable, session.client_conn)
+                            else:
+                                session.task.completed(session.client_conn,
+                                    session.retcode, session.stdout, session.stderr)
+                else:
+                    # Not part of a session, handled by node_manager.
+                    node_index = self.node_manager.handle_socket(socket)
+                    if node_index is not None and self.csrv.first():
+                        server_conn, node_index = self.node_manager.get_server_conn(node_index)
+                        assert server_conn
+                        self.csrv.server_ready((server_conn, node_index))
+
+    
+
+    def start_task(self, task, compiler, executable, client_conn):
+        pp_socket = self.pp_sockets.get_socket()
+        session = CompileSession(compiler, executable, task, client_conn,
+            pp_socket, self.compiler_info)
+        self.sessions.register(self.Sessions.FROM_CLIENT, client_conn.id, session)
+        self.sessions.register(self.Sessions.FROM_PREPR, pp_socket, session)
+        self.register_socket(pp_socket)
+
+    def print_stats(self):
+        current_time = time()
+        if hasattr(self, 'last_print') and (current_time - self.last_print) < 2:
+            return
+        self.last_print = current_time
         print("================")
         print("Build nodes:")
         print("================")
-        for index in range(len(node_info)):
-            node = node_info[index]
+        for index in range(len(self.node_info)):
+            node = self.node_info[index]
             print('{:30} - Tasks sent {:<3} '
                 'Open Connections {:<3} Completed {:<3} Failed '
                 '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
@@ -328,8 +335,8 @@ class TaskProcessor:
         print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(total_hits,
             total_misses, total_hits / total))
         print("================")
-        for index in range(len(node_info)):
-            node = node_info[index]
+        for index in range(len(self.node_info)):
+            node = self.node_info[index]
             times = node.timer().as_dict()
             if not times:
                 continue
@@ -350,4 +357,3 @@ class TaskProcessor:
                 'compiler',):
                 total += times.get('server.' + x, (0,0))[0]
             print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - total))
-        return True

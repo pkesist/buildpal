@@ -21,11 +21,14 @@ alias boostLibs :
 ;
 
 lib map_files_inj32 : mapFilesInject.cpp dllInject.cpp remoteOps.cpp boostLibs shlwapi : <def-file>mapFilesInject32.def <link>shared ;
+explicit map_files_inj32 ;
 lib map_files_inj64 : mapFilesInject.cpp dllInject.cpp remoteOps.cpp boostLibs shlwapi : <def-file>mapFilesInject64.def <link>shared <address-model>64 ;
+explicit map_files_inj64 ;
 
 alias select_inject_module : map_files_inj32 ;
 alias select_inject_module : map_files_inj32 : <address-model>32 ;
 alias select_inject_module : map_files_inj64 : <address-model>64 ;
+explicit select_inject_module ;
 
 pyd map_files :
     pydll.cpp
@@ -35,5 +38,5 @@ pyd map_files :
 ;
 explicit map_files ;
 
-
-install _ : map_files map_files_inj32 map_files_inj64 : <variant>profileWithAssert <location>C:\\Python33\\DLLs ;
+local PYTHONDIR = [ python_dev.python-dir ] ;
+install _ : map_files map_files_inj32 map_files_inj64 : <variant>profileWithAssert <location>$(PYTHONDIR)/DLLs ;

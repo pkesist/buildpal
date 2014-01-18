@@ -36,4 +36,6 @@ exe argParser
 ;
 explicit argParser ;
 
-install _ : parse_args : <variant>profileWithAssert : <location>C:\\Python33\\DLLs ;
+local PYTHONDIR = [ python_dev.python-dir ] ;
+install _ : parse_args : <variant>profileWithAssert : <location>$(PYTHONDIR)/DLLs ;
+

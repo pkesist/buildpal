@@ -1,3 +1,5 @@
+from .source_scanner import header_beginning
+
 from Common import SimpleTimer, send_compressed_file, send_file
 
 from subprocess import list2cmdline
@@ -9,31 +11,32 @@ import zipfile
 import zlib
 import zmq
 
+from itertools import chain
 from time import time
 
 class CompileSession:
     STATE_START = 0
     STATE_WAIT_FOR_PREPROCESSING_DONE = 1
-    STATE_WAIT_FOR_SERVER_OK = 2
-    STATE_WAIT_FOR_PCH_RESPONSE = 3
-    STATE_WAIT_FOR_SERVER_RESPONSE = 4
-    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 5
-    STATE_WAIT_FOR_COMPILER_FILE_LIST = 6
-    STATE_RECEIVE_RESULT_FILE = 7
-    STATE_POSTPROCESS = 8
-    STATE_DONE = 9
-    STATE_SERVER_FAILURE = 10
+    STATE_WAIT_FOR_HEADER_FILE_LIST = 2
+    STATE_WAIT_FOR_SERVER_OK = 3
+    STATE_WAIT_FOR_PCH_RESPONSE = 4
+    STATE_WAIT_FOR_SERVER_RESPONSE = 5
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 6
+    STATE_WAIT_FOR_COMPILER_FILE_LIST = 7
+    STATE_RECEIVE_RESULT_FILE = 8
+    STATE_POSTPROCESS = 9
+    STATE_DONE = 10
+    STATE_SERVER_FAILURE = 11
 
-    def __init__(self, compiler, executable, task, client_conn, preprocess_socket,
-        compiler_info):
-
+    def __init__(self, task, preprocess_worker, compiler_info):
         self.task = task
-        self.client_conn = client_conn
-        self.preprocess_socket = preprocess_socket
-        self.compiler = compiler
+        self.client_conn = task.client_conn
+        self.compiler = task.compiler()
+        self.executable = task.executable()
         self.compiler_info = compiler_info
-        self.executable = executable
+        self.preprocess_worker = preprocess_worker
 
+    def begin(self):
         if self.executable in self.compiler_info:
             self.start_preprocessing()
         else:
@@ -45,16 +48,29 @@ class CompileSession:
     def timer(self):
         return self.node_info.timer()
 
+    def rewind(self):
+        assert self.state == self.STATE_SERVER_FAILURE
+        self.state = STATE_WAIT_FOR_PREPROCESSING_DONE
+
     def start_preprocessing(self):
         assert self.executable in self.compiler_info
         self.task.compiler_info = self.compiler_info[self.executable]
         self.task.server_task_info['compiler_info'] = self.task.compiler_info
         self.task.preprocess_task_info['macros'].extend(self.task.compiler_info['macros'])
-        self.preprocess_socket.send_multipart([b'PREPROCESS_TASK',
-            pickle.dumps(self.task.preprocess_task_info)],
-            copy=False)
+        self.preprocess_worker(self)
         self.preprocessing_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
+
+    def preprocessing_done(self, server_conn, node_info):
+        assert self.state == self.STATE_WAIT_FOR_PREPROCESSING_DONE
+        self.server_conn = server_conn
+        self.node_info = node_info
+        server_id = self.server_conn.getsockopt(zmq.IDENTITY)
+        assert server_id
+        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
+        self.node_info.add_tasks_sent()
+        self.server_time = SimpleTimer()
+        self.state = self.STATE_WAIT_FOR_HEADER_FILE_LIST
 
     def got_data_from_client(self, msg):
         if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
@@ -71,21 +87,16 @@ class CompileSession:
             self.compiler_info[self.executable]['files'] = msg
             self.start_preprocessing()
 
-    def preprocessing_done(self, server_conn, node_info):
-        assert self.state == self.STATE_WAIT_FOR_PREPROCESSING_DONE
-        self.server_conn = server_conn
-        self.node_info = node_info
-        server_id = self.server_conn.getsockopt(zmq.IDENTITY)
-        assert server_id
-        self.preprocess_socket.send_multipart([b'SEND_TO_SERVER',
-            server_id, pickle.dumps(self.node_info.index())], copy=False)
-        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
-        self.node_info.add_tasks_sent()
-        self.server_time = SimpleTimer()
-        self.state = self.STATE_WAIT_FOR_SERVER_OK
-
     def got_data_from_server(self, msg):
-        if self.state == self.STATE_WAIT_FOR_SERVER_OK:
+        if self.state == self.STATE_WAIT_FOR_HEADER_FILE_LIST:
+            assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
+            missing_files = pickle.loads(msg[1])
+            new_files, src_loc = self.task_files_bundle(missing_files)
+            self.server_conn.send_multipart([b'TASK_FILES',
+                zlib.compress(pickle.dumps(new_files)), src_loc.encode()])
+            self.state = self.STATE_WAIT_FOR_SERVER_OK
+
+        elif self.state == self.STATE_WAIT_FOR_SERVER_OK:
             compiler_state = msg[0]
             if compiler_state == b'NEED_COMPILER':
                 ci = self.compiler_info[self.executable]
@@ -158,3 +169,77 @@ class CompileSession:
                 self.state = self.STATE_DONE
                 return True
         return False
+
+    def task_files_bundle(self, in_filelist):
+        header_info = self.task.header_info
+        source_file = self.task.source
+
+        relative_includes = {}
+        rel_counter = 0
+        max_depth = 0
+        files = {}
+        # Iterate over
+        #
+        #    (dir1, [[a11, a12], [b11, b12]]),
+        #    (dir2, [[a21, a22], [b21, b22]]),
+        #    ....
+        #
+        # Like it was
+        #
+        #  (dir1, a11, a12),
+        #  (dir1, b11, b12),
+        #  (dir2, a21, a22),
+        #  (dir2, b21, b22),
+        #  ...
+        #
+        #
+        header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))
+        for entry in in_filelist:
+            found = False
+            while not found:
+                try:
+                    dir, file, relative, content, checksum, header = \
+                        next(header_info_iter)
+                    if entry == (dir, file):
+                        assert not relative
+                        found = True
+                        break
+                    elif relative:
+                        break
+                except StopIteration:
+                    raise Exception("Could not find information for {}.".format(
+                        in_name))
+            assert found or relative
+            depth = 0
+            path_elements = file.split('/')
+            # Handle '.' in include directive.
+            path_elements = [p for p in path_elements if p != '.']
+            # Handle '..' in include directive.
+            if relative:
+                while '..' in path_elements:
+                    index = path_elements.index('..')
+                    if index == 0:
+                        depth += 1
+                        if depth > max_depth:
+                            max_depth += 1
+                        del path_elements[index]
+                    else:
+                        del path_element[index - 1:index + 1]
+                if depth:
+                    relative_includes.setdefault(depth - 1, []).append((dir,
+                        '/'.join(path_elements), content, header))
+                else:
+                    files['/'.join(path_elements)] = header + content
+            else:
+                files[(dir, file)] = header + content
+            
+        curr_dir = ''
+        for depth in range(max_depth):
+            assert relative
+            curr_dir += 'dummy_rel/'
+            for dir, file, content, header in relative_includes[depth]:
+                files[('', curr_dir + file)] = header + content
+        rel_file = curr_dir + os.path.basename(source_file)
+        with open(source_file, 'rb') as src:
+            files[('', rel_file)] = header_beginning(source_file) + src.read()
+        return files, rel_file

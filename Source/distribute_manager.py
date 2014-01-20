@@ -25,7 +25,7 @@ if __name__ == "__main__":
     port = config.get(manager_section, 'port')
 
     if not opts.profile in config:
-        raise "ERROR: No '{}' section in '{}'.".format(opts.profile, opts.ini_file)
+        raise Exception("ERROR: No '{}' section in '{}'.".format(opts.profile, opts.ini_file))
 
     nodes = []
     section = config[opts.profile]

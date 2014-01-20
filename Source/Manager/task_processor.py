@@ -17,9 +17,11 @@ import pickle
 import sys
 import zmq
 import sched
+import threading
 
 from functools import cmp_to_key
 from multiprocessing import cpu_count, Semaphore
+from socket import getfqdn
 from time import time
 
 class TaskProcessor:
@@ -50,12 +52,10 @@ class TaskProcessor:
 
     class Sessions:
         FROM_CLIENT = 0
-        FROM_PREPR  = 1
-        FROM_SERVER = 2
+        FROM_SERVER = 1
 
         def __init__(self):
-            self.session = {self.FROM_CLIENT : {}, self.FROM_PREPR : {},
-                            self.FROM_SERVER : {}}
+            self.session = {self.FROM_CLIENT : {}, self.FROM_SERVER : {}}
 
         def register(self, type, key, *val):
             self.session[type][key] = val
@@ -108,8 +108,6 @@ class TaskProcessor:
             self.timer.add_time('waiting.server', timer.get())
             self.sessions.register(TaskProcessor.Sessions.FROM_SERVER, server_conn, session, node_index)
             session.preprocessing_done(server_conn, self.node_info[node_index])
-            self.pp_sockets.return_socket(session.preprocess_socket)
-            del session.preprocess_socket
 
     class ClientData:
         def __init__(self):
@@ -153,8 +151,8 @@ class TaskProcessor:
         self.poller = zmq.Poller()
 
         self.zmq_ctx = zmq.Context()
-        self.source_scanner = SourceScanner(self.zmq_ctx,
-            'inproc://preprocessor', self.__nodes, self.poller)
+        self.zmq_ctx2 = zmq.Context()
+        self.source_scanner = SourceScanner()
 
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
         self.client_socket.bind('tcp://*:{}'.format(self.__port))
@@ -171,6 +169,28 @@ class TaskProcessor:
     def unregister_socket(self, socket):
         self.poller.unregister(socket)
 
+    def run_queue(self):
+        notify_socket = create_socket(self.zmq_ctx2, zmq.PAIR)
+        notify_socket.connect('inproc://preprocessing')
+        fqdn = getfqdn()
+
+        try:
+            while True:
+                client_id, header_info, async_wait_time, internal_time, (hits, misses) = \
+                    self.source_scanner.completed_task()
+                self.cache_info = hits, misses
+                session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
+                assert(session)
+                self.timer.add_time('preprocessing.async_wait', async_wait_time)
+                self.timer.add_time('preprocessing.internal', internal_time)
+                # Add filelist to package which goes to the server.
+                session.task.server_task_info['filelist'] = create_filelist(header_info)
+                session.task.server_task_info['fqdn'] = fqdn
+                session.task.header_info = header_info
+                notify_socket.send_multipart([client_id, pickle.dumps(time())], copy=False)
+        finally:
+            notify_socket.disconnect('inproc://preprocessing')
+
     def run_poller(self):
         for connection in self.node_manager.spawn_connections(self.zmq_ctx):
             self.register_socket(connection)
@@ -180,54 +200,34 @@ class TaskProcessor:
             self.handle_socket(socket)
 
     def run(self):
-        self.ima_lil_file = open("jorgula.txt", "wt")
+        queue_thread = threading.Thread(target=self.run_queue)
+        queue_thread.start()
+
+        self.preprocessing_done = create_socket(self.zmq_ctx2, zmq.PAIR)
+        self.preprocessing_done.bind('inproc://preprocessing')
+        self.register_socket(self.preprocessing_done)
 
         try:
             while True:
                 self.print_stats()
                 self.run_poller()
         finally:
-            self.ima_lil_file.close()
             self.source_scanner.terminate()
+            queue_thread.join()
+            self.poller.unregister(self.preprocessing_done)
+            self.preprocessing_done.unbind('inproc://preprocessing')
 
     def handle_socket(self, socket):
-        with self.timer.timeit("poller.preprocessor_out"):
-            if self.source_scanner.handle(socket):
-                return
+        if socket is self.preprocessing_done:
+            (client_id, start_time) = recv_multipart(socket)
+            self.timer.add_time('preprocessing.notify_done', time() - pickle.loads(start_time))
+            session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
+            self.timer.add_time('preprocessing.external', session.pp_timer.get())
+            self.csrv.client_ready((session, SimpleTimer()))
+            server_result = self.node_manager.get_server_conn()
+            if server_result:
+                self.csrv.server_ready(server_result)
 
-        session = self.sessions.get(self.Sessions.FROM_PREPR, socket)
-        if session:
-            with self.timer.timeit("poller.preprocessor_in"):
-                assert socket is session.preprocess_socket
-                msg = recv_multipart(socket)
-                assert msg[0] == b'PREPROCESSING_DONE'
-                self.timer.add_time('preprocessing.internal', pickle.loads(msg[1]))
-                self.timer.add_time('preprocessing.external', session.preprocessing_time.get())
-                self.ima_lil_file.write("Preprocessing '{}' took {}.\n".format(
-                    session.task.source, session.preprocessing_time.get()))
-                hits, misses = pickle.loads(msg[2])
-                self.cache_info = hits, misses
-                # We will not be receiving throught this socket
-                # anymore, but we still need it to send data to
-                # server. It will be marked for reuse in
-                # client-server randezvous.
-                self.sessions.unregister(self.Sessions.FROM_PREPR, socket)
-                self.unregister_socket(socket)
-                # Useful toggle for profiling preprocessor.
-                DEBUG_JUST_PREPROCESS = False
-                if DEBUG_JUST_PREPROCESS:
-                    # At this point preprocessing is done.
-                    # Notify client to exit with success errorcode,
-                    # so build can pump further tasks. The task will
-                    # not be actually compiled.
-                    session.client_conn.send([b'EXIT', b'0', b'', b''])
-                    socket.send_multipart([b'DROP'])
-                    self.sessions.unregister(self.Sessions.FROM_CLIENT, session.client_conn.id)
-                else:
-                    self.csrv.client_ready((session, SimpleTimer()))
-                    server_result = self.node_manager.get_server_conn()
-                    if server_result:
-                        self.csrv.server_ready(server_result)
         elif socket is self.client_socket:
             with self.timer.timeit('poller.client'):
                 client_id, data = recv_multipart(self.client_socket)
@@ -237,19 +237,28 @@ class TaskProcessor:
                     if session:
                         session.got_data_from_client(msg)
                     else:
-                        # Create new session.
-                        compiler_name = msg[0].decode()
-                        executable = msg[1].decode()
-                        sysincludes = msg[2].decode()
-                        cwd = msg[3].decode()
-                        command = [x.decode() for x in msg[4:]]
-                        client_conn = self.SendProxy(self.client_socket, client_id.tobytes())
-                        client_conn.send([b'TASK_RECEIVED'])
-                        assert compiler_name == 'msvc'
-                        compiler = MSVCWrapper()
-                        for task in create_tasks(client_conn, compiler,
-                            executable, cwd, sysincludes, command):
-                            self.start_task(task, compiler, executable, client_conn)
+                        with self.timer.timeit('poller.client.no_sess'):
+                            # Create new session.
+                            compiler_name = msg[0].decode()
+                            executable = msg[1].decode()
+                            sysincludes = msg[2].decode()
+                            cwd = msg[3].decode()
+                            command = [x.decode() for x in msg[4:]]
+                            client_conn = self.SendProxy(self.client_socket, client_id.tobytes())
+                            client_conn.send([b'TASK_RECEIVED'])
+                            assert compiler_name == 'msvc'
+                            compiler = MSVCWrapper()
+                            def preprocess_task(session):
+                                session.pp_timer = SimpleTimer()
+                                self.source_scanner.add_task(session.task)
+                            for task in create_tasks(client_conn, compiler,
+                                executable, cwd, sysincludes, command):
+                                session = CompileSession(task, preprocess_task,
+                                    self.compiler_info)
+                                self.sessions.register(self.Sessions.FROM_CLIENT,
+                                    client_id, session)
+                                session.begin()
+
         else:
             with self.timer.timeit('poller.server'):
                 # Connection to server node.
@@ -266,8 +275,8 @@ class TaskProcessor:
                         self.unregister_socket(socket)
                         self.node_manager.recycle(node_index, socket)
                         if session.state == session.STATE_DONE:
-                            session.task.completed(session.client_conn,
-                            session.retcode, session.stdout, session.stderr)
+                            session.task.completed(session.retcode,
+                                session.stdout, session.stderr)
                         else:
                             assert session.state == session.STATE_SERVER_FAILURE
                             if hasattr(task, 'retries'):
@@ -275,7 +284,11 @@ class TaskProcessor:
                             else:
                                 task.retries = 1
                             if task.retries <= 3:
-                                self.start_task(task, session.compiler, session.executable, session.client_conn)
+                                session.rewind()
+                                self.csrv.client_ready((session, SimpleTimer()))
+                                server_result = self.node_manager.get_server_conn()
+                                if server_result:
+                                    self.csrv.server_ready(server_result)
                             else:
                                 session.task.completed(session.client_conn,
                                     session.retcode, session.stdout, session.stderr)
@@ -286,16 +299,6 @@ class TaskProcessor:
                         server_conn, node_index = self.node_manager.get_server_conn(node_index)
                         assert server_conn
                         self.csrv.server_ready((server_conn, node_index))
-
-    
-
-    def start_task(self, task, compiler, executable, client_conn):
-        pp_socket = self.pp_sockets.get_socket()
-        session = CompileSession(compiler, executable, task, client_conn,
-            pp_socket, self.compiler_info)
-        self.sessions.register(self.Sessions.FROM_CLIENT, client_conn.id, session)
-        self.sessions.register(self.Sessions.FROM_PREPR, pp_socket, session)
-        self.register_socket(pp_socket)
 
     def print_stats(self):
         current_time = time()
@@ -357,3 +360,17 @@ class TaskProcessor:
                 'compiler',):
                 total += times.get('server.' + x, (0,0))[0]
             print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - total))
+
+
+def create_filelist(header_info):
+    result = []
+    for dir, content in header_info:
+        dir_data = []
+        for file, relative, content, checksum, header in content:
+            # Headers which are relative to source file are not
+            # considered as candidates for server cache, and are
+            # always sent together with the source file.
+            if not relative:
+                dir_data.append((file, checksum))
+        result.append((dir, dir_data))
+    return tuple(result)

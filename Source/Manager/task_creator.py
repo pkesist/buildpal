@@ -3,19 +3,23 @@ from subprocess import list2cmdline
 import os
 
 class TaskCreator:
-    def __init__(self, executable, cwd, sysincludes, options):
+    def __init__(self, executable, cwd, sysincludes, compiler, command):
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
-        self.__options = options
         self.__cwd = cwd
+        self.__compiler = compiler
+        self.__options = compiler.parse_options(command)
 
     def executable(self):
         return self.__executable
 
+    def compiler(self):
+        return self.__compiler
+
     def build_local(self):
         return self.__options.should_build_locally()
 
-    def create_tasks(self):
+    def create_tasks(self, client_conn):
         output = self.__options.output_file()
         sources = self.__options.input_files()
         if output and len(sources) > 1:
@@ -35,17 +39,24 @@ class TaskCreator:
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
         class Task:
-            def __init__(self, task_creator):
+            def __init__(self, task_creator, client_conn):
                 self.task_creator = task_creator
+                self.client_conn = client_conn
 
+            def compiler(self):
+                return self.task_creator.compiler()
+
+            def executable(self):
+                return self.task_creator.executable()
+                
             def completed(self, *args):
                 self.task_creator.task_done(self, *args)
 
-        def create_task(source):
+        def create_task(source, client_conn):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
 
-            task = Task(self)
+            task = Task(self, client_conn)
             task.__dict__.update(
             {
                 'server_task_info' : {
@@ -64,18 +75,18 @@ class TaskCreator:
                 'source' : source,
             })
             return task
-        self.tasks = set(create_task(source) for source in sources)
+        self.tasks = set(create_task(source, client_conn) for source in sources)
         self.completed_tasks = {}
         return self.tasks
 
-    def task_done(self, task, client_conn, retcode, stdout, stderr):
+    def task_done(self, task, retcode, stdout, stderr):
         assert task in self.tasks
         assert task not in self.completed_tasks
         self.completed_tasks[task] = (retcode, stdout, stderr)
         stdout = ''
         stderr = ''
         if self.tasks == self.completed_tasks.keys():
-            self.postprocess(client_conn)
+            self.postprocess(task.client_conn)
 
     def should_invoke_linker(self):
         return self.__options.should_invoke_linker()
@@ -117,9 +128,8 @@ class TaskCreator:
 
 
 def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):
-    task_creator = TaskCreator(executable, cwd, sysincludes,
-                        compiler.parse_options(command))
+    task_creator = TaskCreator(executable, cwd, sysincludes, compiler, command)
     if task_creator.build_local():
         client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(['cl.exe'] + command).encode()])
         return []
-    return task_creator.create_tasks()
+    return task_creator.create_tasks(client_conn)

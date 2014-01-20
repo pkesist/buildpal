@@ -141,15 +141,11 @@ class CompileSession:
     STATE_START = 0
     STATE_GET_TASK = 1
     STATE_DONE = 2
-    STATE_WAITING_FOR_COMPILER = 3
-    STATE_CHECK_PCH_TAG = 4
-    STATE_GET_PCH_DATA = 5
-    STATE_TASK_READY = 6
+    STATE_SENDING_MISSING_FILES = 3
+    STATE_WAITING_FOR_COMPILER = 4
+    STATE_CHECK_PCH_TAG = 5
+    STATE_GET_PCH_DATA = 6
     STATE_FAILED = 7
-
-    STATE_WAITING_FOR_HEADER_LIST = 0
-    STATE_WAITING_FOR_HEADERS = 1
-    STATE_HEADERS_ARRIVED = 2
 
     def verify(self, future):
         try:
@@ -170,11 +166,11 @@ class CompileSession:
         return async_helper
 
     def process_failure(self, exception):
-        assert self.task_state == self.STATE_TASK_READY
+        assert self.state == self.STATE_TASK_READY
         tb = StringIO()
         traceback.print_exc(file=tb)
         tb.seek(0)
-        self.task_state = self.STATE_FAILED
+        self.state = self.STATE_FAILED
         sender = self.Sender(self.id)
         sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
         sender.disconnect()
@@ -182,8 +178,7 @@ class CompileSession:
     def __init__(self, pch_repository, header_repository, compiler_repository,
                  task_counter, checksums, compile_thread_pool, misc_thread_pool,
                  scheduler):
-        self.task_state = self.STATE_START
-        self.header_state = self.STATE_WAITING_FOR_HEADER_LIST
+        self.state = self.STATE_START
         self.task_counter = task_counter
         self.compiler_repository = compiler_repository
         self.header_repository = header_repository
@@ -205,11 +200,11 @@ class CompileSession:
             pass
 
     def created(self):
-        assert self.task_state == self.STATE_START
+        assert self.state == self.STATE_START
         sender = self.Sender(self.id)
         accept_task = True
         sender.send_pyobj('ACCEPT' if accept_task else 'REJECT')
-        self.task_state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
+        self.state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
         return accept_task
 
     class Sender:
@@ -323,13 +318,10 @@ class CompileSession:
                 return proc.returncode, output[0], output[1]
         self.compiler = spawn_compiler
         if self.task['pch_file'] is None:
-            if self.header_state == self.STATE_HEADERS_ARRIVED:
                 self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                 self.run_compiler()
-            else:
-                self.task_state = self.STATE_TASK_READY
         else:
-            self.task_state = self.STATE_CHECK_PCH_TAG
+            self.state = self.STATE_CHECK_PCH_TAG
 
     def session_done(self):
         self.terminate()
@@ -348,23 +340,38 @@ class CompileSession:
         self.prolong_lifetime()
         try:
             sender = self.Sender(self.id)
-            if self.task_state == self.STATE_GET_TASK:
+            if self.state == self.STATE_GET_TASK:
                 self.task_counter.inc()
                 self.server_time_timer = SimpleTimer()
                 self.waiting_for_header_list = SimpleTimer()
-                assert len(msg) == 2 and msg[0] == b'SERVER_TASK'
+                assert len(msg) == 2
+                assert msg[0] == b'SERVER_TASK'
                 self.task = pickle.loads(msg[1])
                 self.compiler_id = self.task['compiler_info']['id']
+                fqdn = self.task['fqdn']
+                filelist = self.task['filelist']
+                missing_files_timer = SimpleTimer()
+                missing_files, self.repo_transaction_id = self.header_repository.missing_files(fqdn, filelist)
+                self.times['process_hdr_list'] = missing_files_timer.get()
+                sender.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
+                self.state = self.STATE_SENDING_MISSING_FILES
+            elif self.state == self.STATE_SENDING_MISSING_FILES:
+                assert msg[0] == b'TASK_FILES'
+                fqdn = self.task['fqdn']
+                new_files = pickle.loads(zlib.decompress(msg[1]))
+                self.src_loc = msg[2].tobytes().decode()
+                self.waiting_for_manager_data = SimpleTimer()
+                self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, new_files)
                 has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
                 if has_compiler is None:
                     # Never heard of it.
                     sender.send(b'NEED_COMPILER')
-                    self.task_state = self.STATE_WAITING_FOR_COMPILER
+                    self.state = self.STATE_WAITING_FOR_COMPILER
                     self.compiler_data = BytesIO()
                 else:
                     sender.send(b'READY')
                     self.compiler_ready()
-            elif self.task_state == self.STATE_WAITING_FOR_COMPILER:
+            elif self.state == self.STATE_WAITING_FOR_COMPILER:
                 more, data = msg
                 self.compiler_data.write(data)
                 if more == b'\x00':
@@ -374,7 +381,7 @@ class CompileSession:
                     del self.compiler_data
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
                     self.compiler_ready()
-            elif self.task_state == self.STATE_CHECK_PCH_TAG:
+            elif self.state == self.STATE_CHECK_PCH_TAG:
                 tag = msg[0]
                 assert tag == b'NEED_PCH_FILE'
                 self.pch_file, required = self.pch_repository.register_file(
@@ -386,15 +393,12 @@ class CompileSession:
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()
-                    self.task_state = self.STATE_GET_PCH_DATA
+                    self.state = self.STATE_GET_PCH_DATA
                 else:
                     sender.send(b'NO')
-                    if self.header_state == self.STATE_HEADERS_ARRIVED:
-                        self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.run_compiler()
-                    else:
-                        self.task_state = self.STATE_TASK_READY
-            elif self.task_state == self.STATE_GET_PCH_DATA:
+                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
+                    self.run_compiler()
+            elif self.state == self.STATE_GET_PCH_DATA:
                 more, data = msg
                 self.pch_desc.write(self.pch_decompressor.decompress(data))
                 if more == b'\x00':
@@ -403,24 +407,10 @@ class CompileSession:
                     del self.pch_desc
                     del self.pch_decompressor
                     self.pch_repository.file_completed(*self.task['pch_file'])
-                    if self.header_state == self.STATE_HEADERS_ARRIVED:
-                        self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                        self.run_compiler()
-                    else:
-                        self.task_state = self.STATE_TASK_READY
+                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
+                    self.run_compiler()
             else:
                 raise Exception("Invalid state.")
-        finally:
-            sender.disconnect()
-
-    @async()
-    def send_missing_files(self, fqdn, filelist, attacher_id):
-        try:
-            sender = self.Sender(attacher_id)
-            missing_files_timer = SimpleTimer()
-            missing_files, self.repo_transaction_id = self.header_repository.missing_files(fqdn, filelist)
-            self.times['process_hdr_list'] = missing_files_timer.get()
-            sender.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
         finally:
             sender.disconnect()
 
@@ -431,35 +421,6 @@ class CompileSession:
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result
-
-    def process_attached_msg(self, attacher_id, msg):
-        self.prolong_lifetime()
-        if self.header_state == self.STATE_WAITING_FOR_HEADER_LIST:
-            if hasattr(self, 'waiting_for_header_list'):
-                self.times['wait_for_header_list'] = self.waiting_for_header_list.get()
-                del self.waiting_for_header_list
-            else:
-                self.times['wait_for_header_list'] = 0
-            self.wait_for_headers = SimpleTimer()
-            assert msg[0] == b'TASK_FILE_LIST'
-            fqdn = msg[1]
-            filelist = pickle.loads(msg[2])
-            self.header_state = self.STATE_WAITING_FOR_HEADERS
-            self.send_missing_files(self.misc_thread_pool, fqdn, filelist, attacher_id)
-        elif self.header_state == self.STATE_WAITING_FOR_HEADERS:
-            self.times['wait_for_headers'] = self.wait_for_headers.get()
-            del self.wait_for_headers
-            assert msg[0] == b'TASK_FILES'
-            fqdn = msg[1]
-            new_files = pickle.loads(zlib.decompress(msg[2]))
-            self.src_loc = msg[3].tobytes().decode()
-            self.times['wait_hdr_list_result'] = pickle.loads(msg[4])
-            self.header_state = self.STATE_HEADERS_ARRIVED
-            self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, new_files)
-            if self.task_state == self.STATE_TASK_READY:
-                self.times['waiting_for_mgr_data'] = 0
-                self.include_dirs_future.add_done_callback(lambda future : self.run_compiler())
 
 class CompileWorker:
     def __init__(self, address, compile_slots):

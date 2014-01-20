@@ -1,18 +1,11 @@
 from .scan_headers import collect_headers, cache_info
 
 from Common import SimpleTimer
-from Common import create_socket, recv_multipart
 
-from collections import defaultdict
-import zmq
-import zlib
 import os
-import pickle
-from socket import getfqdn
-from itertools import chain
+import queue
 
 from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO
 from multiprocessing import cpu_count
 
 
@@ -37,211 +30,31 @@ def header_info(task):
     return header_info
 
 class SourceScanner:
-    def __init__(self, zmq_ctx, address, nodes, poller):
-        self.zmq_ctx = zmq_ctx
-
-        self.nodes = nodes
-        self.address = address
-
-        self.mgr_socket = create_socket(self.zmq_ctx, zmq.ROUTER)
-        self.mgr_socket.bind(address)
-
-        self.sessions_socket = create_socket(self.zmq_ctx, zmq.DEALER)
-        self.sessions_socket.bind('inproc://pp_sessions')
-
-        self.sockets = {}
-        self.client_sessions = {}
-        self.server_sessions = {}
-
+    def __init__(self):
+        self.out_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(4 * cpu_count())
-        self.poller = poller
 
-        self.poller.register(self.mgr_socket, zmq.POLLIN)
-        self.poller.register(self.sessions_socket, zmq.POLLIN)
+    def add_task(self, task):
+        future = self.executor.submit(self.process_task_worker, task, SimpleTimer())
+        def verify(f):
+            f.result()
+        future.add_done_callback(verify)
+
+    def completed_task(self):
+        return self.out_queue.get()
+
+    def process_task_worker(self, task, queued_timer):
+        queued_time = queued_timer.get()
+        timer = SimpleTimer()
+        hi = header_info(task.preprocess_task_info)
+        result = (
+            task.client_conn.id,
+            hi,
+            queued_time,
+            timer.get(),
+            cache_info())
+        self.out_queue.put(result)
 
     def terminate(self):
         self.executor.shutdown()
-        self.mgr_socket.unbind(self.address)
-        self.sessions_socket.unbind('inproc://pp_sessions')
-        self.poller.unregister(self.mgr_socket)
-        self.poller.unregister(self.sessions_socket)
-
-    class Session:
-        STATE_WAITING_FOR_TASK = 1
-        STATE_WAITING_FOR_SERVER = 2
-        STATE_ATTACHING_TO_SESSION = 3
-        STATE_SENDING_FILE_LIST = 4
-
-        def __init__(self, zmq_ctx, conn_id, task, executor):
-            self.state = self.STATE_WAITING_FOR_TASK
-            self.conn_id = conn_id
-            self.task = task
-            def verify(future):
-                future.result()
-            executor.submit(self.calc_header_info, zmq_ctx).add_done_callback(
-                verify)
-
-        def calc_header_info(self, zmq_ctx):
-            timer = SimpleTimer()
-            self.header_info = header_info(self.task)
-            self.filelist = self.create_filelist()
-            hits, misses = cache_info()
-
-            self.state = self.STATE_WAITING_FOR_SERVER
-            s = create_socket(zmq_ctx, zmq.DEALER)
-            s.connect('inproc://pp_sessions')
-            s.send_multipart([self.conn_id,
-                b'PREPROCESSING_DONE', pickle.dumps(timer.get()),
-                pickle.dumps((hits, misses))])
-            s.disconnect('inproc://pp_sessions')
-
-        def create_filelist(self):
-            result = []
-            for dir, content in self.header_info:
-                dir_data = []
-                for file, relative, content, checksum, header in content:
-                    # Headers which are relative to source file are not
-                    # considered as candidates for server cache, and are
-                    # always sent together with the source file.
-                    if not relative:
-                        dir_data.append((file, checksum))
-                result.append((dir, dir_data))
-            return tuple(result)
-
-    def handle(self, socket):
-        if socket is self.mgr_socket:
-            conn_id, *msg = recv_multipart(socket)
-            session = self.client_sessions.get(conn_id)
-            if not session:
-                assert msg[0] == b'PREPROCESS_TASK'
-                self.client_sessions[conn_id] = self.Session(self.zmq_ctx,
-                    conn_id, pickle.loads(msg[1]), self.executor)
-            else:
-                assert session.state == self.Session.STATE_WAITING_FOR_SERVER
-                del self.client_sessions[conn_id]
-                if msg[0] == b'SEND_TO_SERVER':
-                    server_id, node_index = msg[1:]
-                    node_index = pickle.loads(node_index)
-                    session.node_index = node_index
-                    available_sockets = self.sockets.setdefault(node_index, [])
-                    if available_sockets:
-                        socket = available_sockets[0]
-                        del available_sockets[0]
-                    else:
-                        socket = create_socket(self.zmq_ctx, zmq.DEALER)
-                        socket.connect(self.nodes[node_index]['address'])
-                    socket.send_multipart([b'ATTACH_TO_SESSION', server_id])
-                    self.poller.register(socket, zmq.POLLIN)
-                    assert socket not in self.server_sessions
-                    self.server_sessions[socket] = session
-                    session.state = self.Session.STATE_ATTACHING_TO_SESSION
-                else:
-                    assert msg[0] == b'DROP'
-            return True
-        elif socket is self.sessions_socket:
-            self.mgr_socket.send_multipart(recv_multipart(self.sessions_socket),
-                copy=False)
-            return True
-        elif socket in self.server_sessions:
-            session = self.server_sessions[socket]
-            msg = recv_multipart(socket)
-            if session.state == self.Session.STATE_ATTACHING_TO_SESSION:
-                assert len(msg) == 1
-                if msg[0] == b'SESSION_ATTACHED':
-                    socket.send_multipart([b'TASK_FILE_LIST',
-                        getfqdn().encode(), pickle.dumps(session.filelist)])
-                    session.wait_for_header_list_response = SimpleTimer()
-                    session.state = self.Session.STATE_SENDING_FILE_LIST
-                else:
-                    assert msg[0] == b'UNKNOWN_SESSION'
-                    # Huh. Weird.
-                    self.poller.unregister(socket)
-                    self.sockets[session.node_index].append(socket)
-                    del self.server_sessions[socket]
-            elif session.state == self.Session.STATE_SENDING_FILE_LIST:
-                assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
-                missing_files = pickle.loads(msg[1])
-                new_files, src_loc = self.task_files_bundle(
-                    session.task['source'], missing_files, session.header_info)
-                socket.send_multipart([b'TASK_FILES', getfqdn().encode(),
-                    zlib.compress(pickle.dumps(new_files)), src_loc.encode(), pickle.dumps(
-                    session.wait_for_header_list_response.get())])
-                self.poller.unregister(socket)
-                self.sockets[session.node_index].append(socket)
-                del self.server_sessions[socket]
-            else:
-                raise Exception("Invalid state.")
-            return True
-        return False
-
-    @classmethod
-    def task_files_bundle(cls, source_file, in_filelist, header_info):
-        relative_includes = {}
-        rel_counter = 0
-        max_depth = 0
-        files = {}
-        # Iterate over
-        #
-        #    (dir1, [[a11, a12], [b11, b12]]),
-        #    (dir2, [[a21, a22], [b21, b22]]),
-        #    ....
-        #
-        # Like it was
-        #
-        #  (dir1, a11, a12),
-        #  (dir1, b11, b12),
-        #  (dir2, a21, a22),
-        #  (dir2, b21, b22),
-        #  ...
-        #
-        #
-        header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))
-        for entry in in_filelist:
-            found = False
-            while not found:
-                try:
-                    dir, file, relative, content, checksum, header = \
-                        next(header_info_iter)
-                    if entry == (dir, file):
-                        assert not relative
-                        found = True
-                        break
-                    elif relative:
-                        break
-                except StopIteration:
-                    raise Exception("Could not find information for {}.".format(
-                        in_name))
-            assert found or relative
-            depth = 0
-            path_elements = file.split('/')
-            # Handle '.' in include directive.
-            path_elements = [p for p in path_elements if p != '.']
-            # Handle '..' in include directive.
-            if relative:
-                while '..' in path_elements:
-                    index = path_elements.index('..')
-                    if index == 0:
-                        depth += 1
-                        if depth > max_depth:
-                            max_depth += 1
-                        del path_elements[index]
-                    else:
-                        del path_element[index - 1:index + 1]
-                if depth:
-                    relative_includes.setdefault(depth - 1, []).append((dir,
-                        '/'.join(path_elements), content, header))
-                else:
-                    files['/'.join(path_elements)] = header + content
-            else:
-                files[(dir, file)] = header + content
-            
-        curr_dir = ''
-        for depth in range(max_depth):
-            assert relative
-            curr_dir += 'dummy_rel/'
-            for dir, file, content, header in relative_includes[depth]:
-                files[('', curr_dir + file)] = header + content
-        rel_file = curr_dir + os.path.basename(source_file)
-        with open(source_file, 'rb') as src:
-            files[('', rel_file)] = header_beginning(source_file) + src.read()
-        return files, rel_file
+        self.out_queue.put('DONE')

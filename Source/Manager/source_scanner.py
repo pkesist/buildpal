@@ -4,8 +4,8 @@ from Common import SimpleTimer
 
 import os
 import queue
+import threading
 
-from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import cpu_count
 
 
@@ -31,30 +31,36 @@ def header_info(task):
 
 class SourceScanner:
     def __init__(self):
+        self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
-        self.executor = ThreadPoolExecutor(4 * cpu_count())
+        self.terminating = False
+        self.threads = set()
+        for i in range(cpu_count() + 1):
+            thread = threading.Thread(target=self.__process_task_worker)
+            self.threads.add(thread)
+        for thread in self.threads:
+            thread.start()
 
     def add_task(self, task):
-        future = self.executor.submit(self.process_task_worker, task, SimpleTimer())
-        def verify(f):
-            f.result()
-        future.add_done_callback(verify)
+        self.in_queue.put((task, SimpleTimer()))
 
     def completed_task(self):
         return self.out_queue.get()
 
-    def process_task_worker(self, task, queued_timer):
-        queued_time = queued_timer.get()
-        timer = SimpleTimer()
-        hi = header_info(task.preprocess_task_info)
-        result = (
-            task.client_conn.id,
-            hi,
-            queued_time,
-            timer.get(),
-            cache_info())
-        self.out_queue.put(result)
+    def __process_task_worker(self):
+        while True:
+            try:
+                task, queued_timer = self.in_queue.get(timeout=1)
+                queued_time = queued_timer.get()
+                hi = header_info(task.preprocess_task_info)
+                self.out_queue.put((task.client_conn.id, hi, queued_time,
+                    queued_timer.get() - queued_time, cache_info()))
+            except queue.Empty:
+                if self.terminating:
+                    return
 
     def terminate(self):
-        self.executor.shutdown()
-        self.out_queue.put('DONE')
+        self.terminating = True
+        for thread in self.threads:
+            thread.join()
+        self.out_queue.put(None)

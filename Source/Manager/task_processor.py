@@ -151,7 +151,6 @@ class TaskProcessor:
         self.poller = zmq.Poller()
 
         self.zmq_ctx = zmq.Context()
-        self.zmq_ctx2 = zmq.Context()
         self.source_scanner = SourceScanner()
 
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
@@ -170,14 +169,17 @@ class TaskProcessor:
         self.poller.unregister(socket)
 
     def run_queue(self):
-        notify_socket = create_socket(self.zmq_ctx2, zmq.PAIR)
+        notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
         notify_socket.connect('inproc://preprocessing')
         fqdn = getfqdn()
 
         try:
             while True:
-                client_id, header_info, async_wait_time, internal_time, (hits, misses) = \
-                    self.source_scanner.completed_task()
+                result = self.source_scanner.completed_task()
+                if result is None:
+                    return
+                client_id, header_info, async_wait_time, internal_time, \
+                    (hits, misses) = result
                 self.cache_info = hits, misses
                 session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
                 assert(session)
@@ -203,7 +205,7 @@ class TaskProcessor:
         queue_thread = threading.Thread(target=self.run_queue)
         queue_thread.start()
 
-        self.preprocessing_done = create_socket(self.zmq_ctx2, zmq.PAIR)
+        self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
         self.preprocessing_done.bind('inproc://preprocessing')
         self.register_socket(self.preprocessing_done)
 

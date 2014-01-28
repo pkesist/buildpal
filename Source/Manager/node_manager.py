@@ -8,8 +8,7 @@ from Common import create_socket, recv_multipart
 
 class NodeManager:
     STATE_SOCKET_OPEN = 0
-    STATE_SOCKET_RESPONDED = 1
-    STATE_SOCKET_READY = 2
+    STATE_SOCKET_READY = 1
 
     CONNECTIONS_PER_NODE = 16
 
@@ -106,22 +105,9 @@ class NodeManager:
 
     def handle_socket(self, socket, msg):
         node_index, state = self.sockets_registered[socket]
-        if state == self.STATE_SOCKET_OPEN:
-            session_created = msg[0]
-            assert session_created == b'SESSION_CREATED'
-            self.sockets_registered[socket] = node_index, self.STATE_SOCKET_RESPONDED
-            return None
-        else:
-            assert state == self.STATE_SOCKET_RESPONDED
-            assert(len(msg) == 1)
-            accept = pickle.loads(msg[0])
-            self.sockets_requested[node_index] -= 1
-            if accept == "ACCEPT":
-                self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY
-                self.sockets_ready.setdefault(node_index, []).append(socket)
-                return node_index
-            else:
-                assert accept == "REJECT"
-                del self.sockets_registered[socket]
-                self.recycle(node_index, socket)
-                return None
+        assert state == self.STATE_SOCKET_OPEN
+        session_created = msg[0]
+        assert session_created == b'SESSION_CREATED'
+        self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY
+        self.sockets_ready.setdefault(node_index, []).append(socket)
+        return node_index

@@ -31,7 +31,7 @@ class PollingMechanism:
     OS_SELECT = 1
     ASYNCIO_PROACTOR = 2
 
-polling_mechanism = PollingMechanism.ASYNCIO_PROACTOR
+polling_mechanism = PollingMechanism.ZMQ_SELECT
 
 if polling_mechanism == PollingMechanism.OS_SELECT:
     class ZmqSocket:

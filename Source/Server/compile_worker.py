@@ -138,14 +138,13 @@ class Popen(subprocess.Popen):
         subprocess._winapi.CloseHandle(ht)
 
 class CompileSession:
-    STATE_START = 0
-    STATE_GET_TASK = 1
-    STATE_DONE = 2
-    STATE_SENDING_MISSING_FILES = 3
-    STATE_WAITING_FOR_COMPILER = 4
-    STATE_CHECK_PCH_TAG = 5
-    STATE_GET_PCH_DATA = 6
-    STATE_FAILED = 7
+    STATE_GET_TASK = 0
+    STATE_DONE = 1
+    STATE_SENDING_MISSING_FILES = 2
+    STATE_WAITING_FOR_COMPILER = 3
+    STATE_CHECK_PCH_TAG = 4
+    STATE_GET_PCH_DATA = 5
+    STATE_FAILED = 6
 
     def verify(self, future):
         try:
@@ -178,7 +177,7 @@ class CompileSession:
     def __init__(self, pch_repository, header_repository, compiler_repository,
                  task_counter, checksums, compile_thread_pool, misc_thread_pool,
                  scheduler):
-        self.state = self.STATE_START
+        self.state = self.STATE_GET_TASK
         self.task_counter = task_counter
         self.compiler_repository = compiler_repository
         self.header_repository = header_repository
@@ -198,14 +197,6 @@ class CompileSession:
             os.rmdir(self.include_path)
         except Exception:
             pass
-
-    def created(self):
-        assert self.state == self.STATE_START
-        sender = self.Sender(self.id)
-        accept_task = True
-        sender.send_pyobj('ACCEPT' if accept_task else 'REJECT')
-        self.state = self.STATE_GET_TASK if accept_task else self.STATE_DONE
-        return accept_task
 
     class Sender:
         def __init__(self, id):
@@ -512,13 +503,6 @@ class CompileWorker:
                         self.workers[client_id] = ProcessMsg(session)
                         # TODO: Remove this, not needed.
                         clients.send_multipart([client_id, b'SESSION_CREATED'])
-                        session.created()
-                    elif msg[0] == b'ATTACH_TO_SESSION':
-                        session_id = msg[1]
-                        session = self.sessions.get(session_id)
-                        if session:
-                            self.workers[client_id] = ProcessAttachedMsg(session, client_id)
-                            clients.send_multipart([client_id, b'SESSION_ATTACHED'])
                     else:
                         worker = self.workers.get(client_id)
                         if worker:

@@ -20,14 +20,13 @@ class NodeManager:
         self.node_info = node_info
         self.__unique_id = 0
 
-    def spawn_connections(self, zmq_ctx):
+    def __spawn_connections(self, zmq_ctx, node_index):
         result = []
-        for node_index in range(len(self.node_info)):
-            for x in range(self.CONNECTIONS_PER_NODE - self.__node_connections(node_index)):
-                socket = self.__connect_to_node(zmq_ctx, node_index)
-                if not socket:
-                    break
-                result.append(socket)
+        for x in range(self.CONNECTIONS_PER_NODE - self.__node_connections(node_index)):
+            socket = self.__connect_to_node(zmq_ctx, node_index)
+            if not socket:
+                break
+            result.append(socket)
         return result
 
     def __connect_to_node(self, zmq_ctx, node_index):
@@ -86,18 +85,20 @@ class NodeManager:
         self.sockets_registered[socket] = (node_index, self.STATE_SOCKET_OPEN)
         self.sockets_requested[node_index] = self.sockets_requested.get(node_index, 0) + 1
 
-    def get_server_conn(self, node_index=None):
+    def get_server_conn(self, zmq_ctx, register, node_index=None):
         if node_index is None:
             node_index = self.__best_node()
-        if node_index is None:
-            return None
+        assert node_index is not None
         node_sockets = self.sockets_ready.get(node_index)
-        if not node_sockets:
-            return None
-        socket = node_sockets[0]
-        del node_sockets[0]
-        del self.sockets_registered[socket]
-        return socket, node_index
+        if node_sockets:
+            result = node_sockets[0], node_index
+            del node_sockets[0]
+            del self.sockets_registered[result[0]]
+        else:
+            result = None
+        for socket in self.__spawn_connections(zmq_ctx, node_index):
+            register(socket)
+        return result
 
     def __node_connections(self, node_index):
         return self.sockets_requested.get(node_index, 0) + \

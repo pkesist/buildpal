@@ -181,7 +181,8 @@ class TaskProcessor:
 
         def send(self, data):
             try:
-                self.socket.send_multipart([self.id, b'\x00'.join(data) + b'\x00\x01'], copy=False)
+                self.socket.send_multipart(
+                    [self.id, b'\x00'.join(data) + b'\x00\x01'], copy=False)
             except zmq.error.ZMQError:
                 # In case connection gets broken ZMQ raises an error.
                 pass
@@ -313,9 +314,6 @@ class TaskProcessor:
             notify_socket.disconnect('inproc://preprocessing')
 
     def run_poller(self):
-        for socket in self.node_manager.spawn_connections(self.zmq_ctx):
-            self.register_socket(socket, self.__handle_server_socket)
-
         self.poller.poll(1)
 
     def __handle_preprocessing_done(self, socket, msg):
@@ -340,7 +338,9 @@ class TaskProcessor:
                 client_id)
             self.timer.add_time('preprocessing.external', session.pp_timer.get())
             self.csrv.client_ready((session, SimpleTimer()))
-            server_result = self.node_manager.get_server_conn()
+            server_result = self.node_manager.get_server_conn(self.zmq_ctx,
+                lambda socket : self.register_socket(socket,
+                self.__handle_server_socket))
             if server_result:
                 self.csrv.server_ready(server_result)
 
@@ -398,7 +398,9 @@ class TaskProcessor:
                     if task.retries <= 3:
                         session.rewind()
                         self.csrv.client_ready((session, SimpleTimer()))
-                        server_result = self.node_manager.get_server_conn()
+                        server_result = self.node_manager.get_server_conn(
+                            self.zmq_ctx, lambda socket : self.register_socket(
+                            socket, self.__handle_server_socket))
                         if server_result:
                             self.csrv.server_ready(server_result)
                     else:
@@ -408,7 +410,10 @@ class TaskProcessor:
             # Not part of a session, handled by node_manager.
             node_index = self.node_manager.handle_socket(socket, msg)
             if node_index is not None and self.csrv.first():
-                server_conn, node_index = self.node_manager.get_server_conn(node_index)
+                register_func = lambda socket : self.register_socket(socket,
+                    self.__handle_server_socket)
+                server_conn, node_index = self.node_manager.get_server_conn(
+                    self.zmq_ctx, register_func, node_index)
                 assert server_conn
                 self.csrv.server_ready((server_conn, node_index))
 

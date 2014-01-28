@@ -17,12 +17,161 @@ import pickle
 import sys
 import zmq
 import sched
+import select
+import socket
 import threading
 
 from functools import cmp_to_key
 from multiprocessing import cpu_count, Semaphore
 from socket import getfqdn
 from time import time
+
+class PollingMechanism:
+    ZMQ_SELECT = 0
+    OS_SELECT = 1
+    ASYNCIO_PROACTOR = 2
+
+polling_mechanism = PollingMechanism.ASYNCIO_PROACTOR
+
+if polling_mechanism == PollingMechanism.OS_SELECT:
+    class ZmqSocket:
+        def __init__(self, timer, socket, handler):
+            self.socket = socket
+            self.handler = handler
+            self.timer = timer
+
+        @classmethod
+        def fileno_from_socket(cls, sock):
+            return sock.getsockopt(zmq.FD)
+
+        def fileno(self):
+            return self.fileno_from_socket(self.socket)
+
+        def registered(self):
+            while True:
+                try:
+                    self.handler(self.socket, recv_multipart(self.socket, zmq.NOBLOCK))
+                except zmq.ZMQError:
+                    return
+
+        def ready(self):
+            if self.socket.getsockopt(zmq.EVENTS) & zmq.POLLIN:
+                self.registered()
+
+    class RawSocket:
+        def __init__(self, timer, socket, handler):
+            self.socket = socket
+            self.handler = handler
+            self.timer = timer
+
+        def registered(self):
+            pass
+
+        @classmethod
+        def fileno_from_socket(cls, sock):
+            return sock.fileno()
+
+        def fileno(self):
+            return self.fileno_from_socket(self.socket)
+
+        def ready(self):
+            self.handler(self.socket, self.socket.recv(256))
+
+    class Poller:
+        def __init__(self):
+            self.pollin = set()
+            self.pollout = set()
+            self.sockets = {}
+
+        def __wrap_type(self, sock):
+            if isinstance(sock, zmq.Socket):
+                return ZmqSocket
+            elif isinstance(sock, socket.socket):
+                return RawSocket
+
+        def register(self, timer, socket, handler):
+            self.register_worker(self.__wrap_type(socket)(timer, socket, handler))
+
+        def register_worker(self, socket):
+            fd = socket.fileno()
+            self.sockets[fd] = socket
+            self.pollin.add(fd)
+            socket.registered()
+
+        def unregister(self, socket):
+            fd = self.__wrap_type(socket).fileno_from_socket(socket)
+            self.pollin.discard(fd)
+            self.sockets.pop(fd)
+
+        def poll(self, timeout):
+            pollin, pollout, pollerr = select.select(self.pollin, [], [], timeout)
+            for fd in pollin:
+                self.sockets[fd].ready()
+
+elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
+    class Poller:
+        def __init__(self):
+            self.poller = zmq.Poller()
+            self.sockets = {}
+
+        def register(self, timer, socket, handler):
+            self.sockets[socket] = handler, timer
+            self.poller.register(socket, zmq.POLLIN)
+
+        def unregister(self, socket):
+            del self.sockets[socket]
+            self.poller.unregister(socket)
+
+        def poll(self, timeout):
+            result = self.poller.poll(timeout * 1000)
+            for socket, event in result:
+                assert event == zmq.POLLIN
+                handler, timer = self.sockets[socket]
+                handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+
+elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
+    import asyncio
+    import socket
+
+    class Poller:
+        @asyncio.coroutine
+        def handle_socket(self, zmq_socket, handler, sock=None):
+            if not sock:
+                sock = socket.socket(fileno=zmq_socket.getsockopt(zmq.FD))
+            yield from self.proactor.sock_recv(sock, 0)
+            self.handle_tasks(zmq_socket, handler)
+            if zmq_socket in self.registered_sockets:
+                asyncio.Task(self.handle_socket(zmq_socket, handler, sock), loop=self.proactor)
+
+        @asyncio.coroutine
+        def add_socket(self, socket):
+            self.registered_sockets.add(socket)
+
+        @asyncio.coroutine
+        def remove_socket(self, socket):
+            self.registered_sockets.remove(socket)
+
+        def handle_tasks(self, socket, handler):
+            while True:
+                try:
+                    handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+                except zmq.ZMQError:
+                    return
+
+        def __init__(self):
+            self.proactor = asyncio.ProactorEventLoop()
+            self.registered_sockets = set()
+
+        def register(self, timer, socket, handler):
+            self.handle_tasks(socket, handler)
+            asyncio.Task(self.add_socket(socket), loop=self.proactor)
+            asyncio.Task(self.handle_socket(socket, handler), loop=self.proactor)
+
+        def unregister(self, socket):
+            asyncio.Task(self.remove_socket(socket), loop=self.proactor)
+
+        def poll(self, timeout):
+            self.proactor.run_forever()
 
 class TaskProcessor:
     class SendProxy:
@@ -76,31 +225,12 @@ class TaskProcessor:
                 import traceback
                 traceback.print_exc()
 
-    class PreprocessorSockets:
-        def __init__(self, zmq_ctx):
-            self.pp_sockets = []
-            self.zmq_ctx = zmq_ctx
-
-        def get_socket(self):
-            if self.pp_sockets:
-                preprocess_socket = self.pp_sockets[0]
-                del self.pp_sockets[0]
-            else:
-                preprocess_socket = self.zmq_ctx.socket(zmq.DEALER)
-                preprocess_socket.connect('inproc://preprocessor')
-            return preprocess_socket
-
-        def return_socket(self, socket):
-            assert socket not in self.pp_sockets
-            self.pp_sockets.append(socket)
-
     class ClientServerRendezvous(Rendezvous):
-        def __init__(self, timer, sessions, node_info, pp_sockets):
+        def __init__(self, timer, sessions, node_info):
             Rendezvous.__init__(self, 'client_ready', 'server_ready')
             self.node_info = node_info
             self.sessions = sessions
             self.timer = timer
-            self.pp_sockets = pp_sockets
 
         def match(self, client_tuple, server_tuple):
             session, timer = client_tuple
@@ -128,7 +258,8 @@ class TaskProcessor:
             return result
 
         def process_new_data(self, client_id, data):
-            self.data[client_id] = self.data.get(client_id, b'') + data.tobytes()
+            byte_data = data if type(data) == bytes else data.tobytes()
+            self.data[client_id] = self.data.get(client_id, b'') + byte_data
             messages = []
             while True:
                 x = self.__get_message(client_id)
@@ -148,66 +279,159 @@ class TaskProcessor:
         self.sessions = self.Sessions()
         self.node_manager = NodeManager(self.node_info)
 
-        self.poller = zmq.Poller()
+        self.poller = Poller()
 
         self.zmq_ctx = zmq.Context()
-        self.source_scanner = SourceScanner()
+        self.source_scanner = SourceScanner(self.notify_preprocessing_done)
 
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
         self.client_socket.bind('tcp://*:{}'.format(self.__port))
-        self.register_socket(self.client_socket)
+        self.register_socket(self.client_socket, self.__handle_client_socket)
 
-        self.pp_sockets = self.PreprocessorSockets(self.zmq_ctx)
         self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
-            self.node_info, self.pp_sockets)
+            self.node_info)
         self.client_data = self.ClientData()
 
-    def register_socket(self, socket):
-        self.poller.register(socket, zmq.POLLIN)
+    def register_socket(self, socket, handler):
+        self.poller.register(self.timer, socket, handler)
 
     def unregister_socket(self, socket):
         self.poller.unregister(socket)
 
-    def run_queue(self):
-        notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
-        notify_socket.connect('inproc://preprocessing')
-        fqdn = getfqdn()
-
-        try:
-            while True:
-                result = self.source_scanner.completed_task()
-                if result is None:
-                    return
-                client_id, header_info, async_wait_time, internal_time, \
-                    (hits, misses) = result
-                self.cache_info = hits, misses
-                session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
-                assert(session)
-                self.timer.add_time('preprocessing.async_wait', async_wait_time)
-                self.timer.add_time('preprocessing.internal', internal_time)
-                # Add filelist to package which goes to the server.
-                session.task.server_task_info['filelist'] = create_filelist(header_info)
-                session.task.server_task_info['fqdn'] = fqdn
-                session.task.header_info = header_info
-                notify_socket.send_multipart([client_id, pickle.dumps(time())], copy=False)
-        finally:
+    def notify_preprocessing_done(self):
+        if polling_mechanism == PollingMechanism.OS_SELECT:
+            self.notify_socket.send(b'x')
+        elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
+            notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
+            notify_socket.connect('inproc://preprocessing')
+            notify_socket.send(b'x')
+            notify_socket.disconnect('inproc://preprocessing')
+        elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
+            notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
+            notify_socket.connect('inproc://preprocessing')
+            notify_socket.send(b'x')
             notify_socket.disconnect('inproc://preprocessing')
 
     def run_poller(self):
-        for connection in self.node_manager.spawn_connections(self.zmq_ctx):
-            self.register_socket(connection)
+        for socket in self.node_manager.spawn_connections(self.zmq_ctx):
+            self.register_socket(socket, self.__handle_server_socket)
 
-        for socket, flags in dict(self.poller.poll(1000)).items():
-            assert flags == zmq.POLLIN
-            self.handle_socket(socket)
+        self.poller.poll(1)
+
+    def __handle_preprocessing_done(self, socket, msg):
+        fqdn = getfqdn()
+        while True:
+            result = self.source_scanner.completed_task()
+            if not result:
+                break
+            client_id, header_info, time_in_queue, preprocessing_time, \
+                time_queued, (hits, misses) = result
+            self.cache_info = hits, misses
+            session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
+            assert(session)
+            self.timer.add_time('preprocessing.in_queue', time_in_queue)
+            self.timer.add_time('preprocessing.out_queue', time() - time_queued)
+            self.timer.add_time('preprocessing.internal', preprocessing_time)
+            # Add filelist to package which goes to the server.
+            session.task.server_task_info['filelist'] = create_filelist(header_info)
+            session.task.server_task_info['fqdn'] = fqdn
+            session.task.header_info = header_info
+            session = self.sessions.get(self.Sessions.FROM_CLIENT,
+                client_id)
+            self.timer.add_time('preprocessing.external', session.pp_timer.get())
+            self.csrv.client_ready((session, SimpleTimer()))
+            server_result = self.node_manager.get_server_conn()
+            if server_result:
+                self.csrv.server_ready(server_result)
+
+    def __handle_client_socket(self, socket, msg):
+        client_id, data = msg
+        messages = self.client_data.process_new_data(client_id, data)
+        for msg in messages:
+            session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
+            if session:
+                session.got_data_from_client(msg)
+            else:
+                # Create new session.
+                compiler_name = msg[0].decode()
+                executable = msg[1].decode()
+                sysincludes = msg[2].decode()
+                cwd = msg[3].decode()
+                command = [x.decode() for x in msg[4:]]
+                client_conn = self.SendProxy(self.client_socket, client_id.tobytes())
+                client_conn.send([b'TASK_RECEIVED'])
+                assert compiler_name == 'msvc'
+                compiler = MSVCWrapper()
+                def preprocess_task(session):
+                    session.pp_timer = SimpleTimer()
+                    self.source_scanner.add_task(session.task)
+                for task in create_tasks(client_conn, compiler,
+                    executable, cwd, sysincludes, command):
+                    session = CompileSession(task, preprocess_task,
+                        self.compiler_info)
+                    self.sessions.register(self.Sessions.FROM_CLIENT,
+                        client_id, session)
+                    session.begin()
+
+    def __handle_server_socket(self, socket, msg):
+        # Connection to server node.
+        result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
+        if result is not None:
+            # Part of a session.
+            session, node_index = result
+            client_id = session.client_conn.id
+            session_done = session.got_data_from_server(msg)
+            if session_done:
+                self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
+                self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
+                self.unregister_socket(socket)
+                self.node_manager.recycle(node_index, socket)
+                if session.state == session.STATE_DONE:
+                    session.task.completed(session.retcode,
+                        session.stdout, session.stderr)
+                else:
+                    assert session.state == session.STATE_SERVER_FAILURE
+                    if hasattr(task, 'retries'):
+                        task.retries += 1
+                    else:
+                        task.retries = 1
+                    if task.retries <= 3:
+                        session.rewind()
+                        self.csrv.client_ready((session, SimpleTimer()))
+                        server_result = self.node_manager.get_server_conn()
+                        if server_result:
+                            self.csrv.server_ready(server_result)
+                    else:
+                        session.task.completed(session.client_conn,
+                            session.retcode, session.stdout, session.stderr)
+        else:
+            # Not part of a session, handled by node_manager.
+            node_index = self.node_manager.handle_socket(socket, msg)
+            if node_index is not None and self.csrv.first():
+                server_conn, node_index = self.node_manager.get_server_conn(node_index)
+                assert server_conn
+                self.csrv.server_ready((server_conn, node_index))
 
     def run(self):
-        queue_thread = threading.Thread(target=self.run_queue)
-        queue_thread.start()
+        if polling_mechanism == PollingMechanism.OS_SELECT:
+            listen_socket = socket.socket()
+            listen_socket.bind(('', 50001))
+            listen_socket.listen(0)
 
-        self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
-        self.preprocessing_done.bind('inproc://preprocessing')
-        self.register_socket(self.preprocessing_done)
+            self.notify_socket = socket.socket()
+            self.notify_socket.connect(('localhost', 50001))
+
+            self.preprocessing_done, whatever = listen_socket.accept()
+            listen_socket.close()
+            self.poller.register(self.timer, self.preprocessing_done, self.__handle_preprocessing_done)
+        elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
+            self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
+            self.preprocessing_done.bind('inproc://preprocessing')
+            self.register_socket(self.preprocessing_done, self.__handle_preprocessing_done)
+        elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
+            self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
+            self.preprocessing_done.bind('inproc://preprocessing')
+            self.register_socket(self.preprocessing_done, self.__handle_preprocessing_done)
 
         try:
             while True:
@@ -215,92 +439,13 @@ class TaskProcessor:
                 self.run_poller()
         finally:
             self.source_scanner.terminate()
-            queue_thread.join()
             self.poller.unregister(self.preprocessing_done)
-            self.preprocessing_done.unbind('inproc://preprocessing')
-
-    def handle_socket(self, socket):
-        if socket is self.preprocessing_done:
-            (client_id, start_time) = recv_multipart(socket)
-            self.timer.add_time('preprocessing.notify_done', time() - pickle.loads(start_time))
-            session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
-            self.timer.add_time('preprocessing.external', session.pp_timer.get())
-            self.csrv.client_ready((session, SimpleTimer()))
-            server_result = self.node_manager.get_server_conn()
-            if server_result:
-                self.csrv.server_ready(server_result)
-
-        elif socket is self.client_socket:
-            with self.timer.timeit('poller.client'):
-                client_id, data = recv_multipart(self.client_socket)
-                messages = self.client_data.process_new_data(client_id, data)
-                for msg in messages:
-                    session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
-                    if session:
-                        session.got_data_from_client(msg)
-                    else:
-                        with self.timer.timeit('poller.client.no_sess'):
-                            # Create new session.
-                            compiler_name = msg[0].decode()
-                            executable = msg[1].decode()
-                            sysincludes = msg[2].decode()
-                            cwd = msg[3].decode()
-                            command = [x.decode() for x in msg[4:]]
-                            client_conn = self.SendProxy(self.client_socket, client_id.tobytes())
-                            client_conn.send([b'TASK_RECEIVED'])
-                            assert compiler_name == 'msvc'
-                            compiler = MSVCWrapper()
-                            def preprocess_task(session):
-                                session.pp_timer = SimpleTimer()
-                                self.source_scanner.add_task(session.task)
-                            for task in create_tasks(client_conn, compiler,
-                                executable, cwd, sysincludes, command):
-                                session = CompileSession(task, preprocess_task,
-                                    self.compiler_info)
-                                self.sessions.register(self.Sessions.FROM_CLIENT,
-                                    client_id, session)
-                                session.begin()
-
-        else:
-            with self.timer.timeit('poller.server'):
-                # Connection to server node.
-                result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
-                if result is not None:
-                    # Part of a session.
-                    session, node_index = result
-                    msg = recv_multipart(socket)
-                    client_id = session.client_conn.id
-                    session_done = session.got_data_from_server(msg)
-                    if session_done:
-                        self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
-                        self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
-                        self.unregister_socket(socket)
-                        self.node_manager.recycle(node_index, socket)
-                        if session.state == session.STATE_DONE:
-                            session.task.completed(session.retcode,
-                                session.stdout, session.stderr)
-                        else:
-                            assert session.state == session.STATE_SERVER_FAILURE
-                            if hasattr(task, 'retries'):
-                                task.retries += 1
-                            else:
-                                task.retries = 1
-                            if task.retries <= 3:
-                                session.rewind()
-                                self.csrv.client_ready((session, SimpleTimer()))
-                                server_result = self.node_manager.get_server_conn()
-                                if server_result:
-                                    self.csrv.server_ready(server_result)
-                            else:
-                                session.task.completed(session.client_conn,
-                                    session.retcode, session.stdout, session.stderr)
-                else:
-                    # Not part of a session, handled by node_manager.
-                    node_index = self.node_manager.handle_socket(socket)
-                    if node_index is not None and self.csrv.first():
-                        server_conn, node_index = self.node_manager.get_server_conn(node_index)
-                        assert server_conn
-                        self.csrv.server_ready((server_conn, node_index))
+            if polling_mechanism == PollingMechanism.OS_SELECT:
+                self.preprocessing_done.close()
+            elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
+                self.preprocessing_done.unbind('inproc://preprocessing')
+            elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
+                self.preprocessing_done.unbind('inproc://preprocessing')
 
     def print_stats(self):
         current_time = time()

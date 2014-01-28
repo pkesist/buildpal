@@ -7,7 +7,7 @@ import queue
 import threading
 
 from multiprocessing import cpu_count
-
+from time import time
 
 def header_beginning(filename):
     # 'sourceannotations.h' header is funny. If you add a #line directive to
@@ -30,13 +30,13 @@ def header_info(task):
     return header_info
 
 class SourceScanner:
-    def __init__(self):
+    def __init__(self, notify):
         self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
         self.terminating = False
         self.threads = set()
         for i in range(cpu_count() + 1):
-            thread = threading.Thread(target=self.__process_task_worker)
+            thread = threading.Thread(target=self.__process_task_worker, args=(notify,))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
@@ -45,16 +45,21 @@ class SourceScanner:
         self.in_queue.put((task, SimpleTimer()))
 
     def completed_task(self):
-        return self.out_queue.get()
+        try:
+            return self.out_queue.get(block=False)
+        except queue.Empty:
+            return None
 
-    def __process_task_worker(self):
+    def __process_task_worker(self, notify):
         while True:
             try:
                 task, queued_timer = self.in_queue.get(timeout=1)
-                queued_time = queued_timer.get()
+                time_in_queue = queued_timer.get()
                 hi = header_info(task.preprocess_task_info)
-                self.out_queue.put((task.client_conn.id, hi, queued_time,
-                    queued_timer.get() - queued_time, cache_info()))
+                self.out_queue.put((task.client_conn.id, hi, time_in_queue,
+                    queued_timer.get() - time_in_queue, time(), cache_info()))
+                notify()
+
             except queue.Empty:
                 if self.terminating:
                     return

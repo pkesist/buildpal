@@ -104,17 +104,17 @@ class NodeManager:
         return self.sockets_requested.get(node_index, 0) + \
             len(self.sockets_ready.get(node_index, []))
 
-    def handle_socket(self, socket):
+    def handle_socket(self, socket, msg):
         node_index, state = self.sockets_registered[socket]
         if state == self.STATE_SOCKET_OPEN:
-            msg = recv_multipart(socket)
             session_created = msg[0]
             assert session_created == b'SESSION_CREATED'
             self.sockets_registered[socket] = node_index, self.STATE_SOCKET_RESPONDED
             return None
         else:
             assert state == self.STATE_SOCKET_RESPONDED
-            accept = socket.recv_pyobj()
+            assert(len(msg) == 1)
+            accept = pickle.loads(msg[0])
             self.sockets_requested[node_index] -= 1
             if accept == "ACCEPT":
                 self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY

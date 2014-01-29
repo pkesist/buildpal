@@ -10,7 +10,7 @@ class NodeManager:
     STATE_SOCKET_OPEN = 0
     STATE_SOCKET_READY = 1
 
-    CONNECTIONS_PER_NODE = 16
+    CONNECTIONS_PER_NODE = 32
 
     def __init__(self, node_info):
         self.sockets_registered = {}
@@ -20,16 +20,13 @@ class NodeManager:
         self.node_info = node_info
         self.__unique_id = 0
 
-    def __spawn_connections(self, zmq_ctx, node_index):
-        result = []
+    def __spawn_connections(self, zmq_ctx, node_index, register):
         for x in range(self.CONNECTIONS_PER_NODE - self.__node_connections(node_index)):
-            socket = self.__connect_to_node(zmq_ctx, node_index)
+            socket = self.__connect_to_node(zmq_ctx, node_index, register)
             if not socket:
                 break
-            result.append(socket)
-        return result
 
-    def __connect_to_node(self, zmq_ctx, node_index):
+    def __connect_to_node(self, zmq_ctx, node_index, register):
         recycled = self.sockets_recycled.get(node_index)
         if recycled:
             socket = recycled[0]
@@ -41,6 +38,7 @@ class NodeManager:
                 socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
                 self.__unique_id += 1
                 socket.connect(node_address)
+                register(socket)
             except zmq.ZMQError:
                 print("Failed to connect to '{}'".format(node_address))
                 return None
@@ -96,8 +94,7 @@ class NodeManager:
             del self.sockets_registered[result[0]]
         else:
             result = None
-        for socket in self.__spawn_connections(zmq_ctx, node_index):
-            register(socket)
+        self.__spawn_connections(zmq_ctx, node_index, register)
         return result
 
     def __node_connections(self, node_index):
@@ -109,6 +106,7 @@ class NodeManager:
         assert state == self.STATE_SOCKET_OPEN
         session_created = msg[0]
         assert session_created == b'SESSION_CREATED'
+        self.sockets_requested[node_index] -= 1
         self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY
         self.sockets_ready.setdefault(node_index, []).append(socket)
         return node_index

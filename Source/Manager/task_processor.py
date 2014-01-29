@@ -103,10 +103,15 @@ if polling_mechanism == PollingMechanism.OS_SELECT:
             self.pollin.discard(fd)
             self.sockets.pop(fd)
 
-        def poll(self, timeout):
+        def run_one(self, timeout):
             pollin, pollout, pollerr = select.select(self.pollin, [], [], timeout)
             for fd in pollin:
                 self.sockets[fd].ready()
+
+        def run(self, printer):
+            while True:
+                printer()
+                self.run_one(1)
 
 elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
     class Poller:
@@ -122,56 +127,82 @@ elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
             del self.sockets[socket]
             self.poller.unregister(socket)
 
-        def poll(self, timeout):
+        def run_one(self, timeout):
             result = self.poller.poll(timeout * 1000)
             for socket, event in result:
                 assert event == zmq.POLLIN
                 handler, timer = self.sockets[socket]
                 handler(socket, recv_multipart(socket, zmq.NOBLOCK))
 
+        def run(self, printer):
+            while True:
+                printer()
+                self.run_one(1)
+
 elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
     import asyncio
     import socket
+    import asyncio.windows_utils as asyncio_win
+    import _overlapped
+
+    class SocketWrapper:
+        def __init__(self, fileno):
+            self._fileno = fileno
+
+        def fileno(self):
+            return self._fileno
 
     class Poller:
-        @asyncio.coroutine
-        def handle_socket(self, zmq_socket, handler, sock=None):
-            if not sock:
-                sock = socket.socket(fileno=zmq_socket.getsockopt(zmq.FD))
-            yield from self.proactor.sock_recv(sock, 0)
-            self.handle_tasks(zmq_socket, handler)
-            if zmq_socket in self.registered_sockets:
-                asyncio.Task(self.handle_socket(zmq_socket, handler, sock), loop=self.proactor)
-
-        @asyncio.coroutine
-        def add_socket(self, socket):
-            self.registered_sockets.add(socket)
-
-        @asyncio.coroutine
-        def remove_socket(self, socket):
-            self.registered_sockets.remove(socket)
-
-        def handle_tasks(self, socket, handler):
-            while True:
-                try:
-                    handler(socket, recv_multipart(socket, zmq.NOBLOCK))
-                except zmq.ZMQError:
-                    return
-
         def __init__(self):
             self.proactor = asyncio.ProactorEventLoop()
             self.registered_sockets = set()
 
+        @asyncio.coroutine
+        def handle_socket(self, zmq_socket, handler, sock=None):
+            assert zmq_socket in self.registered_sockets
+            if sock is None:
+                sock = SocketWrapper(fileno=zmq_socket.getsockopt(zmq.FD))
+            tasks_handled = self.handle_tasks(zmq_socket, handler)
+            yield from self.proactor.sock_recv(sock, 0)
+            asyncio.async(self.handle_socket(zmq_socket, handler, sock), loop=self.proactor)
+
+        def handle_tasks(self, socket, handler):
+            assert socket in self.registered_sockets
+            while socket.getsockopt(zmq.EVENTS) & zmq.POLLIN:
+                handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+
+        @asyncio.coroutine
+        def handle_pipe(self, pipe_handle, handler):
+            data = yield from self.proactor.sock_recv(pipe_handle, 256)
+            handler(pipe_handle, data)
+            asyncio.async(self.handle_pipe(pipe_handle, handler), loop=self.proactor)
+
+        @asyncio.coroutine
+        def print(self, printer):
+            printer()
+            yield from asyncio.sleep(2, loop=self.proactor)
+            asyncio.async(self.print(printer), loop=self.proactor)
+
+        def register_pipe(self, pipe_handle, handler):
+            asyncio.async(self.handle_pipe(pipe_handle, handler), loop=self.proactor)
+
         def register(self, timer, socket, handler):
-            self.handle_tasks(socket, handler)
-            asyncio.Task(self.add_socket(socket), loop=self.proactor)
-            asyncio.Task(self.handle_socket(socket, handler), loop=self.proactor)
+            assert socket not in self.registered_sockets
+            self.registered_sockets.add(socket)
+            asyncio.async(self.handle_socket(socket, handler), loop=self.proactor)
 
         def unregister(self, socket):
-            asyncio.Task(self.remove_socket(socket), loop=self.proactor)
+            """
+            Did not really succeed implementing this.
+            register->unregister->register sequence keeps crashing the process.
+            Finally stopped using this pattern.
+            """ 
+            self.registered_sockets.remove(socket)
 
-        def poll(self, timeout):
+        def run(self, printer):
+            asyncio.async(self.print(printer), loop=self.proactor)
             self.proactor.run_forever()
+
 
 class TaskProcessor:
     class SendProxy:
@@ -308,13 +339,8 @@ class TaskProcessor:
             notify_socket.send(b'x')
             notify_socket.disconnect('inproc://preprocessing')
         elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-            notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
-            notify_socket.connect('inproc://preprocessing')
-            notify_socket.send(b'x')
-            notify_socket.disconnect('inproc://preprocessing')
-
-    def run_poller(self):
-        self.poller.poll(1)
+            ov = _overlapped.Overlapped()
+            ov.WriteFile(self.pp_pipe_write.fileno(), b'x')
 
     def __handle_preprocessing_done(self, socket, msg):
         fqdn = getfqdn()
@@ -322,13 +348,14 @@ class TaskProcessor:
             result = self.source_scanner.completed_task()
             if not result:
                 break
-            client_id, header_info, time_in_queue, preprocessing_time, \
+            client_id, header_info, time_in_in_queue, preprocessing_time, \
                 time_queued, (hits, misses) = result
+            time_in_out_queue = time() - time_queued
             self.cache_info = hits, misses
             session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
             assert(session)
-            self.timer.add_time('preprocessing.in_queue', time_in_queue)
-            self.timer.add_time('preprocessing.out_queue', time() - time_queued)
+            self.timer.add_time('preprocessing.in_queue', time_in_in_queue)
+            self.timer.add_time('preprocessing.out_queue', time_in_out_queue)
             self.timer.add_time('preprocessing.internal', preprocessing_time)
             # Add filelist to package which goes to the server.
             session.task.server_task_info['filelist'] = create_filelist(header_info)
@@ -337,12 +364,17 @@ class TaskProcessor:
             session = self.sessions.get(self.Sessions.FROM_CLIENT,
                 client_id)
             self.timer.add_time('preprocessing.external', session.pp_timer.get())
-            self.csrv.client_ready((session, SimpleTimer()))
-            server_result = self.node_manager.get_server_conn(self.zmq_ctx,
-                lambda socket : self.register_socket(socket,
-                self.__handle_server_socket))
-            if server_result:
-                self.csrv.server_ready(server_result)
+            DEBUG_just_preprocess = False
+            if DEBUG_just_preprocess:
+                session.client_conn.send([b'EXIT', b'0', b'', b''])
+                self.sessions.unregister(self.Sessions.FROM_CLIENT, session.client_conn.id)
+            else:
+                self.csrv.client_ready((session, SimpleTimer()))
+                server_result = self.node_manager.get_server_conn(self.zmq_ctx,
+                    lambda socket : self.register_socket(socket,
+                    self.__handle_server_socket))
+                if server_result:
+                    self.csrv.server_ready(server_result)
 
     def __handle_client_socket(self, socket, msg):
         client_id, data = msg
@@ -384,7 +416,6 @@ class TaskProcessor:
             if session_done:
                 self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
                 self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
-                self.unregister_socket(socket)
                 self.node_manager.recycle(node_index, socket)
                 if session.state == session.STATE_DONE:
                     session.task.completed(session.retcode,
@@ -434,23 +465,23 @@ class TaskProcessor:
             self.preprocessing_done.bind('inproc://preprocessing')
             self.register_socket(self.preprocessing_done, self.__handle_preprocessing_done)
         elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-            self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
-            self.preprocessing_done.bind('inproc://preprocessing')
-            self.register_socket(self.preprocessing_done, self.__handle_preprocessing_done)
+            p1, p2 = asyncio_win.pipe()
+            self.pp_pipe_read = asyncio_win.PipeHandle(p1)
+            self.pp_pipe_write = asyncio_win.PipeHandle(p2)
+            self.poller.register_pipe(self.pp_pipe_read, self.__handle_preprocessing_done)
 
         try:
-            while True:
-                self.print_stats()
-                self.run_poller()
+            self.poller.run(self.print_stats)
         finally:
             self.source_scanner.terminate()
-            self.poller.unregister(self.preprocessing_done)
             if polling_mechanism == PollingMechanism.OS_SELECT:
+                self.poller.unregister(self.preprocessing_done)
                 self.preprocessing_done.close()
             elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
+                self.poller.unregister(self.preprocessing_done)
                 self.preprocessing_done.unbind('inproc://preprocessing')
             elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-                self.preprocessing_done.unbind('inproc://preprocessing')
+                pass
 
     def print_stats(self):
         current_time = time()
@@ -475,6 +506,9 @@ class TaskProcessor:
                 node.tasks_processing (),
                 node.average_tasks    (),
                 node.average_task_time()))
+        print("================")
+        print("in_queue_size {}".format(self.source_scanner.in_queue.qsize()))
+        print("out_queue_size {}".format(self.source_scanner.out_queue.qsize()))
         print("================")
         def print_times(times):
             sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]

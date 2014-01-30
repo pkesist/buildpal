@@ -31,14 +31,13 @@ class PollingMechanism:
     OS_SELECT = 1
     ASYNCIO_PROACTOR = 2
 
-polling_mechanism = PollingMechanism.ZMQ_SELECT
+polling_mechanism = PollingMechanism.OS_SELECT
 
 if polling_mechanism == PollingMechanism.OS_SELECT:
     class ZmqSocket:
-        def __init__(self, timer, socket, handler):
+        def __init__(self, socket, handler):
             self.socket = socket
             self.handler = handler
-            self.timer = timer
 
         @classmethod
         def fileno_from_socket(cls, sock):
@@ -59,10 +58,9 @@ if polling_mechanism == PollingMechanism.OS_SELECT:
                 self.registered()
 
     class RawSocket:
-        def __init__(self, timer, socket, handler):
+        def __init__(self, socket, handler):
             self.socket = socket
             self.handler = handler
-            self.timer = timer
 
         def registered(self):
             pass
@@ -78,7 +76,27 @@ if polling_mechanism == PollingMechanism.OS_SELECT:
             self.handler(self.socket, self.socket.recv(256))
 
     class Poller:
-        def __init__(self):
+        class Event:
+            def __init__(self, poller, handler):
+                self.poller = poller
+                with socket.socket() as listen_socket:
+                    listen_socket.bind(('', 0))
+                    listen_socket.listen(0)
+
+                    self.read = socket.socket()
+                    self.read.connect(('localhost', listen_socket.getsockname()[1]))
+                    self.poller.register(self.read, lambda ignore, ignore2 : handler())
+
+                    self.write, whatever = listen_socket.accept()
+
+            def __call__(self):
+                self.write.send(b'x')
+
+            def close(self):
+                self.poller.unregister(self.read)
+                self.read.close()
+
+        def __init__(self, zmq_ctx):
             self.pollin = set()
             self.pollout = set()
             self.sockets = {}
@@ -89,8 +107,11 @@ if polling_mechanism == PollingMechanism.OS_SELECT:
             elif isinstance(sock, socket.socket):
                 return RawSocket
 
-        def register(self, timer, socket, handler):
-            self.register_worker(self.__wrap_type(socket)(timer, socket, handler))
+        def register(self, socket, handler):
+            self.register_worker(self.__wrap_type(socket)(socket, handler))
+
+        def create_event(self, handler):
+            return self.Event(self, handler)
 
         def register_worker(self, socket):
             fd = socket.fileno()
@@ -115,12 +136,33 @@ if polling_mechanism == PollingMechanism.OS_SELECT:
 
 elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
     class Poller:
-        def __init__(self):
+        class Event:
+            def __init__(self, poller, handler):
+                self.poller = poller
+                self.event_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
+                self.event_socket.bind('inproc://preprocessing')
+                poller.register(self.event_socket, lambda ignore, ignore2 : handler())
+
+            def __call__(self):
+                notify_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
+                notify_socket.connect('inproc://preprocessing')
+                notify_socket.send(b'x')
+                notify_socket.disconnect('inproc://preprocessing')
+
+            def close(self):
+                self.poller.unregister(self.event_socket)
+                self.event_socket.unbind('inproc://preprocessing')
+
+        def __init__(self, zmq_ctx):
             self.poller = zmq.Poller()
+            self.zmq_ctx = zmq_ctx
             self.sockets = {}
 
-        def register(self, timer, socket, handler):
-            self.sockets[socket] = handler, timer
+        def create_event(self, handler):
+            return self.Event(self, handler)
+
+        def register(self, socket, handler):
+            self.sockets[socket] = handler
             self.poller.register(socket, zmq.POLLIN)
 
         def unregister(self, socket):
@@ -131,7 +173,7 @@ elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
             result = self.poller.poll(timeout * 1000)
             for socket, event in result:
                 assert event == zmq.POLLIN
-                handler, timer = self.sockets[socket]
+                handler = self.sockets[socket]
                 handler(socket, recv_multipart(socket, zmq.NOBLOCK))
 
         def run(self, printer):
@@ -142,7 +184,6 @@ elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
 elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
     import asyncio
     import socket
-    import asyncio.windows_utils as asyncio_win
     import _overlapped
 
     class SocketWrapper:
@@ -153,18 +194,35 @@ elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
             return self._fileno
 
     class Poller:
-        def __init__(self):
+        class Event:
+            def __init__(self, proactor, event):
+                self.proactor = proactor
+                self.event = event
+
+            def __call__(self):
+                self.proactor.call_soon_threadsafe(lambda : self.event.set())
+
+            def clear(self):
+                self.event.clear()
+
+            def close():
+                pass
+
+        def __init__(self, zmq_ctx):
             self.proactor = asyncio.ProactorEventLoop()
             self.registered_sockets = set()
 
         @asyncio.coroutine
-        def handle_socket(self, zmq_socket, handler, sock=None):
+        def handle_socket(self, zmq_socket, handler, sock=None, first=True):
             assert zmq_socket in self.registered_sockets
             if sock is None:
-                sock = SocketWrapper(fileno=zmq_socket.getsockopt(zmq.FD))
-            tasks_handled = self.handle_tasks(zmq_socket, handler)
+                fd = zmq_socket.getsockopt(zmq.FD)
+                sock = SocketWrapper(fd)
+            if first:
+                self.handle_tasks(zmq_socket, handler)
             yield from self.proactor.sock_recv(sock, 0)
-            asyncio.async(self.handle_socket(zmq_socket, handler, sock), loop=self.proactor)
+            self.handle_tasks(zmq_socket, handler)
+            asyncio.async(self.handle_socket(zmq_socket, handler, sock=sock, first=False), loop=self.proactor)
 
         def handle_tasks(self, socket, handler):
             assert socket in self.registered_sockets
@@ -172,10 +230,11 @@ elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
                 handler(socket, recv_multipart(socket, zmq.NOBLOCK))
 
         @asyncio.coroutine
-        def handle_pipe(self, pipe_handle, handler):
-            data = yield from self.proactor.sock_recv(pipe_handle, 256)
-            handler(pipe_handle, data)
-            asyncio.async(self.handle_pipe(pipe_handle, handler), loop=self.proactor)
+        def handle_event(self, event, handler):
+            yield from event.wait()
+            event.clear()
+            handler()
+            asyncio.async(self.handle_event(event, handler), loop=self.proactor)
 
         @asyncio.coroutine
         def print(self, printer):
@@ -183,10 +242,12 @@ elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
             yield from asyncio.sleep(2, loop=self.proactor)
             asyncio.async(self.print(printer), loop=self.proactor)
 
-        def register_pipe(self, pipe_handle, handler):
-            asyncio.async(self.handle_pipe(pipe_handle, handler), loop=self.proactor)
+        def create_event(self, handler):
+            event = asyncio.Event(loop=self.proactor)
+            asyncio.async(self.handle_event(event, handler), loop=self.proactor)
+            return self.Event(self.proactor, event)
 
-        def register(self, timer, socket, handler):
+        def register(self, socket, handler):
             assert socket not in self.registered_sockets
             self.registered_sockets.add(socket)
             asyncio.async(self.handle_socket(socket, handler), loop=self.proactor)
@@ -196,7 +257,7 @@ elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
             Did not really succeed implementing this.
             register->unregister->register sequence keeps crashing the process.
             Finally stopped using this pattern.
-            """ 
+            """
             self.registered_sockets.remove(socket)
 
         def run(self, printer):
@@ -311,9 +372,10 @@ class TaskProcessor:
         self.sessions = self.Sessions()
         self.node_manager = NodeManager(self.node_info)
 
-        self.poller = Poller()
-
         self.zmq_ctx = zmq.Context()
+
+        self.poller = Poller(self.zmq_ctx)
+
         self.source_scanner = SourceScanner(self.notify_preprocessing_done)
 
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
@@ -325,24 +387,15 @@ class TaskProcessor:
         self.client_data = self.ClientData()
 
     def register_socket(self, socket, handler):
-        self.poller.register(self.timer, socket, handler)
+        self.poller.register(socket, handler)
 
     def unregister_socket(self, socket):
         self.poller.unregister(socket)
 
     def notify_preprocessing_done(self):
-        if polling_mechanism == PollingMechanism.OS_SELECT:
-            self.notify_socket.send(b'x')
-        elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
-            notify_socket = create_socket(self.zmq_ctx, zmq.PAIR)
-            notify_socket.connect('inproc://preprocessing')
-            notify_socket.send(b'x')
-            notify_socket.disconnect('inproc://preprocessing')
-        elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-            ov = _overlapped.Overlapped()
-            ov.WriteFile(self.pp_pipe_write.fileno(), b'x')
+        self.pp_ready()
 
-    def __handle_preprocessing_done(self, socket, msg):
+    def __handle_preprocessing_done(self):
         fqdn = getfqdn()
         while True:
             result = self.source_scanner.completed_task()
@@ -449,39 +502,13 @@ class TaskProcessor:
                 self.csrv.server_ready((server_conn, node_index))
 
     def run(self):
-        if polling_mechanism == PollingMechanism.OS_SELECT:
-            listen_socket = socket.socket()
-            listen_socket.bind(('', 50001))
-            listen_socket.listen(0)
-
-            self.notify_socket = socket.socket()
-            self.notify_socket.connect(('localhost', 50001))
-
-            self.preprocessing_done, whatever = listen_socket.accept()
-            listen_socket.close()
-            self.poller.register(self.timer, self.preprocessing_done, self.__handle_preprocessing_done)
-        elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
-            self.preprocessing_done = create_socket(self.zmq_ctx, zmq.PAIR)
-            self.preprocessing_done.bind('inproc://preprocessing')
-            self.register_socket(self.preprocessing_done, self.__handle_preprocessing_done)
-        elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-            p1, p2 = asyncio_win.pipe()
-            self.pp_pipe_read = asyncio_win.PipeHandle(p1)
-            self.pp_pipe_write = asyncio_win.PipeHandle(p2)
-            self.poller.register_pipe(self.pp_pipe_read, self.__handle_preprocessing_done)
+        self.pp_ready = self.poller.create_event(self.__handle_preprocessing_done)
 
         try:
             self.poller.run(self.print_stats)
         finally:
             self.source_scanner.terminate()
-            if polling_mechanism == PollingMechanism.OS_SELECT:
-                self.poller.unregister(self.preprocessing_done)
-                self.preprocessing_done.close()
-            elif polling_mechanism == PollingMechanism.ZMQ_SELECT:
-                self.poller.unregister(self.preprocessing_done)
-                self.preprocessing_done.unbind('inproc://preprocessing')
-            elif polling_mechanism == PollingMechanism.ASYNCIO_PROACTOR:
-                pass
+            self.pp_ready.close()
 
     def print_stats(self):
         current_time = time()

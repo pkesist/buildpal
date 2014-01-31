@@ -488,17 +488,21 @@ class CompileWorker:
                 assert event == zmq.POLLIN
                 if sock is clients:
                     client_id, *msg = recv_multipart(clients)
-                    if msg[0] == b'CREATE_SESSION':
+                    if not client_id in self.workers:
                         session = self.create_session(client_id)
-                        session.terminate = lambda client_id=client_id : self.terminate(client_id)
+
+                        class Terminate:
+                            def __init__(self, worker, client_id):
+                                self.client_id = client_id
+                                self.worker = worker
+
+                            def __call__(self):
+                                self.worker.terminate(self.client_id)
+
+                        session.terminate = Terminate(self, client_id)
                         self.sessions[client_id] = session
                         self.workers[client_id] = ProcessMsg(session)
-                        # TODO: Remove this, not needed.
-                        clients.send_multipart([client_id, b'SESSION_CREATED'])
-                    else:
-                        worker = self.workers.get(client_id)
-                        if worker:
-                            worker(msg)
+                    self.workers.get(client_id)(msg)
                 else:
                     assert sock is sessions
                     clients.send_multipart(recv_multipart(sessions))

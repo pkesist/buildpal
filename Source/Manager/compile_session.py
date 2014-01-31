@@ -65,8 +65,6 @@ class CompileSession:
         assert self.state == self.STATE_WAIT_FOR_PREPROCESSING_DONE
         self.server_conn = server_conn
         self.node_info = node_info
-        server_id = self.server_conn.getsockopt(zmq.IDENTITY)
-        assert server_id
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.node_info.add_tasks_sent()
         self.server_time = SimpleTimer()

@@ -7,43 +7,20 @@ from struct import pack
 from Common import create_socket, recv_multipart
 
 class NodeManager:
-    STATE_SOCKET_OPEN = 0
-    STATE_SOCKET_READY = 1
-
-    CONNECTIONS_PER_NODE = 32
-
     def __init__(self, node_info):
-        self.sockets_registered = {}
         self.sockets_ready = {}
-        self.sockets_requested = {}
-        self.sockets_recycled = {}
         self.node_info = node_info
-        self.__unique_id = 0
-
-    def __spawn_connections(self, zmq_ctx, node_index, register):
-        for x in range(self.CONNECTIONS_PER_NODE - self.__node_connections(node_index)):
-            socket = self.__connect_to_node(zmq_ctx, node_index, register)
-            if not socket:
-                break
 
     def __connect_to_node(self, zmq_ctx, node_index, register):
-        recycled = self.sockets_recycled.get(node_index)
-        if recycled:
-            socket = recycled[0]
-            del recycled[0]
-        else:
-            node_address = self.node_info[node_index].node_dict()['address']
-            try:
-                socket = create_socket(zmq_ctx, zmq.DEALER)
-                socket.setsockopt(zmq.IDENTITY, b'A' + pack('>I', self.__unique_id))
-                self.__unique_id += 1
-                socket.connect(node_address)
-                register(socket)
-            except zmq.ZMQError:
-                print("Failed to connect to '{}'".format(node_address))
-                return None
-        socket.send(b'CREATE_SESSION')
-        self.__register(socket, node_index)
+        node_address = self.node_info[node_index].node_dict()['address']
+        try:
+            socket = create_socket(zmq_ctx, zmq.DEALER)
+            socket.connect(node_address)
+            register(socket)
+        except zmq.ZMQError:
+            print("Failed to connect to '{}'".format(node_address))
+            raise Exception("Invalid node")
+        self.sockets_ready.setdefault(node_index, []).append(socket)
         return socket
             
     def __best_node(self):
@@ -74,39 +51,12 @@ class NodeManager:
         return min(range(len(self.node_info)), key=cmp_to_key(cmp))
 
     def recycle(self, node_index, socket):
-        recycled = self.sockets_recycled.setdefault(
-            node_index, [])
-        assert socket not in recycled
-        recycled.append(socket)
+        self.sockets_ready[node_index].append(socket)
 
-    def __register(self, socket, node_index):
-        self.sockets_registered[socket] = (node_index, self.STATE_SOCKET_OPEN)
-        self.sockets_requested[node_index] = self.sockets_requested.get(node_index, 0) + 1
-
-    def get_server_conn(self, zmq_ctx, register, node_index=None):
-        if node_index is None:
-            node_index = self.__best_node()
-        assert node_index is not None
-        node_sockets = self.sockets_ready.get(node_index)
-        if node_sockets:
-            result = node_sockets[0], node_index
-            del node_sockets[0]
-            del self.sockets_registered[result[0]]
-        else:
-            result = None
-        self.__spawn_connections(zmq_ctx, node_index, register)
-        return result
-
-    def __node_connections(self, node_index):
-        return self.sockets_requested.get(node_index, 0) + \
-            len(self.sockets_ready.get(node_index, []))
-
-    def handle_socket(self, socket, msg):
-        node_index, state = self.sockets_registered[socket]
-        assert state == self.STATE_SOCKET_OPEN
-        session_created = msg[0]
-        assert session_created == b'SESSION_CREATED'
-        self.sockets_requested[node_index] -= 1
-        self.sockets_registered[socket] = node_index, self.STATE_SOCKET_READY
-        self.sockets_ready.setdefault(node_index, []).append(socket)
-        return node_index
+    def get_server_conn(self, zmq_ctx, register):
+        node_index = self.__best_node()
+        node_sockets = self.sockets_ready.setdefault(node_index, [])
+        if len(node_sockets) <= 1:
+            self.__connect_to_node(zmq_ctx, node_index, register), node_index
+        assert node_sockets
+        return node_sockets.pop(0), node_index

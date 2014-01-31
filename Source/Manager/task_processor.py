@@ -225,45 +225,35 @@ class TaskProcessor:
     def __handle_server_socket(self, socket, msg):
         # Connection to server node.
         result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
-        if result is not None:
-            # Part of a session.
-            session, node_index = result
-            client_id = session.client_conn.id
-            session_done = session.got_data_from_server(msg)
-            if session_done:
-                self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
-                self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
-                self.node_manager.recycle(node_index, socket)
-                if session.state == session.STATE_DONE:
-                    session.task.completed(session.retcode,
-                        session.stdout, session.stderr)
+        assert result is not None
+        # Part of a session.
+        session, node_index = result
+        client_id = session.client_conn.id
+        session_done = session.got_data_from_server(msg)
+        if session_done:
+            self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
+            self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
+            self.node_manager.recycle(node_index, socket)
+            if session.state == session.STATE_DONE:
+                session.task.completed(session.retcode,
+                    session.stdout, session.stderr)
+            else:
+                assert session.state == session.STATE_SERVER_FAILURE
+                if hasattr(task, 'retries'):
+                    task.retries += 1
                 else:
-                    assert session.state == session.STATE_SERVER_FAILURE
-                    if hasattr(task, 'retries'):
-                        task.retries += 1
-                    else:
-                        task.retries = 1
-                    if task.retries <= 3:
-                        session.rewind()
-                        self.csrv.client_ready((session, SimpleTimer()))
-                        server_result = self.node_manager.get_server_conn(
-                            self.zmq_ctx, lambda socket : self.register_socket(
-                            socket, self.__handle_server_socket))
-                        if server_result:
-                            self.csrv.server_ready(server_result)
-                    else:
-                        session.task.completed(session.client_conn,
-                            session.retcode, session.stdout, session.stderr)
-        else:
-            # Not part of a session, handled by node_manager.
-            node_index = self.node_manager.handle_socket(socket, msg)
-            if node_index is not None and self.csrv.first():
-                register_func = lambda socket : self.register_socket(socket,
-                    self.__handle_server_socket)
-                server_conn, node_index = self.node_manager.get_server_conn(
-                    self.zmq_ctx, register_func, node_index)
-                assert server_conn
-                self.csrv.server_ready((server_conn, node_index))
+                    task.retries = 1
+                if task.retries <= 3:
+                    session.rewind()
+                    self.csrv.client_ready((session, SimpleTimer()))
+                    server_result = self.node_manager.get_server_conn(
+                        self.zmq_ctx, lambda socket : self.register_socket(
+                        socket, self.__handle_server_socket))
+                    if server_result:
+                        self.csrv.server_ready(server_result)
+                else:
+                    session.task.completed(session.client_conn,
+                        session.retcode, session.stdout, session.stderr)
 
     def run(self):
         self.pp_ready = self.poller.create_event(self.__handle_preprocessing_done)

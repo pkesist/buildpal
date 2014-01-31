@@ -31,7 +31,8 @@ node[0]=localhost:{}:4
 """.format(MGR_PORT, SRV_PORT))
     mgr_script = os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'distribute_manager.py'))
-    proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir,
+        stdout=subprocess.PIPE, stderr=sys.stderr, universal_newlines=True)
     def teardown():
         terminate_proc(proc)
         shutil.rmtree(dir)
@@ -44,8 +45,8 @@ def run_server(request):
     srv_script = os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'distribute_server.py'))
     proc = subprocess.Popen([sys.executable, srv_script,
-            '--port={}'.format(SRV_PORT)], cwd=dir, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
+        '--port={}'.format(SRV_PORT)], cwd=dir, stdout=subprocess.PIPE,
+        stderr=sys.stderr, universal_newlines=True)
     def teardown():
         terminate_proc(proc)
         shutil.rmtree(dir)
@@ -114,7 +115,6 @@ def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, db_cl):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
         stdout, stderr = proc.communicate()
         assert proc.returncode != 0
-
 
 def test_link(tmpdir, run_server, run_manager, vcvarsall, db_cl):
     tmpdir = str(tmpdir)

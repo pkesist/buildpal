@@ -4,7 +4,17 @@ import select
 
 from Common import recv_multipart, create_socket
 
-class OSSelectPoller:
+class PollerBase:
+    def __init__(self):
+        self._terminating = False
+
+    def terminate(self):
+        self._terminating = True
+
+    def terminating(self):
+        return self._terminating
+
+class OSSelectPoller(PollerBase):
     class ZmqSocket:
         def __init__(self, socket, handler):
             self.socket = socket
@@ -67,6 +77,7 @@ class OSSelectPoller:
             self.read.close()
 
     def __init__(self, zmq_ctx):
+        PollerBase.__init__(self)
         self.pollin = set()
         self.pollout = set()
         self.sockets = {}
@@ -93,32 +104,39 @@ class OSSelectPoller:
         self.pollin.discard(fd)
         self.sockets.pop(fd)
 
+    def run_for_a_while(self, timeout=None):
+        pollin, pollout, pollerr = select.select(self.pollin, [], [], timeout)
+        for fd in pollin:
+            self.sockets[fd].ready()
+
     def run(self, printer):
         while True:
             printer()
-            pollin, pollout, pollerr = select.select(self.pollin, [], [], 1)
-            for fd in pollin:
-                self.sockets[fd].ready()
+            self.run_for_a_while(1)
+            if self.terminating():
+                return
 
-class ZMQSelectPoller:
+class ZMQSelectPoller(PollerBase):
     class Event:
         def __init__(self, poller, handler):
             self.poller = poller
+            self.address = 'inproc://preprocessing_{}'.format(id(self))
             self.event_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
-            self.event_socket.bind('inproc://preprocessing')
+            self.event_socket.bind(self.address)
             poller.register(self.event_socket, lambda ignore, ignore2 : handler())
 
         def __call__(self):
             notify_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
-            notify_socket.connect('inproc://preprocessing')
+            notify_socket.connect(self.address)
             notify_socket.send(b'x')
-            notify_socket.disconnect('inproc://preprocessing')
+            notify_socket.disconnect(self.address)
 
         def close(self):
             self.poller.unregister(self.event_socket)
-            self.event_socket.unbind('inproc://preprocessing')
+            self.event_socket.unbind(self.address)
 
     def __init__(self, zmq_ctx):
+        PollerBase.__init__(self)
         self.poller = zmq.Poller()
         self.zmq_ctx = zmq_ctx
         self.sockets = {}
@@ -134,14 +152,21 @@ class ZMQSelectPoller:
         del self.sockets[socket]
         self.poller.unregister(socket)
 
+    def run_for_a_while(self, timeout=None):
+        if timeout is not None:
+            timeout *= 1000
+        result = self.poller.poll(timeout)
+        for socket, event in result:
+            assert event == zmq.POLLIN
+            handler = self.sockets[socket]
+            handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+
     def run(self, printer):
         while True:
             printer()
-            result = self.poller.poll(1000)
-            for socket, event in result:
-                assert event == zmq.POLLIN
-                handler = self.sockets[socket]
-                handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+            self.run_for_a_while(1)
+            if self.terminating():
+                return
 
 has_asyncio = True
 try:

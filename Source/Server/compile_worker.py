@@ -456,14 +456,6 @@ class CompileWorker:
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
-        class ProcessAttachedMsg:
-            def __init__(self, session, id):
-                self.session = session
-                self.id = id
-
-            def __call__(self, msg):
-                self.session.process_attached_msg(self.id, msg)
-
         class ProcessMsg:
             def __init__(self, session):
                 self.session = session

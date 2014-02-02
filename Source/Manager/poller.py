@@ -6,13 +6,13 @@ from Common import recv_multipart, create_socket
 
 class PollerBase:
     def __init__(self):
-        self._terminating = False
+        self._stopped = False
 
-    def terminate(self):
-        self._terminating = True
+    def stop(self):
+        self._stopped = True
 
-    def terminating(self):
-        return self._terminating
+    def stopped(self):
+        return self._stopped
 
 class OSSelectPoller(PollerBase):
     class ZmqSocket:
@@ -113,8 +113,12 @@ class OSSelectPoller(PollerBase):
         while True:
             printer()
             self.run_for_a_while(1)
-            if self.terminating():
+            if self.stopped():
                 return
+
+    def close(self):
+        self.sockets.clear()
+
 
 class ZMQSelectPoller(PollerBase):
     class Event:
@@ -129,11 +133,11 @@ class ZMQSelectPoller(PollerBase):
             notify_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
             notify_socket.connect(self.address)
             notify_socket.send(b'x')
-            notify_socket.disconnect(self.address)
+            notify_socket.close()
 
         def close(self):
             self.poller.unregister(self.event_socket)
-            self.event_socket.unbind(self.address)
+            self.event_socket.close()
 
     def __init__(self, zmq_ctx):
         PollerBase.__init__(self)
@@ -165,8 +169,12 @@ class ZMQSelectPoller(PollerBase):
         while True:
             printer()
             self.run_for_a_while(1)
-            if self.terminating():
+            if self.stopped():
                 return
+
+    def close(self):
+        for socket in self.poller.sockets:
+            self.unregister(socket)
 
 has_asyncio = True
 try:

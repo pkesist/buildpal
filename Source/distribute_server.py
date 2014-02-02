@@ -32,7 +32,7 @@ if __name__ == "__main__":
     if opts.port < 1024 or opts.port > 65535:
         raise RuntimeError("TCP port should be in {1024, 1025, ..., 65535}.")
 
-    compile_worker = CompileWorker('tcp://*:{}'.format(opts.port), opts.compile_slots)
+    compile_worker = CompileWorker(opts.port, opts.compile_slots)
     try:
         compile_worker.run()
     except KeyboardInterrupt:

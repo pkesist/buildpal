@@ -10,7 +10,6 @@ class NodeInfo:
         self._tasks_failed     = 0
         self._tasks_sent       = 0
         self._total_time       = 0
-        self._open_connections = 0
         self._tasks_change     = None
         self._avg_tasks = {}
         self._timer = Timer()
@@ -21,12 +20,6 @@ class NodeInfo:
     def average_task_time(self):
         tasks_completed = self.tasks_completed()
         return self.total_time() / tasks_completed if tasks_completed else 0
-
-    def connection_open(self): self._open_connections += 1
-
-    def connection_closed(self): self._open_connections -= 1
-
-    def connections(self): return self._open_connections
 
     def tasks_sent(self): return self._tasks_sent
 

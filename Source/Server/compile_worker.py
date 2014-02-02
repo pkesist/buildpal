@@ -11,6 +11,7 @@ from threading import Lock, Thread
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
+from .beacon import Beacon
 
 import subprocess
 import logging
@@ -214,7 +215,7 @@ class CompileSession:
             self.socket.send_multipart([self.id] + list(data), copy=copy)
 
         def disconnect(self):
-            self.socket.disconnect('inproc://sessions_socket')
+            self.socket.close()
 
     def run_compiler(self):
         self.cancel_autodestruct()
@@ -414,8 +415,9 @@ class CompileSession:
         return result
 
 class CompileWorker:
-    def __init__(self, address, compile_slots):
-        self.__address = address
+    def __init__(self, port, compile_slots):
+        self.__port = port
+        self.__address = 'tcp://*:{}'.format(self.__port)
         self.__compile_slots = compile_slots
         self.__checksums = {}
         self.workers = {}
@@ -478,34 +480,42 @@ class CompileWorker:
         print("Running server on '{}'.".format(self.__address))
         print("Using {} job slots.".format(self.__compile_slots))
 
-        while True:
-            sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))
+        beacon = Beacon(self.__compile_slots, self.__port)
+        beacon.start(broadcast_port=51134)
 
-            # Run any scheduled tasks.
-            self.scheduler.run(False)
+        try:
+            while True:
+                sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))
 
-            for sock, event in dict(poller.poll(1000)).items():
-                assert event == zmq.POLLIN
-                if sock is clients:
-                    client_id, *msg = recv_multipart(clients)
-                    if not client_id in self.workers:
-                        session = self.create_session(client_id)
+                # Run any scheduled tasks.
+                self.scheduler.run(False)
 
-                        class Terminate:
-                            def __init__(self, worker, client_id):
-                                self.client_id = client_id
-                                self.worker = worker
+                for sock, event in dict(poller.poll(1000)).items():
+                    assert event == zmq.POLLIN
+                    if sock is clients:
+                        client_id, *msg = recv_multipart(clients)
+                        if len(msg) == 1 and msg[0] == b'PING':
+                            clients.send_multipart([client_id, b'PONG'])
+                        elif not client_id in self.workers:
+                            session = self.create_session(client_id)
 
-                            def __call__(self):
-                                self.worker.terminate(self.client_id)
+                            class Terminate:
+                                def __init__(self, worker, client_id):
+                                    self.client_id = client_id
+                                    self.worker = worker
 
-                        session.terminate = Terminate(self, client_id)
-                        self.sessions[client_id] = session
-                        self.workers[client_id] = ProcessMsg(session)
-                    self.workers.get(client_id)(msg)
-                else:
-                    assert sock is sessions
-                    clients.send_multipart(recv_multipart(sessions))
+                                def __call__(self):
+                                    self.worker.terminate(self.client_id)
+
+                            session.terminate = Terminate(self, client_id)
+                            self.sessions[client_id] = session
+                            self.workers[client_id] = ProcessMsg(session)
+                        self.workers.get(client_id)(msg)
+                    else:
+                        assert sock is sessions
+                        clients.send_multipart(recv_multipart(sessions))
+        finally:
+            beacon.stop()
 
     def shutdown(self):
         self.__compile_thread_pool.shutdown()

@@ -3,13 +3,13 @@ from Common import SimpleTimer, Rendezvous
 from Common import create_socket, recv_multipart
 
 from .compile_session import CompileSession
-from .node_info import NodeInfo
 from .source_scanner import SourceScanner
 from .timer import Timer
 from .task_creator import create_tasks
 from .node_manager import NodeManager
 from .scan_headers import dump_cache
-from .poller import OSSelectPoller
+from .poller import ZMQSelectPoller
+from .console import ConsolePrinter
 
 from Common import bind_to_random_port
 
@@ -27,7 +27,7 @@ from multiprocessing import cpu_count, Semaphore
 from socket import getfqdn
 from time import time
 
-Poller = OSSelectPoller
+Poller = ZMQSelectPoller
 
 class TaskProcessor:
     class SendProxy:
@@ -82,6 +82,10 @@ class TaskProcessor:
                 import traceback
                 traceback.print_exc()
 
+        def close(self):
+            for server_conn in self.session[self.FROM_SERVER]:
+                server_conn.close()
+
     class ClientServerRendezvous(Rendezvous):
         def __init__(self, timer, sessions, node_info):
             Rendezvous.__init__(self, 'client_ready', 'server_ready')
@@ -126,29 +130,12 @@ class TaskProcessor:
                     break
             return messages
 
-    def __init__(self, nodes, port):
+    def __init__(self, node_info, port):
         self.__port = port
-        self.__nodes = nodes
         self.cache_info = (0, 0)
         self.compiler_info = {}
         self.timer = Timer()
-        self.node_info = [NodeInfo(self.__nodes[x], x) for x in range(len(self.__nodes))]
-        self.sessions = self.Sessions()
-        self.node_manager = NodeManager(self.node_info)
-
-        self.zmq_ctx = zmq.Context()
-
-        self.poller = Poller(self.zmq_ctx)
-
-        self.source_scanner = SourceScanner(self.notify_preprocessing_done)
-
-        self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
-        self.client_socket.bind('tcp://*:{}'.format(self.__port))
-        self.register_socket(self.client_socket, self.__handle_client_socket)
-
-        self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
-            self.node_info)
-        self.client_data = self.ClientData()
+        self.node_info = node_info
 
     def register_socket(self, socket, handler):
         self.poller.register(socket, handler)
@@ -255,79 +242,37 @@ class TaskProcessor:
                     session.task.completed(session.client_conn,
                         session.retcode, session.stdout, session.stderr)
 
-    def run(self):
-        self.pp_ready = self.poller.create_event(self.__handle_preprocessing_done)
+    def run(self, observer=None):
+        self.sessions = self.Sessions()
+        self.node_manager = NodeManager(self.node_info)
+        self.zmq_ctx = zmq.Context()
+        self.poller = Poller(self.zmq_ctx)
+        self.source_scanner = SourceScanner(self.notify_preprocessing_done)
+        self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
+        self.client_socket.bind('tcp://*:{}'.format(self.__port))
+        self.register_socket(self.client_socket, self.__handle_client_socket)
+
+        self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
+            self.node_info)
+        self.client_data = self.ClientData()
+        self.pp_ready = self.poller.create_event(
+            self.__handle_preprocessing_done)
 
         try:
-            self.poller.run(self.print_stats)
+            if observer is None:
+                observer = ConsolePrinter(self.node_info, self.timer,
+                    self.cache_info, self.__port)
+            self.poller.run(observer)
         finally:
-            self.source_scanner.terminate()
+            self.client_socket.close()
+            self.source_scanner.close()
             self.pp_ready.close()
+            self.node_manager.close()
+            self.sessions.close()
+            self.zmq_ctx.term()
 
-    def print_stats(self):
-        current_time = time()
-        if hasattr(self, 'last_print') and (current_time - self.last_print) < 2:
-            return
-        self.last_print = current_time
-        print("================")
-        print("Build nodes:")
-        print("================")
-        for index in range(len(self.node_info)):
-            node = self.node_info[index]
-            print('{:30} - Tasks sent {:<3} '
-                'Open Connections {:<3} Completed {:<3} Failed '
-                '{:<3} Running {:<3} Avg. Tasks {:<3.2f} '
-                'Avg. Time {:<3.2f}'
-            .format(
-                node.node_dict()['address'],
-                node.tasks_sent       (),
-                node.connections      (),
-                node.tasks_completed  (),
-                node.tasks_failed     (),
-                node.tasks_processing (),
-                node.average_tasks    (),
-                node.average_task_time()))
-        print("================")
-        print("in_queue_size {}".format(self.source_scanner.in_queue.qsize()))
-        print("out_queue_size {}".format(self.source_scanner.out_queue.qsize()))
-        print("================")
-        def print_times(times):
-            sorted_times = [(name, total, count, total / count) for name, (total, count) in times.items()]
-            sorted_times.sort(key=operator.itemgetter(1), reverse=True)
-            for name, tm, count, average in sorted_times:
-                print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
-        print_times(self.timer.as_dict())
-        print("================")
-        total_hits = self.cache_info[0]
-        total_misses = self.cache_info[1]
-        total = total_hits + total_misses
-        if not total: total = 1
-        print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(total_hits,
-            total_misses, total_hits / total))
-        print("================")
-        for index in range(len(self.node_info)):
-            node = self.node_info[index]
-            times = node.timer().as_dict()
-            if not times:
-                continue
-            print("================")
-            print("Statistics for '{}'".format(node.node_dict()['address']))
-            print("================")
-            print_times(times)
-            print("================")
-            print("Server time difference - {}".format(times.get('server_time', (0, 0))[0] - times.get('server.server_time', (0, 0))[0]))
-            total = 0
-            for x in (
-                'wait_for_header_list',
-                'process_hdr_list',
-                'wait_for_headers',
-                'shared_prepare_dir',
-                'async_compiler_delay',
-                'compiler_prep',
-                'compiler',):
-                total += times.get('server.' + x, (0,0))[0]
-            print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - total))
-
+    def stop(self):
+        self.poller.stop()
 
 def create_filelist(header_info):
     result = []

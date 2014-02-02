@@ -53,6 +53,12 @@ class NodeManager:
     def recycle(self, node_index, socket):
         self.sockets_ready[node_index].append(socket)
 
+    def close(self):
+        for node_index, node_sockets in self.sockets_ready.items():
+            node_address = self.node_info[node_index].node_dict()['address']
+            for socket in node_sockets:
+                socket.close()
+
     def get_server_conn(self, zmq_ctx, register):
         node_index = self.__best_node()
         node_sockets = self.sockets_ready.setdefault(node_index, [])

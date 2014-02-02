@@ -1,5 +1,7 @@
 #! python3.3
 from Manager import TaskProcessor
+from Manager import run_gui
+from Manager import NodeInfo
 
 import argparse
 import configparser
@@ -8,22 +10,7 @@ import sys
 
 default_script = 'distribute_manager.ini'
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Command line parameters for distribute_manager.py')
-    parser.add_argument('--ini', dest='ini_file', type=str, default='distribute_manager.ini', help='Specify .ini file.')
-    parser.add_argument('profile', nargs='?', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
-    
-    opts = parser.parse_args()
-
-    config = configparser.SafeConfigParser(strict=False)
-    if not config.read(opts.ini_file):
-        raise Exception("Error reading the configuration file "
-            "'{}'.".format(opts.ini_file))
-
-    manager_section = 'Manager'
-
-    port = config.get(manager_section, 'port')
-
+def get_nodes_from_ini_file(config):
     if not opts.profile in config:
         raise Exception("ERROR: No '{}' section in '{}'.".format(opts.profile, opts.ini_file))
 
@@ -50,13 +37,75 @@ if __name__ == "__main__":
                 'max_tasks' : max_tasks })
         else:
             done = True
+    return nodes
+
+def get_nodes_from_beacon():
+    import socket
+    import select
+    import struct
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    udp.setblocking(False)
+    udp.sendto(b'DB_MGR_DISCOVER', ("<broadcast>", 51134))
+    nodes = []
+    r, w, e = select.select([udp], [], [], 0.1)
+    while True:
+        try:
+            data, (address, port) = udp.recvfrom(256)
+        except BlockingIOError:
+            break
+        prefix = b'DB_MGR_SERVER'
+        prefix_len = len(prefix)
+        if len(data) == prefix_len + 2 + 2 and data[:prefix_len] == prefix:
+            port, max_tasks = struct.unpack('!2h', data[prefix_len:prefix_len+4])
+            nodes.append({
+                'address' : 'tcp://{}:{}'.format(address, port),
+                'max_tasks' : max_tasks})
+    return nodes
+
+def get_config(ini_file):
+    config = configparser.SafeConfigParser(strict=False)
+    if not config.read(ini_file):
+        raise Exception("Error reading the configuration file "
+            "'{}'.".format(ini_file))
+    return config
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
+    parser.add_argument('--use-beacon', action='store_true', help='Autodetect LAN servers')
+    parser.add_argument('--port', dest='port', type=int, default=None, help='TCP Port number on which manager should run.')
+    parser.add_argument('--ini', dest='ini_file', type=str, default='distribute_manager.ini', help='Specify .ini file.')
+    parser.add_argument('profile', nargs='?', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
+    
+    opts = parser.parse_args()
+
+    config = None
+
+    if opts.port is None:
+        config = get_config(opts.ini_file)
+        port = config.get('Manager', 'port')
+
+    if opts.use_beacon:
+        nodes = get_nodes_from_beacon()
+    else:
+        if not config:
+            config = get_config(opts.ini_file)
+        nodes = get_nodes_from_ini_file(config)
+
     if not nodes:
         raise RuntimeError("No build nodes configured.")
+
+    node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
 
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
-    try:
-        TaskProcessor(nodes, port).run()
-    finally:
-        print("Shutting down.")
+    if opts.ui == 'gui':
+        run_gui(node_info, port)
+    else:
+        try:
+            TaskProcessor(node_info, port).run()
+        except KeyboardInterrupt:
+            print("Shutting down.")

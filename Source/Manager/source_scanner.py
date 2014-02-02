@@ -33,7 +33,7 @@ class SourceScanner:
     def __init__(self, notify):
         self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
-        self.terminating = False
+        self.closing = False
         self.threads = set()
         for i in range(cpu_count() + 1):
             thread = threading.Thread(target=self.__process_task_worker, args=(notify,))
@@ -61,11 +61,10 @@ class SourceScanner:
                 notify()
 
             except queue.Empty:
-                if self.terminating:
+                if self.closing:
                     return
 
-    def terminate(self):
-        self.terminating = True
+    def close(self):
+        self.closing = True
         for thread in self.threads:
             thread.join()
-        self.out_queue.put(None)

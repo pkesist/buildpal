@@ -5,8 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>
-    </StartupFile>
+    <StartupFile>Source\Manager\gui.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -33,8 +32,10 @@
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
     <Compile Include="Source\Manager\compile_session.py" />
+    <Compile Include="Source\Manager\gui.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\node_manager.py" />
+    <Compile Include="Source\Manager\poller.py" />
     <Compile Include="Source\Manager\scan_headers.py" />
     <Compile Include="Source\Manager\task_creator.py" />
     <Compile Include="Source\Manager\timer.py" />
@@ -50,6 +51,7 @@
     <Compile Include="Source\setup_manager.py" />
     <Compile Include="Source\setup_server.py" />
     <Compile Include="Source\Test\test_compile.py" />
+    <Compile Include="Source\Test\test_poller.py" />
     <Compile Include="Source\Test\test_source_scanner.py" />
   </ItemGroup>
   <ItemGroup>

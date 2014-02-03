@@ -129,12 +129,29 @@ class TaskProcessor:
                     break
             return messages
 
-    def __init__(self, node_info, timer, port):
+    def __init__(self, node_info, port, ui_data):
+        class CacheStats:
+            def __init__(self):
+                self.hits = 0
+                self.misses = 0
+                self.ratio = 0.0
+
+            def update(self, data):
+                self.hits, self.misses = data
+                total = self.hits + self.misses
+                if total == 0:
+                    total = 1
+                self.ratio = self.hits / total
+
         self.port = port
-        self.cache_info = (0, 0)
+        self.cache_stats = CacheStats()
         self.compiler_info = {}
-        self.timer = timer
+        self.timer = Timer()
         self.node_info = node_info
+
+        self.ui_data = ui_data
+        self.ui_data.timer = self.timer
+        self.ui_data.cache_stats = self.cache_stats
 
     def register_socket(self, socket, handler):
         self.poller.register(socket, handler)
@@ -152,9 +169,9 @@ class TaskProcessor:
             if not result:
                 break
             client_id, header_info, time_in_in_queue, preprocessing_time, \
-                time_queued, (hits, misses) = result
+                time_queued, cache_stats = result
             time_in_out_queue = time() - time_queued
-            self.cache_info = hits, misses
+            self.cache_stats.update(cache_stats)
             session = self.sessions.get(self.Sessions.FROM_CLIENT, client_id)
             assert(session)
             self.timer.add_time('preprocessing.in_queue', time_in_in_queue)
@@ -259,8 +276,7 @@ class TaskProcessor:
 
         try:
             if observer is None:
-                observer = ConsolePrinter(self.node_info, self.timer,
-                    self.cache_info, self.port)
+                observer = ConsolePrinter(self.node_info, self.ui_data)
             self.poller.run(observer)
         finally:
             self.client_socket.close()

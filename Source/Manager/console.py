@@ -2,11 +2,9 @@ from time import time
 from operator import itemgetter
 
 class ConsolePrinter:
-    def __init__(self, node_info, timer, cache_info, port):
+    def __init__(self, node_info, ui_data):
         self.node_info = node_info
-        self.port = port
-        self.timer = timer
-        self.cache_info = cache_info
+        self.ui_data = ui_data
         self.last_print = None
 
     def __call__(self):
@@ -37,14 +35,11 @@ class ConsolePrinter:
             sorted_times.sort(key=itemgetter(1), reverse=True)
             for name, tm, count, average in sorted_times:
                 print('{:-<30} Total {:->14.2f} Num {:->5} Average {:->14.2f}'.format(name, tm, count, average))
-        print_times(self.timer.as_dict())
+        print_times(self.ui_data.timer.as_dict())
         print("================")
-        total_hits = self.cache_info[0]
-        total_misses = self.cache_info[1]
-        total = total_hits + total_misses
-        if not total: total = 1
-        print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(total_hits,
-            total_misses, total_hits / total))
+        print("Hits: {:8} Misses: {:8} Ratio: {:>.2f}".format(
+            self.ui_data.cache_stats.hits, self.ui_data.cache_stats.misses,
+            self.ui_data.cache_stats.ratio))
         print("================")
         for index in range(len(self.node_info)):
             node = self.node_info[index]

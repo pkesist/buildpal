@@ -113,12 +113,11 @@ if __name__ == "__main__":
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
-    timer = Timer()
-
     if opts.ui == 'gui':
-        run_gui(node_info, timer, port)
+        run_gui(node_info, port)
     else:
         try:
-            TaskProcessor(node_info, timer, port).run()
+            ui_data = type('UIData', (), {})()
+            TaskProcessor(node_info, port, ui_data).run()
         except KeyboardInterrupt:
             print("Shutting down.")

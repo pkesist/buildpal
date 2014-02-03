@@ -122,14 +122,80 @@ class NodeDisplay(Frame):
 def called_from_foreign_thread(func):
     return func
 
+class CacheStats(LabelFrame):
+    def __init__(self, parent, ui_data, **kw):
+        LabelFrame.__init__(self, parent, text = "Cache Statistics", **kw)
+        self.ui_data = ui_data
+        self.draw()
+    
+    def draw(self):
+        self.cache_misses = StringVar()
+        self.cache_hits = StringVar()
+        self.cache_ratio = StringVar()
+        self.cache_hits_label = Label(self, text="Hits")
+        self.cache_hits_label.grid(row=0, sticky=W)
+        self.cache_hits_text = Entry(self, state=DISABLED, textvariable=self.cache_hits)
+        self.cache_hits_text.grid(row=0, column=1)
+        self.cache_misses_label = Label(self, text="Misses")
+        self.cache_misses_label.grid(row=1, sticky=W)
+        self.cache_misses_text = Entry(self, state=DISABLED, textvariable=self.cache_misses)
+        self.cache_misses_text.grid(row=1, column=1)
+        self.cache_separator = Separator(self)
+        self.cache_separator.grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
+        self.cache_ratio_label = Label(self, text="Ratio")
+        self.cache_ratio_label.grid(row=3, sticky=W)
+        self.cache_ratio_text = Entry(self, state=DISABLED, textvariable=self.cache_ratio)
+        self.cache_ratio_text.grid(row=3, column=1)
+
+    def refresh(self):
+        self.cache_hits.set(self.ui_data.cache_stats.hits)
+        self.cache_misses.set(self.ui_data.cache_stats.misses)
+        self.cache_ratio.set("{:.2f}".format(self.ui_data.cache_stats.ratio))
+
+class GlobalDataFrame(LabelFrame):
+    def __init__(self, parent, ui_data, **kw):
+        LabelFrame.__init__(self, parent, text="Global Data", **kw)
+        self.ui_data = ui_data
+        self.draw()
+
+    def draw(self):
+        self.global_times = TimerDisplay(self, height=5)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
+
+        self.cache_frame = CacheStats(self, self.ui_data)
+        self.cache_frame.grid(row=0, column=1, sticky=N+S+W+E)
+
+class SettingsFrame(LabelFrame):
+    def __init__(self, parent, port, start, stop, **kw):
+        LabelFrame.__init__(self, parent, text="Settings", **kw)
+        self.start = start
+        self.stop = stop
+        self.port = port
+        self.draw()
+
+    def draw(self):
+        self.port_label = Label(self, text="Port")
+        self.port_label.grid(row=0, column=0, padx=(5, 20))
+        self.port_sb = Spinbox(self, from_=1024, to=65536, increment=1)
+        self.port_sb.delete(0, "end")
+        self.port_sb.insert(0, self.port)
+        self.port_sb.grid(row=0, column=1)
+
+        self.start_but = Button(self, text="Start", command=self.start)
+        self.start_but.grid(row=0, column=2, sticky=E+W)
+        self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
+        self.stop_but.grid(row=0, column=3, sticky=E+W)
+
 class DBManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
-    def __init__(self, node_info, timer, port):
+    def __init__(self, node_info, port):
         Tk.__init__(self, None)
+        self.ui_data = type('UIData', (), {})()
         self.node_info = node_info
-        self.timer = timer
         self.port = port
         self.state = self.state_stopped
         self.initialize()
@@ -145,56 +211,25 @@ class DBManagerApp(Tk):
 
     def initialize(self):
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(4, weight=1)
 
         # Row 0
-        self.settings_frame = LabelFrame(self, text="Settings")
-        self.settings_frame.grid(row=0, column=0, columnspan=5, sticky=E+W, padx=5, pady=(0, 5))
-        self.port_label = Label(self.settings_frame, text="Port")
-        self.port_label.grid(row=0, column=0, padx=(5, 20))
-        self.port_sb = Spinbox(self.settings_frame, from_=1024, to=65536, increment=1)
-        self.port_sb.delete(0, "end")
-        self.port_sb.insert(0, self.port)
-        self.port_sb.grid(row=0, column=1)
-
-        self.start_but = Button(self.settings_frame, text="Start", command=self.start)
-        self.start_but.grid(row=0, column=2, sticky=E+W)
-        self.stop_but = Button(self.settings_frame, text="Stop", command=self.stop, state=DISABLED)
-        self.stop_but.grid(row=0, column=3, sticky=E+W)
+        self.settings_frame = SettingsFrame(self, self.port,
+            self.__start_running, self.__stop_running)
+        self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
 
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
-        self.global_data_frame = LabelFrame(self.pane, text="Global Data")
-        self.global_times = TimerDisplay(self.global_data_frame, height=5)
-        self.global_data_frame.rowconfigure(0, weight=1)
-        self.global_data_frame.columnconfigure(0, weight=1)
-        self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
 
-        self.cache_frame = LabelFrame(self.global_data_frame, text="Cache Statistics")
-        self.cache_hits_label = Label(self.cache_frame, text="Hits")
-        self.cache_hits_label.grid(row=0, sticky=W)
-        self.cache_hits_text = Entry(self.cache_frame, state=DISABLED)
-        self.cache_hits_text.grid(row=0, column=1)
-        self.cache_misses_label = Label(self.cache_frame, text="Misses")
-        self.cache_misses_label.grid(row=1, sticky=W)
-        self.cache_misses_text = Entry(self.cache_frame, state=DISABLED)
-        self.cache_misses_text.grid(row=1, column=1)
-        self.cache_separator = Separator(self.cache_frame)
-        self.cache_separator.grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
-        self.cache_ratio_label = Label(self.cache_frame, text="Ratio")
-        self.cache_ratio_label.grid(row=3, sticky=W)
-        self.cache_ratio_text = Entry(self.cache_frame, state=DISABLED)
-        self.cache_ratio_text.grid(row=3, column=1)
-        self.cache_frame.grid(row=0, column=1, sticky=N+S+W+E)
-
-
-        self.global_data_frame.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
+        self.global_data_frame = GlobalDataFrame(self.pane, self.ui_data)
+        self.global_data_frame.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.global_data_frame)
+
         self.node_display = NodeDisplay(self.pane, self.node_info)
-        self.node_display.grid(row=2, column=0, columnspan=5, sticky=N+S+W+E)
+        self.node_display.grid(row=2, sticky=N+S+W+E)
         self.pane.add(self.node_display)
+
         self.rowconfigure(1, weight=1)
-        self.pane.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
+        self.pane.grid(row=1, sticky=N+S+W+E)
 
         # Row 3
         self.sizegrip = Sizegrip(self)
@@ -206,8 +241,9 @@ class DBManagerApp(Tk):
         self.refresh_event.set()
 
     def refresh(self):
-        self.global_times.update(self.timer.as_dict())
+        self.global_times.update(self.ui_data.timer.as_dict())
         self.node_display.refresh()
+        self.cache_frame.refresh()
 
     def update_state(self, state):
         self.state = state
@@ -220,11 +256,10 @@ class DBManagerApp(Tk):
             self.stop()
         Tk.destroy(self)
 
-    def start(self):
+    def __start_running(self):
         if self.state != self.state_stopped:
             return
-        self.task_processor = TaskProcessor(self.node_info, self.timer,
-            self.port_sb.get())
+        self.task_processor = TaskProcessor(self.node_info, self.port_sb.get(), self.ui_data)
         self.thread = threading.Thread(target=self.__run_task_processor)
         self.thread.start()
         self.update_state(self.state_started)
@@ -232,7 +267,7 @@ class DBManagerApp(Tk):
     def __run_task_processor(self):
         self.task_processor.run(self.signal_refresh)
 
-    def stop(self):
+    def __stop_running(self):
         if self.state != self.state_started:
             return
         self.task_processor.stop()

@@ -60,7 +60,7 @@ namespace
         {
             if ( !file )
             {
-                std::cout << "ERROR: Could not find header <" << fileName.str() << ">.";
+                std::cerr << "ERROR: Could not find header <" << fileName.str() << ">.";
                 return;
             }
             headerTracker_.inclusionDirective( SearchPath, RelativePath, isAngled, file );

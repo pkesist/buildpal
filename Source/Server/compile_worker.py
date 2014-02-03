@@ -1,5 +1,6 @@
-from Common import send_compressed_file, SimpleTimer
-from Common import create_socket, recv_multipart
+from Common import send_compressed_file, SimpleTimer, \
+    create_socket, recv_multipart, \
+    bind_to_random_port
 
 from io import BytesIO, StringIO
 from multiprocessing import Process, cpu_count
@@ -166,7 +167,6 @@ class CompileSession:
         return async_helper
 
     def process_failure(self, exception):
-        assert self.state == self.STATE_TASK_READY
         tb = StringIO()
         traceback.print_exc(file=tb)
         tb.seek(0)
@@ -417,7 +417,6 @@ class CompileSession:
 class CompileWorker:
     def __init__(self, port, compile_slots):
         self.__port = port
-        self.__address = 'tcp://*:{}'.format(self.__port)
         self.__compile_slots = compile_slots
         self.__checksums = {}
         self.workers = {}
@@ -466,7 +465,12 @@ class CompileWorker:
                 self.session.process_msg(msg)
 
         clients = create_socket(zmq_ctx, zmq.ROUTER)
-        clients.bind(self.__address)
+        if self.__port == 0:
+            self.__port = bind_to_random_port(clients)
+            self.__address = "tcp://*:{}".format(self.__port)
+        else:
+            self.__address = "tcp://*:{}".format(self.__port)
+            clients.bind(self.__address)
 
         sessions = create_socket(zmq_ctx, zmq.DEALER)
         sessions.bind('inproc://sessions_socket')

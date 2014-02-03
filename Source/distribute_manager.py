@@ -45,6 +45,10 @@ def get_nodes_from_beacon():
     udp.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
     multicast_group = '224.3.29.71'
     multicast_port = 51134
+    # when sending multicast, it is not enough to add membership to
+    # socket.INADDR_ANY. Windows will send multicast message through
+    # only one interface - loopback. We need to enumerate interfaces
+    # and add membership to each one.
     for family, x, y, z, addr in [info for info in socket.getaddrinfo('', 0)]:
         if family == socket.AF_INET:
             address, port = addr

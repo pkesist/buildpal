@@ -49,8 +49,10 @@ def get_nodes_from_beacon():
     udp.setblocking(False)
     udp.sendto(b'DB_MGR_DISCOVER', ("<broadcast>", 51134))
     nodes = []
-    r, w, e = select.select([udp], [], [], 0.1)
     while True:
+        r, w, e = select.select([udp], [], [], 0.1)
+        if not r:
+            break
         try:
             data, (address, port) = udp.recvfrom(256)
         except BlockingIOError:
@@ -58,7 +60,7 @@ def get_nodes_from_beacon():
         prefix = b'DB_MGR_SERVER'
         prefix_len = len(prefix)
         if len(data) == prefix_len + 2 + 2 and data[:prefix_len] == prefix:
-            port, max_tasks = struct.unpack('!2h', data[prefix_len:prefix_len+4])
+            port, max_tasks = struct.unpack('!2H', data[prefix_len:prefix_len+4])
             nodes.append({
                 'address' : 'tcp://{}:{}'.format(address, port),
                 'max_tasks' : max_tasks})

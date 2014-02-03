@@ -1,5 +1,6 @@
 # !python3.3
 from tkinter import *
+import tkinter.font as font
 from tkinter.ttk import *
 
 import threading
@@ -8,27 +9,35 @@ from operator import itemgetter
 
 from . import TaskProcessor
 
-class NodeList(Treeview):
+class MyTreeView(Treeview):
+    def __init__(self, parent):
+        Treeview.__init__(self, parent,
+            columns=tuple(c['cid'] for c in self.columns[1:]))
+        heading_font = font.nametofont('TkHeadingFont')
+        for c in self.columns:
+            self.column(c['cid'], width=max(heading_font.measure(c['text']) + 15, c['minwidth']), minwidth=c['minwidth'], anchor=c['anchor'])
+            self.heading(c['cid'], text=c['text'])
+
+
+class NodeList(MyTreeView):
     columns = (
-        ("#0"       , "Address"      , 100),
-        ("MaxTasks" , "Max Tasks"    , 20 ),
-        ("TasksSent", "Tasks Sent"   , 20 ),
-        ("Completed", "Completed"    , 20 ),
-        ("Failed"   , "Failed"       , 20 ),
-        ("Running"  , "Running"      , 20 ),
-        ("AvgTasks" , "Average Tasks", 40 ),
-        ("AvgTime"  , "Average Time" , 40 ))
+        {'cid' : "#0"       , 'text' : "Address"      , 'minwidth' : 100, 'anchor' : W  },
+        {'cid' : "MaxTasks" , 'text' : "Max Tasks"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TasksSent", 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Completed", 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Failed"   , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Running"  , 'text' : "Running"      , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "AvgTasks" , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
+        {'cid' : "AvgTime"  , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
     def __init__(self, parent, node_info):
-        Treeview.__init__(self, parent,
-            columns=tuple(c[0] for c in self.columns[1:]))
-        for c in self.columns:
-            self.column(c[0], width=max(len(c[1]) * 8, c[2]), minwidth=c[2])
-            self.heading(c[0], text=c[1])
+        MyTreeView.__init__(self, parent)
         self.node_info = node_info
         for node in self.node_info:
+            text = node.node_dict()['address']
             self.insert('', 'end', text=node.node_dict()['address'],
                 values=(node.node_dict()['max_tasks'],))
+
         self.refresh()
 
     def refresh(self):
@@ -48,18 +57,12 @@ class NodeList(Treeview):
             self.item(item, values=values)
 
 
-class NodeTimes(Treeview):
+class NodeTimes(MyTreeView):
     columns = (
-        ('#0'       , 'Timer Name'  , 100),
-        ('TotalTime', 'Total Time'  , 30 ),
-        ('Count'    , 'Count'       , 20 ),
-        ('AvgTime'  , 'Average Time', 30 ))
-    def __init__(self, parent):
-        Treeview.__init__(self, parent,
-            columns=tuple(c[0] for c in self.columns[1:]))
-        for c in self.columns:
-            self.column(c[0], width=max(len(c[1]) * 8, c[2]), minwidth=c[2])
-            self.heading(c[0], text=c[1])
+        { 'cid' : '#0'       , 'text' : 'Timer Name'  , 'minwidth' : 100, 'anchor' : W      },
+        { 'cid' : 'TotalTime', 'text' : 'Total Time'  , 'minwidth' : 30 , 'anchor' : CENTER },
+        { 'cid' : 'Count'    , 'text' : 'Count'       , 'minwidth' : 20 , 'anchor' : CENTER },
+        { 'cid' : 'AvgTime'  , 'text' : 'Average Time', 'minwidth' : 30 , 'anchor' : CENTER })
 
     def update(self, timer_dict):
         self.delete(*self.get_children(''))
@@ -155,7 +158,6 @@ class DBManagerApp(Tk):
         self.stop_but.grid(row=2, column=2, sticky=E+W)
         self.exit = Button(self, text="Exit", command=self.destroy)
         self.exit.grid(row=2, column=3, sticky=E+W)
-        return
 
     @called_from_foreign_thread
     def signal_refresh(self):

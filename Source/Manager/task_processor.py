@@ -95,10 +95,10 @@ class TaskProcessor:
 
         def match(self, client_tuple, server_tuple):
             session, timer = client_tuple
-            server_conn, node_index = server_tuple
+            server_conn, node = server_tuple
             self.timer.add_time('waiting.server', timer.get())
-            self.sessions.register(TaskProcessor.Sessions.FROM_SERVER, server_conn, session, node_index)
-            session.preprocessing_done(server_conn, self.node_info[node_index])
+            self.sessions.register(TaskProcessor.Sessions.FROM_SERVER, server_conn, session, node)
+            session.preprocessing_done(server_conn, node)
 
     class ClientData:
         def __init__(self):
@@ -174,9 +174,7 @@ class TaskProcessor:
                 self.sessions.unregister(self.Sessions.FROM_CLIENT, session.client_conn.id)
             else:
                 self.csrv.client_ready((session, SimpleTimer()))
-                server_result = self.node_manager.get_server_conn(self.zmq_ctx,
-                    lambda socket : self.register_socket(socket,
-                    self.__handle_server_socket))
+                server_result = self.node_manager.get_server_conn(self.zmq_ctx)
                 if server_result:
                     self.csrv.server_ready(server_result)
 
@@ -214,18 +212,19 @@ class TaskProcessor:
         result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
         assert result is not None
         # Part of a session.
-        session, node_index = result
+        session, node = result
         client_id = session.client_conn.id
         session_done = session.got_data_from_server(msg)
         if session_done:
             self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
-            self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
-            self.node_manager.recycle(node_index, socket)
+            self.node_manager.recycle(node, socket)
             if session.state == session.STATE_DONE:
+                self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
                 session.task.completed(session.retcode,
                     session.stdout, session.stderr)
             else:
                 assert session.state == session.STATE_SERVER_FAILURE
+                task = session.task
                 if hasattr(task, 'retries'):
                     task.retries += 1
                 else:
@@ -233,21 +232,25 @@ class TaskProcessor:
                 if task.retries <= 3:
                     session.rewind()
                     self.csrv.client_ready((session, SimpleTimer()))
-                    server_result = self.node_manager.get_server_conn(
-                        self.zmq_ctx, lambda socket : self.register_socket(
-                        socket, self.__handle_server_socket))
+                    server_result = self.node_manager.get_server_conn(self.zmq_ctx)
                     if server_result:
                         self.csrv.server_ready(server_result)
                 else:
-                    session.task.completed(session.client_conn,
-                        session.retcode, session.stdout, session.stderr)
+                    self.sessions.unregister(self.Sessions.FROM_CLIENT, client_id)
+                    session.task.completed(session.retcode, session.stdout,
+                        session.stderr)
 
     def run(self, observer=None):
         self.sessions = self.Sessions()
-        self.node_manager = NodeManager(self.node_info)
         self.zmq_ctx = zmq.Context()
+        register_server_socket = lambda socket : self.register_socket(socket,
+            self.__handle_server_socket)
         self.poller = Poller(self.zmq_ctx)
+        self.node_manager = NodeManager(self.zmq_ctx, self.node_info,
+            register_server_socket, self.unregister_socket)
         self.source_scanner = SourceScanner(self.notify_preprocessing_done)
+
+        # Setup socket for receiving clients.
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
         self.client_socket.bind('tcp://*:{}'.format(self.__port))
         self.register_socket(self.client_socket, self.__handle_client_socket)
@@ -269,6 +272,7 @@ class TaskProcessor:
             self.pp_ready.close()
             self.node_manager.close()
             self.sessions.close()
+            self.poller.close()
             self.zmq_ctx.term()
 
     def stop(self):

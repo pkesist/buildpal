@@ -50,7 +50,7 @@ class CompileSession:
 
     def rewind(self):
         assert self.state == self.STATE_SERVER_FAILURE
-        self.state = STATE_WAIT_FOR_PREPROCESSING_DONE
+        self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
 
     def start_preprocessing(self):
         assert self.executable in self.compiler_info

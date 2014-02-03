@@ -1,7 +1,5 @@
 #! python3.3
-from Manager import TaskProcessor
-from Manager import run_gui
-from Manager import NodeInfo
+from Manager import TaskProcessor, run_gui, NodeInfo, Timer
 
 import argparse
 import configparser
@@ -44,18 +42,24 @@ def get_nodes_from_beacon():
     import select
     import struct
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
+    multicast_group = '224.3.29.71'
+    multicast_port = 51134
+    for family, x, y, z, addr in [info for info in socket.getaddrinfo('', 0)]:
+        if family == socket.AF_INET:
+            address, port = addr
+            mreq = struct.pack('=4s4s', socket.inet_aton(multicast_group), socket.inet_aton(address))
+            udp.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     udp.setblocking(False)
-    udp.sendto(b'DB_MGR_DISCOVER', ("<broadcast>", 51134))
+    udp.bind(('', 0))
+    udp.sendto(b'DB_MGR_DISCOVER', (multicast_group, multicast_port))
     nodes = []
     while True:
-        r, w, e = select.select([udp], [], [], 0.1)
-        if not r:
-            break
+        udp.settimeout(0.2)
         try:
             data, (address, port) = udp.recvfrom(256)
-        except BlockingIOError:
+        except socket.timeout:
             break
         prefix = b'DB_MGR_SERVER'
         prefix_len = len(prefix)
@@ -64,6 +68,7 @@ def get_nodes_from_beacon():
             nodes.append({
                 'address' : 'tcp://{}:{}'.format(address, port),
                 'max_tasks' : max_tasks})
+    udp.close()
     return nodes
 
 def get_config(ini_file):
@@ -104,10 +109,12 @@ if __name__ == "__main__":
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
+    timer = Timer()
+
     if opts.ui == 'gui':
-        run_gui(node_info, port)
+        run_gui(node_info, timer, port)
     else:
         try:
-            TaskProcessor(node_info, port).run()
+            TaskProcessor(node_info, timer, port).run()
         except KeyboardInterrupt:
             print("Shutting down.")

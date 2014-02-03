@@ -485,7 +485,7 @@ class CompileWorker:
         print("Using {} job slots.".format(self.__compile_slots))
 
         beacon = Beacon(self.__compile_slots, self.__port)
-        beacon.start(broadcast_port=51134)
+        beacon.start(multicast_address='224.3.29.71', multicast_port=51134)
 
         try:
             while True:

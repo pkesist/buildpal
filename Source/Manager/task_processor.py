@@ -130,11 +130,11 @@ class TaskProcessor:
                     break
             return messages
 
-    def __init__(self, node_info, port):
-        self.__port = port
+    def __init__(self, node_info, timer, port):
+        self.port = port
         self.cache_info = (0, 0)
         self.compiler_info = {}
-        self.timer = Timer()
+        self.timer = timer
         self.node_info = node_info
 
     def register_socket(self, socket, handler):
@@ -174,7 +174,7 @@ class TaskProcessor:
                 self.sessions.unregister(self.Sessions.FROM_CLIENT, session.client_conn.id)
             else:
                 self.csrv.client_ready((session, SimpleTimer()))
-                server_result = self.node_manager.get_server_conn(self.zmq_ctx)
+                server_result = self.node_manager.get_server_conn()
                 if server_result:
                     self.csrv.server_ready(server_result)
 
@@ -232,7 +232,7 @@ class TaskProcessor:
                 if task.retries <= 3:
                     session.rewind()
                     self.csrv.client_ready((session, SimpleTimer()))
-                    server_result = self.node_manager.get_server_conn(self.zmq_ctx)
+                    server_result = self.node_manager.get_server_conn()
                     if server_result:
                         self.csrv.server_ready(server_result)
                 else:
@@ -252,7 +252,7 @@ class TaskProcessor:
 
         # Setup socket for receiving clients.
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
-        self.client_socket.bind('tcp://*:{}'.format(self.__port))
+        self.client_socket.bind('tcp://*:{}'.format(self.port))
         self.register_socket(self.client_socket, self.__handle_client_socket)
 
         self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
@@ -264,7 +264,7 @@ class TaskProcessor:
         try:
             if observer is None:
                 observer = ConsolePrinter(self.node_info, self.timer,
-                    self.cache_info, self.__port)
+                    self.cache_info, self.port)
             self.poller.run(observer)
         finally:
             self.client_socket.close()

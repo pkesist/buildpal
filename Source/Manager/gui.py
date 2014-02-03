@@ -79,29 +79,29 @@ class TimerDisplay(MyTreeView):
             self.insert('', 'end', text=timer_name, values=values)
 
 class NodeDisplay(Frame):
-    def __init__(self, parent, node_info, timer):
+    def __init__(self, parent, node_info):
         Frame.__init__(self)
         self.node_info = node_info
-        self.timer = timer
         self.node_index = None
         self.draw()
 
     def draw(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        self.paned_window = PanedWindow(self, orient=VERTICAL)
+        self.label_frame = LabelFrame(self, text="Node Information")
+        self.label_frame.columnconfigure(0, weight=1)
+        self.label_frame.rowconfigure(0, weight=1)
+        self.paned_window = PanedWindow(self.label_frame, orient=VERTICAL)
 
         self.node_list = NodeList(self.paned_window, self.node_info, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
-        self.paned_window.add(self.node_list, weight=3)
+        self.paned_window.add(self.node_list)
         
-        self.global_times = TimerDisplay(self.paned_window, height=4)
-        self.paned_window.add(self.global_times, weight=2)
-
-        self.node_times = TimerDisplay(self.paned_window, height=4)
-        self.paned_window.add(self.node_times, weight=2)
+        self.node_times = TimerDisplay(self.paned_window, height=6)
+        self.paned_window.add(self.node_times)
 
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
+        self.label_frame.grid(row=0, column=0, sticky=N+S+W+E, padx=5, pady=5)
 
     def node_selected(self, event):
         selection = self.node_list.selection()
@@ -113,7 +113,6 @@ class NodeDisplay(Frame):
 
     def refresh(self):
         self.node_list.refresh()
-        self.global_times.update(self.timer.as_dict())
         if self.node_index is None:
             node_time_dict = {}
         else:
@@ -148,30 +147,66 @@ class DBManagerApp(Tk):
         self.columnconfigure(0, weight=1)
         self.columnconfigure(4, weight=1)
 
-        self.port_frame = Frame(self)
-        self.port_frame.grid(row=0, column=0, columnspan=5, sticky=E+W)
-        self.port_label = Label(self.port_frame, text="Port")
-        self.port_label.grid(row=0, column=0)
-        self.port_sb = Spinbox(self.port_frame, from_=1024, to=65536, increment=1)
+        # Row 0
+        self.settings_frame = LabelFrame(self, text="Settings")
+        self.settings_frame.grid(row=0, column=0, columnspan=5, sticky=E+W, padx=5, pady=(0, 5))
+        self.port_label = Label(self.settings_frame, text="Port")
+        self.port_label.grid(row=0, column=0, padx=(5, 20))
+        self.port_sb = Spinbox(self.settings_frame, from_=1024, to=65536, increment=1)
         self.port_sb.delete(0, "end")
         self.port_sb.insert(0, self.port)
         self.port_sb.grid(row=0, column=1)
 
+        self.start_but = Button(self.settings_frame, text="Start", command=self.start)
+        self.start_but.grid(row=0, column=2, sticky=E+W)
+        self.stop_but = Button(self.settings_frame, text="Stop", command=self.stop, state=DISABLED)
+        self.stop_but.grid(row=0, column=3, sticky=E+W)
+
+        # Row 1
+        self.pane = PanedWindow(self, orient=VERTICAL)
+        self.global_data_frame = LabelFrame(self.pane, text="Global Data")
+        self.global_times = TimerDisplay(self.global_data_frame, height=5)
+        self.global_data_frame.rowconfigure(0, weight=1)
+        self.global_data_frame.columnconfigure(0, weight=1)
+        self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
+
+        self.cache_frame = LabelFrame(self.global_data_frame, text="Cache Statistics")
+        self.cache_hits_label = Label(self.cache_frame, text="Hits")
+        self.cache_hits_label.grid(row=0, sticky=W)
+        self.cache_hits_text = Entry(self.cache_frame, state=DISABLED)
+        self.cache_hits_text.grid(row=0, column=1)
+        self.cache_misses_label = Label(self.cache_frame, text="Misses")
+        self.cache_misses_label.grid(row=1, sticky=W)
+        self.cache_misses_text = Entry(self.cache_frame, state=DISABLED)
+        self.cache_misses_text.grid(row=1, column=1)
+        self.cache_separator = Separator(self.cache_frame)
+        self.cache_separator.grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
+        self.cache_ratio_label = Label(self.cache_frame, text="Ratio")
+        self.cache_ratio_label.grid(row=3, sticky=W)
+        self.cache_ratio_text = Entry(self.cache_frame, state=DISABLED)
+        self.cache_ratio_text.grid(row=3, column=1)
+        self.cache_frame.grid(row=0, column=1, sticky=N+S+W+E)
+
+
+        self.global_data_frame.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
+        self.pane.add(self.global_data_frame)
+        self.node_display = NodeDisplay(self.pane, self.node_info)
+        self.node_display.grid(row=2, column=0, columnspan=5, sticky=N+S+W+E)
+        self.pane.add(self.node_display)
         self.rowconfigure(1, weight=1)
-        self.node_display = NodeDisplay(self, self.node_info, self.timer)
-        self.node_display.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
-        self.start_but = Button(self, text="Start", command=self.start)
-        self.start_but.grid(row=2, column=1, sticky=E+W)
-        self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
-        self.stop_but.grid(row=2, column=2, sticky=E+W)
-        self.exit = Button(self, text="Exit", command=self.destroy)
-        self.exit.grid(row=2, column=3, sticky=E+W)
+        self.pane.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
+
+        # Row 3
+        self.sizegrip = Sizegrip(self)
+        self.sizegrip.grid(row=3, column=0, columnspan=5, sticky=S+E)
+
 
     @called_from_foreign_thread
     def signal_refresh(self):
         self.refresh_event.set()
 
     def refresh(self):
+        self.global_times.update(self.timer.as_dict())
         self.node_display.refresh()
 
     def update_state(self, state):

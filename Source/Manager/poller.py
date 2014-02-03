@@ -173,8 +173,8 @@ class ZMQSelectPoller(PollerBase):
                 return
 
     def close(self):
-        for socket in self.poller.sockets:
-            self.unregister(socket)
+        for socket in self.sockets.keys():
+            socket.close()
 
 has_asyncio = True
 try:

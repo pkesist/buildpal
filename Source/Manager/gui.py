@@ -10,11 +10,11 @@ from operator import itemgetter
 from . import TaskProcessor
 
 class MyTreeView(Treeview):
-    def __init__(self, parent):
+    def __init__(self, parent, columns, **kwargs):
         Treeview.__init__(self, parent,
-            columns=tuple(c['cid'] for c in self.columns[1:]))
+            columns=tuple(c['cid'] for c in columns[1:]), **kwargs)
         heading_font = font.nametofont('TkHeadingFont')
-        for c in self.columns:
+        for c in columns:
             self.column(c['cid'], width=max(heading_font.measure(c['text']) + 15, c['minwidth']), minwidth=c['minwidth'], anchor=c['anchor'])
             self.heading(c['cid'], text=c['text'])
 
@@ -30,8 +30,8 @@ class NodeList(MyTreeView):
         {'cid' : "AvgTasks" , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
         {'cid' : "AvgTime"  , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
-    def __init__(self, parent, node_info):
-        MyTreeView.__init__(self, parent)
+    def __init__(self, parent, node_info, **kwargs):
+        MyTreeView.__init__(self, parent, self.columns, **kwargs)
         self.node_info = node_info
         for node in self.node_info:
             text = node.node_dict()['address']
@@ -57,12 +57,15 @@ class NodeList(MyTreeView):
             self.item(item, values=values)
 
 
-class NodeTimes(MyTreeView):
+class TimerDisplay(MyTreeView):
     columns = (
         { 'cid' : '#0'       , 'text' : 'Timer Name'  , 'minwidth' : 100, 'anchor' : W      },
         { 'cid' : 'TotalTime', 'text' : 'Total Time'  , 'minwidth' : 30 , 'anchor' : CENTER },
         { 'cid' : 'Count'    , 'text' : 'Count'       , 'minwidth' : 20 , 'anchor' : CENTER },
         { 'cid' : 'AvgTime'  , 'text' : 'Average Time', 'minwidth' : 30 , 'anchor' : CENTER })
+
+    def __init__(self, parent, **kwargs):
+        return MyTreeView.__init__(self, parent, self.columns, **kwargs)
 
     def update(self, timer_dict):
         self.delete(*self.get_children(''))
@@ -76,9 +79,10 @@ class NodeTimes(MyTreeView):
             self.insert('', 'end', text=timer_name, values=values)
 
 class NodeDisplay(Frame):
-    def __init__(self, parent, node_info):
+    def __init__(self, parent, node_info, timer):
         Frame.__init__(self)
         self.node_info = node_info
+        self.timer = timer
         self.node_index = None
         self.draw()
 
@@ -87,12 +91,15 @@ class NodeDisplay(Frame):
         self.rowconfigure(0, weight=1)
         self.paned_window = PanedWindow(self, orient=VERTICAL)
 
-        self.node_list = NodeList(self.paned_window, self.node_info)
-        self.paned_window.add(self.node_list)
+        self.node_list = NodeList(self.paned_window, self.node_info, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
+        self.paned_window.add(self.node_list, weight=3)
         
-        self.node_times = NodeTimes(self.paned_window)
-        self.paned_window.add(self.node_times)
+        self.global_times = TimerDisplay(self.paned_window, height=4)
+        self.paned_window.add(self.global_times, weight=2)
+
+        self.node_times = TimerDisplay(self.paned_window, height=4)
+        self.paned_window.add(self.node_times, weight=2)
 
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
 
@@ -106,12 +113,12 @@ class NodeDisplay(Frame):
 
     def refresh(self):
         self.node_list.refresh()
+        self.global_times.update(self.timer.as_dict())
         if self.node_index is None:
-            timer_dict = {}
+            node_time_dict = {}
         else:
-            timer_dict = self.node_info[self.node_index].timer().as_dict()
-        self.rowconfigure(1, weight=len(timer_dict))
-        self.node_times.update(timer_dict)
+            node_time_dict = self.node_info[self.node_index].timer().as_dict()
+        self.node_times.update(node_time_dict)
 
 def called_from_foreign_thread(func):
     return func
@@ -120,10 +127,11 @@ class DBManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
-    def __init__(self, node_info, port):
+    def __init__(self, node_info, timer, port):
         Tk.__init__(self, None)
-        self.port = port
         self.node_info = node_info
+        self.timer = timer
+        self.port = port
         self.state = self.state_stopped
         self.initialize()
         self.refresh_event = threading.Event()
@@ -150,7 +158,7 @@ class DBManagerApp(Tk):
         self.port_sb.grid(row=0, column=1)
 
         self.rowconfigure(1, weight=1)
-        self.node_display = NodeDisplay(self, self.node_info)
+        self.node_display = NodeDisplay(self, self.node_info, self.timer)
         self.node_display.grid(row=1, column=0, columnspan=5, sticky=N+S+W+E)
         self.start_but = Button(self, text="Start", command=self.start)
         self.start_but.grid(row=2, column=1, sticky=E+W)
@@ -180,7 +188,8 @@ class DBManagerApp(Tk):
     def start(self):
         if self.state != self.state_stopped:
             return
-        self.task_processor = TaskProcessor(self.node_info, self.port_sb.get())
+        self.task_processor = TaskProcessor(self.node_info, self.timer,
+            self.port_sb.get())
         self.thread = threading.Thread(target=self.__run_task_processor)
         self.thread.start()
         self.update_state(self.state_started)

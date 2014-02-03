@@ -7,7 +7,6 @@ from .source_scanner import SourceScanner
 from .timer import Timer
 from .task_creator import create_tasks
 from .node_manager import NodeManager
-from .scan_headers import dump_cache
 from .poller import ZMQSelectPoller
 from .console import ConsolePrinter
 
@@ -209,10 +208,7 @@ class TaskProcessor:
 
     def __handle_server_socket(self, socket, msg):
         # Connection to server node.
-        result = self.sessions.get(self.Sessions.FROM_SERVER, socket)
-        assert result is not None
-        # Part of a session.
-        session, node = result
+        session, node = self.sessions.get(self.Sessions.FROM_SERVER, socket)
         client_id = session.client_conn.id
         session_done = session.got_data_from_server(msg)
         if session_done:

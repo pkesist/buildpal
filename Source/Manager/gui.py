@@ -178,22 +178,26 @@ class NodeDisplay(Frame):
         s = self.zmq_ctx.socket(zmq.DEALER)
         s.connect(node.zmq_address())
         s.RCVTIMEO = 1000
-        ping_time = time()
-        s.send(b'PING')
-        try:
-            response = s.recv()
-        except zmq.ZMQError:
-            self.node_info_display.ping_result.set("FAILURE")
-        else:
-            diff = time() - ping_time
-            diff *= 1000
-            if diff < 1:
-                diff = "<1"
+        times = []
+        for x in range(5):
+            ping_time = time()
+            s.send(b'PING')
+            try:
+                response = s.recv()
+            except zmq.ZMQError:
+                self.node_info_display.ping_result.set("FAILURE")
+                return
             else:
-                diff = round(diff)
-            self.node_info_display.ping_result.set("{} ms".format(diff))
-        finally:
-            s.close()
+                times.append(time() - ping_time)
+
+        diff = sum(times) / len(times)
+        diff *= 1000
+        if diff < 1:
+            diff = "<1"
+        else:
+            diff = round(diff)
+        self.node_info_display.ping_result.set("{} ms".format(diff))
+        s.close()
 
     def node_selected(self, event):
         selection = self.node_list.selection()
@@ -298,7 +302,7 @@ class DBManagerApp(Tk):
         self.ui_data = type('UIData', (), {})()
         self.node_info = node_info
         self.port = port
-        self.state = self.state_stopped
+        self.running = False
         self.initialize()
         self.refresh_event = threading.Event()
         self.refresh_event.clear()
@@ -348,31 +352,31 @@ class DBManagerApp(Tk):
         self.global_data_frame.refresh()
         self.node_display.refresh()
 
-    def update_state(self, state):
-        self.state = state
-        self.stop_but['state'] = 'enable' if self.state == self.state_started else 'disable'
-        self.start_but['state'] = 'enable' if self.state == self.state_stopped else 'disable'
-        self.port_sb['state'] = 'normal' if self.state == self.state_stopped else 'disable'
+    def set_running(self, running):
+        self.running = running
+        self.stop_but['state'] = 'enable' if self.running else 'disable'
+        self.start_but['state'] = 'enable' if not self.running else 'disable'
+        self.port_sb['state'] = 'normal' if not self.running else 'disable'
 
     def destroy(self):
-        if self.state == self.state_started:
-            self.stop()
+        if self.running:
+            self.__stop_running()
         Tk.destroy(self)
 
     def __start_running(self):
-        if self.state != self.state_stopped:
+        if self.running:
             return
         self.task_processor = TaskProcessor(self.node_info, self.port_sb.get(), self.ui_data)
         self.thread = threading.Thread(target=self.__run_task_processor)
         self.thread.start()
-        self.update_state(self.state_started)
+        self.set_running(True)
 
     def __run_task_processor(self):
         self.task_processor.run(self.signal_refresh)
 
     def __stop_running(self):
-        if self.state != self.state_started:
+        if not self.running:
             return
         self.task_processor.stop()
         self.thread.join()
-        self.update_state(self.state_stopped)
+        self.set_running(False)

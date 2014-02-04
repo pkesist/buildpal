@@ -230,27 +230,20 @@ class CacheStats(LabelFrame):
         self.draw()
     
     def draw(self):
-        self.cache_misses = StringVar()
+        self.include_directives = StringVar()
         self.cache_hits = StringVar()
         self.cache_ratio = StringVar()
-        self.cache_hits_label = Label(self, text="Hits")
-        self.cache_hits_label.grid(row=0, sticky=W)
-        self.cache_hits_text = Entry(self, state=DISABLED, textvariable=self.cache_hits)
-        self.cache_hits_text.grid(row=0, column=1)
-        self.cache_misses_label = Label(self, text="Misses")
-        self.cache_misses_label.grid(row=1, sticky=W)
-        self.cache_misses_text = Entry(self, state=DISABLED, textvariable=self.cache_misses)
-        self.cache_misses_text.grid(row=1, column=1)
-        self.cache_separator = Separator(self)
-        self.cache_separator.grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
-        self.cache_ratio_label = Label(self, text="Ratio")
-        self.cache_ratio_label.grid(row=3, sticky=W)
-        self.cache_ratio_text = Entry(self, state=DISABLED, textvariable=self.cache_ratio)
-        self.cache_ratio_text.grid(row=3, column=1)
+        Label(self, text="Include Directives").grid(row=0, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.include_directives).grid(row=0, column=1)
+        Label(self, text="Cache Hits").grid(row=1, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_hits).grid(row=1, column=1)
+        Separator(self).grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
+        Label(self, text="Hit Ratio").grid(row=3, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=3, column=1)
 
     def refresh(self):
+        self.include_directives.set(self.ui_data.cache_stats.hits + self.ui_data.cache_stats.misses)
         self.cache_hits.set(self.ui_data.cache_stats.hits)
-        self.cache_misses.set(self.ui_data.cache_stats.misses)
         self.cache_ratio.set("{:.2f}".format(self.ui_data.cache_stats.ratio))
 
 class GlobalDataFrame(LabelFrame):

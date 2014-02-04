@@ -14,6 +14,9 @@ class NodeInfo:
         self._avg_tasks = {}
         self._timer = Timer()
 
+    def zmq_address(self):
+        return 'tcp://{}:{}'.format(self._node_dict['address'], self._node_dict['port'])
+
     def index(self):
         return self._index
 

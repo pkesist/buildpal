@@ -21,7 +21,7 @@ class MyTreeView(Treeview):
 
 class NodeList(MyTreeView):
     columns = (
-        {'cid' : "#0"       , 'text' : "Address"      , 'minwidth' : 100, 'anchor' : W  },
+        {'cid' : "#0"       , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
         {'cid' : "MaxTasks" , 'text' : "Max Tasks"    , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "TasksSent", 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Completed", 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
@@ -34,8 +34,8 @@ class NodeList(MyTreeView):
         MyTreeView.__init__(self, parent, self.columns, **kwargs)
         self.node_info = node_info
         for node in self.node_info:
-            text = node.node_dict()['address']
-            self.insert('', 'end', text=node.node_dict()['address'],
+            text = node.node_dict()['hostname']
+            self.insert('', 'end', text=text,
                 values=(node.node_dict()['max_tasks'],))
 
         self.refresh()
@@ -45,7 +45,7 @@ class NodeList(MyTreeView):
         assert len(items) == len(self.node_info)
         for node, item in zip(self.node_info, items):
             # Make sure the order did not change somehow.
-            assert self.item(item)['text'] == node.node_dict()['address']
+            assert self.item(item)['text'] == node.node_dict()['hostname']
             values = (
                 node.node_dict()['max_tasks'], 
                 node.tasks_sent       (),
@@ -56,6 +56,53 @@ class NodeList(MyTreeView):
                 "{:.2f}".format(node.average_task_time()))
             self.item(item, values=values)
 
+class NodeInfoDisplay(Frame):
+    def __init__(self, parent, node_info, **kw):
+        Frame.__init__(self, parent, **kw)
+        self.node_info = node_info
+        self.draw()
+
+    def label_and_entry(self, label_text, row, col=0):
+        var = StringVar()
+        label = Label(self, text=label_text)
+        entry = Entry(self, state=DISABLED, textvariable=var)
+        label.grid(row=row, column=2 * col + 0, sticky=E+W)
+        entry.grid(row=row, column=2 * col + 1)
+        return var
+
+    def draw(self):
+        self.address = self.label_and_entry("Address", 0)
+        self.port = self.label_and_entry("Port", 0, 1)
+        self.max_tasks = self.label_and_entry("Max Tasks", 1)
+        self.tasks_running = self.label_and_entry("Current Tasks", 1, 1)
+        self.tasks_sent = self.label_and_entry("Tasks Sent", 2)
+        self.tasks_completed = self.label_and_entry("Tasks Completed", 3)
+        self.tasks_failed = self.label_and_entry("Tasks Failed", 3, 1)
+        self.average_tasks = self.label_and_entry("Average Tasks", 4)
+        self.average_time = self.label_and_entry("Average Time", 4, 1)
+
+    def refresh(self, node_index):
+        if node_index is None:
+            self.address.set('')
+            self.port.set('')
+            self.max_tasks.set('')
+            self.tasks_sent.set('')
+            self.tasks_completed.set('')
+            self.tasks_failed.set('')
+            self.tasks_running.set('')
+            self.average_tasks.set('')
+            self.average_time.set('')
+        else:
+            node = self.node_info[node_index]
+            self.address.set(node.node_dict()['address'])
+            self.port.set(node.node_dict()['port'])
+            self.max_tasks.set(node.node_dict()['max_tasks'])
+            self.tasks_sent.set(node.tasks_sent())
+            self.tasks_completed.set(node.tasks_completed())
+            self.tasks_failed.set(node.tasks_failed())
+            self.tasks_running.set(node.tasks_processing())
+            self.average_tasks.set("{:.2f}".format(node.average_tasks()))
+            self.average_time.set("{:.2f}".format(node.average_task_time()))
 
 class TimerDisplay(MyTreeView):
     columns = (
@@ -67,7 +114,7 @@ class TimerDisplay(MyTreeView):
     def __init__(self, parent, **kwargs):
         return MyTreeView.__init__(self, parent, self.columns, **kwargs)
 
-    def update(self, timer_dict):
+    def refresh(self, timer_dict):
         self.delete(*self.get_children(''))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in timer_dict.items()]
         sorted_times.sort(key=itemgetter(1), reverse=True)
@@ -93,10 +140,17 @@ class NodeDisplay(Frame):
         self.label_frame.rowconfigure(0, weight=1)
         self.paned_window = PanedWindow(self.label_frame, orient=VERTICAL)
 
-        self.node_list = NodeList(self.paned_window, self.node_info, height=6)
+        self.nodes_pane = PanedWindow(self.paned_window, orient=HORIZONTAL)
+
+        self.node_list = NodeList(self.nodes_pane, self.node_info, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
-        self.paned_window.add(self.node_list)
-        
+        self.nodes_pane.add(self.node_list, weight=1)
+
+        self.node_info_display = NodeInfoDisplay(self.nodes_pane, self.node_info)
+        self.nodes_pane.add(self.node_info_display, weight=0)
+
+        self.paned_window.add(self.nodes_pane)
+
         self.node_times = TimerDisplay(self.paned_window, height=6)
         self.paned_window.add(self.node_times)
 
@@ -117,7 +171,8 @@ class NodeDisplay(Frame):
             node_time_dict = {}
         else:
             node_time_dict = self.node_info[self.node_index].timer().as_dict()
-        self.node_times.update(node_time_dict)
+        self.node_times.refresh(node_time_dict)
+        self.node_info_display.refresh(self.node_index)
 
 def called_from_foreign_thread(func):
     return func
@@ -164,8 +219,12 @@ class GlobalDataFrame(LabelFrame):
         self.columnconfigure(0, weight=1)
         self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
 
-        self.cache_frame = CacheStats(self, self.ui_data)
-        self.cache_frame.grid(row=0, column=1, sticky=N+S+W+E)
+        self.cache_stats = CacheStats(self, self.ui_data)
+        self.cache_stats.grid(row=0, column=1, sticky=N+S+W+E)
+
+    def refresh(self):
+        self.global_times.refresh(self.ui_data.timer.as_dict())
+        self.cache_stats.refresh()
 
 class SettingsFrame(LabelFrame):
     def __init__(self, parent, port, start, stop, **kw):
@@ -216,6 +275,9 @@ class DBManagerApp(Tk):
         self.settings_frame = SettingsFrame(self, self.port,
             self.__start_running, self.__stop_running)
         self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
+        self.port_sb = self.settings_frame.port_sb
+        self.stop_but = self.settings_frame.stop_but
+        self.start_but = self.settings_frame.start_but
 
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
@@ -241,9 +303,8 @@ class DBManagerApp(Tk):
         self.refresh_event.set()
 
     def refresh(self):
-        self.global_times.update(self.ui_data.timer.as_dict())
+        self.global_data_frame.refresh()
         self.node_display.refresh()
-        self.cache_frame.refresh()
 
     def update_state(self, state):
         self.state = state

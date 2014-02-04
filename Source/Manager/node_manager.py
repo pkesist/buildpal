@@ -16,7 +16,7 @@ class NodeManager:
         self.sockets_ready = {}
 
     def __connect_to_node(self, node):
-        node_address = node.node_dict()['address']
+        node_address = node.zmq_address()
         try:
             socket = create_socket(self.zmq_ctx, zmq.DEALER)
             socket.connect(node_address)

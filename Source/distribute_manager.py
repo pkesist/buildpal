@@ -31,7 +31,8 @@ def get_nodes_from_ini_file(config):
                 server_port = int(value[port_index + 1:])
                 max_tasks = None
             nodes.append({
-                'address' : 'tcp://{}:{}'.format(value[:port_index], server_port),
+                'address' : value[:port_index],
+                'port' : server_port,
                 'max_tasks' : max_tasks })
         else:
             done = True
@@ -49,11 +50,12 @@ def get_nodes_from_beacon():
     # socket.INADDR_ANY. Windows will send multicast message through
     # only one interface - loopback. We need to enumerate interfaces
     # and add membership to each one.
-    for family, x, y, z, addr in [info for info in socket.getaddrinfo('', 0)]:
-        if family == socket.AF_INET:
-            address, port = addr
-            mreq = struct.pack('=4s4s', socket.inet_aton(multicast_group), socket.inet_aton(address))
-            udp.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    addrinfo = []
+    addrinfo.extend((info for info in socket.getaddrinfo('', 0)))
+    addrinfo.extend((info for info in socket.getaddrinfo('localhost', 0)))
+    for x, y, z, (address, *port) in (x[1:] for x in addrinfo if x[0] == socket.AF_INET):
+        mreq = struct.pack('=4s4s', socket.inet_aton(multicast_group), socket.inet_aton(address))
+        udp.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp.setblocking(False)
     udp.bind(('', 0))
@@ -67,11 +69,23 @@ def get_nodes_from_beacon():
             break
         prefix = b'DB_MGR_SERVER'
         prefix_len = len(prefix)
-        if len(data) == prefix_len + 2 + 2 and data[:prefix_len] == prefix:
-            port, max_tasks = struct.unpack('!2H', data[prefix_len:prefix_len+4])
+        if data[:prefix_len] != prefix:
+            continue
+        if len(data) == prefix_len + 2 + 2 + 32:
+            port, max_tasks, hostname = struct.unpack('!2H32p', data[prefix_len:])
             nodes.append({
-                'address' : 'tcp://{}:{}'.format(address, port),
+                'address' : address,
+                'port' : port,
+                'hostname' : hostname.decode().strip(),
                 'max_tasks' : max_tasks})
+        elif len(data) == prefix_len + 2 + 2:
+            port, max_tasks = struct.unpack('!2H', data[prefix_len:])
+            nodes.append({
+                'address' : address,
+                'port' : port,
+                'hostname' : "<{}>".format(address),
+                'max_tasks' : max_tasks})
+
     udp.close()
     return nodes
 

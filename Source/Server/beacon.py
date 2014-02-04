@@ -6,7 +6,7 @@ class Beacon:
     discover_string = b'DB_MGR_DISCOVER'
 
     def __init__(self, slots, server_port):
-        self.response = b'DB_MGR_SERVER' + struct.pack('!2H', server_port, slots)
+        self.response = b'DB_MGR_SERVER' + struct.pack('!2H32p', server_port, slots, socket.getfqdn().encode())
         self.running = False
 
     def start(self, multicast_address, multicast_port):

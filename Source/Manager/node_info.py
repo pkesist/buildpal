@@ -15,7 +15,8 @@ class NodeInfo:
         self._timer = Timer()
 
     def zmq_address(self):
-        return 'tcp://{}:{}'.format(self._node_dict['address'], self._node_dict['port'])
+        return 'tcp://{}:{}'.format(self._node_dict['address'],
+            self._node_dict['port'])
 
     def index(self):
         return self._index
@@ -30,7 +31,7 @@ class NodeInfo:
 
     def tasks_failed(self): return self._tasks_failed
 
-    def tasks_processing(self): return self.tasks_sent() - self.tasks_completed() - self.tasks_failed()
+    def tasks_pending(self): return self.tasks_sent() - self.tasks_completed() - self.tasks_failed()
 
     def total_time(self): return self._total_time
 
@@ -40,23 +41,23 @@ class NodeInfo:
         weighted_duration = sum((duration * tasks for tasks, duration in avg_tasks.items()))
         return (weighted_duration / regular_duration) if regular_duration else 0
 
-    def __tasks_processing_about_to_change(self):
-        tasks_processing = self.tasks_processing()
-        if tasks_processing > 0:
+    def __tasks_pending_about_to_change(self):
+        tasks_pending = self.tasks_pending()
+        if tasks_pending > 0:
             current_time = time()
             duration = current_time - self._tasks_change
             self._tasks_change = current_time
-            self._avg_tasks.setdefault(tasks_processing, 0)
-            self._avg_tasks[tasks_processing] += duration
+            self._avg_tasks.setdefault(tasks_pending, 0)
+            self._avg_tasks[tasks_pending] += duration
         else:
             self._tasks_change = time()
 
     def add_tasks_sent(self):
-        self.__tasks_processing_about_to_change()
+        self.__tasks_pending_about_to_change()
         self._tasks_sent += 1
 
     def add_tasks_completed(self):
-        self.__tasks_processing_about_to_change()
+        self.__tasks_pending_about_to_change()
         self._tasks_completed += 1
 
     def add_tasks_failed(self): self._tasks_failed += 1

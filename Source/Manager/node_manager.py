@@ -30,8 +30,8 @@ class NodeManager:
             
     def __best_node(self):
         def cmp(lhs_node, rhs_node):
-            lhs_tasks_processing = lhs_node.tasks_processing()
-            rhs_tasks_processing = rhs_node.tasks_processing()
+            lhs_tasks_pending = lhs_node.tasks_pending()
+            rhs_tasks_pending = rhs_node.tasks_pending()
 
             def time_per_task(node):
                 timer = node.timer().as_dict()
@@ -43,14 +43,14 @@ class NodeManager:
             rhs_time_per_task = time_per_task(rhs_node)
 
             if lhs_time_per_task == 0 and rhs_time_per_task == 0:
-                return -1 if lhs_tasks_processing < rhs_tasks_processing else 1
-            if lhs_tasks_processing == 0 and rhs_tasks_processing == 0:
+                return -1 if lhs_tasks_pending < rhs_tasks_pending else 1
+            if lhs_tasks_pending == 0 and rhs_tasks_pending == 0:
                 return -1 if lhs_time_per_task < rhs_time_per_task else 1
             # In case we don't yet have average time per task for a node, do
             # not allow that node to be flooded.
-            if lhs_time_per_task == 0 and lhs_tasks_processing >= 5:
+            if lhs_time_per_task == 0 and lhs_tasks_pending >= 5:
                 return 1
-            return -1 if lhs_tasks_processing * lhs_time_per_task <= rhs_tasks_processing * rhs_time_per_task else 1
+            return -1 if lhs_tasks_pending * lhs_time_per_task <= rhs_tasks_pending * rhs_time_per_task else 1
         return min(self.node_info, key=cmp_to_key(cmp))
 
     def recycle(self, node, socket):

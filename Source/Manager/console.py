@@ -26,7 +26,7 @@ class ConsolePrinter:
                 node.tasks_sent       (),
                 node.tasks_completed  (),
                 node.tasks_failed     (),
-                node.tasks_processing (),
+                node.tasks_pending    (),
                 node.average_tasks    (),
                 node.average_task_time()))
         print("================")

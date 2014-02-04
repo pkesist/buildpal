@@ -22,14 +22,14 @@ class MyTreeView(Treeview):
 
 class NodeList(MyTreeView):
     columns = (
-        {'cid' : "#0"       , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
-        {'cid' : "JobSlots" , 'text' : "Job Slots"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TasksSent", 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Completed", 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Failed"   , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Running"  , 'text' : "Running"      , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "AvgTasks" , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
-        {'cid' : "AvgTime"  , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
+        {'cid' : "#0"          , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
+        {'cid' : "JobSlots"    , 'text' : "Job Slots"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TasksPending", 'text' : "Tasks Pending", 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Completed"   , 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Failed"      , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Running"     , 'text' : "Running"      , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "AvgTasks"    , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
+        {'cid' : "AvgTime"     , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
     def __init__(self, parent, node_info, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
@@ -49,10 +49,10 @@ class NodeList(MyTreeView):
             assert self.item(item)['text'] == node.node_dict()['hostname']
             values = (
                 node.node_dict()['job_slots'], 
-                node.tasks_sent       (),
-                node.tasks_completed  (),
-                node.tasks_failed     (),
-                node.tasks_processing (),
+                node.tasks_sent     (),
+                node.tasks_completed(),
+                node.tasks_failed   (),
+                node.tasks_pending  (),
                 "{:.2f}".format(node.average_tasks()),
                 "{:.2f}".format(node.average_task_time()))
             self.item(item, values=values)
@@ -75,7 +75,7 @@ class NodeInfoDisplay(Frame):
         self.address = self.label_and_entry("Address", 0)
         self.port = self.label_and_entry("Port", 0, 1)
         self.job_slots = self.label_and_entry("Job Slots", 1)
-        self.tasks_running = self.label_and_entry("Current Tasks", 1, 1)
+        self.tasks_pending = self.label_and_entry("Tasks Pending", 1, 1)
         self.tasks_sent = self.label_and_entry("Tasks Sent", 2)
         self.tasks_completed = self.label_and_entry("Tasks Completed", 3)
         self.tasks_failed = self.label_and_entry("Tasks Failed", 3, 1)
@@ -97,7 +97,7 @@ class NodeInfoDisplay(Frame):
             self.tasks_sent.set('')
             self.tasks_completed.set('')
             self.tasks_failed.set('')
-            self.tasks_running.set('')
+            self.tasks_pending.set('')
             self.average_tasks.set('')
             self.average_time.set('')
             self.ping_button['state'] = 'disabled'
@@ -109,7 +109,7 @@ class NodeInfoDisplay(Frame):
             self.tasks_sent.set(node.tasks_sent())
             self.tasks_completed.set(node.tasks_completed())
             self.tasks_failed.set(node.tasks_failed())
-            self.tasks_running.set(node.tasks_processing())
+            self.tasks_pending.set(node.tasks_pending())
             self.average_tasks.set("{:.2f}".format(node.average_tasks()))
             self.average_time.set("{:.2f}".format(node.average_task_time()))
             self.ping_button['state'] = 'enabled'

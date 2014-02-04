@@ -341,8 +341,9 @@ int main( int argc, char * argv[] )
     StringSaver saver;
     if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeGNUCommandLine, newArgv ) )
     {
-        std::cerr << "FATAL: Failed to expand response files.";
-        return -1;
+        // Still not fixed in Clang 3.4.
+        //std::cerr << "FATAL: Failed to expand response files.";
+        //return -1;
     }
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
@@ -379,11 +380,14 @@ int main( int argc, char * argv[] )
             char const * commandLine;
             std::size_t commandLineSize;
             receiver.getPart( 1, &commandLine, &commandLineSize );
+            // Running the compiler is implied.
+            std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
 
-            // Create a copy on the stack as required by CreateProcess.
-            char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
-            std::memcpy( buffer, commandLine, commandLineSize );
-            buffer[ commandLineSize ] = 0;
+            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLineSize + 1 ) );
+            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize );
+            buffer[ compilerExecutableSize ] = ' ';
+            std::memcpy( buffer + compilerExecutableSize + 1, commandLine, commandLineSize );
+            buffer[ compilerExecutableSize + 1 + commandLineSize ] = 0;
 
             return createProcess( buffer );
         }
@@ -394,10 +398,14 @@ int main( int argc, char * argv[] )
             std::size_t commandLineSize;
             receiver.getPart( 1, &commandLine, &commandLineSize );
 
-            // Create a copy on the stack as required by CreateProcess.
-            char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
-            std::memcpy( buffer, commandLine, commandLineSize );
-            buffer[ commandLineSize ] = 0;
+            // Running the compiler is implied.
+            std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
+
+            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLineSize + 1 ) );
+            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize + 1 );
+            buffer[ compilerExecutableSize ] = ' ';
+            std::memcpy( buffer + compilerExecutableSize + 1, commandLine, commandLineSize );
+            buffer[ compilerExecutableSize + 1 + commandLineSize ] = 0;
 
             SECURITY_ATTRIBUTES saAttr;
             saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);

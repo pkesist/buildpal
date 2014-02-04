@@ -226,7 +226,8 @@ class CompileSession:
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
         try:
-            object_file_handle, object_file_name = tempfile.mkstemp(suffix='.obj')
+            object_file_handle, object_file_name = tempfile.mkstemp(
+                suffix='.obj')
             os.close(object_file_handle)
 
             compiler_prep = time()
@@ -272,7 +273,8 @@ class CompileSession:
                 sleep(1)
 
             include_dirs = self.include_dirs_future.result()
-            includes = [compiler_info['set_include_option'].format(incpath) for incpath in include_dirs]
+            includes = [compiler_info['set_include_option'].format(incpath)
+                for incpath in include_dirs]
             start = time()
             self.times['compiler_prep'] = start - compiler_prep
             command = (self.task['call'] + pch_switch +
@@ -290,7 +292,8 @@ class CompileSession:
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
                 stdout, stderr, self.times))])
             if retcode == 0:
-                fh = os.open(object_file_name, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+                fh = os.open(object_file_name, os.O_RDONLY | os.O_BINARY |
+                    os.O_NOINHERIT)
                 with os.fdopen(fh, 'rb') as obj:
                     send_compressed_file(sender.send_multipart, obj, copy=False)
             sender.disconnect()

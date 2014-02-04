@@ -2,8 +2,22 @@ from subprocess import list2cmdline
 
 import os
 
+class Task:
+    def __init__(self, task_dict):
+        self.__dict__.update(task_dict)
+
+    def compiler(self):
+        return self.task_creator.compiler()
+
+    def executable(self):
+        return self.task_creator.executable()
+
+    def completed(self, *args):
+        self.task_creator.task_done(self, *args)
+
 class TaskCreator:
-    def __init__(self, executable, cwd, sysincludes, compiler, command):
+    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command):
+        self.__client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
         self.__cwd = cwd
@@ -19,7 +33,7 @@ class TaskCreator:
     def build_local(self):
         return self.__options.should_build_locally()
 
-    def create_tasks(self, client_conn):
+    def create_tasks(self):
         output = self.__options.output_file()
         sources = self.__options.input_files()
         if output and len(sources) > 1:
@@ -38,27 +52,10 @@ class TaskCreator:
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
-        class Task:
-            def __init__(self, task_creator, client_conn):
-                self.task_creator = task_creator
-                self.client_conn = client_conn
-
-            def compiler(self):
-                return self.task_creator.compiler()
-
-            def executable(self):
-                return self.task_creator.executable()
-                
-            def completed(self, *args):
-                self.task_creator.task_done(self, *args)
-
-        def create_task(source, client_conn):
+        def create_task(source):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
-
-            task = Task(self, client_conn)
-            task.__dict__.update(
-            {
+            return Task({
                 'server_task_info' : {
                     'call' : self.__options.create_server_call(),
                     'pch_file' : pch_file,
@@ -70,12 +67,13 @@ class TaskCreator:
                     'sysincludes' : self.__sysincludes,
                     'pch_header' : pch_header
                 },
+                'task_creator' : self,
+                'client_conn' : self.__client_conn,
                 'output' : os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
                 'pch_file' : pch_file,
                 'source' : source,
             })
-            return task
-        self.tasks = set(create_task(source, client_conn) for source in sources)
+        self.tasks = set(create_task(source) for source in sources)
         self.completed_tasks = {}
         return self.tasks
 
@@ -86,12 +84,12 @@ class TaskCreator:
         stdout = ''
         stderr = ''
         if self.tasks == self.completed_tasks.keys():
-            self.postprocess(task.client_conn)
+            self.postprocess()
 
     def should_invoke_linker(self):
         return self.__options.should_invoke_linker()
 
-    def postprocess(self, client_conn):
+    def postprocess(self):
         error_code = None
         stdout = b''
         stderr = b''
@@ -101,19 +99,18 @@ class TaskCreator:
             stdout += result[1]
             stderr += result[2]
         if error_code:
-            client_conn.send([b'EXIT', error_code, stdout, stderr])
+            self.__client_conn.send([b'EXIT', error_code, stdout, stderr])
             return
 
         if not self.should_invoke_linker():
-            client_conn.send([b'EXIT', b'0', stdout, stderr])
+            self.__client_conn.send([b'EXIT', b'0', stdout, stderr])
             return
 
         objects = {}
         for task in self.tasks:
             objects[task.source] = task.output
 
-        call = [self.executable()]
-
+        call = []
         for input in self.__options.input_files():
             if input in objects:
                 call.append(objects[input])
@@ -124,12 +121,11 @@ class TaskCreator:
         if link_opts:
             call.extend(*link_opts)
 
-        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
-
+        self.__client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
 
 def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):
-    task_creator = TaskCreator(executable, cwd, sysincludes, compiler, command)
+    task_creator = TaskCreator(client_conn, executable, cwd, sysincludes, compiler, command)
     if task_creator.build_local():
-        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(['cl.exe'] + command).encode()])
+        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
         return []
-    return task_creator.create_tasks(client_conn)
+    return task_creator.create_tasks()

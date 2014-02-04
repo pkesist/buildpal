@@ -158,8 +158,7 @@ class MSVCWrapper:
     placeholder_string = '__PLACEHOLDER_G87AD68BGV7AD67BV8ADR8B6'
 
     class TestSource:
-        def __init__(self, executable, macros, placeholder_string):
-            self.executable = executable
+        def __init__(self, macros, placeholder_string):
             cpp_handle, self.cpp_filename = tempfile.mkstemp(suffix='.cpp')
             obj_handle, self.obj_filename = tempfile.mkstemp(suffix='.obj')
             os.close(obj_handle)
@@ -184,16 +183,16 @@ class MSVCWrapper:
             os.remove(self.obj_filename)
 
         def command(self):
-            return [self.executable, '/Fo{}'.format(self.obj_filename), '-c', self.cpp_filename]
+            return ['/Fo{}'.format(self.obj_filename), '-c', self.cpp_filename]
 
-    def prepare_test_source(self, executable):
+    def prepare_test_source(self):
         #   Here we should test only for macros which do not change depending on
         # compiler options, i.e. which are fixed for a specific compiler
         # executable.
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
-        return MSVCWrapper.TestSource(executable, macros, self.placeholder_string)
+        return MSVCWrapper.TestSource(macros, self.placeholder_string)
 
     def compiler_info(self, executable, stdout, stderr):
         output = stdout.split(b'\r\n')

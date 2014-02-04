@@ -40,7 +40,7 @@ class CompileSession:
         if self.executable in self.compiler_info:
             self.start_preprocessing()
         else:
-            self.test_source = self.compiler.prepare_test_source(self.executable)
+            self.test_source = self.compiler.prepare_test_source()
             self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
             self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 

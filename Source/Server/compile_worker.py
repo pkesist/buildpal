@@ -500,6 +500,7 @@ class CompileWorker:
                         client_id, *msg = recv_multipart(clients)
                         if len(msg) == 1 and msg[0] == b'PING':
                             clients.send_multipart([client_id, b'PONG'])
+                            continue
                         elif not client_id in self.workers:
                             session = self.create_session(client_id)
 

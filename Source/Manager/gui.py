@@ -2,10 +2,12 @@
 from tkinter import *
 import tkinter.font as font
 from tkinter.ttk import *
+import zmq
 
 import threading
 
 from operator import itemgetter
+from time import time
 
 from . import TaskProcessor
 
@@ -18,11 +20,10 @@ class MyTreeView(Treeview):
             self.column(c['cid'], width=max(heading_font.measure(c['text']) + 15, c['minwidth']), minwidth=c['minwidth'], anchor=c['anchor'])
             self.heading(c['cid'], text=c['text'])
 
-
 class NodeList(MyTreeView):
     columns = (
         {'cid' : "#0"       , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
-        {'cid' : "MaxTasks" , 'text' : "Max Tasks"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "JobSlots" , 'text' : "Job Slots"    , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "TasksSent", 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Completed", 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Failed"   , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
@@ -31,12 +32,12 @@ class NodeList(MyTreeView):
         {'cid' : "AvgTime"  , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
     def __init__(self, parent, node_info, **kwargs):
-        MyTreeView.__init__(self, parent, self.columns, **kwargs)
+        MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
         self.node_info = node_info
         for node in self.node_info:
             text = node.node_dict()['hostname']
             self.insert('', 'end', text=text,
-                values=(node.node_dict()['max_tasks'],))
+                values=(node.node_dict()['job_slots'],))
 
         self.refresh()
 
@@ -47,7 +48,7 @@ class NodeList(MyTreeView):
             # Make sure the order did not change somehow.
             assert self.item(item)['text'] == node.node_dict()['hostname']
             values = (
-                node.node_dict()['max_tasks'], 
+                node.node_dict()['job_slots'], 
                 node.tasks_sent       (),
                 node.tasks_completed  (),
                 node.tasks_failed     (),
@@ -65,7 +66,7 @@ class NodeInfoDisplay(Frame):
     def label_and_entry(self, label_text, row, col=0):
         var = StringVar()
         label = Label(self, text=label_text)
-        entry = Entry(self, state=DISABLED, textvariable=var)
+        entry = Entry(self, state=DISABLED, foreground='black', textvariable=var)
         label.grid(row=row, column=2 * col + 0, sticky=E+W)
         entry.grid(row=row, column=2 * col + 1)
         return var
@@ -73,36 +74,45 @@ class NodeInfoDisplay(Frame):
     def draw(self):
         self.address = self.label_and_entry("Address", 0)
         self.port = self.label_and_entry("Port", 0, 1)
-        self.max_tasks = self.label_and_entry("Max Tasks", 1)
+        self.job_slots = self.label_and_entry("Job Slots", 1)
         self.tasks_running = self.label_and_entry("Current Tasks", 1, 1)
         self.tasks_sent = self.label_and_entry("Tasks Sent", 2)
         self.tasks_completed = self.label_and_entry("Tasks Completed", 3)
         self.tasks_failed = self.label_and_entry("Tasks Failed", 3, 1)
         self.average_tasks = self.label_and_entry("Average Tasks", 4)
         self.average_time = self.label_and_entry("Average Time", 4, 1)
+        Separator(self).grid(row=5, column=0, columnspan=4, sticky=E+W, pady=5)
+        self.ping_button = Button(self, text='PING', state=DISABLED)
+        self.ping_button.grid(row=6, column=0)
+        self.ping_result = StringVar()
+        self.ping_result_entry = Entry(self, textvariable=self.ping_result,
+            state=DISABLED, foreground='black')
+        self.ping_result_entry.grid(row=6, column=1)
 
     def refresh(self, node_index):
         if node_index is None:
             self.address.set('')
             self.port.set('')
-            self.max_tasks.set('')
+            self.job_slots.set('')
             self.tasks_sent.set('')
             self.tasks_completed.set('')
             self.tasks_failed.set('')
             self.tasks_running.set('')
             self.average_tasks.set('')
             self.average_time.set('')
+            self.ping_button['state'] = 'disabled'
         else:
             node = self.node_info[node_index]
             self.address.set(node.node_dict()['address'])
             self.port.set(node.node_dict()['port'])
-            self.max_tasks.set(node.node_dict()['max_tasks'])
+            self.job_slots.set(node.node_dict()['job_slots'])
             self.tasks_sent.set(node.tasks_sent())
             self.tasks_completed.set(node.tasks_completed())
             self.tasks_failed.set(node.tasks_failed())
             self.tasks_running.set(node.tasks_processing())
             self.average_tasks.set("{:.2f}".format(node.average_tasks()))
             self.average_time.set("{:.2f}".format(node.average_task_time()))
+            self.ping_button['state'] = 'enabled'
 
 class TimerDisplay(MyTreeView):
     columns = (
@@ -115,6 +125,7 @@ class TimerDisplay(MyTreeView):
         return MyTreeView.__init__(self, parent, self.columns, **kwargs)
 
     def refresh(self, timer_dict):
+        selection = self.selection()
         self.delete(*self.get_children(''))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in timer_dict.items()]
         sorted_times.sort(key=itemgetter(1), reverse=True)
@@ -124,6 +135,8 @@ class TimerDisplay(MyTreeView):
                 count,
                 "{:.2f}".format(average))
             self.insert('', 'end', text=timer_name, values=values)
+        if selection:
+            self.selection_add(selection)
 
 class NodeDisplay(Frame):
     def __init__(self, parent, node_info):
@@ -131,6 +144,7 @@ class NodeDisplay(Frame):
         self.node_info = node_info
         self.node_index = None
         self.draw()
+        self.zmq_ctx = zmq.Context()
 
     def draw(self):
         self.columnconfigure(0, weight=1)
@@ -147,6 +161,7 @@ class NodeDisplay(Frame):
         self.nodes_pane.add(self.node_list, weight=1)
 
         self.node_info_display = NodeInfoDisplay(self.nodes_pane, self.node_info)
+        self.node_info_display.ping_button['command'] = self.ping
         self.nodes_pane.add(self.node_info_display, weight=0)
 
         self.paned_window.add(self.nodes_pane)
@@ -157,12 +172,39 @@ class NodeDisplay(Frame):
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
         self.label_frame.grid(row=0, column=0, sticky=N+S+W+E, padx=5, pady=5)
 
+    def ping(self):
+        assert self.node_index is not None
+        node = self.node_info[self.node_index]
+        s = self.zmq_ctx.socket(zmq.DEALER)
+        s.connect(node.zmq_address())
+        s.RCVTIMEO = 1000
+        ping_time = time()
+        s.send(b'PING')
+        try:
+            response = s.recv()
+        except zmq.ZMQError:
+            self.node_info_display.ping_result.set("FAILURE")
+        else:
+            diff = time() - ping_time
+            diff *= 1000
+            if diff < 1:
+                diff = "<1"
+            else:
+                diff = round(diff)
+            self.node_info_display.ping_result.set("{} ms".format(diff))
+        finally:
+            s.close()
+
     def node_selected(self, event):
         selection = self.node_list.selection()
         if not selection:
             self.node_index = None
         else:
-            self.node_index = self.node_list.index(self.node_list.selection()[0])
+            new_index = self.node_list.index(self.node_list.selection()[0])
+            if new_index == self.node_index:
+                return
+            self.node_index = new_index
+        self.node_info_display.ping_result.set('')
         self.refresh()
 
     def refresh(self):

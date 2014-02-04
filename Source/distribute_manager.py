@@ -21,19 +21,19 @@ def get_nodes_from_ini_file(config):
             value = section[option]
             delim = ':'
             if not delim in value:
-                raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>[:<max_tasks>]")
+                raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>[:<job_slots>]")
             port_index = value.index(delim)
             try:
-                max_tasks_index = value.index(':', port_index + 1)
-                server_port = int(value[port_index + 1 : max_tasks_index])
-                max_tasks = int(value[max_tasks_index + 1 : ])
+                job_slots_index = value.index(':', port_index + 1)
+                server_port = int(value[port_index + 1 : job_slots_index])
+                job_slots = int(value[job_slots_index + 1 : ])
             except ValueError:
                 server_port = int(value[port_index + 1:])
-                max_tasks = None
+                job_slots = None
             nodes.append({
                 'address' : value[:port_index],
                 'port' : server_port,
-                'max_tasks' : max_tasks })
+                'job_slots' : job_slots })
         else:
             done = True
     return nodes
@@ -72,19 +72,19 @@ def get_nodes_from_beacon():
         if data[:prefix_len] != prefix:
             continue
         if len(data) == prefix_len + 2 + 2 + 32:
-            port, max_tasks, hostname = struct.unpack('!2H32p', data[prefix_len:])
+            port, job_slots, hostname = struct.unpack('!2H32p', data[prefix_len:])
             nodes.append({
                 'address' : address,
                 'port' : port,
                 'hostname' : hostname.decode().strip(),
-                'max_tasks' : max_tasks})
+                'job_slots' : job_slots})
         elif len(data) == prefix_len + 2 + 2:
-            port, max_tasks = struct.unpack('!2H', data[prefix_len:])
+            port, job_slots = struct.unpack('!2H', data[prefix_len:])
             nodes.append({
                 'address' : address,
                 'port' : port,
                 'hostname' : "<{}>".format(address),
-                'max_tasks' : max_tasks})
+                'job_slots' : job_slots})
 
     udp.close()
     return nodes

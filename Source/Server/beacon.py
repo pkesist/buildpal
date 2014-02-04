@@ -27,8 +27,12 @@ class Beacon:
         self.thread.join()
 
     def __run_beacon(self, multicast_address, multicast_port):
-        mreq = struct.pack('=4sL', socket.inet_aton(multicast_address), socket.INADDR_ANY)
-        self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        addrinfo = []
+        addrinfo.extend((info for info in socket.getaddrinfo('', 0)))
+        addrinfo.extend((info for info in socket.getaddrinfo('localhost', 0)))
+        for x, y, z, (address, *port) in (x[1:] for x in addrinfo if x[0] == socket.AF_INET):
+            mreq = struct.pack('=4s4s', socket.inet_aton(multicast_address), socket.inet_aton(address))
+            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         self.socket.bind(('', multicast_port))
         while self.running:
             try:

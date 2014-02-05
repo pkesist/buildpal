@@ -31,13 +31,13 @@
     <Compile Include="Source\Compilers\__init__.py" />
     <Compile Include="Source\distribute_manager.py" />
     <Compile Include="Source\distribute_server.py" />
+    <Compile Include="Source\Manager\command_processor.py" />
     <Compile Include="Source\Manager\compile_session.py" />
     <Compile Include="Source\Manager\console.py" />
     <Compile Include="Source\Manager\gui.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\node_manager.py" />
     <Compile Include="Source\Manager\poller.py" />
-    <Compile Include="Source\Manager\task_creator.py" />
     <Compile Include="Source\Manager\timer.py" />
     <Compile Include="Source\Manager\source_scanner.py" />
     <Compile Include="Source\Manager\task_processor.py" />

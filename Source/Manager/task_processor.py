@@ -3,7 +3,7 @@ from Common import SimpleTimer, Rendezvous, recv_multipart, create_socket
 
 from .compile_session import CompileSession
 from .source_scanner import SourceScanner
-from .task_creator import CommandProcessor
+from .command_processor import CommandProcessor
 from .timer import Timer
 from .node_manager import NodeManager
 from .poller import ZMQSelectPoller

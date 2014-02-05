@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# DistriBuild documentation build configuration file, created by
+# BuildPal documentation build configuration file, created by
 # sphinx-quickstart on Wed Nov 27 18:34:54 2013.
 #
 # This file is execfile()d with the current directory set to its
@@ -49,7 +49,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'DistriBuild'
+project = 'BuildPal'
 copyright = '2013, PKE sistemi'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -182,7 +182,7 @@ html_show_copyright = False
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'DistriBuilddoc'
+htmlhelp_basename = 'BuildPaldoc'
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -202,7 +202,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-  ('index', 'DistriBuild.tex', 'DistriBuild Documentation',
+  ('index', 'BuildPal.tex', 'BuildPal Documentation',
    'PKE sistemi', 'manual'),
 ]
 
@@ -232,7 +232,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'distribuild', 'DistriBuild Documentation',
+    ('index', 'buildpal', 'BuildPal Documentation',
      ['PKE sistemi'], 1)
 ]
 
@@ -246,8 +246,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'DistriBuild', 'DistriBuild Documentation',
-   'PKE sistemi', 'DistriBuild', 'One line description of project.',
+  ('index', 'BuildPal', 'BuildPal Documentation',
+   'PKE sistemi', 'BuildPal', 'One line description of project.',
    'Miscellaneous'),
 ]
 

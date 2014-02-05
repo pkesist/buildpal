@@ -1,6 +1,6 @@
-###########
-DistriBuild
-###########
+########
+BuildPal
+########
 
 .. sidebar:: Summary
 
@@ -17,10 +17,10 @@ Contents:
 Motivation
 ==========
 
-*DistriBuild* is a tool for speeding up large C/C++ project builds. Inspired by
+*BuildPal* is a tool for speeding up large C/C++ project builds. Inspired by
 the `distcc <https://code.google.com/p/distcc/>`_ project, it works by
 distributing parts of build process to other machines on the network.
-However, unlike *distcc*, DistriBuild's primary target platform is
+However, unlike *distcc*, BuildPal's primary target platform is
 Windows/Visual C++.
 
 Supported platforms and compilers
@@ -34,30 +34,30 @@ Features
 ========
 
 * **Easy setup**
-    No additional files, other than Distribuild Server, are needed on the
+    No additional files, other than BuildPal Server, are needed on the
     slave machines. All required files will be automatically transferred
     on-demand. This includes compiler executable, system headers,
     precompiled headers etc.
 
 * **Build consistency**
-    DistriBuild takes special care to produce object files which are equivalent
+    BuildPal takes special care to produce object files which are equivalent
     (for all intents and purposes) to the files which would be produced on
     local compilation.
 
 * **Remote preprocessing**
-    Distribuild does not preprocess headers on the local machine.
+    BuildPal does not preprocess headers on the local machine.
     Instead, all headers required by a source file are collected and
     transfered to the slave [#f1]_ .
 
 * **PCH support**
-    DistriBuild supports precompiled headers. Precompiled headers are
+    BuildPal supports precompiled headers. Precompiled headers are
     created locally, on the client machine and are transferred on-demand
     to specific slave nodes.
 
 Requirements
 ============
 
-DistriBuild Server and Manager are written and tested with Python 3.3. It *will not* work with Python 2.x. It *might* work with Python 3.0 - 3.2
+BuildPal Server and Manager are written and tested with Python 3.3. It *will not* work with Python 2.x. It *might* work with Python 3.0 - 3.2
 
 Quick-start
 ===========
@@ -65,7 +65,7 @@ Quick-start
 Setting up the Server (slave) node
 ----------------------------------
 
-* Install DistriBuild Server.
+* Install BuildPal Server.
 * Run distribute_server.py (distribute_server.exe).
     * You can pass the TCP port for server to listen on.
     * You can set the number of jobs.
@@ -87,7 +87,7 @@ Run ``distribute_server.py -h`` for more information.
 Setting up the Client
 ---------------------
 
-* Install DistriBuild Manager.
+* Install BuildPal Manager.
 * Create :file:`distribute_manager.ini`.
     * This file must contain configuration for the Manager, namely -- it should
       specify TCP port on which the Manager should listen on, and enumerate
@@ -173,7 +173,7 @@ Manager. These commands can be:
 Server
 ======
 
-Server is the part of DistriBuild which runs on slave machines.
+Server is the part of BuildPal which runs on slave machines.
 Capable of storing files which are shared between build processes.
 
 **Workflow**
@@ -194,7 +194,7 @@ Capable of storing files which are shared between build processes.
 Manager
 =======
 
-The manager is the most complex part of the DistriBuild suite.
+The manager is the most complex part of the BuildPal suite.
 Contains all compiler-specific knowledge.
 Runs locally, on the client machine.
 
@@ -253,12 +253,12 @@ Runs locally, on the client machine.
 Benchmarks
 ==========
 
-Currently DistriBuild is mainly tested by building `Boost`_ libraries. Boost
+Currently BuildPal is mainly tested by building `Boost`_ libraries. Boost
 libraries make heavy use of preprocessor, and are thus ideal candidates for
 testing both speed and sanity.
 
 Building Boost was done with the following command, after modifying
-Boost.Build to use DistriBuild's compiler instead of the native msvc
+Boost.Build to use BuildPal's compiler instead of the native msvc
 compiler executable::
 
     bjam stage --stagedir=. -a -j ##

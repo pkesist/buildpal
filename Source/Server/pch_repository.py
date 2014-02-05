@@ -22,6 +22,7 @@ class PCHRepository:
                 return self.__partial_files[key], False
             dir, fn = os.path.split(filename)
             local_filename = os.path.join(self.__dir, md5(dir.encode()).hexdigest(), fn)
+            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
             self.__partial_files[key] = local_filename
             return local_filename, True
 

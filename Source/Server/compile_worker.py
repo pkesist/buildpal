@@ -154,10 +154,6 @@ class CompileSession:
         try:
             future.result()
         except Exception as e:
-            with open('jorgula.txt', 'at') as file:
-                print("BAD THINGS!!!!!", file=file)
-                import traceback
-                traceback.print_exc(file=file)
             self.process_failure(e)
             self.cancel_autodestruct()
             self.session_done()

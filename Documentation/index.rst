@@ -36,8 +36,10 @@ Features
 * **Easy setup**
     No additional files, other than BuildPal Server, are needed on the
     slave machines. All required files will be automatically transferred
-    on-demand. This includes compiler executable, system headers,
-    precompiled headers etc.
+    on-demand.
+
+* **Node auto-detection**
+    Build nodes on LAN are automatically detected and used.
 
 * **Build consistency**
     BuildPal takes special care to produce object files which are equivalent

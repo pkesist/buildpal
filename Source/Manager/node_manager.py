@@ -3,6 +3,7 @@ import zmq
 
 from functools import cmp_to_key
 from struct import pack
+from collections import defaultdict
 
 from Common import create_socket, recv_multipart
 
@@ -12,8 +13,8 @@ class NodeManager:
         self.node_info = node_info
         self.register_socket = register
         self.unregister_socket = unregister
-        self.all_sockets = set()
-        self.sockets_ready = {}
+        self.all_sockets = defaultdict(list)
+        self.sockets_ready = defaultdict(list)
 
     def __connect_to_node(self, node):
         node_address = node.zmq_address()
@@ -24,8 +25,8 @@ class NodeManager:
         except zmq.ZMQError:
             print("Failed to connect to '{}'".format(node_address))
             raise Exception("Invalid node")
-        self.sockets_ready.setdefault(node, []).append(socket)
-        self.all_sockets.add(socket)
+        self.sockets_ready[node].append(socket)
+        self.all_sockets[node].append(socket)
         return socket
             
     def __best_node(self):
@@ -57,13 +58,14 @@ class NodeManager:
         self.sockets_ready[node].append(socket)
 
     def close(self):
-        for socket in self.all_sockets:
-            self.unregister_socket(socket)
-            socket.close()
+        for node, socketlist in self.all_sockets.items():
+            for socket in socketlist:
+                self.unregister_socket(socket)
+                socket.close()
 
     def get_server_conn(self):
         node = self.__best_node()
-        node_sockets = self.sockets_ready.setdefault(node, [])
+        node_sockets = self.sockets_ready[node]
         if len(node_sockets) <= 1:
             self.__connect_to_node(node)
         assert node_sockets

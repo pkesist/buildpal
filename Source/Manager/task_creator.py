@@ -5,24 +5,68 @@ import os
 class Task:
     def __init__(self, task_dict):
         self.__dict__.update(task_dict)
+        self.session_completed = None
+
+    def compiler_info(self):
+        return self.command_processor.compiler_info
 
     def compiler(self):
-        return self.task_creator.compiler()
+        return self.command_processor.compiler()
 
     def executable(self):
-        return self.task_creator.executable()
+        return self.command_processor.executable()
 
-    def completed(self, *args):
-        self.task_creator.task_done(self, *args)
+    def is_completed(self):
+        return bool(self.session_completed)
 
-class TaskCreator:
+    def register_completion(self, session):
+        if self.session_completed:
+            return False
+        self.session_completed = session
+        return True
+
+    def completed(self, session, *args):
+        assert session == self.session_completed
+        self.command_processor.task_done(self, *args)
+
+class CommandProcessor:
+    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 0
+    STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
+    STATE_HAS_COMPILER_INFO = 2
+
     def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command):
-        self.__client_conn = client_conn
+        self.client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
         self.__cwd = cwd
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
+
+    def set_compiler_info(self, compiler_info):
+        self.compiler_info = compiler_info
+        self.state = self.STATE_HAS_COMPILER_INFO
+
+    def request_compiler_info(self, on_completion):
+        self.got_compiler_info = on_completion
+        self.test_source = self.__compiler.prepare_test_source()
+        self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
+        self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
+
+    def got_data_from_client(self, msg):
+        if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
+            self.test_source.destroy()
+            del self.test_source
+            retcode = int(msg[0])
+            stdout = msg[1]
+            stderr = msg[2]
+            info = self.__compiler.compiler_info(self.__executable, stdout, stderr)
+            self.compiler_info = info
+            self.client_conn.send([b'LOCATE_FILES'] + info['compiler_files'])
+            self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
+        elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
+            self.compiler_info['files'] = msg
+            self.state = self.STATE_HAS_COMPILER_INFO
+            self.got_compiler_info(self)
 
     def executable(self):
         return self.__executable
@@ -67,8 +111,8 @@ class TaskCreator:
                     'sysincludes' : self.__sysincludes,
                     'pch_header' : pch_header
                 },
-                'task_creator' : self,
-                'client_conn' : self.__client_conn,
+                'command_processor' : self,
+                'client_conn' : self.client_conn,
                 'output' : os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
                 'pch_file' : pch_file,
                 'source' : source,
@@ -99,11 +143,11 @@ class TaskCreator:
             stdout += result[1]
             stderr += result[2]
         if error_code:
-            self.__client_conn.send([b'EXIT', error_code, stdout, stderr])
+            self.client_conn.send([b'EXIT', error_code, stdout, stderr])
             return
 
         if not self.should_invoke_linker():
-            self.__client_conn.send([b'EXIT', b'0', stdout, stderr])
+            self.client_conn.send([b'EXIT', b'0', stdout, stderr])
             return
 
         objects = {}
@@ -121,11 +165,4 @@ class TaskCreator:
         if link_opts:
             call.extend(*link_opts)
 
-        self.__client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
-
-def create_tasks(client_conn, compiler, executable, cwd, sysincludes, command):
-    task_creator = TaskCreator(client_conn, executable, cwd, sysincludes, compiler, command)
-    if task_creator.build_local():
-        client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
-        return []
-    return task_creator.create_tasks()
+        self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])

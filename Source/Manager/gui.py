@@ -1,6 +1,7 @@
 # !python3.3
 from tkinter import *
 import tkinter.font as font
+import tkinter.messagebox as msgbox
 from tkinter.ttk import *
 import zmq
 
@@ -8,6 +9,7 @@ import threading
 
 from operator import itemgetter
 from time import time
+from multiprocessing import cpu_count
 
 from . import TaskProcessor
 
@@ -31,20 +33,20 @@ class NodeList(MyTreeView):
         {'cid' : "AvgTasks"    , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
         {'cid' : "AvgTime"     , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
-    def __init__(self, parent, node_info, **kwargs):
+    def __init__(self, parent, node_info, ui_data, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
-        self.node_info = node_info
-        for node in self.node_info:
+        self.ui_data = ui_data
+        for node in node_info:
             text = node.node_dict()['hostname']
             self.insert('', 'end', text=text,
                 values=(node.node_dict()['job_slots'],))
 
-        self.refresh()
-
     def refresh(self):
         items = self.get_children('')
-        assert len(items) == len(self.node_info)
-        for node, item in zip(self.node_info, items):
+        if not hasattr(self.ui_data, 'node_info'):
+            return
+        assert len(items) == len(self.ui_data.node_info)
+        for node, item in zip(self.ui_data.node_info, items):
             # Make sure the order did not change somehow.
             assert self.item(item)['text'] == node.node_dict()['hostname']
             values = (
@@ -58,9 +60,8 @@ class NodeList(MyTreeView):
             self.item(item, values=values)
 
 class NodeInfoDisplay(Frame):
-    def __init__(self, parent, node_info, **kw):
+    def __init__(self, parent, **kw):
         Frame.__init__(self, parent, **kw)
-        self.node_info = node_info
         self.draw()
 
     def label_and_entry(self, label_text, row, col=0):
@@ -89,8 +90,8 @@ class NodeInfoDisplay(Frame):
             state=DISABLED, foreground='black')
         self.ping_result_entry.grid(row=6, column=1)
 
-    def refresh(self, node_index):
-        if node_index is None:
+    def refresh(self, node):
+        if node is None:
             self.address.set('')
             self.port.set('')
             self.job_slots.set('')
@@ -102,7 +103,6 @@ class NodeInfoDisplay(Frame):
             self.average_time.set('')
             self.ping_button['state'] = 'disabled'
         else:
-            node = self.node_info[node_index]
             self.address.set(node.node_dict()['address'])
             self.port.set(node.node_dict()['port'])
             self.job_slots.set(node.node_dict()['job_slots'])
@@ -139,9 +139,10 @@ class TimerDisplay(MyTreeView):
             self.selection_add(selection)
 
 class NodeDisplay(Frame):
-    def __init__(self, parent, node_info):
+    def __init__(self, parent, node_info, ui_data):
         Frame.__init__(self)
         self.node_info = node_info
+        self.ui_data = ui_data
         self.node_index = None
         self.draw()
         self.zmq_ctx = zmq.Context()
@@ -156,11 +157,11 @@ class NodeDisplay(Frame):
 
         self.nodes_pane = PanedWindow(self.paned_window, orient=HORIZONTAL)
 
-        self.node_list = NodeList(self.nodes_pane, self.node_info, height=6)
+        self.node_list = NodeList(self.nodes_pane, self.node_info, self.ui_data, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
         self.nodes_pane.add(self.node_list, weight=1)
 
-        self.node_info_display = NodeInfoDisplay(self.nodes_pane, self.node_info)
+        self.node_info_display = NodeInfoDisplay(self.nodes_pane)
         self.node_info_display.ping_button['command'] = self.ping
         self.nodes_pane.add(self.node_info_display, weight=0)
 
@@ -214,11 +215,13 @@ class NodeDisplay(Frame):
     def refresh(self):
         self.node_list.refresh()
         if self.node_index is None:
+            node = None
             node_time_dict = {}
         else:
-            node_time_dict = self.node_info[self.node_index].timer().as_dict()
+            node = self.node_info[self.node_index]
+            node_time_dict = node.timer().as_dict()
         self.node_times.refresh(node_time_dict)
-        self.node_info_display.refresh(self.node_index)
+        self.node_info_display.refresh(node)
 
 def called_from_foreign_thread(func):
     return func
@@ -274,17 +277,30 @@ class SettingsFrame(LabelFrame):
         self.draw()
 
     def draw(self):
-        self.port_label = Label(self, text="Port")
-        self.port_label.grid(row=0, column=0, padx=(5, 20))
-        self.port_sb = Spinbox(self, from_=1024, to=65536, increment=1)
+        def digits_filter(value):
+            return not value or value.isdigit()
+
+        self.digits_filter = self.register(digits_filter)
+        Label(self, text="Port").grid(row=0, column=0, sticky=E+W)
+        self.port_sb = Spinbox(self, from_=1024, to=65535, increment=1,
+            validate='key', validatecommand=(self.digits_filter, '%P'))
         self.port_sb.delete(0, "end")
         self.port_sb.insert(0, self.port)
         self.port_sb.grid(row=0, column=1)
 
+        Label(self, text="Preprocessor Threads").grid(row=1, column=0, sticky=E+W)
+        self.pp_threads_sb = Spinbox(self, from_=1, to=4 * cpu_count(),
+            increment=1, validate='key', validatecommand=(self.digits_filter, '%P'))
+        self.pp_threads_sb.delete(0, "end")
+        self.pp_threads_sb.insert(0, cpu_count())
+        self.pp_threads_sb.grid(row=1, column=1)
+
+        Separator(self).grid(row=2, column=0, columnspan=2, pady=10, sticky=E+W)
+
         self.start_but = Button(self, text="Start", command=self.start)
-        self.start_but.grid(row=0, column=2, sticky=E+W)
+        self.start_but.grid(row=3, column=0, sticky=E+W)
         self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
-        self.stop_but.grid(row=0, column=3, sticky=E+W)
+        self.stop_but.grid(row=3, column=1, sticky=E+W)
 
 class DBManagerApp(Tk):
     state_stopped = 0
@@ -315,6 +331,7 @@ class DBManagerApp(Tk):
             self.__start_running, self.__stop_running)
         self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
         self.port_sb = self.settings_frame.port_sb
+        self.pp_threads_sb = self.settings_frame.pp_threads_sb
         self.stop_but = self.settings_frame.stop_but
         self.start_but = self.settings_frame.start_but
 
@@ -325,7 +342,7 @@ class DBManagerApp(Tk):
         self.global_data_frame.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.global_data_frame)
 
-        self.node_display = NodeDisplay(self.pane, self.node_info)
+        self.node_display = NodeDisplay(self.pane, self.node_info, self.ui_data)
         self.node_display.grid(row=2, sticky=N+S+W+E)
         self.pane.add(self.node_display)
 
@@ -335,7 +352,6 @@ class DBManagerApp(Tk):
         # Row 3
         self.sizegrip = Sizegrip(self)
         self.sizegrip.grid(row=3, column=0, columnspan=5, sticky=S+E)
-
 
     @called_from_foreign_thread
     def signal_refresh(self):
@@ -350,6 +366,7 @@ class DBManagerApp(Tk):
         self.stop_but['state'] = 'enable' if self.running else 'disable'
         self.start_but['state'] = 'enable' if not self.running else 'disable'
         self.port_sb['state'] = 'normal' if not self.running else 'disable'
+        self.pp_threads_sb['state'] = 'normal' if not self.running else 'disable'
 
     def destroy(self):
         if self.running:
@@ -359,7 +376,28 @@ class DBManagerApp(Tk):
     def __start_running(self):
         if self.running:
             return
-        self.task_processor = TaskProcessor(self.node_info, self.port_sb.get(), self.ui_data)
+        try:
+            port = int(self.port_sb.get())
+            if not (1024 <= port <= 65535):
+                raise ValueError()
+        except ValueError:
+            msgbox.showerror("Invalid Port Number", "Port number '{}' is invalid.\n"
+                "It should be between 1 and 65535.".format(
+                self.port_sb.get()))
+            return
+
+        try:
+            threads = int(self.pp_threads_sb.get())
+            if not (1 <= threads <= 4 * cpu_count()):
+                raise ValueError()
+        except ValueError:
+            msgbox.showerror("Invalid Thread Count", "Thread count '{}' is invalid.\n"
+                "It should be between 1 and {}.".format(
+                self.pp_threads_sb.get(), 4 * cpu_count()))
+            return
+        
+        self.task_processor = TaskProcessor(self.node_info, port, threads,
+            self.ui_data)
         self.thread = threading.Thread(target=self.__run_task_processor)
         self.thread.start()
         self.set_running(True)

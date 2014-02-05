@@ -32,6 +32,7 @@ def get_nodes_from_ini_file(config):
                 job_slots = None
             nodes.append({
                 'address' : value[:port_index],
+                'hostname' : '<{}>'.format(value[:port_index]),
                 'port' : server_port,
                 'job_slots' : job_slots })
         else:
@@ -132,6 +133,6 @@ if __name__ == "__main__":
     else:
         try:
             ui_data = type('UIData', (), {})()
-            TaskProcessor(node_info, port, ui_data).run()
+            TaskProcessor(node_info, port, 0, ui_data).run()
         except KeyboardInterrupt:
             print("Shutting down.")

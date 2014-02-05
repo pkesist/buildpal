@@ -8,6 +8,7 @@ from time import sleep, time
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
+from subprocess import list2cmdline
 
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
@@ -141,17 +142,22 @@ class Popen(subprocess.Popen):
 
 class CompileSession:
     STATE_GET_TASK = 0
-    STATE_DONE = 1
-    STATE_SENDING_MISSING_FILES = 2
-    STATE_WAITING_FOR_COMPILER = 3
-    STATE_CHECK_PCH_TAG = 4
-    STATE_GET_PCH_DATA = 5
-    STATE_FAILED = 6
+    STATE_SENDING_MISSING_FILES = 1
+    STATE_WAITING_FOR_COMPILER = 2
+    STATE_CHECK_PCH_TAG = 3
+    STATE_GET_PCH_DATA = 4
+    STATE_WAIT_FOR_CONFIRMATION = 5
+    STATE_DONE = 6
+    STATE_FAILED = 7
 
     def verify(self, future):
         try:
             future.result()
         except Exception as e:
+            with open('jorgula.txt', 'at') as file:
+                print("BAD THINGS!!!!!", file=file)
+                import traceback
+                traceback.print_exc(file=file)
             self.process_failure(e)
             self.cancel_autodestruct()
             self.session_done()
@@ -289,17 +295,14 @@ class CompileSession:
             self.process_failure(e)
         else:
             sender = self.Sender(self.id)
+            if retcode == 0:
+                self.state = self.STATE_WAIT_FOR_CONFIRMATION
+                self.object_file = object_file_name
             sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
                 stdout, stderr, self.times))])
-            if retcode == 0:
-                fh = os.open(object_file_name, os.O_RDONLY | os.O_BINARY |
-                    os.O_NOINHERIT)
-                with os.fdopen(fh, 'rb') as obj:
-                    send_compressed_file(sender.send_multipart, obj, copy=False)
+            if retcode != 0:
+                self.session_done()
             sender.disconnect()
-        finally:
-            self.session_done()
-            os.remove(object_file_name)
 
     def compiler_ready(self):
         assert hasattr(self, 'compiler_id')
@@ -377,8 +380,7 @@ class CompileSession:
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
                     self.compiler_ready()
             elif self.state == self.STATE_CHECK_PCH_TAG:
-                tag = msg[0]
-                assert tag == b'NEED_PCH_FILE'
+                assert msg[0] == b'NEED_PCH_FILE'
                 self.pch_file, required = self.pch_repository.register_file(
                     *self.task['pch_file'])
                 if required:
@@ -404,6 +406,17 @@ class CompileSession:
                     self.pch_repository.file_completed(*self.task['pch_file'])
                     self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                     self.run_compiler()
+            elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
+                self.cancel_autodestruct()
+                tag, verdict = msg
+                assert tag == b'SEND_CONFIRMATION'
+                if verdict == b'\x01':
+                    fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
+                        os.O_NOINHERIT)
+                    with os.fdopen(fh, 'rb') as obj:
+                        send_compressed_file(sender.send_multipart, obj, copy=False)
+                    os.remove(self.object_file)
+                self.session_done()
             else:
                 raise Exception("Invalid state.")
         finally:
@@ -438,6 +451,8 @@ class CompileWorker:
         return id
 
     def terminate(self, id):
+        assert not hasattr(self, 'terminated')
+        self.terminated = True
         if id in self.workers:
             del self.workers[id]
         if id in self.sessions:

@@ -2,7 +2,6 @@ from .source_scanner import header_beginning
 
 from Common import SimpleTimer, send_compressed_file, send_file
 
-from subprocess import list2cmdline
 from io import BytesIO
 
 import os
@@ -16,74 +15,33 @@ from time import time
 
 class CompileSession:
     STATE_START = 0
-    STATE_WAIT_FOR_PREPROCESSING_DONE = 1
-    STATE_WAIT_FOR_HEADER_FILE_LIST = 2
-    STATE_WAIT_FOR_SERVER_OK = 3
-    STATE_WAIT_FOR_PCH_RESPONSE = 4
-    STATE_WAIT_FOR_SERVER_RESPONSE = 5
-    STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 6
-    STATE_WAIT_FOR_COMPILER_FILE_LIST = 7
-    STATE_RECEIVE_RESULT_FILE = 8
-    STATE_POSTPROCESS = 9
-    STATE_DONE = 10
-    STATE_SERVER_FAILURE = 11
+    STATE_WAIT_FOR_HEADER_FILE_LIST = 1
+    STATE_WAIT_FOR_SERVER_OK = 2
+    STATE_WAIT_FOR_PCH_RESPONSE = 3
+    STATE_WAIT_FOR_SERVER_RESPONSE = 4
+    STATE_RECEIVE_RESULT_FILE = 5
+    STATE_DONE = 6
+    STATE_SERVER_FAILURE = 7
+    STATE_CANCELLED = 8
 
-    def __init__(self, task, preprocess_worker, compiler_info):
+    def __init__(self, task, server_conn, node):
+        self.state = self.STATE_START
         self.task = task
-        self.client_conn = task.client_conn
         self.compiler = task.compiler()
-        self.executable = task.executable()
-        self.compiler_info = compiler_info
-        self.preprocess_worker = preprocess_worker
-
-    def begin(self):
-        if self.executable in self.compiler_info:
-            self.start_preprocessing()
-        else:
-            self.test_source = self.compiler.prepare_test_source()
-            self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
-            self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
-
-    @property
-    def timer(self):
-        return self.node_info.timer()
-
-    def rewind(self):
-        assert self.state == self.STATE_SERVER_FAILURE
-        self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
-
-    def start_preprocessing(self):
-        assert self.executable in self.compiler_info
-        self.task.compiler_info = self.compiler_info[self.executable]
-        self.task.server_task_info['compiler_info'] = self.task.compiler_info
-        self.task.preprocess_task_info['macros'].extend(self.task.compiler_info['macros'])
-        self.preprocess_worker(self)
-        self.preprocessing_time = SimpleTimer()
-        self.state = self.STATE_WAIT_FOR_PREPROCESSING_DONE
-
-    def preprocessing_done(self, server_conn, node_info):
-        assert self.state == self.STATE_WAIT_FOR_PREPROCESSING_DONE
+        self.compiler_info = task.compiler_info
         self.server_conn = server_conn
-        self.node_info = node_info
+        self.node = node
+
+    def start(self):
+        assert self.state == self.STATE_START
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
-        self.node_info.add_tasks_sent()
+        self.node.add_tasks_sent()
         self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_HEADER_FILE_LIST
 
-    def got_data_from_client(self, msg):
-        if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
-            self.test_source.destroy()
-            del self.test_source
-            retcode = int(msg[0])
-            stdout = msg[1]
-            stderr = msg[2]
-            info = self.compiler.compiler_info(self.executable, stdout, stderr)
-            self.compiler_info[self.executable] = info
-            self.client_conn.send([b'LOCATE_FILES'] + info['compiler_files'])
-            self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
-        elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
-            self.compiler_info[self.executable]['files'] = msg
-            self.start_preprocessing()
+    @property
+    def timer(self):
+        return self.node.timer()
 
     def got_data_from_server(self, msg):
         if self.state == self.STATE_WAIT_FOR_HEADER_FILE_LIST:
@@ -97,7 +55,7 @@ class CompileSession:
         elif self.state == self.STATE_WAIT_FOR_SERVER_OK:
             compiler_state = msg[0]
             if compiler_state == b'NEED_COMPILER':
-                ci = self.compiler_info[self.executable]
+                ci = self.compiler_info
                 assert 'files' in ci
                 assert 'compiler_files' in ci
                 zip_data = BytesIO()
@@ -129,10 +87,10 @@ class CompileSession:
             server_time = self.server_time.get()
             del self.server_time
             self.timer.add_time('server_time', server_time)
-            self.node_info.add_total_time(server_time)
+            self.node.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
-                self.node_info.add_tasks_failed()
+                self.node.add_tasks_failed()
                 self.retcode = -1
                 self.stdout = b''
                 self.stderr = msg[1].tobytes()
@@ -143,14 +101,21 @@ class CompileSession:
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
                 for name, duration in server_times.items():
                     self.timer.add_time("server." + name, duration)
-                if self.retcode == 0:
-                    self.output = open(self.task.output, "wb")
-                    self.output_decompressor = zlib.decompressobj()
-                    self.state = self.STATE_RECEIVE_RESULT_FILE
-                    self.receive_result_time = SimpleTimer()
+                if self.task.register_completion(self):
+                    if self.retcode == 0:
+                        self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
+                        self.output = open(self.task.output, "wb")
+                        self.output_decompressor = zlib.decompressobj()
+                        self.state = self.STATE_RECEIVE_RESULT_FILE
+                        self.receive_result_time = SimpleTimer()
+                    else:
+                        self.node.add_tasks_completed()
+                        self.state = self.STATE_DONE
+                        return True
                 else:
-                    self.node_info.add_tasks_completed()
-                    self.state = self.STATE_DONE
+                    self.state = self.STATE_CANCELLED
+                    if self.retcode == 0:
+                        self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
                     return True
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
@@ -163,7 +128,7 @@ class CompileSession:
                 del self.receive_result_time
                 self.output.close()
                 del self.output
-                self.node_info.add_tasks_completed()
+                self.node.add_tasks_completed()
                 self.state = self.STATE_DONE
                 return True
         return False
@@ -180,7 +145,7 @@ class CompileSession:
         #
         #    (dir1, [[a11, a12], [b11, b12]]),
         #    (dir2, [[a21, a22], [b21, b22]]),
-        #    ....
+        #
         #
         # Like it was
         #
@@ -188,7 +153,7 @@ class CompileSession:
         #  (dir1, b11, b12),
         #  (dir2, a21, a22),
         #  (dir2, b21, b22),
-        #  ...
+        #
         #
         #
         header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))

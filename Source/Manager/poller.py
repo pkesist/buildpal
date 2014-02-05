@@ -108,11 +108,12 @@ class OSSelectPoller(PollerBase):
         pollin, pollout, pollerr = select.select(self.pollin, [], [], timeout)
         for fd in pollin:
             self.sockets[fd].ready()
+        return bool(pollin)
 
-    def run(self, printer):
+    def run(self, observer):
         while True:
-            printer()
-            self.run_for_a_while(1)
+            if self.run_for_a_while(1):
+                observer()
             if self.stopped():
                 return
 
@@ -164,94 +165,15 @@ class ZMQSelectPoller(PollerBase):
             assert event == zmq.POLLIN
             handler = self.sockets[socket]
             handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+        return bool(result)
 
-    def run(self, printer):
+    def run(self, observer):
         while True:
-            printer()
-            self.run_for_a_while(1)
+            if self.run_for_a_while(1):
+                observer()
             if self.stopped():
                 return
 
     def close(self):
         for socket in self.sockets.keys():
             socket.close()
-
-has_asyncio = True
-try:
-    import asyncio
-except ImportError:
-    has_asyncio = False
-
-if has_asyncio:
-    class AsyncIOPoller:
-        class Event:
-            def __init__(self, proactor, event):
-                self.proactor = proactor
-                self.event = event
-
-            def __call__(self):
-                self.proactor.call_soon_threadsafe(lambda : self.event.set())
-
-            def clear(self):
-                self.event.clear()
-
-            def close():
-                pass
-
-        class SocketWrapper:
-            def __init__(self, fileno):
-                self._fileno = fileno
-
-            def fileno(self):
-                return self._fileno
-
-        def __init__(self, zmq_ctx):
-            self.proactor = asyncio.ProactorEventLoop()
-            self.registered_sockets = set()
-
-        @asyncio.coroutine
-        def handle_socket(self, zmq_socket, handler, sock=None, first=True):
-            assert zmq_socket in self.registered_sockets
-            if sock is None:
-                fd = zmq_socket.getsockopt(zmq.FD)
-                sock = SocketWrapper(fd)
-            if first:
-                self.handle_tasks(zmq_socket, handler)
-            yield from self.proactor.sock_recv(sock, 0)
-            self.handle_tasks(zmq_socket, handler)
-            asyncio.async(self.handle_socket(zmq_socket, handler, sock=sock, first=False), loop=self.proactor)
-
-        def handle_tasks(self, socket, handler):
-            assert socket in self.registered_sockets
-            while socket.getsockopt(zmq.EVENTS) & zmq.POLLIN:
-                handler(socket, recv_multipart(socket, zmq.NOBLOCK))
-
-        @asyncio.coroutine
-        def handle_event(self, event, handler):
-            yield from event.wait()
-            event.clear()
-            handler()
-            asyncio.async(self.handle_event(event, handler), loop=self.proactor)
-
-        @asyncio.coroutine
-        def print(self, printer):
-            printer()
-            yield from asyncio.sleep(2, loop=self.proactor)
-            asyncio.async(self.print(printer), loop=self.proactor)
-
-        def create_event(self, handler):
-            event = asyncio.Event(loop=self.proactor)
-            asyncio.async(self.handle_event(event, handler), loop=self.proactor)
-            return self.Event(self.proactor, event)
-
-        def register(self, socket, handler):
-            assert socket not in self.registered_sockets
-            self.registered_sockets.add(socket)
-            asyncio.async(self.handle_socket(socket, handler), loop=self.proactor)
-
-        def unregister(self, socket):
-            self.registered_sockets.remove(socket)
-
-        def run(self, printer):
-            asyncio.async(self.print(printer), loop=self.proactor)
-            self.proactor.run_forever()

@@ -41,9 +41,6 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
         result[dir].append([name, relative, buff, checksum])
     return tuple(result.items())
 
-def cache_info():
-    return cache.get_stats()
-
 def dump_cache():
     print("Dumping cache.")
     cache.dump('cacheDump.txt')
@@ -69,12 +66,12 @@ def header_info(task):
     return header_info
 
 class SourceScanner:
-    def __init__(self, notify):
+    def __init__(self, notify, thread_count=cpu_count() + 1):
         self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
         self.closing = False
         self.threads = set()
-        for i in range(cpu_count() + 1):
+        for i in range(thread_count):
             thread = threading.Thread(target=self.__process_task_worker, args=(notify,))
             self.threads.add(thread)
         for thread in self.threads:
@@ -93,10 +90,15 @@ class SourceScanner:
         while True:
             try:
                 task, queued_timer = self.in_queue.get(timeout=1)
-                time_in_queue = queued_timer.get()
-                hi = header_info(task.preprocess_task_info)
-                self.out_queue.put((task.client_conn.id, hi, time_in_queue,
-                    queued_timer.get() - time_in_queue, time(), cache_info()))
+                time_in_in_queue = queued_timer.get()
+                task.header_info = header_info(task.preprocess_task_info)
+                self.out_queue.put({
+                    'task' : task,
+                    'time_in_in_queue' : time_in_in_queue,
+                    'preprocessing_time' : queued_timer.get() - time_in_in_queue,
+                    'time_queued' : time(),
+                    'cache_stats' : cache.get_stats()
+                })
                 notify()
 
             except queue.Empty:

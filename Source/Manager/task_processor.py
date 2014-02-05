@@ -214,7 +214,8 @@ class TaskProcessor:
             return
 
         if executable in self.compiler_info:
-            cmd_processor.set_compiler_info(self.compiler_info[executable])
+            info, files = self.compiler_info[executable]
+            cmd_processor.set_compiler_info(info, files)
             self.__create_tasks(cmd_processor)
         else:
             self.command_processor[client_id.tobytes()] = cmd_processor
@@ -224,7 +225,7 @@ class TaskProcessor:
         assert cmd_processor.state == cmd_processor.STATE_HAS_COMPILER_INFO
         if not cmd_processor.executable() in self.compiler_info:
             self.compiler_info[cmd_processor.executable()] = \
-                cmd_processor.compiler_info
+                cmd_processor.compiler_info, cmd_processor.compiler_files
         for task in cmd_processor.create_tasks():
             task.server_task_info['compiler_info'] = task.compiler_info()
             task.preprocess_task_info['macros'].extend(

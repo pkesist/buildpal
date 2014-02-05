@@ -7,5 +7,5 @@ __all__ = ['TaskProcessor', 'NodeInfo', 'run_gui', 'Timer']
 
 def run_gui(node_info, port):
     app = DBManagerApp(node_info, port)
-    app.title('DistriBuild Manager Console')
+    app.title('BuildPal Manager Console')
     app.mainloop()

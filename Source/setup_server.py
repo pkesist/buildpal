@@ -37,8 +37,8 @@ executables = [
     Executable('distribute_server.py', base=base)
 ]
 
-setup(name='DistriBuild_Server',
+setup(name='BuildPals_Server',
       version = '0.1',
-      description = 'Server for DistriBuild nodes.',
+      description = 'Server for BuildPal nodes.',
       options = dict(build_exe = buildOptions),
       executables = executables)

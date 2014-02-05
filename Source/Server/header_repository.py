@@ -10,7 +10,7 @@ from hashlib import md5
 class HeaderRepository:
     def __init__(self):
         self.checksums = {}
-        self.dir = os.path.join(tempfile.gettempdir(), 'DistriBuild', 'Headers')
+        self.dir = os.path.join(tempfile.gettempdir(), 'BuildPal', 'Headers')
         self.session_lock = Lock()
         self.counter = 0
         self.session_data = {}

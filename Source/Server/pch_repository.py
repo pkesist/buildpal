@@ -7,7 +7,7 @@ from hashlib import md5
 
 class PCHRepository:
     def __init__(self):
-        self.__dir=os.path.join(tempfile.gettempdir(), "DistriBuild", "PCH")
+        self.__dir=os.path.join(tempfile.gettempdir(), "BuildPal", "PCH")
         os.makedirs(self.__dir, exist_ok=True)
         self.__lock = Lock()
         self.__files = {}

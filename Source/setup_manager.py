@@ -27,8 +27,8 @@ executables = [
     Executable('distribute_manager.py', base=base)
 ]
 
-setup(name='DistriBuild_Manager',
+setup(name='BuildPal_Manager',
       version = '0.1',
-      description = 'Manager for DistriBuild.',
+      description = 'Manager for BuildPal.',
       options = dict(build_exe = buildOptions),
       executables = executables)

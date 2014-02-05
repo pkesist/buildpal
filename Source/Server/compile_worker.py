@@ -142,13 +142,12 @@ class Popen(subprocess.Popen):
 
 class CompileSession:
     STATE_GET_TASK = 0
-    STATE_SENDING_MISSING_FILES = 1
-    STATE_WAITING_FOR_COMPILER = 2
-    STATE_CHECK_PCH_TAG = 3
-    STATE_GET_PCH_DATA = 4
-    STATE_WAIT_FOR_CONFIRMATION = 5
-    STATE_DONE = 6
-    STATE_FAILED = 7
+    STATE_DOWNLOADING_MISSING_HEADERS = 1
+    STATE_DOWNLOADING_COMPILER = 2
+    STATE_DOWNLOADING_PCH = 3
+    STATE_WAIT_FOR_CONFIRMATION = 4
+    STATE_DONE = 5
+    STATE_FAILED = 6
 
     def verify(self, future):
         try:
@@ -185,7 +184,7 @@ class CompileSession:
         self.compiler_repository = compiler_repository
         self.header_repository = header_repository
         self.pch_repository = pch_repository
-        temp_dir = os.path.join(tempfile.gettempdir(), "DistriBuild", "Temp")
+        temp_dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
         os.makedirs(temp_dir, exist_ok=True)
         self.include_path = tempfile.mkdtemp(dir=temp_dir)
         self.checksums = checksums
@@ -221,6 +220,16 @@ class CompileSession:
 
     def run_compiler(self):
         self.cancel_autodestruct()
+        assert hasattr(self, 'compiler_id')
+        compiler_exe = os.path.join(
+            self.compiler_repository.compiler_dir(self.compiler_id),
+            self.task['compiler_info']['executable'])
+        def spawn_compiler(command, cwd, overrides={}):
+            command[0] = compiler_exe
+            with Popen(overrides, command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+                output = proc.communicate()
+                return proc.returncode, output[0], output[1]
+        self.compiler = spawn_compiler
         self.compile_thread_pool.submit(
             self.async_run_compiler, time()).add_done_callback(
             self.verify)
@@ -289,6 +298,7 @@ class CompileSession:
             del self.server_time_timer
         except Exception as e:
             self.process_failure(e)
+            self.session_done()
         else:
             sender = self.Sender(self.id)
             if retcode == 0:
@@ -299,23 +309,6 @@ class CompileSession:
             if retcode != 0:
                 self.session_done()
             sender.disconnect()
-
-    def compiler_ready(self):
-        assert hasattr(self, 'compiler_id')
-        self.compiler_exe = os.path.join(
-            self.compiler_repository.compiler_dir(self.compiler_id),
-            self.task['compiler_info']['executable'])
-        def spawn_compiler(command, cwd, overrides={}):
-            command[0] = self.compiler_exe
-            with Popen(overrides, command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-                output = proc.communicate()
-                return proc.returncode, output[0], output[1]
-        self.compiler = spawn_compiler
-        if self.task['pch_file'] is None:
-                self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                self.run_compiler()
-        else:
-            self.state = self.STATE_CHECK_PCH_TAG
 
     def session_done(self):
         assert not hasattr(self, 'terminated')
@@ -344,30 +337,41 @@ class CompileSession:
                 assert msg[0] == b'SERVER_TASK'
                 self.task = pickle.loads(msg[1])
                 self.compiler_id = self.task['compiler_info']['id']
+                # Determine headers which are missing
                 fqdn = self.task['fqdn']
                 filelist = self.task['filelist']
                 missing_files_timer = SimpleTimer()
                 missing_files, self.repo_transaction_id = self.header_repository.missing_files(fqdn, filelist)
                 self.times['process_hdr_list'] = missing_files_timer.get()
-                sender.send_multipart([b'MISSING_FILES', pickle.dumps(missing_files)])
-                self.state = self.STATE_SENDING_MISSING_FILES
-            elif self.state == self.STATE_SENDING_MISSING_FILES:
+                # Determine if we have this compiler
+                self.compiler_required = not self.compiler_repository.has_compiler(self.compiler_id)
+
+                # Determine whether we need pch PCH file.
+                if self.task['pch_file'] is None:
+                    self.pch_required = False
+                else:
+                    self.pch_file, self.pch_required = self.pch_repository.register_file(
+                        *self.task['pch_file'])
+                sender.send_multipart([b'MISSING_FILES', pickle.dumps((missing_files, self.compiler_required, self.pch_required))])
+                self.state = self.STATE_DOWNLOADING_MISSING_HEADERS
+            elif self.state == self.STATE_DOWNLOADING_MISSING_HEADERS:
                 assert msg[0] == b'TASK_FILES'
                 fqdn = self.task['fqdn']
                 new_files = pickle.loads(zlib.decompress(msg[1]))
                 self.src_loc = msg[2].tobytes().decode()
                 self.waiting_for_manager_data = SimpleTimer()
                 self.include_dirs_future = self.prepare_include_dirs(self.misc_thread_pool, fqdn, new_files)
-                has_compiler = self.compiler_repository.has_compiler(self.compiler_id)
-                if has_compiler is None:
-                    # Never heard of it.
-                    sender.send(b'NEED_COMPILER')
-                    self.state = self.STATE_WAITING_FOR_COMPILER
+                if self.compiler_required:
+                    self.state = self.STATE_DOWNLOADING_COMPILER
                     self.compiler_data = BytesIO()
+                elif self.pch_required:
+                    self.state = self.STATE_DOWNLOADING_PCH
+                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
+                    self.pch_desc = os.fdopen(handle, 'wb')
+                    self.pch_decompressor = zlib.decompressobj()
                 else:
-                    sender.send(b'READY')
-                    self.compiler_ready()
-            elif self.state == self.STATE_WAITING_FOR_COMPILER:
+                    self.run_compiler()
+            elif self.state == self.STATE_DOWNLOADING_COMPILER:
                 more, data = msg
                 self.compiler_data.write(data)
                 if more == b'\x00':
@@ -376,24 +380,14 @@ class CompileSession:
                         zip.extractall(path=self.compiler_repository.compiler_dir(self.compiler_id))
                     del self.compiler_data
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
-                    self.compiler_ready()
-            elif self.state == self.STATE_CHECK_PCH_TAG:
-                assert msg[0] == b'NEED_PCH_FILE'
-                self.pch_file, required = self.pch_repository.register_file(
-                    *self.task['pch_file'])
-                if required:
-                    sender.send(b'YES')
-                    if not os.path.exists(os.path.dirname(self.pch_file)):
-                        os.makedirs(os.path.dirname(self.pch_file), exist_ok=True)
-                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
-                    self.pch_desc = os.fdopen(handle, 'wb')
-                    self.pch_decompressor = zlib.decompressobj()
-                    self.state = self.STATE_GET_PCH_DATA
-                else:
-                    sender.send(b'NO')
-                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
-                    self.run_compiler()
-            elif self.state == self.STATE_GET_PCH_DATA:
+                    if self.pch_required:
+                        self.state = self.STATE_DOWNLOADING_PCH
+                        handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
+                        self.pch_desc = os.fdopen(handle, 'wb')
+                        self.pch_decompressor = zlib.decompressobj()
+                    else:
+                        self.run_compiler()
+            elif self.state == self.STATE_DOWNLOADING_PCH:
                 more, data = msg
                 self.pch_desc.write(self.pch_decompressor.decompress(data))
                 if more == b'\x00':
@@ -402,7 +396,6 @@ class CompileSession:
                     del self.pch_desc
                     del self.pch_decompressor
                     self.pch_repository.file_completed(*self.task['pch_file'])
-                    self.times['waiting_for_mgr_data'] = self.waiting_for_manager_data.get()
                     self.run_compiler()
             elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
                 self.cancel_autodestruct()

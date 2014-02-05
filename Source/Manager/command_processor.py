@@ -42,8 +42,9 @@ class CommandProcessor:
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
 
-    def set_compiler_info(self, compiler_info):
+    def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
+        self.compiler_files = compiler_files
         self.state = self.STATE_HAS_COMPILER_INFO
 
     def request_compiler_info(self, on_completion):
@@ -59,12 +60,13 @@ class CommandProcessor:
             retcode = int(msg[0])
             stdout = msg[1]
             stderr = msg[2]
-            info = self.__compiler.compiler_info(self.__executable, stdout, stderr)
+            info, self.compiler_files = self.__compiler.compiler_info(self.__executable, stdout, stderr)
             self.compiler_info = info
-            self.client_conn.send([b'LOCATE_FILES'] + info['compiler_files'])
+            self.client_conn.send([b'LOCATE_FILES'] + self.compiler_files)
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
-            self.compiler_info['files'] = msg
+            assert len(msg) == len(self.compiler_files)
+            self.compiler_files = list(zip(msg, self.compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info(self)
 
@@ -111,6 +113,7 @@ class CommandProcessor:
                     'sysincludes' : self.__sysincludes,
                     'pch_header' : pch_header
                 },
+                'compiler_files' : self.compiler_files,
                 'command_processor' : self,
                 'client_conn' : self.client_conn,
                 'output' : os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),

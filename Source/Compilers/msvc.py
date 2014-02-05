@@ -214,8 +214,7 @@ class MSVCWrapper:
             'set_object_name' : self.set_object_name_option(),
             'set_pch_file' : self.set_pch_file_option(),
             'set_include_option' : self.set_include_option(),
-            'compiler_files' : self.compiler_files[version[0][:5]],
-        }
+        }, self.compiler_files[version[0][:5]]
 
     compiler_files = {
         b'15.00' : 

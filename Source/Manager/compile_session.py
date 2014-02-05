@@ -15,20 +15,17 @@ from time import time
 
 class CompileSession:
     STATE_START = 0
-    STATE_WAIT_FOR_HEADER_FILE_LIST = 1
-    STATE_WAIT_FOR_SERVER_OK = 2
-    STATE_WAIT_FOR_PCH_RESPONSE = 3
-    STATE_WAIT_FOR_SERVER_RESPONSE = 4
-    STATE_RECEIVE_RESULT_FILE = 5
-    STATE_DONE = 6
-    STATE_SERVER_FAILURE = 7
-    STATE_CANCELLED = 8
+    STATE_WAIT_FOR_MISSING_FILES = 1
+    STATE_RECEIVE_RESULT_FILE = 2
+    STATE_WAIT_FOR_SERVER_RESPONSE = 3
+    STATE_DONE = 4
+    STATE_SERVER_FAILURE = 5
+    STATE_CANCELLED = 6
 
     def __init__(self, task, server_conn, node):
         self.state = self.STATE_START
         self.task = task
         self.compiler = task.compiler()
-        self.compiler_info = task.compiler_info
         self.server_conn = server_conn
         self.node = node
 
@@ -37,50 +34,31 @@ class CompileSession:
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.node.add_tasks_sent()
         self.server_time = SimpleTimer()
-        self.state = self.STATE_WAIT_FOR_HEADER_FILE_LIST
+        self.state = self.STATE_WAIT_FOR_MISSING_FILES
 
     @property
     def timer(self):
         return self.node.timer()
 
     def got_data_from_server(self, msg):
-        if self.state == self.STATE_WAIT_FOR_HEADER_FILE_LIST:
+        if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
-            missing_files = pickle.loads(msg[1])
+            missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
             self.server_conn.send_multipart([b'TASK_FILES',
                 zlib.compress(pickle.dumps(new_files)), src_loc.encode()])
-            self.state = self.STATE_WAIT_FOR_SERVER_OK
-
-        elif self.state == self.STATE_WAIT_FOR_SERVER_OK:
-            compiler_state = msg[0]
-            if compiler_state == b'NEED_COMPILER':
-                ci = self.compiler_info
-                assert 'files' in ci
-                assert 'compiler_files' in ci
+            if need_compiler:
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
-                    for path, file in zip(ci['files'], ci['compiler_files']):
+                    for path, file in self.task.compiler_files:
                         zip_file.write(path.decode(), file.decode())
                 zip_data.seek(0)
                 send_file(self.server_conn.send_multipart, zip_data)
                 del zip_data
-            else:
-                assert compiler_state == b'READY'
-
-            if self.task.pch_file:
-                self.server_conn.send(b'NEED_PCH_FILE')
-                self.state = self.STATE_WAIT_FOR_PCH_RESPONSE
-            else:
-                self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
-
-        elif self.state == self.STATE_WAIT_FOR_PCH_RESPONSE:
-            response = msg[0]
-            if response == b'YES':
+            if need_pch:
+                assert self.task.pch_file is not None
                 with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
                     send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
-            else:
-                assert response == b'NO'
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:

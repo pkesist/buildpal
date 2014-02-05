@@ -322,6 +322,8 @@ class CompileSession:
             self.state = self.STATE_CHECK_PCH_TAG
 
     def session_done(self):
+        assert not hasattr(self, 'terminated')
+        self.terminated = True
         self.terminate()
         self.task_counter.dec()
 
@@ -451,8 +453,6 @@ class CompileWorker:
         return id
 
     def terminate(self, id):
-        assert not hasattr(self, 'terminated')
-        self.terminated = True
         if id in self.workers:
             del self.workers[id]
         if id in self.sessions:

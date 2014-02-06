@@ -8,7 +8,6 @@ from threading import Lock
 class CompilerRepository:
     def __init__(self):
         self.__dir = os.path.join(tempfile.gettempdir(), 'BuildPal', 'Compilers')
-        os.makedirs(self.__dir, exist_ok=True)
         self.__lock = Lock()
         self.__compilers = set()
         self.__partial_compilers = set()

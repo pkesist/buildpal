@@ -47,11 +47,20 @@ class CompileSession:
         return self.node.timer()
 
     def got_data_from_server(self, msg):
-        if msg == [b'SESSION_CANCELLED']:
-            assert self.cancelled
-            self.state = self.STATE_CANCELLED
-            return True
-        if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
+        if self.cancelled:
+            if msg[0] == b'SESSION_CANCELLED':
+                assert self.cancelled
+                self.state = self.STATE_CANCELLED
+                self.node.add_tasks_too_late()
+                return True
+        # It is possible that cancellation arrived too late,
+        # that the server already sent the final message and
+        # unregistered its session. In that case we will never
+        # get confirmation. We must check for that.
+
+        # This state requires a response, so the session must be still alive
+        # on the server.
+        if not self.cancelled and self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
@@ -82,7 +91,7 @@ class CompileSession:
                 self.retcode = -1
                 self.stdout = b''
                 self.stderr = msg[1].tobytes()
-                self.state = self.STATE_SERVER_FAILURE
+                self.state = self.STATE_CANCELLED if self.cancelled else self.STATE_SERVER_FAILURE
                 return True
             else:
                 assert server_status == b'SERVER_DONE'
@@ -90,6 +99,8 @@ class CompileSession:
                 for name, duration in server_times.items():
                     self.timer.add_time("server." + name, duration)
                 if self.task.register_completion(self):
+                    # We could not have been cancelled if we completed the task.
+                    assert not self.cancelled
                     if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
                         self.output = open(self.task.output, "wb")
@@ -103,11 +114,12 @@ class CompileSession:
                 else:
                     self.state = self.STATE_CANCELLED
                     self.node.add_tasks_too_late()
-                    if self.retcode == 0:
+                    if not self.cancelled and self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
                     return True
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
+            assert not self.cancelled
             more, data = msg
             self.output.write(self.output_decompressor.decompress(data))
             if more == b'\x00':

@@ -29,6 +29,6 @@ executables = [
 
 setup(name='BuildPal_Manager',
       version = '0.1',
-      description = 'Manager for BuildPal.',
+      description = 'BuildPal Manager',
       options = dict(build_exe = buildOptions),
       executables = executables)

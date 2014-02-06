@@ -335,7 +335,7 @@ class CompileSession:
         self.prolong_lifetime()
         try:
             sender = self.Sender(self.id)
-            if msg == [b'CANCEL_SESSION']:
+            if msg[0] == b'CANCEL_SESSION':
                 self.state = self.STATE_CANCELLED
                 sender.send(b'SESSION_CANCELLED')
                 self.cancel_autodestruct()
@@ -388,8 +388,10 @@ class CompileSession:
                 self.compiler_data.write(data)
                 if more == b'\x00':
                     self.compiler_data.seek(0)
+                    dir = self.compiler_repository.compiler_dir(self.compiler_id)
+                    os.makedirs(dir, exist_ok=True)
                     with zipfile.ZipFile(self.compiler_data) as zip:
-                        zip.extractall(path=self.compiler_repository.compiler_dir(self.compiler_id))
+                        zip.extractall(path=dir)
                     del self.compiler_data
                     self.compiler_repository.set_compiler_ready(self.compiler_id)
                     if self.pch_required:

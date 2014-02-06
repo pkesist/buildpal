@@ -26,10 +26,11 @@ class NodeList(MyTreeView):
     columns = (
         {'cid' : "#0"          , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
         {'cid' : "JobSlots"    , 'text' : "Job Slots"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TasksPending", 'text' : "Tasks Pending", 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TasksSent"   , 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Completed"   , 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Too Late"    , 'text' : "Too Late"     , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Failed"      , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Running"     , 'text' : "Running"      , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Pending"     , 'text' : "Pending"      , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "AvgTasks"    , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
         {'cid' : "AvgTime"     , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
@@ -53,6 +54,7 @@ class NodeList(MyTreeView):
                 node.node_dict()['job_slots'], 
                 node.tasks_sent     (),
                 node.tasks_completed(),
+                node.tasks_too_late (),
                 node.tasks_failed   (),
                 node.tasks_pending  (),
                 "{:.2f}".format(node.average_tasks()),
@@ -125,7 +127,7 @@ class TimerDisplay(MyTreeView):
         return MyTreeView.__init__(self, parent, self.columns, **kwargs)
 
     def refresh(self, timer_dict):
-        selection = self.selection()
+        selected_rows = [self.index(x) for x in self.selection()]
         self.delete(*self.get_children(''))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in timer_dict.items()]
         sorted_times.sort(key=itemgetter(1), reverse=True)
@@ -135,8 +137,10 @@ class TimerDisplay(MyTreeView):
                 count,
                 "{:.2f}".format(average))
             self.insert('', 'end', text=timer_name, values=values)
-        if selection:
-            self.selection_add(selection)
+        for row in selected_rows:
+            iid = self.identify_row(row)
+            if iid:
+                self.selection_add(iid)
 
 class NodeDisplay(Frame):
     def __init__(self, parent, node_info, ui_data):

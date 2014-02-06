@@ -45,7 +45,7 @@ def get_nodes_from_beacon():
     import struct
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
-    multicast_group = '224.3.29.71'
+    multicast_group = '239.192.29.71'
     multicast_port = 51134
     # when sending multicast, it is not enough to add membership to
     # socket.INADDR_ANY. Windows will send multicast message through

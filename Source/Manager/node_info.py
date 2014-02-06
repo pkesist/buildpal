@@ -9,6 +9,7 @@ class NodeInfo:
         self._tasks_completed  = 0
         self._tasks_failed     = 0
         self._tasks_sent       = 0
+        self._tasks_too_late   = 0
         self._total_time       = 0
         self._tasks_change     = None
         self._avg_tasks = {}
@@ -31,7 +32,9 @@ class NodeInfo:
 
     def tasks_failed(self): return self._tasks_failed
 
-    def tasks_pending(self): return self.tasks_sent() - self.tasks_completed() - self.tasks_failed()
+    def tasks_too_late(self): return self._tasks_too_late
+
+    def tasks_pending(self): return self.tasks_sent() - self.tasks_completed() - self.tasks_failed() - self.tasks_too_late()
 
     def total_time(self): return self._total_time
 
@@ -59,6 +62,10 @@ class NodeInfo:
     def add_tasks_completed(self):
         self.__tasks_pending_about_to_change()
         self._tasks_completed += 1
+
+    def add_tasks_too_late(self):
+        self.__tasks_pending_about_to_change()
+        self._tasks_too_late += 1
 
     def add_tasks_failed(self): self._tasks_failed += 1
 

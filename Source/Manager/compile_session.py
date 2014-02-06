@@ -25,8 +25,10 @@ class CompileSession:
     def __init__(self, task, server_conn, node):
         self.state = self.STATE_START
         self.task = task
+        self.task.register_session(self)
         self.compiler = task.compiler()
         self.server_conn = server_conn
+        self.cancelled = False
         self.node = node
 
     def start(self):
@@ -36,11 +38,19 @@ class CompileSession:
         self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
 
+    def cancel(self):
+        self.server_conn.send_multipart([b'CANCEL_SESSION'])
+        self.cancelled = True
+
     @property
     def timer(self):
         return self.node.timer()
 
     def got_data_from_server(self, msg):
+        if msg == [b'SESSION_CANCELLED']:
+            assert self.cancelled
+            self.state = self.STATE_CANCELLED
+            return True
         if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
@@ -92,6 +102,7 @@ class CompileSession:
                         return True
                 else:
                     self.state = self.STATE_CANCELLED
+                    self.node.add_tasks_too_late()
                     if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
                     return True

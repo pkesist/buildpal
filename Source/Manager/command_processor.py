@@ -5,6 +5,7 @@ import os
 class Task:
     def __init__(self, task_dict):
         self.__dict__.update(task_dict)
+        self.sessions_running = set()
         self.session_completed = None
 
     def compiler_info(self):
@@ -19,10 +20,17 @@ class Task:
     def is_completed(self):
         return bool(self.session_completed)
 
+    def register_session(self, session):
+        self.sessions_running.add(session)
+
     def register_completion(self, session):
         if self.session_completed:
             return False
         self.session_completed = session
+        assert session in self.sessions_running
+        self.sessions_running.remove(session)
+        for session in self.sessions_running:
+            session.cancel()
         return True
 
     def completed(self, session, *args):

@@ -145,17 +145,18 @@ class CompileSession:
     STATE_DOWNLOADING_MISSING_HEADERS = 1
     STATE_DOWNLOADING_COMPILER = 2
     STATE_DOWNLOADING_PCH = 3
-    STATE_WAIT_FOR_CONFIRMATION = 4
-    STATE_DONE = 5
-    STATE_FAILED = 6
+    STATE_RUNNING_COMPILER = 4
+    STATE_WAIT_FOR_CONFIRMATION = 5
+    STATE_DONE = 6
+    STATE_FAILED = 7
+    STATE_CANCELLED = 8
 
     def verify(self, future):
         try:
             future.result()
         except Exception as e:
-            self.process_failure(e)
             self.cancel_autodestruct()
-            self.session_done()
+            self.process_failure(e)
 
     def async(verify=True):
         def async_helper(func):
@@ -168,13 +169,15 @@ class CompileSession:
         return async_helper
 
     def process_failure(self, exception):
-        tb = StringIO()
-        traceback.print_exc(file=tb)
-        tb.seek(0)
-        self.state = self.STATE_FAILED
-        sender = self.Sender(self.id)
-        sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
-        sender.disconnect()
+        if self.state != self.STATE_CANCELLED:
+            tb = StringIO()
+            traceback.print_exc(file=tb)
+            tb.seek(0)
+            self.state = self.STATE_FAILED
+            sender = self.Sender(self.id)
+            sender.send_multipart([b'SERVER_FAILED', tb.read().encode()])
+            sender.disconnect()
+            self.session_done()
 
     def __init__(self, pch_repository, header_repository, compiler_repository,
                  task_counter, checksums, compile_thread_pool, misc_thread_pool,
@@ -219,6 +222,7 @@ class CompileSession:
             self.socket.close()
 
     def run_compiler(self):
+        self.state = self.STATE_RUNNING_COMPILER
         self.cancel_autodestruct()
         assert hasattr(self, 'compiler_id')
         compiler_exe = os.path.join(
@@ -298,16 +302,18 @@ class CompileSession:
             del self.server_time_timer
         except Exception as e:
             self.process_failure(e)
-            self.session_done()
         else:
-            sender = self.Sender(self.id)
-            if retcode == 0:
-                self.state = self.STATE_WAIT_FOR_CONFIRMATION
-                self.object_file = object_file_name
-            sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
-                stdout, stderr, self.times))])
-            if retcode != 0:
-                self.session_done()
+            if self.state == self.STATE_RUNNING_COMPILER:
+                sender = self.Sender(self.id)
+                if retcode == 0:
+                    self.state = self.STATE_WAIT_FOR_CONFIRMATION
+                    self.object_file = object_file_name
+                sender.send_multipart([b'SERVER_DONE', pickle.dumps((retcode,
+                    stdout, stderr, self.times))])
+                if retcode != 0:
+                    self.session_done()
+            else:
+                assert self.state == self.STATE_CANCELLED
             sender.disconnect()
 
     def session_done(self):
@@ -329,7 +335,13 @@ class CompileSession:
         self.prolong_lifetime()
         try:
             sender = self.Sender(self.id)
-            if self.state == self.STATE_GET_TASK:
+            if msg == [b'CANCEL_SESSION']:
+                self.state = self.STATE_CANCELLED
+                sender.send(b'SESSION_CANCELLED')
+                self.cancel_autodestruct()
+                self.session_done()
+
+            elif self.state == self.STATE_GET_TASK:
                 self.task_counter.inc()
                 self.server_time_timer = SimpleTimer()
                 self.waiting_for_header_list = SimpleTimer()
@@ -492,7 +504,7 @@ class CompileWorker:
         print("Using {} job slots.".format(self.__compile_slots))
 
         beacon = Beacon(self.__compile_slots, self.__port)
-        beacon.start(multicast_address='224.3.29.71', multicast_port=51134)
+        beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
 
         try:
             while True:

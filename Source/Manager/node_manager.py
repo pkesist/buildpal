@@ -63,8 +63,12 @@ class NodeManager:
                 self.unregister_socket(socket)
                 socket.close()
 
-    def get_server_conn(self):
-        node = self.__best_node()
+    def all_server_conn(self):
+        return list(self.get_server_conn(node) for node in self.node_info)
+
+    def get_server_conn(self, node=None):
+        if not node:
+            node = self.__best_node()
         node_sockets = self.sockets_ready[node]
         if len(node_sockets) <= 1:
             self.__connect_to_node(node)

@@ -78,12 +78,6 @@ class Rendezvous:
         self.__dict__[first_name] = self.__add_first
         self.__dict__[second_name] = self.__add_second
 
-    def first(self):
-        return self._first
-
-    def second(self):
-        return self._second
-
     def __add_first(self, first):
         if self._second:
             second = self._second[0]

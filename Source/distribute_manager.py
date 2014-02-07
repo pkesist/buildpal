@@ -1,5 +1,5 @@
 #! python3.3
-from Manager import TaskProcessor, run_gui, NodeInfo, Timer
+from Manager import TaskProcessor, run_gui, Timer
 
 import argparse
 import configparser
@@ -123,16 +123,14 @@ if __name__ == "__main__":
     if not nodes:
         raise RuntimeError("No build nodes configured.")
 
-    node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
-
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
     if opts.ui == 'gui':
-        run_gui(node_info, port)
+        run_gui(nodes, port)
     else:
         try:
             ui_data = type('UIData', (), {})()
-            TaskProcessor(node_info, port, 0, ui_data).run()
+            TaskProcessor(nodes, port, 0, ui_data).run()
         except KeyboardInterrupt:
             print("Shutting down.")

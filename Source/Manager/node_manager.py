@@ -1,3 +1,5 @@
+from .compile_session import CompileSession
+
 import pickle
 import zmq
 
@@ -15,47 +17,24 @@ class NodeManager:
         self.unregister_socket = unregister
         self.all_sockets = defaultdict(list)
         self.sockets_ready = defaultdict(list)
+        self.tasks_running = defaultdict(list)
+        self.unassigned_tasks = []
+        self.sessions = {}
 
-    def __connect_to_node(self, node):
-        node_address = node.zmq_address()
-        try:
-            socket = create_socket(self.zmq_ctx, zmq.DEALER)
-            socket.connect(node_address)
-            self.register_socket(socket)
-        except zmq.ZMQError:
-            print("Failed to connect to '{}'".format(node_address))
-            raise Exception("Invalid node")
-        self.sockets_ready[node].append(socket)
-        self.all_sockets[node].append(socket)
-        return socket
-            
-    def __best_node(self):
-        def cmp(lhs_node, rhs_node):
-            lhs_tasks_pending = lhs_node.tasks_pending()
-            rhs_tasks_pending = rhs_node.tasks_pending()
-
-            def time_per_task(node):
-                timer = node.timer().as_dict()
-                hl_total, hl_count = timer.get('server.wait_for_header_list', (0, 1))
-                h_total, h_count = timer.get('server.wait_for_headers', (0, 1))
-                return node.average_task_time() - hl_total / hl_count + h_total / h_count
-
-            lhs_time_per_task = time_per_task(lhs_node)
-            rhs_time_per_task = time_per_task(rhs_node)
-
-            if lhs_time_per_task == 0 and rhs_time_per_task == 0:
-                return -1 if lhs_tasks_pending < rhs_tasks_pending else 1
-            if lhs_tasks_pending == 0 and rhs_tasks_pending == 0:
-                return -1 if lhs_time_per_task < rhs_time_per_task else 1
-            # In case we don't yet have average time per task for a node, do
-            # not allow that node to be flooded.
-            if lhs_time_per_task == 0 and lhs_tasks_pending >= 5:
-                return 1
-            return -1 if lhs_tasks_pending * lhs_time_per_task <= rhs_tasks_pending * rhs_time_per_task else 1
-        return min(self.node_info, key=cmp_to_key(cmp))
-
-    def recycle(self, node, socket):
-        self.sockets_ready[node].append(socket)
+    def schedule_task(self, task, node=None):
+        if node is None and self.unassigned_tasks:
+            self.unassigned_tasks.append(task)
+            return
+        result = self.__get_server_conn(node)
+        if result is None:
+            self.unassigned_tasks.append(task)
+            return
+        server_conn, node = result
+        session = CompileSession(task, server_conn, node)
+        self.sessions[server_conn] = session
+        self.tasks_running[node].append(task)
+        node.add_tasks_sent()
+        session.start()
 
     def close(self):
         for node, socketlist in self.all_sockets.items():
@@ -63,14 +42,108 @@ class NodeManager:
                 self.unregister_socket(socket)
                 socket.close()
 
-    def all_server_conn(self):
-        return list(self.get_server_conn(node) for node in self.node_info)
+    def __connect_to_node(self, node):
+        node_address = node.zmq_address()
+        try:
+            socket = create_socket(self.zmq_ctx, zmq.DEALER)
+            socket.connect(node_address)
+            self.register_socket(socket, self.__handle_server_socket)
+        except zmq.ZMQError:
+            print("Failed to connect to '{}'".format(node_address))
+            raise Exception("Invalid node")
+        self.sockets_ready[node].append(socket)
+        self.all_sockets[node].append(socket)
+        return socket
+            
+    def __target_tasks_per_node(self, node):
+        return 2 * node.node_dict()['job_slots']
 
-    def get_server_conn(self, node=None):
+    def __can_steal_task(self, node):
+        return len(self.tasks_running[node]) < node.node_dict()['job_slots']
+
+    def __free_slots(self, node):
+        return self.__target_tasks_per_node(node) - len(self.tasks_running[node])
+
+    def __best_node(self):
+        def current_node_weight(node):
+            return len(self.tasks_running[node]) * node.average_task_time()
+        nodes = self.node_info[:]
+        nodes.sort(key=current_node_weight)
+        for node in nodes:
+            if node.average_task_time() == 0:
+                if len(self.tasks_running[node]) < 4:
+                    return node
+            elif self.__free_slots(node) > 0:
+                return node
+        return None
+
+    def __steal_tasks(self, node):
+        tasks_to_steal = self.__free_slots(node)
+        while tasks_to_steal > 0:
+            while self.unassigned_tasks:
+                print("TOOK UNASSIGNED TASK")
+                self.schedule_task(self.unassigned_tasks.pop(0), node)
+                tasks_to_steal -= 1
+                if tasks_to_steal == 0:
+                    return
+            if not self.__can_steal_task(node):
+                return
+            for from_node in self.tasks_running:
+                if node == from_node:
+                    continue
+                for task in reversed(self.tasks_running[from_node]):
+                    if not task.is_completed() and task not in self.tasks_running[node]:
+                        print("{} STOLE A TASK FROM {}".format(node.node_dict()['hostname'], from_node.node_dict()['hostname']))
+                        self.schedule_task(task, node)
+                        tasks_to_steal -= 1
+                        if tasks_to_steal <= 0:
+                            return
+            return
+
+    def __get_server_conn(self, node):
         if not node:
             node = self.__best_node()
+        if not node:
+            return None
         node_sockets = self.sockets_ready[node]
         if len(node_sockets) <= 1:
             self.__connect_to_node(node)
         assert node_sockets
         return node_sockets.pop(0), node
+
+    def __handle_server_socket(self, socket, msg):
+        session = self.sessions.get(socket)
+        if not session:
+            print("Got message from invalid session:")
+            print([m.tobytes()[:50] for m in msg])
+            return
+        if not session.got_data_from_server(msg):
+            return
+        # Session is finished.
+        del self.sessions[socket]
+        task = session.task
+        node = session.node
+        self.sockets_ready[node].append(socket)
+        self.tasks_running[node].remove(task)
+        self.__steal_tasks(node)
+        if session.state == session.STATE_DONE:
+            node.add_tasks_completed()
+            assert task.is_completed()
+            assert task.session_completed == session
+            task.completed(session, session.retcode,
+                session.stdout, session.stderr)
+        elif session.state == session.STATE_SERVER_FAILURE:
+            node.add_tasks_failed()
+            if task.is_completed():
+                assert task.session_completed != session
+                return
+            # TODO: Do something smarter.
+            if task.register_completion(session):
+                task.completed(session, session.retcode,
+                    session.stdout, session.stderr)
+        elif session.state == session.STATE_CANCELLED:
+            node.add_tasks_cancelled()
+        else:
+            assert session.state == session.STATE_TOO_LATE
+            node.add_tasks_too_late()
+

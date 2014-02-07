@@ -1,13 +1,13 @@
 from Compilers import MSVCWrapper
-from Common import SimpleTimer, Rendezvous, recv_multipart, create_socket
+from Common import SimpleTimer, recv_multipart, create_socket
 
-from .compile_session import CompileSession
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor
 from .timer import Timer
 from .node_manager import NodeManager
 from .poller import ZMQSelectPoller
 from .console import ConsolePrinter
+from .node_info import NodeInfo
 
 from Common import bind_to_random_port
 
@@ -54,46 +54,22 @@ class TaskProcessor:
         def recv_pyobj(self):
             return pickle.loads(self.recv()[0])
 
-    class Sessions:
-        FROM_SERVER = 1
-
+    class ServerSessions:
         def __init__(self):
-            self.session = {self.FROM_SERVER : {}}
+            self.sessions = {}
 
-        def register(self, type, key, *val):
-            self.session[type][key] = val
+        def register(self, socket, session):
+            self.sessions[socket] = session
 
-        def get(self, type, key):
-            result = self.session[type].get(key)
-            if result is None:
-                return None
-            assert isinstance(result, tuple)
-            if len(result) == 1:
-                return result[0]
-            return result
+        def get(self, socket):
+            return self.sessions.get(socket)
 
-        def unregister(self, type, key):
-            try:
-                del self.session[type][key]
-            except Exception:
-                import traceback
-                traceback.print_exc()
+        def unregister(self, socket):
+            del self.session[socket]
 
         def close(self):
-            for server_conn in self.session[self.FROM_SERVER]:
-                server_conn.close()
-
-    class ClientServerRendezvous(Rendezvous):
-        def __init__(self, timer, sessions, node_info):
-            Rendezvous.__init__(self, 'client_ready', 'server_ready')
-            self.node_info = node_info
-            self.sessions = sessions
-
-        def match(self, task, server_tuple):
-            server_conn, node = server_tuple
-            session = CompileSession(task, server_conn, node)
-            self.sessions.register(TaskProcessor.Sessions.FROM_SERVER, server_conn, session)
-            session.start()
+            for socket in self.sessions:
+                socket.close()
 
     class ClientData:
         def __init__(self):
@@ -125,7 +101,7 @@ class TaskProcessor:
                     break
             return messages
 
-    def __init__(self, node_info, port, n_pp_threads, ui_data):
+    def __init__(self, nodes, port, n_pp_threads, ui_data):
         class CacheStats:
             def __init__(self):
                 self.hits = 0
@@ -143,7 +119,8 @@ class TaskProcessor:
         self.cache_stats = CacheStats()
         self.compiler_info = {}
         self.timer = Timer()
-        self.node_info = node_info
+        self.node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
+
         self.n_pp_threads = n_pp_threads
         if not self.n_pp_threads:
             self.n_pp_threads = cpu_count()
@@ -190,10 +167,7 @@ class TaskProcessor:
                 session.client_conn.send([b'EXIT', b'0', b'', b''])
                 return
 
-            self.csrv.client_ready(task)
-            server_result = self.node_manager.get_server_conn()
-            if server_result:
-                self.csrv.server_ready(server_result)
+            self.node_manager.schedule_task(task)
 
     def __handle_new_client(self, client_id, msg):
         compiler_name = msg[0].decode()
@@ -243,59 +217,21 @@ class TaskProcessor:
             else:
                 self.__handle_new_client(client_id, msg)
 
-    def __handle_server_socket(self, socket, msg):
-        # Connection to server node.
-        session = self.sessions.get(self.Sessions.FROM_SERVER, socket)
-        session_done = session.got_data_from_server(msg)
-        if session_done:
-            self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
-            self.node_manager.recycle(session.node, socket)
-            task = session.task
-            if session.state == session.STATE_DONE:
-                assert task.is_completed()
-                assert task.session_completed == session
-                task.completed(session, session.retcode,
-                    session.stdout, session.stderr)
-            elif session.state == session.STATE_SERVER_FAILURE:
-                if task.is_completed():
-                    assert task.completed
-                    assert task.session_completed != session
-                    self.sessions.unregister(self.Sessions.FROM_SERVER, socket)
-                    return
-                if hasattr(task, 'retries'):
-                    task.retries += 1
-                else:
-                    task.retries = 1
-                if task.retries <= 3:
-                    self.csrv.client_ready(task)
-                    server_result = self.node_manager.get_server_conn()
-                    if server_result:
-                        self.csrv.server_ready(server_result)
-                else:
-                    # BUGGY
-                    session.task.completed(session, session.retcode,
-                        session.stdout, session.stderr)
-            else:
-                assert session.state == session.STATE_CANCELLED
-
     def run(self, observer=None):
         self.command_processor = {}
-        self.sessions = self.Sessions()
+        self.sessions = self.ServerSessions()
         self.zmq_ctx = zmq.Context()
-        register_server_socket = lambda socket : self.register_socket(socket,
-            self.__handle_server_socket)
         self.poller = Poller(self.zmq_ctx)
         self.node_manager = NodeManager(self.zmq_ctx, self.node_info,
-            register_server_socket, self.unregister_socket)
-        self.source_scanner = SourceScanner(self.notify_preprocessing_done, self.n_pp_threads)
+            self.register_socket, self.unregister_socket)
+        self.source_scanner = SourceScanner(self.notify_preprocessing_done,
+            self.n_pp_threads)
 
         # Setup socket for receiving clients.
         self.client_socket = create_socket(self.zmq_ctx, zmq.STREAM)
         self.client_socket.bind('tcp://*:{}'.format(self.port))
         self.register_socket(self.client_socket, self.__handle_client_socket)
 
-        self.csrv = self.ClientServerRendezvous(self.timer, self.sessions,
-            self.node_info)
         self.client_data = self.ClientData()
         self.pp_ready = self.poller.create_event(
             self.__handle_preprocessing_done)

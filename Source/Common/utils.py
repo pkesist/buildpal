@@ -70,34 +70,6 @@ class SimpleTimer:
     def get(self):
         return time() - self.__start
 
-class Rendezvous:
-    def __init__(self, first_name='add_first', second_name='add_second'):
-        self._first = []
-        self._second = []
-
-        self.__dict__[first_name] = self.__add_first
-        self.__dict__[second_name] = self.__add_second
-
-    def __add_first(self, first):
-        if self._second:
-            second = self._second[0]
-            del self._second[0]
-            self.match(first, second)
-        else:
-            self._first.append(first)
-
-    def __add_second(self, second):
-        if self._first:
-            first = self._first[0]
-            del self._first[0]
-            self.match(first, second)
-        else:
-            self._second.append(second)
-
-    def match(self, first, second):
-        raise NotImplementedError()
-
-
 def create_socket(zmq_ctx, socket_type):
     socket = zmq_ctx.socket(socket_type)
     return socket

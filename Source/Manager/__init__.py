@@ -5,7 +5,7 @@ from .timer import Timer
 
 __all__ = ['TaskProcessor', 'NodeInfo', 'run_gui', 'Timer']
 
-def run_gui(node_info, port):
-    app = DBManagerApp(node_info, port)
+def run_gui(nodes, port):
+    app = DBManagerApp(nodes, port)
     app.title('BuildPal Manager Console')
     app.mainloop()

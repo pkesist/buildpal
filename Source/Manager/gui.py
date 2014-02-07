@@ -29,18 +29,19 @@ class NodeList(MyTreeView):
         {'cid' : "TasksSent"   , 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Completed"   , 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Too Late"    , 'text' : "Too Late"     , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Cancelled"   , 'text' : "Cancelled"    , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Failed"      , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Pending"     , 'text' : "Pending"      , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "AvgTasks"    , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
         {'cid' : "AvgTime"     , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
-    def __init__(self, parent, node_info, ui_data, **kwargs):
+    def __init__(self, parent, nodes, ui_data, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
         self.ui_data = ui_data
-        for node in node_info:
-            text = node.node_dict()['hostname']
+        for node in nodes:
+            text = node['hostname']
             self.insert('', 'end', text=text,
-                values=(node.node_dict()['job_slots'],))
+                values=(node['job_slots'],))
 
     def refresh(self):
         items = self.get_children('')
@@ -55,6 +56,7 @@ class NodeList(MyTreeView):
                 node.tasks_sent     (),
                 node.tasks_completed(),
                 node.tasks_too_late (),
+                node.tasks_cancelled(),
                 node.tasks_failed   (),
                 node.tasks_pending  (),
                 "{:.2f}".format(node.average_tasks()),
@@ -143,9 +145,9 @@ class TimerDisplay(MyTreeView):
                 self.selection_add(iid)
 
 class NodeDisplay(Frame):
-    def __init__(self, parent, node_info, ui_data):
+    def __init__(self, parent, nodes, ui_data):
         Frame.__init__(self)
-        self.node_info = node_info
+        self.nodes = nodes
         self.ui_data = ui_data
         self.node_index = None
         self.draw()
@@ -161,7 +163,7 @@ class NodeDisplay(Frame):
 
         self.nodes_pane = PanedWindow(self.paned_window, orient=HORIZONTAL)
 
-        self.node_list = NodeList(self.nodes_pane, self.node_info, self.ui_data, height=6)
+        self.node_list = NodeList(self.nodes_pane, self.nodes, self.ui_data, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
         self.nodes_pane.add(self.node_list, weight=1)
 
@@ -179,9 +181,10 @@ class NodeDisplay(Frame):
 
     def ping(self):
         assert self.node_index is not None
-        node = self.node_info[self.node_index]
+        node = self.nodes[self.node_index]
         s = self.zmq_ctx.socket(zmq.DEALER)
-        s.connect(node.zmq_address())
+        address = 'tcp://{}:{}'.format(node['address'], node['port'])
+        s.connect(address)
         s.RCVTIMEO = 1000
         times = []
         for x in range(5):
@@ -218,11 +221,11 @@ class NodeDisplay(Frame):
 
     def refresh(self):
         self.node_list.refresh()
-        if self.node_index is None:
+        if self.node_index is None or not hasattr(self.ui_data, 'node_info'):
             node = None
             node_time_dict = {}
         else:
-            node = self.node_info[self.node_index]
+            node = self.ui_data.node_info[self.node_index]
             node_time_dict = node.timer().as_dict()
         self.node_times.refresh(node_time_dict)
         self.node_info_display.refresh(node)
@@ -310,10 +313,10 @@ class DBManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
-    def __init__(self, node_info, port):
+    def __init__(self, nodes, port):
         Tk.__init__(self, None)
         self.ui_data = type('UIData', (), {})()
-        self.node_info = node_info
+        self.nodes = nodes
         self.port = port
         self.running = False
         self.initialize()
@@ -346,7 +349,7 @@ class DBManagerApp(Tk):
         self.global_data_frame.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.global_data_frame)
 
-        self.node_display = NodeDisplay(self.pane, self.node_info, self.ui_data)
+        self.node_display = NodeDisplay(self.pane, self.nodes, self.ui_data)
         self.node_display.grid(row=2, sticky=N+S+W+E)
         self.pane.add(self.node_display)
 
@@ -400,7 +403,7 @@ class DBManagerApp(Tk):
                 self.pp_threads_sb.get(), 4 * cpu_count()))
             return
         
-        self.task_processor = TaskProcessor(self.node_info, port, threads,
+        self.task_processor = TaskProcessor(self.nodes, port, threads,
             self.ui_data)
         self.thread = threading.Thread(target=self.__run_task_processor)
         self.thread.start()

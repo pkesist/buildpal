@@ -21,6 +21,7 @@ class CompileSession:
     STATE_DONE = 4
     STATE_SERVER_FAILURE = 5
     STATE_CANCELLED = 6
+    STATE_TOO_LATE = 7
 
     def __init__(self, task, server_conn, node):
         self.state = self.STATE_START
@@ -34,7 +35,6 @@ class CompileSession:
     def start(self):
         assert self.state == self.STATE_START
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
-        self.node.add_tasks_sent()
         self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
 
@@ -47,21 +47,24 @@ class CompileSession:
         return self.node.timer()
 
     def got_data_from_server(self, msg):
-        if self.cancelled:
-            if msg[0] == b'SESSION_CANCELLED':
-                assert self.cancelled
+        if msg[0] == b'SESSION_CANCELLED':
+            assert self.cancelled
+            if self.state != self.STATE_TOO_LATE:
                 self.state = self.STATE_CANCELLED
-                self.node.add_tasks_too_late()
-                return True
+            return True
         # It is possible that cancellation arrived too late,
         # that the server already sent the final message and
         # unregistered its session. In that case we will never
-        # get confirmation. We must check for that.
+        # get confirmation.
 
         # This state requires a response, so the session must be still alive
         # on the server.
         if not self.cancelled and self.state == self.STATE_WAIT_FOR_MISSING_FILES:
-            assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
+            try:
+                assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
+            except AssertionError:
+                print([m.tobytes()[:50] for m in msg])
+                raise
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
             self.server_conn.send_multipart([b'TASK_FILES',
@@ -76,8 +79,10 @@ class CompileSession:
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None
-                with self.timer.timeit('send.pch'), open(os.path.join(os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
-                    send_compressed_file(self.server_conn.send_multipart, pch_file, copy=False)
+                with self.timer.timeit('send.pch'), open(os.path.join(
+                        os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
+                    send_compressed_file(self.server_conn.send_multipart,
+                        pch_file, copy=False)
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
@@ -87,7 +92,6 @@ class CompileSession:
             self.node.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
-                self.node.add_tasks_failed()
                 self.retcode = -1
                 self.stdout = b''
                 self.stderr = msg[1].tobytes()
@@ -108,15 +112,13 @@ class CompileSession:
                         self.state = self.STATE_RECEIVE_RESULT_FILE
                         self.receive_result_time = SimpleTimer()
                     else:
-                        self.node.add_tasks_completed()
                         self.state = self.STATE_DONE
                         return True
                 else:
-                    self.state = self.STATE_CANCELLED
-                    self.node.add_tasks_too_late()
+                    self.state = self.STATE_TOO_LATE
                     if not self.cancelled and self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
-                    return True
+                    return not self.cancelled or self.retcode != 0
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled
@@ -129,7 +131,6 @@ class CompileSession:
                 del self.receive_result_time
                 self.output.close()
                 del self.output
-                self.node.add_tasks_completed()
                 self.state = self.STATE_DONE
                 return True
         return False

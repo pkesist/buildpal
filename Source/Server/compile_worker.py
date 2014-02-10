@@ -329,7 +329,6 @@ class CompileSession:
         assert not self.completed
         self.completed = True
         self.terminate()
-        self.runner.task_counter().dec()
 
     def reschedule_selfdestruct(self):
         self.cancel_autodestruct()
@@ -358,7 +357,6 @@ class CompileSession:
             self.session_done()
 
         elif self.state == self.STATE_GET_TASK:
-            self.runner.task_counter().inc()
             self.server_time_timer = SimpleTimer()
             self.waiting_for_header_list = SimpleTimer()
             assert len(msg) == 2
@@ -462,7 +460,6 @@ class CompileWorker:
         self.__compile_slots = compile_slots
         self.workers = {}
         self.sessions = {}
-        self.__task_counter = Counter()
 
         # Data shared between sessions.
         self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
@@ -473,7 +470,6 @@ class CompileWorker:
         self.__scheduler = sched.scheduler()
 
     def scheduler(self): return self.__scheduler
-    def task_counter(self): return self.__task_counter
     def compile_thread_pool(self): return self.__compile_thread_pool
     def misc_thread_pool(self): return self.__misc_thread_pool
     def header_repository(self): return self.__header_repository
@@ -524,7 +520,7 @@ class CompileWorker:
 
         try:
             while True:
-                sys.stdout.write("Currently running {} tasks.\r".format(self.__task_counter.get()))
+                sys.stdout.write("Currently running {} tasks.\r".format(len(self.sessions)))
 
                 # Run any scheduled tasks.
                 self.__scheduler.run(False)

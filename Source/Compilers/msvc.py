@@ -63,7 +63,7 @@ class CompileOptions:
         return list(itertools.chain(*self.value_dict.get(self.compiler.define_option(), [])))
 
     def create_server_call(self):
-        result = ['cl.exe', '/c']
+        result = ['/c']
         exclude_opts = ['c', 'I', 'Fo', 'link', '<input>', 'Fp', 'Yc']
         for name, value in zip(self.option_names, self.arg_values):
             if name == 'Zi':

@@ -497,20 +497,20 @@ class CompileWorker:
             def __call__(self, msg):
                 self.session.process_msg(msg)
 
-        clients = create_socket(zmq_ctx, zmq.ROUTER)
+        client_socket = create_socket(zmq_ctx, zmq.ROUTER)
         if self.__port == 0:
-            self.__port = bind_to_random_port(clients)
+            self.__port = bind_to_random_port(client_socket)
             self.__address = "tcp://*:{}".format(self.__port)
         else:
             self.__address = "tcp://*:{}".format(self.__port)
-            clients.bind(self.__address)
+            client_socket.bind(self.__address)
 
-        sessions = create_socket(zmq_ctx, zmq.DEALER)
-        sessions.bind('inproc://sessions_socket')
+        session_socket = create_socket(zmq_ctx, zmq.DEALER)
+        session_socket.bind('inproc://sessions_socket')
 
         poller = zmq.Poller()
-        poller.register(clients, zmq.POLLIN)
-        poller.register(sessions, zmq.POLLIN)
+        poller.register(client_socket, zmq.POLLIN)
+        poller.register(session_socket, zmq.POLLIN)
 
         print("Running server on '{}'.".format(self.__address))
         print("Using {} job slots.".format(self.__compile_slots))
@@ -527,13 +527,13 @@ class CompileWorker:
 
                 for sock, event in dict(poller.poll(1000)).items():
                     assert event == zmq.POLLIN
-                    if sock is clients:
-                        client_id, *msg = recv_multipart(clients)
+                    if sock is client_socket:
+                        client_id, *msg = recv_multipart(client_socket)
                         if len(msg) == 1 and msg[0] == b'PING':
-                            clients.send_multipart([client_id, b'PONG'])
+                            client_socket.send_multipart([client_id, b'PONG'])
                             continue
                         elif not client_id in self.workers:
-                            session = CompileSession(self, clients, client_id)
+                            session = CompileSession(self, client_socket, client_id)
 
                             class Terminate:
                                 def __init__(self, worker, client_id):
@@ -548,8 +548,8 @@ class CompileWorker:
                             self.workers[client_id] = ProcessMsg(session)
                         self.workers.get(client_id)(msg)
                     else:
-                        assert sock is sessions
-                        clients.send_multipart(recv_multipart(sessions))
+                        assert sock is session_socket
+                        client_socket.send_multipart(recv_multipart(session_socket))
         finally:
             beacon.stop()
 

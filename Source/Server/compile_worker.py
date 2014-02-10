@@ -328,7 +328,7 @@ class CompileSession:
         assert not hasattr(self, 'selfdestruct') or from_selfdestruct
         assert not self.completed
         self.completed = True
-        self.terminate()
+        self.runner.terminate(self.id)
 
     def reschedule_selfdestruct(self):
         self.cancel_autodestruct()
@@ -458,7 +458,6 @@ class CompileWorker:
     def __init__(self, port, compile_slots):
         self.__port = port
         self.__compile_slots = compile_slots
-        self.workers = {}
         self.sessions = {}
 
         # Data shared between sessions.
@@ -476,26 +475,13 @@ class CompileWorker:
     def pch_repository(self): return self.__pch_repository
     def compiler_repository(self): return self.__compiler_repository
 
-    def attach_session(self, session):
-        socket = create_socket(zmq_ctx, zmq.DEALER)
-        return id
-
     def terminate(self, id):
-        if id in self.workers:
-            del self.workers[id]
         if id in self.sessions:
             del self.sessions[id]
 
     def run(self):
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
-
-        class ProcessMsg:
-            def __init__(self, session):
-                self.session = session
-
-            def __call__(self, msg):
-                self.session.process_msg(msg)
 
         client_socket = create_socket(zmq_ctx, zmq.ROUTER)
         if self.__port == 0:
@@ -532,21 +518,12 @@ class CompileWorker:
                         if len(msg) == 1 and msg[0] == b'PING':
                             client_socket.send_multipart([client_id, b'PONG'])
                             continue
-                        elif not client_id in self.workers:
+                        elif not client_id in self.sessions:
                             session = CompileSession(self, client_socket, client_id)
-
-                            class Terminate:
-                                def __init__(self, worker, client_id):
-                                    self.client_id = client_id
-                                    self.worker = worker
-
-                                def __call__(self):
-                                    self.worker.terminate(self.client_id)
-
-                            session.terminate = Terminate(self, client_id)
                             self.sessions[client_id] = session
-                            self.workers[client_id] = ProcessMsg(session)
-                        self.workers.get(client_id)(msg)
+                        else:
+                            session = self.sessions[client_id]
+                        session.process_msg(msg)
                     else:
                         assert sock is session_socket
                         client_socket.send_multipart(recv_multipart(session_socket))

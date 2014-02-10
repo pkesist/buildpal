@@ -66,7 +66,8 @@ class NodeManager:
 
     def __best_node(self):
         def current_node_weight(node):
-            return len(self.tasks_running[node]) * node.average_task_time()
+            return (len(self.tasks_running[node]) * node.average_task_time(),
+                node.average_task_time())
         nodes = self.node_info[:]
         nodes.sort(key=current_node_weight)
         for node in nodes:

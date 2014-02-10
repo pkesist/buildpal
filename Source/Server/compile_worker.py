@@ -156,22 +156,14 @@ class CompileSession:
             return runner.submit(func, self, *args, **kwds)
         return wrapper
 
-    def __init__(self, pch_repository, header_repository, compiler_repository,
-                 task_counter, checksums, compile_thread_pool, misc_thread_pool,
-                 scheduler):
+    def __init__(self, runner, id):
+        self.id = id
+        self.runner = runner
         self.state = self.STATE_GET_TASK
-        self.task_counter = task_counter
-        self.compiler_repository = compiler_repository
-        self.header_repository = header_repository
-        self.pch_repository = pch_repository
         temp_dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
         os.makedirs(temp_dir, exist_ok=True)
         self.include_path = tempfile.mkdtemp(dir=temp_dir)
-        self.checksums = checksums
         self.times = {}
-        self.compile_thread_pool = compile_thread_pool
-        self.misc_thread_pool = misc_thread_pool
-        self.scheduler = scheduler
         self.compiler_state_lock = Lock()
         self.completed = False
 
@@ -197,13 +189,19 @@ class CompileSession:
         def send_multipart(self, data, copy=False):
             self.socket.send_multipart([self.id] + list(data), copy=copy)
 
-        def disconnect(self):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.close()
+
+        def close(self):
             self.socket.close()
 
     def run_compiler(self):
         self.state = self.STATE_RUNNING_COMPILER
         self.cancel_autodestruct()
-        self.compile_thread_pool.submit(
+        self.runner.compile_thread_pool().submit(
             self.async_run_compiler, time())
 
     def compiler_id(self):
@@ -211,8 +209,11 @@ class CompileSession:
 
     def compiler_exe(self):
         return os.path.join(
-            self.compiler_repository.compiler_dir(self.compiler_id()),
+            self.runner.compiler_repository().compiler_dir(self.compiler_id()),
             self.task['compiler_info']['executable'])
+
+    def sender(self):
+        return self.Sender(self.id)
 
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
@@ -248,7 +249,7 @@ class CompileSession:
                 pch_switch.append(compiler_info['set_pch_file'].format(
                     self.pch_file
                 ))
-                while not self.pch_repository.file_arrived(
+                while not self.runner.pch_repository().file_arrived(
                     *self.task['pch_file']):
                     # The PCH file is being downloaded by another session.
                     # This could be made prettier by introducing another state
@@ -257,7 +258,7 @@ class CompileSession:
                     # Just not worth the additional complexity.
                     sleep(1)
 
-            while not self.compiler_repository.has_compiler(self.compiler_id()):
+            while not self.runner.compiler_repository().has_compiler(self.compiler_id()):
                 # Compiler is being downloaded by another session.
                 # Similar to the PCH hack above.
                 sleep(1)
@@ -292,24 +293,25 @@ class CompileSession:
                     traceback.print_exc(file=tb)
                     tb.write("============================\n")
                     tb.seek(0)
-                    sender = self.Sender(self.id)
-                    sender.send_multipart([b'SERVER_FAILED',
-                        tb.read().encode()])
-                    sender.disconnect()
+                    with self.sender() as sender:
+                        sender.send_multipart([b'SERVER_FAILED',
+                            tb.read().encode()])
                     self.session_done()
                 else:
                     assert self.state == self.STATE_CANCELLED
         else:
             with self.compiler_state_lock:
                 if self.state == self.STATE_RUNNING_COMPILER:
-                    sender = self.Sender(self.id)
-                    if retcode == 0:
-                        self.state = self.STATE_WAIT_FOR_CONFIRMATION
-                        self.object_file = object_file_name
-                    sender.send_multipart([b'SERVER_DONE', pickle.dumps(
-                        (retcode, stdout, stderr, self.times))])
-                    if retcode != 0:
-                        self.session_done()
+                    with self.sender() as sender:
+                        if retcode == 0:
+                            self.state = self.STATE_WAIT_FOR_CONFIRMATION
+                            self.object_file = object_file_name
+                        sender.send_multipart([b'SERVER_DONE', pickle.dumps(
+                            (retcode, stdout, stderr, self.times))])
+                        if retcode == 0:
+                            self.reschedule_selfdestruct()
+                        else:
+                            self.session_done()
                 else:
                     assert self.state == self.STATE_CANCELLED
         finally:
@@ -320,131 +322,129 @@ class CompileSession:
         assert not self.completed
         self.completed = True
         self.terminate()
-        self.task_counter.dec()
+        self.runner.task_counter().dec()
 
-    def prolong_lifetime(self):
+    def reschedule_selfdestruct(self):
         self.cancel_autodestruct()
-        self.selfdestruct = self.scheduler.enter(60, 1, self.session_done,
+        self.selfdestruct = self.runner.scheduler().enter(60, 1, self.session_done,
             (True,))
 
     def cancel_autodestruct(self):
         if hasattr(self, 'selfdestruct'):
-            self.scheduler.cancel(self.selfdestruct)
+            self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
     def process_msg(self, msg):
-        self.prolong_lifetime()
-        try:
-            sender = self.Sender(self.id)
-            if msg[0] == b'CANCEL_SESSION':
-                if self.completed:
-                    # We are already dead, just don't know it yet.
-                    return
-                if self.state == self.STATE_RUNNING_COMPILER:
-                    with self.compiler_state_lock:
-                        self.state = self.STATE_CANCELLED
-                        if hasattr(self, 'process'):
-                            self.process.terminate()
+        self.reschedule_selfdestruct()
+        if msg[0] == b'CANCEL_SESSION':
+            if self.completed:
+                # We are already dead, just don't know it yet.
+                return
+            if self.state == self.STATE_RUNNING_COMPILER:
+                with self.compiler_state_lock:
+                    self.state = self.STATE_CANCELLED
+                    if hasattr(self, 'process'):
+                        self.process.terminate()
+            with self.sender() as sender:
                 sender.send(b'SESSION_CANCELLED')
-                self.cancel_autodestruct()
-                self.session_done()
+            self.cancel_autodestruct()
+            self.session_done()
 
-            elif self.state == self.STATE_GET_TASK:
-                self.task_counter.inc()
-                self.server_time_timer = SimpleTimer()
-                self.waiting_for_header_list = SimpleTimer()
-                assert len(msg) == 2
-                assert msg[0] == b'SERVER_TASK'
-                self.task = pickle.loads(msg[1])
-                # Determine headers which are missing
-                missing_files_timer = SimpleTimer()
-                missing_files, self.repo_transaction_id = \
-                    self.header_repository.missing_files(self.task['fqdn'],
-                    self.task['filelist'])
-                self.times['process_hdr_list'] = missing_files_timer.get()
-                # Determine if we have this compiler
-                self.compiler_required = not \
-                    self.compiler_repository.has_compiler(self.compiler_id())
+        elif self.state == self.STATE_GET_TASK:
+            self.runner.task_counter().inc()
+            self.server_time_timer = SimpleTimer()
+            self.waiting_for_header_list = SimpleTimer()
+            assert len(msg) == 2
+            assert msg[0] == b'SERVER_TASK'
+            self.task = pickle.loads(msg[1])
+            # Determine headers which are missing
+            missing_files_timer = SimpleTimer()
+            missing_files, self.repo_transaction_id = \
+                self.runner.header_repository().missing_files(self.task['fqdn'],
+                self.task['filelist'])
+            self.times['process_hdr_list'] = missing_files_timer.get()
+            # Determine if we have this compiler
+            self.compiler_required = not \
+                self.runner.compiler_repository().has_compiler(self.compiler_id())
 
-                # Determine whether we need pch PCH file.
-                if self.task['pch_file'] is None:
-                    self.pch_required = False
-                else:
-                    self.pch_file, self.pch_required = \
-                        self.pch_repository.register_file(
-                        *self.task['pch_file'])
+            # Determine whether we need pch PCH file.
+            if self.task['pch_file'] is None:
+                self.pch_required = False
+            else:
+                self.pch_file, self.pch_required = \
+                    self.runner.pch_repository().register_file(
+                    *self.task['pch_file'])
+            with self.sender() as sender:
                 sender.send_multipart([b'MISSING_FILES', pickle.dumps(
                     (missing_files, self.compiler_required,
-                     self.pch_required))])
-                self.state = self.STATE_DOWNLOADING_MISSING_HEADERS
-            elif self.state == self.STATE_DOWNLOADING_MISSING_HEADERS:
-                assert msg[0] == b'TASK_FILES'
-                fqdn = self.task['fqdn']
-                new_files = pickle.loads(zlib.decompress(msg[1]))
-                self.src_loc = msg[2].tobytes().decode()
-                self.waiting_for_manager_data = SimpleTimer()
-                self.include_dirs_future = self.prepare_include_dirs(
-                    self.misc_thread_pool, fqdn, new_files)
-                if self.compiler_required:
-                    self.state = self.STATE_DOWNLOADING_COMPILER
-                    self.compiler_data = BytesIO()
-                elif self.pch_required:
+                    self.pch_required))])
+            self.state = self.STATE_DOWNLOADING_MISSING_HEADERS
+        elif self.state == self.STATE_DOWNLOADING_MISSING_HEADERS:
+            assert msg[0] == b'TASK_FILES'
+            fqdn = self.task['fqdn']
+            new_files = pickle.loads(zlib.decompress(msg[1]))
+            self.src_loc = msg[2].tobytes().decode()
+            self.waiting_for_manager_data = SimpleTimer()
+            self.include_dirs_future = self.prepare_include_dirs(
+                self.runner.misc_thread_pool(), fqdn, new_files)
+            if self.compiler_required:
+                self.state = self.STATE_DOWNLOADING_COMPILER
+                self.compiler_data = BytesIO()
+            elif self.pch_required:
+                self.state = self.STATE_DOWNLOADING_PCH
+                handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
+                    os.O_NOINHERIT)
+                self.pch_desc = os.fdopen(handle, 'wb')
+                self.pch_decompressor = zlib.decompressobj()
+            else:
+                self.run_compiler()
+        elif self.state == self.STATE_DOWNLOADING_COMPILER:
+            more, data = msg
+            self.compiler_data.write(data)
+            if more == b'\x00':
+                self.compiler_data.seek(0)
+                dir = self.runner.compiler_repository().compiler_dir(
+                    self.compiler_id())
+                os.makedirs(dir, exist_ok=True)
+                with zipfile.ZipFile(self.compiler_data) as zip:
+                    zip.extractall(path=dir)
+                del self.compiler_data
+                self.runner.compiler_repository().set_compiler_ready(self.compiler_id())
+                if self.pch_required:
                     self.state = self.STATE_DOWNLOADING_PCH
-                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
-                        os.O_NOINHERIT)
+                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
                     self.pch_decompressor = zlib.decompressobj()
                 else:
                     self.run_compiler()
-            elif self.state == self.STATE_DOWNLOADING_COMPILER:
-                more, data = msg
-                self.compiler_data.write(data)
-                if more == b'\x00':
-                    self.compiler_data.seek(0)
-                    dir = self.compiler_repository.compiler_dir(
-                        self.compiler_id())
-                    os.makedirs(dir, exist_ok=True)
-                    with zipfile.ZipFile(self.compiler_data) as zip:
-                        zip.extractall(path=dir)
-                    del self.compiler_data
-                    self.compiler_repository.set_compiler_ready(self.compiler_id())
-                    if self.pch_required:
-                        self.state = self.STATE_DOWNLOADING_PCH
-                        handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
-                        self.pch_desc = os.fdopen(handle, 'wb')
-                        self.pch_decompressor = zlib.decompressobj()
-                    else:
-                        self.run_compiler()
-            elif self.state == self.STATE_DOWNLOADING_PCH:
-                more, data = msg
-                self.pch_desc.write(self.pch_decompressor.decompress(data))
-                if more == b'\x00':
-                    self.pch_desc.write(self.pch_decompressor.flush())
-                    self.pch_desc.close()
-                    del self.pch_desc
-                    del self.pch_decompressor
-                    self.pch_repository.file_completed(*self.task['pch_file'])
-                    self.run_compiler()
-            elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
-                self.cancel_autodestruct()
-                tag, verdict = msg
-                assert tag == b'SEND_CONFIRMATION'
-                if verdict == b'\x01':
-                    fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
-                        os.O_NOINHERIT)
-                    with os.fdopen(fh, 'rb') as obj:
-                        send_compressed_file(sender.send_multipart, obj, copy=False)
-                    os.remove(self.object_file)
-                self.session_done()
-            else:
-                raise Exception("Invalid state.")
-        finally:
-            sender.disconnect()
+        elif self.state == self.STATE_DOWNLOADING_PCH:
+            more, data = msg
+            self.pch_desc.write(self.pch_decompressor.decompress(data))
+            if more == b'\x00':
+                self.pch_desc.write(self.pch_decompressor.flush())
+                self.pch_desc.close()
+                del self.pch_desc
+                del self.pch_decompressor
+                self.runner.pch_repository().file_completed(*self.task['pch_file'])
+                self.run_compiler()
+        elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
+            self.cancel_autodestruct()
+            tag, verdict = msg
+            assert tag == b'SEND_CONFIRMATION'
+            if verdict == b'\x01':
+                fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
+                    os.O_NOINHERIT)
+                with os.fdopen(fh, 'rb') as obj, self.sender() as sender:
+                    send_compressed_file(sender.send_multipart, obj, copy=False)
+                os.remove(self.object_file)
+            self.session_done()
+        else:
+            raise Exception("Invalid state.")
 
     @async
     def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.header_repository.prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
+        result = self.runner.header_repository().prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
         self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result
@@ -453,17 +453,25 @@ class CompileWorker:
     def __init__(self, port, compile_slots):
         self.__port = port
         self.__compile_slots = compile_slots
-        self.__checksums = {}
         self.workers = {}
         self.sessions = {}
+        self.__task_counter = Counter()
 
-    def create_session(self, client_id):
-        session = CompileSession(self.__pch_repository,
-            self.__header_repository, self.__compiler_repository,
-            self.__counter, self.__checksums, self.__compile_thread_pool,
-            self.__misc_thread_pool, self.scheduler)
-        session.id = client_id
-        return session
+        # Data shared between sessions.
+        self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
+        self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
+        self.__header_repository = HeaderRepository()
+        self.__pch_repository = PCHRepository()
+        self.__compiler_repository = CompilerRepository()
+        self.__scheduler = sched.scheduler()
+
+    def scheduler(self): return self.__scheduler
+    def task_counter(self): return self.__task_counter
+    def compile_thread_pool(self): return self.__compile_thread_pool
+    def misc_thread_pool(self): return self.__misc_thread_pool
+    def header_repository(self): return self.__header_repository
+    def pch_repository(self): return self.__pch_repository
+    def compiler_repository(self): return self.__compiler_repository
 
     def attach_session(self, session):
         socket = create_socket(zmq_ctx, zmq.DEALER)
@@ -476,19 +484,6 @@ class CompileWorker:
             del self.sessions[id]
 
     def run(self):
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)
-        root_logger.addHandler(logging.NullHandler())
-
-        self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
-        self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
-        self.__header_repository = HeaderRepository()
-        self.__pch_repository = PCHRepository()
-        self.__compiler_repository = CompilerRepository()
-        self.__counter = Counter()
-
-        self.scheduler = sched.scheduler()
-
         import signal
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
@@ -514,8 +509,6 @@ class CompileWorker:
         poller.register(clients, zmq.POLLIN)
         poller.register(sessions, zmq.POLLIN)
 
-        scheduler = sched.scheduler()
-
         print("Running server on '{}'.".format(self.__address))
         print("Using {} job slots.".format(self.__compile_slots))
 
@@ -524,10 +517,10 @@ class CompileWorker:
 
         try:
             while True:
-                sys.stdout.write("Currently running {} tasks.\r".format(self.__counter.get()))
+                sys.stdout.write("Currently running {} tasks.\r".format(self.__task_counter.get()))
 
                 # Run any scheduled tasks.
-                self.scheduler.run(False)
+                self.__scheduler.run(False)
 
                 for sock, event in dict(poller.poll(1000)).items():
                     assert event == zmq.POLLIN
@@ -537,7 +530,7 @@ class CompileWorker:
                             clients.send_multipart([client_id, b'PONG'])
                             continue
                         elif not client_id in self.workers:
-                            session = self.create_session(client_id)
+                            session = CompileSession(self, client_id)
 
                             class Terminate:
                                 def __init__(self, worker, client_id):

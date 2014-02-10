@@ -156,8 +156,9 @@ class CompileSession:
             return runner.submit(func, self, *args, **kwds)
         return wrapper
 
-    def __init__(self, runner, id):
+    def __init__(self, runner, socket, id):
         self.id = id
+        self.socket = socket
         self.runner = runner
         self.state = self.STATE_GET_TASK
         temp_dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
@@ -175,10 +176,15 @@ class CompileSession:
             pass
 
     class Sender:
-        def __init__(self, id):
-            self.socket = create_socket(zmq_ctx, zmq.DEALER)
+        def __init__(self, id, socket=None):
+            if not socket:
+                self.socket = create_socket(zmq_ctx, zmq.DEALER)
+                self.socket.connect('inproc://sessions_socket')
+                self.close_socket = True
+            else:
+                self.socket = socket
+                self.close_socket = False
             self.id = id
-            self.socket.connect('inproc://sessions_socket')
 
         def send(self, data, copy=False):
             self.socket.send_multipart([self.id, data], copy=copy)
@@ -196,7 +202,8 @@ class CompileSession:
             self.close()
 
         def close(self):
-            self.socket.close()
+            if self.close_socket:
+                self.socket.close()
 
     def run_compiler(self):
         self.state = self.STATE_RUNNING_COMPILER
@@ -212,8 +219,8 @@ class CompileSession:
             self.runner.compiler_repository().compiler_dir(self.compiler_id()),
             self.task['compiler_info']['executable'])
 
-    def sender(self):
-        return self.Sender(self.id)
+    def sender(self, other_thread=True):
+        return self.Sender(self.id, None if other_thread else self.socket)
 
     def async_run_compiler(self, start_time):
         self.times['async_compiler_delay'] = time() - start_time
@@ -345,7 +352,7 @@ class CompileSession:
                     self.state = self.STATE_CANCELLED
                     if hasattr(self, 'process'):
                         self.process.terminate()
-            with self.sender() as sender:
+            with self.sender(False) as sender:
                 sender.send(b'SESSION_CANCELLED')
             self.cancel_autodestruct()
             self.session_done()
@@ -374,7 +381,7 @@ class CompileSession:
                 self.pch_file, self.pch_required = \
                     self.runner.pch_repository().register_file(
                     *self.task['pch_file'])
-            with self.sender() as sender:
+            with self.sender(False) as sender:
                 sender.send_multipart([b'MISSING_FILES', pickle.dumps(
                     (missing_files, self.compiler_required,
                     self.pch_required))])
@@ -434,7 +441,7 @@ class CompileSession:
             if verdict == b'\x01':
                 fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
                     os.O_NOINHERIT)
-                with os.fdopen(fh, 'rb') as obj, self.sender() as sender:
+                with os.fdopen(fh, 'rb') as obj, self.sender(False) as sender:
                     send_compressed_file(sender.send_multipart, obj, copy=False)
                 os.remove(self.object_file)
             self.session_done()
@@ -530,7 +537,7 @@ class CompileWorker:
                             clients.send_multipart([client_id, b'PONG'])
                             continue
                         elif not client_id in self.workers:
-                            session = CompileSession(self, client_id)
+                            session = CompileSession(self, clients, client_id)
 
                             class Terminate:
                                 def __init__(self, worker, client_id):

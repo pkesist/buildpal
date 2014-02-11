@@ -42,20 +42,22 @@ class NodeManager:
         try:
             while True:
                 task = self.input_tasks.get_nowait()
-                task.note_time('collected')
+                task.note_time('collected from preprocessor')
                 self.schedule_task(task)
         except queue.Empty:
             pass
 
     def schedule_task(self, task, node=None):
         if node is None and self.unassigned_tasks:
+            task.note_time('queue as unassigned task')
             self.unassigned_tasks.append(task)
             return
         result = self.__get_server_conn(node)
         if result is None:
+            assert node is None
+            task.note_time('queue as unassigned task')
             self.unassigned_tasks.append(task)
             return
-        task.note_time('assigned')
         server_conn, node = result
         session = CompileSession(task, server_conn, node)
         self.sessions[server_conn] = session
@@ -120,7 +122,9 @@ class NodeManager:
         tasks_to_steal = self.__free_slots(node)
         while tasks_to_steal > 0:
             while self.unassigned_tasks:
-                self.schedule_task(self.unassigned_tasks.pop(0), node)
+                task = self.unassigned_tasks.pop(0)
+                task.note_time('taken from unassigned task queue')
+                self.schedule_task(task, node)
                 tasks_to_steal -= 1
                 if tasks_to_steal == 0:
                     return

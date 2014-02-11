@@ -90,7 +90,7 @@ class SourceScanner:
         self.hostname = getfqdn()
 
     def add_task(self, task):
-        task.note_time('queued')
+        task.note_time('queued for preprocessing')
         task.server_task_info['fqdn'] = self.hostname
         self.in_queue.put(task)
 
@@ -104,7 +104,7 @@ class SourceScanner:
         while True:
             try:
                 task = self.in_queue.get(timeout=1)
-                task.note_time('dequeued')
+                task.note_time('dequeued by preprocessor')
                 task.header_info, task.server_task_info['filelist'] = \
                     header_info(task.preprocess_task_info)
                 task.note_time('preprocessed')

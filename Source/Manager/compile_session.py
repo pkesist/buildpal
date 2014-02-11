@@ -7,6 +7,7 @@ from io import BytesIO
 import os
 import pickle
 import zipfile
+import zlib
 import zmq
 
 from time import time
@@ -106,7 +107,8 @@ class CompileSession:
                     assert not self.cancelled
                     if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
-                        self.output = open(self.task.output, "wb")
+                        self.obj_desc = open(self.task.output, "wb")
+                        self.obj_decompressor = zlib.decompressobj()
                         self.state = self.STATE_RECEIVE_RESULT_FILE
                         self.receive_result_time = SimpleTimer()
                     else:
@@ -121,12 +123,12 @@ class CompileSession:
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled
             more, data = msg
-            self.output.write(data)
+            self.obj_desc.write(self.obj_decompressor.decompress(data))
             if more == b'\x00':
+                self.obj_desc.write(self.obj_decompressor.flush())
                 self.timer.add_time('receive_result', self.receive_result_time.get())
                 del self.receive_result_time
-                self.output.close()
-                del self.output
+                self.obj_desc.close()
                 self.state = self.STATE_DONE
                 return True
         return False

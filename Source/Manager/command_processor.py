@@ -29,14 +29,13 @@ class Task:
 
     def register_session(self, session):
         if not self.sessions_running:
-            self.note_time('assigned')
+            self.note_time('assigned to a server session')
         self.sessions_running.add(session)
 
     def register_completion(self, session):
         if self.session_completed:
             return False
-        self.note_time('completed')
-        self.command_processor.process_task_times(self.times)
+        self.note_time('task completed notification received')
         self.session_completed = session
         assert session in self.sessions_running
         self.sessions_running.remove(session)
@@ -45,6 +44,7 @@ class Task:
         return True
 
     def completed(self, session, *args):
+        self.note_time('task result received')
         assert session == self.session_completed
         self.command_processor.task_done(self, *args)
 
@@ -53,14 +53,14 @@ class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
     STATE_HAS_COMPILER_INFO = 2
 
-    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command, timer):
+    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command, ui_data):
         self.client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
         self.__cwd = cwd
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
-        self.__timer = timer
+        self.__ui_data = ui_data
 
     def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
@@ -90,9 +90,10 @@ class CommandProcessor:
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
 
-    def process_task_times(self, times_dict):
-        for name, time in times_dict.items():
-            self.__timer.add_time(name, time)
+    def update_task_ui(self, task):
+        for name, time in task.times.items():
+            self.__ui_data.timer.add_time(name, time)
+        self.__ui_data.cache_stats.update(task.cache_stats)
 
     def executable(self):
         return self.__executable
@@ -151,6 +152,7 @@ class CommandProcessor:
     def task_done(self, task, retcode, stdout, stderr):
         assert task in self.tasks
         assert task not in self.completed_tasks
+        self.update_task_ui(task)
         self.completed_tasks[task] = (retcode, stdout, stderr)
         stdout = ''
         stderr = ''

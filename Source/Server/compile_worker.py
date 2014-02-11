@@ -1,5 +1,5 @@
-from Common import send_file, SimpleTimer, create_socket, recv_multipart, \
-    bind_to_random_port
+from Common import send_compressed_file, SimpleTimer, create_socket, \
+    recv_multipart, bind_to_random_port
 
 from io import BytesIO, StringIO
 from multiprocessing import Process, cpu_count
@@ -342,6 +342,15 @@ class CompileSession:
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
+    @async
+    def send_object_file(self):
+        fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
+            os.O_NOINHERIT)
+        with os.fdopen(fh, 'rb') as obj, self.sender(True) as sender:
+            send_compressed_file(sender.send_multipart, obj, copy=False)
+        os.remove(self.object_file)
+        self.session_done()
+
     def process_msg(self, msg):
         self.reschedule_selfdestruct()
         if msg[0] == b'CANCEL_SESSION':
@@ -433,12 +442,9 @@ class CompileSession:
             tag, verdict = msg
             assert tag == b'SEND_CONFIRMATION'
             if verdict == b'\x01':
-                fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
-                    os.O_NOINHERIT)
-                with os.fdopen(fh, 'rb') as obj, self.sender(False) as sender:
-                    send_file(sender.send_multipart, obj, copy=False)
-                os.remove(self.object_file)
-            self.session_done()
+                self.send_object_file(self.runner.misc_thread_pool())
+            else:
+                self.session_done()
         else:
             raise Exception("Invalid state.")
 

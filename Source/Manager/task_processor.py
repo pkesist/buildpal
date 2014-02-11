@@ -25,7 +25,7 @@ from subprocess import list2cmdline
 
 class ClientProcessor:
     def __init__(self, socket, compiler_info, task_created_func, register,
-            unregister, timer):
+            unregister, ui_data):
         self.socket = socket
         self.compiler_info = compiler_info
         self.data = b''
@@ -33,7 +33,7 @@ class ClientProcessor:
         self.unregister = unregister
         register(self.socket, selectors.EVENT_READ, self.read)
         self.registered = True
-        self.timer = timer
+        self.ui_data = ui_data
 
     def close(self):
         if self.registered:
@@ -82,7 +82,7 @@ class ClientProcessor:
         assert compiler_name == 'msvc'
         compiler = MSVCWrapper()
         self.cmd_processor = CommandProcessor(self, executable,
-            cwd, sysincludes, compiler, command, self.timer)
+            cwd, sysincludes, compiler, command, self.ui_data)
 
         if self.cmd_processor.build_local():
             self.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
@@ -128,7 +128,6 @@ class TaskProcessor:
                 self.ratio = self.hits / total
 
         self.port = port
-        self.cache_stats = CacheStats()
         self.compiler_info = {}
         self.timer = Timer()
         self.node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
@@ -140,7 +139,7 @@ class TaskProcessor:
         self.ui_data = ui_data
         self.ui_data.timer = self.timer
         self.ui_data.node_info = self.node_info
-        self.ui_data.cache_stats = self.cache_stats
+        self.ui_data.cache_stats = CacheStats()
 
     def client_thread(self, task_created_func):
         client_selector = selectors.DefaultSelector()
@@ -154,7 +153,7 @@ class TaskProcessor:
             conn.setblocking(False)
             client_processor = ClientProcessor(conn, self.compiler_info,
                 task_created_func, client_selector.register,
-                client_selector.unregister, self.timer)
+                client_selector.unregister, self.ui_data)
 
         client_selector.register(listen_socket, selectors.EVENT_READ, accept)
         while True:

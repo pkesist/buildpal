@@ -1,6 +1,12 @@
 import zmq
 import socket
 import select
+import threading
+
+import pickle
+from time import time
+
+import cProfile
 
 from Common import recv_multipart, create_socket
 
@@ -126,17 +132,24 @@ class ZMQSelectPoller(PollerBase):
         def __init__(self, poller, handler):
             self.poller = poller
             self.address = 'inproc://preprocessing_{}'.format(id(self))
-            self.event_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
+            self.event_socket = create_socket(self.poller.zmq_ctx, zmq.PULL)
             self.event_socket.bind(self.address)
-            poller.register(self.event_socket, lambda ignore, ignore2 : handler())
+            poller.register(self.event_socket, lambda socket, msgs : handler(), True)
+            self.notify_sockets = {}
 
         def __call__(self):
-            notify_socket = create_socket(self.poller.zmq_ctx, zmq.DEALER)
-            notify_socket.connect(self.address)
+            thread_id = threading.get_ident()
+            notify_socket = self.notify_sockets.get(thread_id)
+            if notify_socket is None:
+                notify_socket = create_socket(self.poller.zmq_ctx, zmq.PUSH)
+                notify_socket.connect(self.address)
+                self.notify_sockets[thread_id] = notify_socket
             notify_socket.send(b'x')
-            notify_socket.close()
 
         def close(self):
+            for thread_id, notify_socket in self.notify_sockets.items():
+                notify_socket.close()
+            self.notify_sockets.clear()
             self.poller.unregister(self.event_socket)
             self.event_socket.close()
 
@@ -149,8 +162,8 @@ class ZMQSelectPoller(PollerBase):
     def create_event(self, handler):
         return self.Event(self, handler)
 
-    def register(self, socket, handler):
-        self.sockets[socket] = handler
+    def register(self, socket, handler, process_all_msgs=False):
+        self.sockets[socket] = handler, process_all_msgs
         self.poller.register(socket, zmq.POLLIN)
 
     def unregister(self, socket):
@@ -163,11 +176,21 @@ class ZMQSelectPoller(PollerBase):
         result = self.poller.poll(timeout)
         for socket, event in result:
             assert event == zmq.POLLIN
-            handler = self.sockets[socket]
-            handler(socket, recv_multipart(socket, zmq.NOBLOCK))
+            handler, process_all_msgs = self.sockets[socket]
+            if process_all_msgs:
+                msgs = []
+                try:
+                    while True:
+                        msgs.append(recv_multipart(socket, zmq.NOBLOCK))
+                except zmq.ZMQError:
+                    pass
+                handler(socket, msgs)
+            else:
+                handler(socket, recv_multipart(socket, zmq.NOBLOCK))
         return bool(result)
 
     def run(self, observer):
+        last_time = time()
         while True:
             if self.run_for_a_while(1):
                 observer()

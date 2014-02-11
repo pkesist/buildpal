@@ -1,12 +1,19 @@
 from subprocess import list2cmdline
 
 import os
+from time import time
 
 class Task:
     def __init__(self, task_dict):
         self.__dict__.update(task_dict)
         self.sessions_running = set()
         self.session_completed = None
+        self.last_time = time()
+        self.times = {}
+
+    def note_time(self, name):
+        curr_time = time()
+        self.times[name], self.last_time = curr_time - self.last_time, curr_time
 
     def compiler_info(self):
         return self.command_processor.compiler_info
@@ -21,11 +28,15 @@ class Task:
         return bool(self.session_completed)
 
     def register_session(self, session):
+        if not self.sessions_running:
+            self.note_time('assigned')
         self.sessions_running.add(session)
 
     def register_completion(self, session):
         if self.session_completed:
             return False
+        self.note_time('completed')
+        self.command_processor.process_task_times(self.times)
         self.session_completed = session
         assert session in self.sessions_running
         self.sessions_running.remove(session)
@@ -42,13 +53,14 @@ class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
     STATE_HAS_COMPILER_INFO = 2
 
-    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command):
+    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command, timer):
         self.client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
         self.__cwd = cwd
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
+        self.__timer = timer
 
     def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
@@ -76,7 +88,11 @@ class CommandProcessor:
             assert len(msg) == len(self.compiler_files)
             self.compiler_files = list(zip(msg, self.compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
-            self.got_compiler_info(self)
+            self.got_compiler_info()
+
+    def process_task_times(self, times_dict):
+        for name, time in times_dict.items():
+            self.__timer.add_time(name, time)
 
     def executable(self):
         return self.__executable
@@ -155,10 +171,12 @@ class CommandProcessor:
             stderr += result[2]
         if error_code:
             self.client_conn.send([b'EXIT', error_code, stdout, stderr])
+            self.client_conn.close()
             return
 
         if not self.should_invoke_linker():
             self.client_conn.send([b'EXIT', b'0', stdout, stderr])
+            self.client_conn.close()
             return
 
         objects = {}
@@ -177,3 +195,4 @@ class CommandProcessor:
             call.extend(*link_opts)
 
         self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
+        self.client_conn.close()

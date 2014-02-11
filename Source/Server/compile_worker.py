@@ -1,5 +1,4 @@
-from Common import send_compressed_file, SimpleTimer, \
-    create_socket, recv_multipart, \
+from Common import send_file, SimpleTimer, create_socket, recv_multipart, \
     bind_to_random_port
 
 from io import BytesIO, StringIO
@@ -27,7 +26,6 @@ import sys
 import traceback
 import tempfile
 import zipfile
-import zlib
 import zmq
 import queue
 import map_files
@@ -207,7 +205,7 @@ class CompileSession:
 
     def run_compiler(self):
         self.state = self.STATE_RUNNING_COMPILER
-        self.cancel_autodestruct()
+        self.cancel_selfdestruct()
         self.runner.compile_thread_pool().submit(
             self.async_run_compiler, time())
 
@@ -321,21 +319,25 @@ class CompileSession:
                             self.session_done()
                 else:
                     assert self.state == self.STATE_CANCELLED
-        finally:
-            x.close()
 
     def session_done(self, from_selfdestruct=False):
-        assert not hasattr(self, 'selfdestruct') or from_selfdestruct
+        if from_selfdestruct and self.completed:
+            return
         assert not self.completed
+        if from_selfdestruct:
+            with self.sender(False) as sender:
+                sender.send_multipart([b'TIMED_OUT'])
+        else:
+            self.cancel_selfdestruct()
         self.completed = True
         self.runner.terminate(self.id)
 
     def reschedule_selfdestruct(self):
-        self.cancel_autodestruct()
-        self.selfdestruct = self.runner.scheduler().enter(60, 1, self.session_done,
-            (True,))
+        self.cancel_selfdestruct()
+        self.selfdestruct = self.runner.scheduler().enter(60, 1,
+            self.session_done, (True,))
 
-    def cancel_autodestruct(self):
+    def cancel_selfdestruct(self):
         if hasattr(self, 'selfdestruct'):
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
@@ -353,7 +355,6 @@ class CompileSession:
                         self.process.terminate()
             with self.sender(False) as sender:
                 sender.send(b'SESSION_CANCELLED')
-            self.cancel_autodestruct()
             self.session_done()
 
         elif self.state == self.STATE_GET_TASK:
@@ -387,7 +388,7 @@ class CompileSession:
         elif self.state == self.STATE_DOWNLOADING_MISSING_HEADERS:
             assert msg[0] == b'TASK_FILES'
             fqdn = self.task['fqdn']
-            new_files = pickle.loads(zlib.decompress(msg[1]))
+            new_files = pickle.loads(msg[1])
             self.src_loc = msg[2].tobytes().decode()
             self.waiting_for_manager_data = SimpleTimer()
             self.include_dirs_future = self.prepare_include_dirs(
@@ -400,7 +401,6 @@ class CompileSession:
                 handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
                     os.O_NOINHERIT)
                 self.pch_desc = os.fdopen(handle, 'wb')
-                self.pch_decompressor = zlib.decompressobj()
             else:
                 self.run_compiler()
         elif self.state == self.STATE_DOWNLOADING_COMPILER:
@@ -419,28 +419,24 @@ class CompileSession:
                     self.state = self.STATE_DOWNLOADING_PCH
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_desc = os.fdopen(handle, 'wb')
-                    self.pch_decompressor = zlib.decompressobj()
                 else:
                     self.run_compiler()
         elif self.state == self.STATE_DOWNLOADING_PCH:
             more, data = msg
-            self.pch_desc.write(self.pch_decompressor.decompress(data))
+            self.pch_desc.write(data)
             if more == b'\x00':
-                self.pch_desc.write(self.pch_decompressor.flush())
                 self.pch_desc.close()
                 del self.pch_desc
-                del self.pch_decompressor
                 self.runner.pch_repository().file_completed(*self.task['pch_file'])
                 self.run_compiler()
         elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
-            self.cancel_autodestruct()
             tag, verdict = msg
             assert tag == b'SEND_CONFIRMATION'
             if verdict == b'\x01':
                 fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
                     os.O_NOINHERIT)
                 with os.fdopen(fh, 'rb') as obj, self.sender(False) as sender:
-                    send_compressed_file(sender.send_multipart, obj, copy=False)
+                    send_file(sender.send_multipart, obj, copy=False)
                 os.remove(self.object_file)
             self.session_done()
         else:

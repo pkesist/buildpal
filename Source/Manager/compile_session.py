@@ -1,16 +1,14 @@
 from .source_scanner import header_beginning
 
-from Common import SimpleTimer, send_compressed_file, send_file
+from Common import SimpleTimer, send_file
 
 from io import BytesIO
 
 import os
 import pickle
 import zipfile
-import zlib
 import zmq
 
-from itertools import chain
 from time import time
 
 class CompileSession:
@@ -22,6 +20,7 @@ class CompileSession:
     STATE_SERVER_FAILURE = 5
     STATE_CANCELLED = 6
     STATE_TOO_LATE = 7
+    STATE_TIMED_OUT = 8
 
     def __init__(self, task, server_conn, node):
         self.state = self.STATE_START
@@ -52,6 +51,9 @@ class CompileSession:
             if self.state != self.STATE_TOO_LATE:
                 self.state = self.STATE_CANCELLED
             return True
+        elif msg[0] == b'TIMED_OUT':
+            self.state = self.STATE_TIMED_OUT
+            return True
         # It is possible that cancellation arrived too late,
         # that the server already sent the final message and
         # unregistered its session. In that case we will never
@@ -60,15 +62,11 @@ class CompileSession:
         # This state requires a response, so the session must be still alive
         # on the server.
         if not self.cancelled and self.state == self.STATE_WAIT_FOR_MISSING_FILES:
-            try:
-                assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
-            except AssertionError:
-                print([m.tobytes()[:50] for m in msg])
-                raise
+            assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
             self.server_conn.send_multipart([b'TASK_FILES',
-                zlib.compress(pickle.dumps(new_files)), src_loc.encode()])
+                pickle.dumps(new_files), src_loc.encode()])
             if need_compiler:
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
@@ -81,7 +79,8 @@ class CompileSession:
                 assert self.task.pch_file is not None
                 with self.timer.timeit('send.pch'), open(os.path.join(
                         os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
-                    send_compressed_file(self.server_conn.send_multipart,
+                    mytime = time()
+                    send_file(self.server_conn.send_multipart,
                         pch_file, copy=False)
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
@@ -108,7 +107,6 @@ class CompileSession:
                     if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
                         self.output = open(self.task.output, "wb")
-                        self.output_decompressor = zlib.decompressobj()
                         self.state = self.STATE_RECEIVE_RESULT_FILE
                         self.receive_result_time = SimpleTimer()
                     else:
@@ -123,10 +121,8 @@ class CompileSession:
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled
             more, data = msg
-            self.output.write(self.output_decompressor.decompress(data))
+            self.output.write(data)
             if more == b'\x00':
-                self.output.write(self.output_decompressor.flush())
-                del self.output_decompressor
                 self.timer.add_time('receive_result', self.receive_result_time.get())
                 del self.receive_result_time
                 self.output.close()
@@ -156,14 +152,12 @@ class CompileSession:
         #  (dir2, a21, a22),
         #  (dir2, b21, b22),
         #
-        #
-        #
-        header_info_iter = chain(*list([([dir] + info) for info in data] for dir, data in header_info))
+        header_info_iter = ((dir, stuff) for dir, data in header_info for stuff in data)
         for entry in in_filelist:
             found = False
             while not found:
                 try:
-                    dir, file, relative, content, checksum, header = \
+                    dir, (file, relative, content, checksum, header) = \
                         next(header_info_iter)
                     if entry == (dir, file):
                         assert not relative

@@ -7,6 +7,7 @@ import threading
 
 from collections import defaultdict
 from multiprocessing import cpu_count
+from socket import getfqdn
 from time import time
 
 data = threading.local()
@@ -59,11 +60,21 @@ def header_info(task):
     header_info = collect_headers(task['source'], task['includes'],
         task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
+    filelist = []
     for dir, data in header_info:
+        dir_data = []
         for entry in data:
-            abs = os.path.join(dir, entry[0])
+            file, relative, content, checksum = entry
+            abs = os.path.join(dir, file)
             entry.append(header_beginning(abs))
-    return header_info
+            if not relative:
+                # Headers which are relative to source file are not
+                # considered as candidates for server cache, and are
+                # always sent together with the source file.
+                dir_data.append((file, checksum))
+        filelist.append((dir, dir_data))
+    return header_info, tuple(filelist)
+
 
 class SourceScanner:
     def __init__(self, notify, thread_count=cpu_count() + 1):
@@ -76,9 +87,12 @@ class SourceScanner:
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
+        self.hostname = getfqdn()
 
     def add_task(self, task):
-        self.in_queue.put((task, SimpleTimer()))
+        task.note_time('queued')
+        task.server_task_info['fqdn'] = self.hostname
+        self.in_queue.put(task)
 
     def completed_task(self):
         try:
@@ -89,18 +103,13 @@ class SourceScanner:
     def __process_task_worker(self, notify):
         while True:
             try:
-                task, queued_timer = self.in_queue.get(timeout=1)
-                time_in_in_queue = queued_timer.get()
-                task.header_info = header_info(task.preprocess_task_info)
-                self.out_queue.put({
-                    'task' : task,
-                    'time_in_in_queue' : time_in_in_queue,
-                    'preprocessing_time' : queued_timer.get() - time_in_in_queue,
-                    'time_queued' : time(),
-                    'cache_stats' : cache.get_stats()
-                })
-                notify()
-
+                task = self.in_queue.get(timeout=1)
+                task.note_time('dequeued')
+                task.header_info, task.server_task_info['filelist'] = \
+                    header_info(task.preprocess_task_info)
+                task.note_time('preprocessed')
+                task.cache_stats = cache.get_stats()
+                notify(task)
             except queue.Empty:
                 if self.closing:
                     return

@@ -356,14 +356,6 @@ int main( int argc, char * argv[] )
     boost::asio::write( sock, req, writeError );
 
     MsgReceiver receiver( sock );
-    {
-        receiver.getMessage();
-        assert( receiver.parts() == 1 );
-        std::pair<char const *, std::size_t> data( receiver.getPart( 0 ) );
-        assert( data.second == 13 );
-        assert( memcmp( data.first, "TASK_RECEIVED", data.second ) == 0 );
-    }
-
     while ( true )
     {
         receiver.getMessage();

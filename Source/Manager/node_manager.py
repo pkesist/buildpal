@@ -1,25 +1,51 @@
 from .compile_session import CompileSession
+from .poller import ZMQSelectPoller
 
 import pickle
 import zmq
+import queue
 
 from functools import cmp_to_key
+from math import floor
 from struct import pack
 from collections import defaultdict
 
 from Common import create_socket, recv_multipart
 
+Poller = ZMQSelectPoller
+
 class NodeManager:
-    def __init__(self, zmq_ctx, node_info, register, unregister):
-        self.zmq_ctx = zmq_ctx
+    def __init__(self, node_info):
+        self.zmq_ctx = zmq.Context()
+        self.poller = Poller(self.zmq_ctx)
+        self.task_ready_event = self.poller.create_event(
+            self.__process_input_tasks)
+        self.input_tasks = queue.Queue()
         self.node_info = node_info
-        self.register_socket = register
-        self.unregister_socket = unregister
         self.all_sockets = defaultdict(list)
         self.sockets_ready = defaultdict(list)
         self.tasks_running = defaultdict(list)
-        self.unassigned_tasks = []
         self.sessions = {}
+        self.unassigned_tasks = []
+
+    def task_ready(self, task):
+        self.input_tasks.put(task)
+        self.task_ready_event()
+
+    def run(self, observer):
+        self.poller.run(observer)
+
+    def stop(self):
+        self.poller.stop()
+
+    def __process_input_tasks(self):
+        try:
+            while True:
+                task = self.input_tasks.get_nowait()
+                task.note_time('collected')
+                self.schedule_task(task)
+        except queue.Empty:
+            pass
 
     def schedule_task(self, task, node=None):
         if node is None and self.unassigned_tasks:
@@ -29,6 +55,7 @@ class NodeManager:
         if result is None:
             self.unassigned_tasks.append(task)
             return
+        task.note_time('assigned')
         server_conn, node = result
         session = CompileSession(task, server_conn, node)
         self.sessions[server_conn] = session
@@ -39,15 +66,18 @@ class NodeManager:
     def close(self):
         for node, socketlist in self.all_sockets.items():
             for socket in socketlist:
-                self.unregister_socket(socket)
+                self.poller.unregister(socket)
                 socket.close()
+        self.task_ready_event.close()
+        self.poller.close()
+        self.zmq_ctx.term()
 
     def __connect_to_node(self, node):
         node_address = node.zmq_address()
         try:
             socket = create_socket(self.zmq_ctx, zmq.DEALER)
             socket.connect(node_address)
-            self.register_socket(socket, self.__handle_server_socket)
+            self.poller.register(socket, self.__handle_server_socket)
         except zmq.ZMQError:
             print("Failed to connect to '{}'".format(node_address))
             raise Exception("Invalid node")
@@ -63,6 +93,14 @@ class NodeManager:
 
     def __free_slots(self, node):
         return self.__target_tasks_per_node(node) - len(self.tasks_running[node])
+
+    def __tasks_viable_for_stealing(self, src_node, tgt_node):
+        if src_node.average_task_time() == 0:
+            return self.tasks_running[src_node]
+        if tgt_node.average_task_time() == 0:
+            return self.tasks_running[src_node]
+        task_index = floor(tgt_node.average_task_time() / src_node.average_task_time()) * src_node.node_dict()['job_slots']
+        return self.tasks_running[src_node][task_index:]
 
     def __best_node(self):
         def current_node_weight(node):
@@ -82,17 +120,17 @@ class NodeManager:
         tasks_to_steal = self.__free_slots(node)
         while tasks_to_steal > 0:
             while self.unassigned_tasks:
-                print("TOOK UNASSIGNED TASK")
                 self.schedule_task(self.unassigned_tasks.pop(0), node)
                 tasks_to_steal -= 1
                 if tasks_to_steal == 0:
                     return
+            return
             if not self.__can_steal_task(node):
                 return
             for from_node in self.tasks_running:
                 if node == from_node:
                     continue
-                for task in reversed(self.tasks_running[from_node]):
+                for task in reversed(self.__tasks_viable_for_stealing(from_node, node)):
                     if not task.is_completed() and task not in self.tasks_running[node]:
                         print("{} STOLE A TASK FROM {}".format(node.node_dict()['hostname'], from_node.node_dict()['hostname']))
                         self.schedule_task(task, node)
@@ -114,10 +152,7 @@ class NodeManager:
 
     def __handle_server_socket(self, socket, msg):
         session = self.sessions.get(socket)
-        if not session:
-            print("Got message from invalid session:")
-            print([m.tobytes()[:50] for m in msg])
-            return
+        assert session
         if not session.got_data_from_server(msg):
             return
         # Session is finished.
@@ -144,7 +179,8 @@ class NodeManager:
                     session.stdout, session.stderr)
         elif session.state == session.STATE_CANCELLED:
             node.add_tasks_cancelled()
+        elif session.state == session.STATE_TIMED_OUT:
+            node.add_tasks_timed_out()
         else:
             assert session.state == session.STATE_TOO_LATE
             node.add_tasks_too_late()
-

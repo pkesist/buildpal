@@ -167,12 +167,11 @@ class NodeManager:
         self.__steal_tasks(node)
         if session.state == session.STATE_DONE:
             node.add_tasks_completed()
-            assert task.is_completed()
-            assert task.session_completed == session
             task.completed(session, session.retcode,
                 session.stdout, session.stderr)
         elif session.state == session.STATE_SERVER_FAILURE:
             node.add_tasks_failed()
+            task.failed(session)
             if task.is_completed():
                 assert task.session_completed != session
                 return
@@ -181,9 +180,12 @@ class NodeManager:
                 task.completed(session, session.retcode,
                     session.stdout, session.stderr)
         elif session.state == session.STATE_CANCELLED:
+            task.cancelled(session)
             node.add_tasks_cancelled()
         elif session.state == session.STATE_TIMED_OUT:
+            task.timed_out(session)
             node.add_tasks_timed_out()
         else:
             assert session.state == session.STATE_TOO_LATE
+            task.too_late(session)
             node.add_tasks_too_late()

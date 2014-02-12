@@ -7,6 +7,11 @@ class Task:
     def __init__(self, task_dict):
         self.__dict__.update(task_dict)
         self.sessions_running = set()
+        self.sessions_cancelled = set()
+        self.sessions_timed_out = set()
+        self.sessions_too_late = set()
+        self.sessions_failed = set()
+        self.first_session = None
         self.session_completed = None
         self.last_time = time()
         self.times = {}
@@ -29,6 +34,7 @@ class Task:
 
     def register_session(self, session):
         if not self.sessions_running:
+            self.first_session = session
             self.note_time('assigned to a server session')
         self.sessions_running.add(session)
 
@@ -47,6 +53,26 @@ class Task:
         self.note_time('task result received')
         assert session == self.session_completed
         self.command_processor.task_done(self, *args)
+
+    def cancelled(self, session):
+        assert session in self.sessions_running
+        self.sessions_running.remove(session)
+        self.sessions_cancelled.add(session)
+
+    def failed(self, session):
+        assert session in self.sessions_running
+        self.sessions_running.remove(session)
+        self.sessions_failed.add(session)
+
+    def timed_out(self, session):
+        assert session in self.sessions_running
+        self.sessions_running.remove(session)
+        self.sessions_timed_out.add(session)
+
+    def too_late(self, session):
+        assert session in self.sessions_running
+        self.sessions_running.remove(session)
+        self.sessions_too_late.add(session)
 
 class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 0

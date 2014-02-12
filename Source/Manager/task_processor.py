@@ -36,7 +36,16 @@ class ClientProcessor:
         self.register, self.unregister = register, unregister
 
     def close(self):
+        # There is currently no good way to close the transport.
+        # If we do self.trasport.close(), it will not wait for
+        # data to be sent. For now we rely that clients will
+        # disconnect once they are done.
         pass
+
+    def abort(self):
+        assert self.transport
+        # This eventually does the same thing as close().
+        self.transport.abort()
 
     def connection_made(self, transport):
         self.transport = transport
@@ -143,7 +152,7 @@ class ClientProcessorFactory:
             self.on_closed()
             return
         for client in self.clients:
-            client.close()
+            client.abort()
 
 class TaskProcessor:
     def __init__(self, nodes, port, n_pp_threads, ui_data):

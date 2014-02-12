@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <sstream>
+#include <windows.h>
 
 char const compiler[] = "msvc";
 unsigned int compilerSize = sizeof(compiler) / sizeof(compiler[0]) - 1;
@@ -90,10 +91,11 @@ std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
     return buffer;
 }
 
+template <class Stream>
 class MsgReceiver
 {
 public:
-    explicit MsgReceiver( boost::asio::ip::tcp::socket & sock )
+    explicit MsgReceiver( Stream & sock )
         :
         socket_( sock ),
         currentSize_( 0 )
@@ -143,7 +145,7 @@ public:
     std::size_t parts() const { return parts_.size(); }
 
 private:
-    boost::asio::ip::tcp::socket & socket_;
+    Stream & socket_;
     boost::asio::streambuf buf_;
     std::vector<std::pair<char const *, std::size_t> > parts_;
     std::size_t currentSize_;
@@ -190,7 +192,6 @@ int createProcess( char * commandLine )
     }
 }
 
-
 int main( int argc, char * argv[] )
 {
     boost::timer::auto_cpu_timer t( std::cout, "Command took %w seconds.\n" );
@@ -214,23 +215,63 @@ int main( int argc, char * argv[] )
 
     if ( !runLocally && ( size > 256 ) )
     {
-        std::cerr << "Invalid DB_MGR_PORT environment variable value.\n";
+        std::cerr << "Invalid DB_MGR_PORT environment variable value (value too big).\n";
         runLocally = true;
     }
 
+#ifdef BOOST_WINDOWS
+    char const pipeStreamPrefix[] = "\\\\.\\pipe\\BuildPal_";
+    std::size_t const pipeStreamPrefixSize = sizeof(pipeStreamPrefix) / sizeof(pipeStreamPrefix[0]) - 1;
+
+    char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + size ) );
+    std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
+    GetEnvironmentVariable( "DB_MGR_PORT", pipeName + pipeStreamPrefixSize, size );
+
+    HANDLE pipe;
+    for ( ; ;  )
+    {
+        pipe = ::CreateFile(
+            pipeName,                                     // LPCTSTR lpFileName,
+            GENERIC_READ | GENERIC_WRITE,                 // DWORD dwDesiredAccess,
+            0,                                            // DWORD dwShareMode,
+            NULL,                                         // LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+            OPEN_EXISTING,                                // DWORD dwCreationDisposition,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, // DWORD dwFlagsAndAttributes,
+            NULL                                          // HANDLE hTemplateFile
+        );
+
+        if ( pipe != INVALID_HANDLE_VALUE )
+            break;
+
+        if ( GetLastError() == ERROR_PIPE_BUSY )
+        {
+            WaitNamedPipe( pipeName, NMPWAIT_USE_DEFAULT_WAIT );
+            continue;
+        }
+            
+        boost::system::error_code const error( ::GetLastError(), boost::system::system_category() );
+        std::cerr << "Failed to create pipe (" << error.message() << ").\n";
+        return -1;
+    }
+
+    typedef boost::asio::windows::stream_handle StreamType;
+
+    boost::asio::io_service ioService;
+    StreamType sock( ioService, pipe );
+#else
     unsigned short port;
     if ( !runLocally )
     {
         char * buffer = static_cast<char *>( alloca( size ) );
         GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
-
+    
         if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
         {
             std::cerr << "Failed to parse DB_MGR_PORT environment variable value.\n";
             runLocally = true;
         }
     }
-
+    
     boost::asio::ip::address localhost;
     if ( !runLocally )
     {
@@ -242,15 +283,16 @@ int main( int argc, char * argv[] )
             runLocally = true;
         }
     }
-
+    
     boost::asio::io_service ioService;
+    typedef boost::asio::ip::tcp::socket StreamType;
     boost::asio::ip::tcp::socket sock( ioService );
     if ( !runLocally )
     {
         boost::asio::ip::tcp::endpoint endpoint;
         endpoint.address( localhost );
         endpoint.port( port );
-
+    
         boost::system::error_code connectError;
         sock.connect( endpoint, connectError );
         if ( connectError )
@@ -259,6 +301,7 @@ int main( int argc, char * argv[] )
             runLocally = true;
         }
     }
+#endif
 
     if ( runLocally )
     {
@@ -355,7 +398,7 @@ int main( int argc, char * argv[] )
     boost::system::error_code writeError;
     boost::asio::write( sock, req, writeError );
 
-    MsgReceiver receiver( sock );
+    MsgReceiver<StreamType> receiver( sock );
     while ( true )
     {
         receiver.getMessage();

@@ -10,6 +10,7 @@ from .node_info import NodeInfo
 
 from Common import bind_to_random_port
 
+import asyncio
 import operator
 import pickle
 import sys
@@ -24,32 +25,34 @@ from time import time
 from subprocess import list2cmdline
 
 class ClientProcessor:
-    def __init__(self, socket, compiler_info, task_created_func, register,
-            unregister, ui_data):
-        self.socket = socket
+    def __init__(self, compiler_info, task_created_func, ui_data, register,
+            unregister):
         self.compiler_info = compiler_info
-        self.data = b''
         self.task_created_func = task_created_func
-        self.unregister = unregister
-        register(self.socket, selectors.EVENT_READ, self.read)
-        self.registered = True
         self.ui_data = ui_data
+        self.data = b''
+        self.transport = None
+        self.command_processor = None
+        self.register, self.unregister = register, unregister
 
     def close(self):
-        if self.registered:
-            self.unregister(self.socket)
-            self.registered = False
-        self.socket.close()
+        pass
 
-    def send(self, data):
-        try:
-            self.socket.sendall(b'\x00'.join(data) + b'\x00\x01')
-        except ConnectionResetError:
-            self.close()
+    def connection_made(self, transport):
+        self.transport = transport
+        self.register(self)
 
-    def read(self, sock):
-        assert sock == self.socket
-        data = sock.recv(1024)
+    def connection_lost(self, exception):
+        self.unregister(self)
+
+    def eof_received(self):
+        return False
+
+    def send(self, msg):
+        assert self.transport is not None
+        self.transport.write(b'\x00'.join(msg) + b'\x00\x01')
+
+    def data_received(self, data):
         self.data = self.data + data
         while True:
             msg = self.__get_message()
@@ -68,8 +71,8 @@ class ClientProcessor:
         return result
 
     def __handle_message(self, msg):
-        if hasattr(self, 'cmd_processor'):
-            self.cmd_processor.got_data_from_client(msg)
+        if self.command_processor is not None:
+            self.command_processor.got_data_from_client(msg)
         else:
             self.__handle_new_client(msg)
 
@@ -81,36 +84,66 @@ class ClientProcessor:
         command = [x.decode() for x in msg[4:]]
         assert compiler_name == 'msvc'
         compiler = MSVCWrapper()
-        self.cmd_processor = CommandProcessor(self, executable,
+        self.command_processor = CommandProcessor(self, executable,
             cwd, sysincludes, compiler, command, self.ui_data)
 
-        if self.cmd_processor.build_local():
+        if self.command_processor.build_local():
             self.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
             self.close()
             return True
 
         if executable in self.compiler_info:
             info, files = self.compiler_info[executable]
-            self.cmd_processor.set_compiler_info(info, files)
+            self.command_processor.set_compiler_info(info, files)
             self.__create_tasks()
         else:
-            self.cmd_processor.request_compiler_info(on_completion=self.__create_tasks)
+            self.command_processor.request_compiler_info(
+                on_completion=self.__create_tasks)
 
     def __create_tasks(self):
         # No more data will be read from the client.
-        if self.registered:
-            self.unregister(self.socket)
-            self.registered = False
-        assert self.cmd_processor.state == self.cmd_processor.STATE_HAS_COMPILER_INFO
-        if not self.cmd_processor.executable() in self.compiler_info:
-            self.compiler_info[self.cmd_processor.executable()] = \
-                self.cmd_processor.compiler_info, self.cmd_processor.compiler_files
-        for task in self.cmd_processor.create_tasks():
+        assert self.command_processor.state == \
+            self.command_processor.STATE_HAS_COMPILER_INFO
+        if not self.command_processor.executable() in self.compiler_info:
+            self.compiler_info[self.command_processor.executable()] = \
+                self.command_processor.compiler_info, \
+                self.command_processor.compiler_files
+        for task in self.command_processor.create_tasks():
             task.server_task_info['compiler_info'] = task.compiler_info()
             task.preprocess_task_info['macros'].extend(
                 task.compiler_info()['macros'])
             task.pp_timer = SimpleTimer()
             self.task_created_func(task)
+
+class ClientProcessorFactory:
+    def __init__(self, compiler_info, task_created_func, ui_data, on_closed):
+        self.compiler_info = compiler_info
+        self.task_created_func = task_created_func
+        self.ui_data = ui_data
+        self.clients = set()
+        self.closing = False
+        self.on_closed = on_closed
+
+    def __call__(self):
+        return ClientProcessor(self.compiler_info,
+            self.task_created_func, self.ui_data, self.__register,
+            self.__unregister)
+            
+    def __register(self, client):
+        self.clients.add(client)
+
+    def __unregister(self, client):
+        self.clients.discard(client)
+        if self.closing and not self.clients:
+            self.on_closed()
+
+    def close(self):
+        self.closing = True
+        if not self.clients:
+            self.on_closed()
+            return
+        for client in self.clients:
+            client.close()
 
 class TaskProcessor:
     def __init__(self, nodes, port, n_pp_threads, ui_data):
@@ -131,10 +164,12 @@ class TaskProcessor:
         self.compiler_info = {}
         self.timer = Timer()
         self.node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
+        self.server = None
 
         self.n_pp_threads = n_pp_threads
         if not self.n_pp_threads:
             self.n_pp_threads = cpu_count()
+        self.client_list = []
 
         self.ui_data = ui_data
         self.ui_data.timer = self.timer
@@ -142,27 +177,29 @@ class TaskProcessor:
         self.ui_data.cache_stats = CacheStats()
 
     def client_thread(self, task_created_func):
-        client_selector = selectors.DefaultSelector()
+        def stop_loop():
+            # First close the server.
+            self.server.close()
+            # Queue loop stop, so that the loop gets a chance to cleanup after
+            # failed pipe accept.
+            self.loop.call_soon(self.loop.stop)
 
-        listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen_socket.bind(('', self.port))
-        listen_socket.listen(16)
-        
-        def accept(sock):
-            conn, addr = sock.accept()
-            conn.setblocking(False)
-            client_processor = ClientProcessor(conn, self.compiler_info,
-                task_created_func, client_selector.register,
-                client_selector.unregister, self.ui_data)
+        self.client_processor_factory = ClientProcessorFactory(
+            self.compiler_info, task_created_func, self.ui_data, stop_loop)
 
-        client_selector.register(listen_socket, selectors.EVENT_READ, accept)
-        while True:
-            for key, mask in client_selector.select(1):
-                callback = key.data
-                callback(key.fileobj)
-            if self.terminating:
-                break
-        listen_socket.close()
+        self.loop = asyncio.ProactorEventLoop()
+        task = asyncio.async(self.loop.start_serving_pipe(
+            self.client_processor_factory,
+            "\\\\.\\pipe\\BuildPal_{}".format(self.port)),
+            loop=self.loop)
+        [self.server] = self.loop.run_until_complete(task)
+        self.loop.run_forever()
+        self.loop.close()
+
+    def stop_client_thread(self):
+        def stop_loop():
+            self.client_processor_factory.close()
+        self.loop.call_soon_threadsafe(stop_loop)
 
     def run(self, observer=None):
         self.terminating = False
@@ -185,4 +222,5 @@ class TaskProcessor:
             self.node_manager.close()
 
     def stop(self):
+        self.stop_client_thread()
         self.node_manager.stop()

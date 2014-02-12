@@ -12,10 +12,16 @@ from Common import recv_multipart, create_socket
 
 class PollerBase:
     def __init__(self):
+        def dummy(): pass
+        self._stop_event = self.create_event(dummy)
         self._stopped = False
+
+    def create_event(handler):
+        raise NotImplementedError()
 
     def stop(self):
         self._stopped = True
+        self._stop_event()
 
     def stopped(self):
         return self._stopped
@@ -87,6 +93,7 @@ class OSSelectPoller(PollerBase):
         self.pollin = set()
         self.pollout = set()
         self.sockets = {}
+        self.events = set()
 
     @classmethod
     def __wrap_type(cls, sock):
@@ -103,7 +110,9 @@ class OSSelectPoller(PollerBase):
         wrapped_socket.registered()
 
     def create_event(self, handler):
-        return self.Event(self, handler)
+        event = self.Event(self, handler)
+        self.events.add(event)
+        return event
 
     def unregister(self, socket):
         fd = self.__wrap_type(socket).fileno_from_socket(socket)
@@ -124,6 +133,8 @@ class OSSelectPoller(PollerBase):
                 return
 
     def close(self):
+        for event in self.events:
+            event.close()
         self.sockets.clear()
 
 
@@ -154,13 +165,16 @@ class ZMQSelectPoller(PollerBase):
             self.event_socket.close()
 
     def __init__(self, zmq_ctx):
-        PollerBase.__init__(self)
         self.poller = zmq.Poller()
         self.zmq_ctx = zmq_ctx
         self.sockets = {}
+        self.events = set()
+        PollerBase.__init__(self)
 
     def create_event(self, handler):
-        return self.Event(self, handler)
+        event = self.Event(self, handler)
+        self.events.add(event)
+        return event
 
     def register(self, socket, handler, process_all_msgs=False):
         self.sockets[socket] = handler, process_all_msgs
@@ -198,5 +212,7 @@ class ZMQSelectPoller(PollerBase):
                 return
 
     def close(self):
+        for event in self.events:
+            event.close()
         for socket in self.sockets.keys():
             socket.close()

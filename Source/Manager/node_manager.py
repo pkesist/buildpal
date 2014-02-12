@@ -70,7 +70,6 @@ class NodeManager:
             for socket in socketlist:
                 self.poller.unregister(socket)
                 socket.close()
-        self.task_ready_event.close()
         self.poller.close()
         self.zmq_ctx.term()
 

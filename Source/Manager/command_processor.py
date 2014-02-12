@@ -93,7 +93,6 @@ class CommandProcessor:
     def update_task_ui(self, task):
         for name, time in task.times.items():
             self.__ui_data.timer.add_time(name, time)
-        self.__ui_data.cache_stats.update(task.cache_stats)
 
     def executable(self):
         return self.__executable

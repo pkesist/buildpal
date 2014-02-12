@@ -214,7 +214,8 @@ class TaskProcessor:
         self.terminating = False
         zmq_ctx = zmq.Context()
         self.node_manager = NodeManager(self.node_info)
-        source_scanner = SourceScanner(self.node_manager.task_ready, self.n_pp_threads)
+        source_scanner = SourceScanner(self.node_manager.task_ready,
+            self.ui_data, self.n_pp_threads)
 
         self.client_thread = threading.Thread(target=self.client_thread,
             kwargs={'task_created_func' : source_scanner.add_task})

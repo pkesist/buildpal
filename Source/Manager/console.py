@@ -51,15 +51,3 @@ class ConsolePrinter:
             print("================")
             print_times(times)
             print("================")
-            print("Server time difference - {}".format(times.get('server_time', (0, 0))[0] - times.get('server.server_time', (0, 0))[0]))
-            total = 0
-            for x in (
-                'wait_for_header_list',
-                'process_hdr_list',
-                'wait_for_headers',
-                'shared_prepare_dir',
-                'async_compiler_delay',
-                'compiler_prep',
-                'compiler',):
-                total += times.get('server.' + x, (0,0))[0]
-            print("Discrepancy - {}".format(times.get('server_time', (0, 0))[0] - total))

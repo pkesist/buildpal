@@ -87,6 +87,7 @@ class CommandProcessor:
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
         self.__ui_data = ui_data
+        ui_data.command_info.append(command)
 
     def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
@@ -106,7 +107,8 @@ class CommandProcessor:
             retcode = int(msg[0])
             stdout = msg[1]
             stderr = msg[2]
-            info, self.compiler_files = self.__compiler.compiler_info(self.__executable, stdout, stderr)
+            info, self.compiler_files = self.__compiler.compiler_info(
+                self.__executable, stdout, stderr)
             self.compiler_info = info
             self.client_conn.send([b'LOCATE_FILES'] + self.compiler_files)
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST

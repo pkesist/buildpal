@@ -28,6 +28,9 @@ class NodeManager:
         self.sessions = {}
         self.unassigned_tasks = []
 
+    def unassigned_tasks_count(self):
+        return len(self.unassigned_tasks)
+
     def task_ready(self, task):
         self.input_tasks.put(task)
         self.task_ready_event()

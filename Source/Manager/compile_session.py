@@ -78,8 +78,8 @@ class CompileSession:
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None
-                with self.timer.timeit('send.pch'), open(os.path.join(
-                        os.getcwd(), self.task.pch_file[0]), 'rb') as pch_file:
+                with open(os.path.join(os.getcwd(), self.task.pch_file[0]),
+                        'rb') as pch_file:
                     mytime = time()
                     send_file(self.server_conn.send_multipart,
                         pch_file, copy=False)
@@ -88,7 +88,7 @@ class CompileSession:
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
             server_time = self.server_time.get()
             del self.server_time
-            self.timer.add_time('server_time', server_time)
+            self.timer.add_time('cumulative task time', server_time)
             self.node.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
@@ -101,7 +101,7 @@ class CompileSession:
                 assert server_status == b'SERVER_DONE'
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
                 for name, duration in server_times.items():
-                    self.timer.add_time("server." + name, duration)
+                    self.timer.add_time(name, duration)
                 if self.task.register_completion(self):
                     # We could not have been cancelled if we completed the task.
                     assert not self.cancelled
@@ -126,7 +126,7 @@ class CompileSession:
             self.obj_desc.write(self.obj_decompressor.decompress(data))
             if more == b'\x00':
                 self.obj_desc.write(self.obj_decompressor.flush())
-                self.timer.add_time('receive_result', self.receive_result_time.get())
+                self.timer.add_time('download object file', self.receive_result_time.get())
                 del self.receive_result_time
                 self.obj_desc.close()
                 self.state = self.STATE_DONE

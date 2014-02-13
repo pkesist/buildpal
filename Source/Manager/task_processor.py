@@ -180,12 +180,18 @@ class TaskProcessor:
             self.n_pp_threads = cpu_count()
         self.client_list = []
 
+        self.node_manager = NodeManager(self.node_info)
+        self.source_scanner = SourceScanner(self.node_manager.task_ready,
+            self.n_pp_threads)
+
         self.ui_data = ui_data
         self.ui_data.timer = self.timer
         self.ui_data.node_info = self.node_info
-        self.ui_data.cache_stats = CacheStats()
+        self.ui_data.command_info = []
+        self.ui_data.cache_stats = self.source_scanner.get_cache_stats
+        self.ui_data.unassigned_tasks = self.node_manager.unassigned_tasks_count
 
-    def client_thread(self, task_created_func):
+    def client_thread(self):
         def stop_loop():
             # First close the server.
             self.server.close()
@@ -194,7 +200,8 @@ class TaskProcessor:
             self.loop.call_soon(self.loop.stop)
 
         self.client_processor_factory = ClientProcessorFactory(
-            self.compiler_info, task_created_func, self.ui_data, stop_loop)
+            self.compiler_info, self.source_scanner.add_task, self.ui_data,
+            stop_loop)
 
         self.loop = asyncio.ProactorEventLoop()
         task = asyncio.async(self.loop.start_serving_pipe(
@@ -213,12 +220,8 @@ class TaskProcessor:
     def run(self, observer=None):
         self.terminating = False
         zmq_ctx = zmq.Context()
-        self.node_manager = NodeManager(self.node_info)
-        source_scanner = SourceScanner(self.node_manager.task_ready,
-            self.ui_data, self.n_pp_threads)
 
-        self.client_thread = threading.Thread(target=self.client_thread,
-            kwargs={'task_created_func' : source_scanner.add_task})
+        self.client_thread = threading.Thread(target=self.client_thread)
         self.client_thread.start()
 
         try:
@@ -228,7 +231,7 @@ class TaskProcessor:
         finally:
             self.terminating = True
             self.client_thread.join()
-            source_scanner.close()
+            self.source_scanner.close()
             self.node_manager.close()
 
     def stop(self):

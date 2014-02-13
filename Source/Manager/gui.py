@@ -24,17 +24,17 @@ class MyTreeView(Treeview):
 
 class NodeList(MyTreeView):
     columns = (
-        {'cid' : "#0"          , 'text' : "Hostname"     , 'minwidth' : 180, 'anchor' : W     },
-        {'cid' : "JobSlots"    , 'text' : "Job Slots"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TasksSent"   , 'text' : "Tasks Sent"   , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Completed"   , 'text' : "Completed"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TooLate"     , 'text' : "Too Late"     , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TimedOut"    , 'text' : "Timed Out"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Cancelled"   , 'text' : "Cancelled"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Failed"      , 'text' : "Failed"       , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Pending"     , 'text' : "Pending"      , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "AvgTasks"    , 'text' : "Average Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
-        {'cid' : "AvgTime"     , 'text' : "Average Time" , 'minwidth' : 40 , 'anchor' : CENTER})
+        {'cid' : "#0"          , 'text' : "Hostname"  , 'minwidth' : 150, 'anchor' : W     },
+        {'cid' : "JobSlots"    , 'text' : "Slots"     , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TasksSent"   , 'text' : "Sent"      , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Completed"   , 'text' : "Completed" , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TooLate"     , 'text' : "Too Late"  , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TimedOut"    , 'text' : "Timed Out" , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Cancelled"   , 'text' : "Cancelled" , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Failed"      , 'text' : "Failed"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Pending"     , 'text' : "Pending"   , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "AvgTasks"    , 'text' : "Avg. Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
+        {'cid' : "AvgTime"     , 'text' : "Avg. Time" , 'minwidth' : 40 , 'anchor' : CENTER})
 
     def __init__(self, parent, nodes, ui_data, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
@@ -65,74 +65,45 @@ class NodeList(MyTreeView):
                 "{:.2f}".format(node.average_task_time()))
             self.item(item, values=values)
 
-class NodeInfoDisplay(Frame):
+class NodeControls(Frame):
     def __init__(self, parent, **kw):
         Frame.__init__(self, parent, **kw)
         self.draw()
 
-    def label_and_entry(self, label_text, row, col=0):
-        var = StringVar()
-        label = Label(self, text=label_text)
-        entry = Entry(self, state=DISABLED, foreground='black', textvariable=var)
-        label.grid(row=row, column=2 * col + 0, sticky=E+W)
-        entry.grid(row=row, column=2 * col + 1)
-        return var
-
     def draw(self):
-        self.address = self.label_and_entry("Address", 0)
-        self.port = self.label_and_entry("Port", 0, 1)
-        self.job_slots = self.label_and_entry("Job Slots", 1)
-        self.tasks_pending = self.label_and_entry("Tasks Pending", 1, 1)
-        self.tasks_sent = self.label_and_entry("Tasks Sent", 2)
-        self.tasks_completed = self.label_and_entry("Tasks Completed", 3)
-        self.tasks_failed = self.label_and_entry("Tasks Failed", 3, 1)
-        self.average_tasks = self.label_and_entry("Average Tasks", 4)
-        self.average_time = self.label_and_entry("Average Time", 4, 1)
-        Separator(self).grid(row=5, column=0, columnspan=4, sticky=E+W, pady=5)
         self.ping_button = Button(self, text='PING', state=DISABLED)
-        self.ping_button.grid(row=6, column=0)
+        self.ping_button.grid(row=0, column=0)
         self.ping_result = StringVar()
         self.ping_result_entry = Entry(self, textvariable=self.ping_result,
             state=DISABLED, foreground='black')
-        self.ping_result_entry.grid(row=6, column=1)
+        self.ping_result_entry.grid(row=0, column=1)
 
-    def refresh(self, node):
-        if node is None:
-            self.address.set('')
-            self.port.set('')
-            self.job_slots.set('')
-            self.tasks_sent.set('')
-            self.tasks_completed.set('')
-            self.tasks_failed.set('')
-            self.tasks_pending.set('')
-            self.average_tasks.set('')
-            self.average_time.set('')
-            self.ping_button['state'] = 'disabled'
-        else:
-            self.address.set(node.node_dict()['address'])
-            self.port.set(node.node_dict()['port'])
-            self.job_slots.set(node.node_dict()['job_slots'])
-            self.tasks_sent.set(node.tasks_sent())
-            self.tasks_completed.set(node.tasks_completed())
-            self.tasks_failed.set(node.tasks_failed())
-            self.tasks_pending.set(node.tasks_pending())
-            self.average_tasks.set("{:.2f}".format(node.average_tasks()))
-            self.average_time.set("{:.2f}".format(node.average_task_time()))
-            self.ping_button['state'] = 'enabled'
+        self.node_included = IntVar()
+        self.node_included_cb = Checkbutton(self, text="Included in Build",
+            variable=self.node_included, state=DISABLED)
+        self.node_included.set(0)
+        self.node_included_cb.grid(row=0, column=2)
 
-class TimerDisplay(MyTreeView):
+    def refresh(self, has_node):
+        self.ping_button['state'] = 'enabled' if has_node else 'disabled'
+
+class TimerDisplay(LabelFrame):
     columns = (
-        { 'cid' : '#0'       , 'text' : 'Timer Name'  , 'minwidth' : 100, 'anchor' : W      },
-        { 'cid' : 'TotalTime', 'text' : 'Total Time'  , 'minwidth' : 30 , 'anchor' : CENTER },
-        { 'cid' : 'Count'    , 'text' : 'Count'       , 'minwidth' : 20 , 'anchor' : CENTER },
-        { 'cid' : 'AvgTime'  , 'text' : 'Average Time', 'minwidth' : 30 , 'anchor' : CENTER })
+        { 'cid' : '#0'     , 'text' : 'Name'   , 'minwidth' : 150, 'anchor' : W      },
+        { 'cid' : 'Total'  , 'text' : 'Total'  , 'minwidth' : 30 , 'anchor' : CENTER },
+        { 'cid' : 'Count'  , 'text' : 'Count'  , 'minwidth' : 20 , 'anchor' : CENTER },
+        { 'cid' : 'Average', 'text' : 'Average', 'minwidth' : 30 , 'anchor' : CENTER })
 
     def __init__(self, parent, **kwargs):
-        return MyTreeView.__init__(self, parent, self.columns, **kwargs)
+        LabelFrame.__init__(self, parent, **kwargs)
+        self.global_timers = MyTreeView(self, self.columns)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.global_timers.grid(sticky=N+S+W+E)
 
     def refresh(self, timer_dict):
-        selected_rows = [self.index(x) for x in self.selection()]
-        self.delete(*self.get_children(''))
+        selected_rows = [self.global_timers.index(x) for x in self.global_timers.selection()]
+        self.global_timers.delete(*self.global_timers.get_children(''))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in timer_dict.items()]
         sorted_times.sort(key=itemgetter(1), reverse=True)
         for timer_name, total, count, average in sorted_times:
@@ -140,11 +111,11 @@ class TimerDisplay(MyTreeView):
                 "{:.2f}".format(total),
                 count,
                 "{:.2f}".format(average))
-            self.insert('', 'end', text=timer_name, values=values)
+            self.global_timers.insert('', 'end', text=timer_name, values=values)
         for row in selected_rows:
-            iid = self.identify_row(row)
+            iid = self.global_timers.identify_row(row)
             if iid:
-                self.selection_add(iid)
+                self.global_timers.selection_add(iid)
 
 class NodeDisplay(Frame):
     def __init__(self, parent, nodes, ui_data):
@@ -158,28 +129,24 @@ class NodeDisplay(Frame):
     def draw(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        self.label_frame = LabelFrame(self, text="Node Information")
-        self.label_frame.columnconfigure(0, weight=1)
-        self.label_frame.rowconfigure(0, weight=1)
-        self.paned_window = PanedWindow(self.label_frame, orient=VERTICAL)
+        self.paned_window = PanedWindow(self, orient=HORIZONTAL)
 
-        self.nodes_pane = PanedWindow(self.paned_window, orient=HORIZONTAL)
+        node_label_frame = LabelFrame(self.paned_window, text='Node List')
+        node_label_frame.rowconfigure(1, weight=1)
+        node_label_frame.columnconfigure(0, weight=1)
 
-        self.node_list = NodeList(self.nodes_pane, self.nodes, self.ui_data, height=6)
-        self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
-        self.nodes_pane.add(self.node_list, weight=1)
-
-        self.node_info_display = NodeInfoDisplay(self.nodes_pane)
+        self.node_info_display = NodeControls(node_label_frame)
         self.node_info_display.ping_button['command'] = self.ping
-        self.nodes_pane.add(self.node_info_display, weight=0)
+        self.node_info_display.grid(row=0, column=0, sticky=N+S+W+E)
 
-        self.paned_window.add(self.nodes_pane)
+        self.node_list = NodeList(node_label_frame, self.nodes, self.ui_data, height=6)
+        self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
+        self.node_list.grid(sticky=N+S+W+E)
+        self.paned_window.add(node_label_frame, weight=1)
 
-        self.node_times = TimerDisplay(self.paned_window, height=6)
+        self.node_times = TimerDisplay(self.paned_window, height=6, text="Node Timers")
         self.paned_window.add(self.node_times)
-
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
-        self.label_frame.grid(row=0, column=0, sticky=N+S+W+E, padx=5, pady=5)
 
     def ping(self):
         assert self.node_index is not None
@@ -230,7 +197,7 @@ class NodeDisplay(Frame):
             node = self.ui_data.node_info[self.node_index]
             node_time_dict = node.timer().as_dict()
         self.node_times.refresh(node_time_dict)
-        self.node_info_display.refresh(node)
+        self.node_info_display.refresh(self.node_index is not None)
 
 def called_from_foreign_thread(func):
     return func
@@ -245,37 +212,66 @@ class CacheStats(LabelFrame):
         self.include_directives = StringVar()
         self.cache_hits = StringVar()
         self.cache_ratio = StringVar()
-        Label(self, text="Include Directives").grid(row=0, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.include_directives).grid(row=0, column=1)
-        Label(self, text="Cache Hits").grid(row=1, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.cache_hits).grid(row=1, column=1)
-        Separator(self).grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
-        Label(self, text="Hit Ratio").grid(row=3, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=3, column=1)
+        Separator(self).grid(row=0, column=0, columnspan=2, pady=5, sticky=E+W)
+        Label(self, text="Include Directives").grid(row=1, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.include_directives).grid(row=1, column=1)
+        Label(self, text="Cache Hits").grid(row=2, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_hits).grid(row=2, column=1)
+        Separator(self).grid(row=3, column=0, columnspan=2, pady=5, sticky=E+W)
+        Label(self, text="Hit Ratio").grid(row=4, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=4, column=1)
+        Separator(self).grid(row=5, column=0, columnspan=2, pady=5, sticky=E+W)
 
     def refresh(self):
-        self.include_directives.set(self.ui_data.cache_stats.hits + self.ui_data.cache_stats.misses)
-        self.cache_hits.set(self.ui_data.cache_stats.hits)
-        self.cache_ratio.set("{:.2f}".format(self.ui_data.cache_stats.ratio))
+        if not hasattr(self.ui_data, 'cache_stats'):
+            return
+        hits, misses, ratio = self.ui_data.cache_stats()
+        self.include_directives.set(hits + misses)
+        self.cache_hits.set(hits)
+        self.cache_ratio.set("{:.2f}".format(ratio))
 
-class GlobalDataFrame(LabelFrame):
+class Miscellaneous(LabelFrame):
     def __init__(self, parent, ui_data, **kw):
-        LabelFrame.__init__(self, parent, text="Global Data", **kw)
+        LabelFrame.__init__(self, parent, text = "Miscellaneous", **kw)
+        self.ui_data = ui_data
+        self.draw()
+    
+    def draw(self):
+        self.unassinged_tasks = StringVar()
+        Separator(self).grid(row=0, column=0, columnspan=2, pady=5, sticky=E+W)
+        Label(self, text="Unassigned Tasks").grid(row=1, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.unassinged_tasks).grid(row=1, column=1)
+        Separator(self).grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
+
+    def refresh(self):
+        if not hasattr(self.ui_data, 'unassigned_tasks'):
+            return
+        self.unassinged_tasks.set(self.ui_data.unassigned_tasks())
+
+class GlobalDataFrame(Frame):
+    def __init__(self, parent, ui_data, **kw):
+        Frame.__init__(self, parent, **kw)
         self.ui_data = ui_data
         self.draw()
 
     def draw(self):
-        self.global_times = TimerDisplay(self, height=5)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
+        self.global_times = TimerDisplay(self, height=5, text="Global Timers")
         self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
 
-        self.cache_stats = CacheStats(self, self.ui_data)
-        self.cache_stats.grid(row=0, column=1, sticky=N+S+W+E)
+        frame = Frame(self)
+        self.cache_stats = CacheStats(frame, self.ui_data)
+        self.cache_stats.grid(sticky=N+S+W+E)
+
+        self.miscellaneous = Miscellaneous(frame, self.ui_data)
+        self.miscellaneous.grid(row=1, sticky=N+S+W+E)
+        frame.grid(row=0, column=1, sticky=N+S+W+E)
 
     def refresh(self):
         self.global_times.refresh(self.ui_data.timer.as_dict())
         self.cache_stats.refresh()
+        self.miscellaneous.refresh()
 
 class SettingsFrame(LabelFrame):
     def __init__(self, parent, port, start, stop, **kw):
@@ -310,6 +306,23 @@ class SettingsFrame(LabelFrame):
         self.start_but.grid(row=3, column=0, sticky=E+W)
         self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
         self.stop_but.grid(row=3, column=1, sticky=E+W)
+
+class CommandBrowser(MyTreeView):
+    columns = ({'cid' : "#0", 'text' : "Command", 'minwidth' : 400, 'anchor' : W },)
+
+    def __init__(self, parent, ui_data, *args, **kw):
+        MyTreeView.__init__(self, parent, self.columns, *args, **kw)
+        self.ui_data = ui_data
+        self.idmap = {}
+
+    def refresh(self):
+        if not hasattr(self.ui_data, 'command_info'):
+            return
+
+        for index, command in enumerate(self.ui_data.command_info):
+            iid = self.idmap.get(index)
+            if iid is None:
+                self.idmap[index] = self.insert('', 'end', text=command)
 
 class DBManagerApp(Tk):
     state_stopped = 0
@@ -347,20 +360,25 @@ class DBManagerApp(Tk):
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
 
-        self.global_data_frame = GlobalDataFrame(self.pane, self.ui_data)
-        self.global_data_frame.grid(row=1, sticky=N+S+W+E)
-        self.pane.add(self.global_data_frame)
-
         self.node_display = NodeDisplay(self.pane, self.nodes, self.ui_data)
-        self.node_display.grid(row=2, sticky=N+S+W+E)
+        self.node_display.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.node_display)
+
+        self.notebook = Notebook(self.pane)
+
+        self.global_data_frame = GlobalDataFrame(self.notebook, self.ui_data)
+        self.notebook.add(self.global_data_frame, text="Global Data")
+
+        self.command_browser = CommandBrowser(self.notebook, self.ui_data)
+        self.notebook.add(self.command_browser, text="Commands")
+
+        self.pane.add(self.notebook)
 
         self.rowconfigure(1, weight=1)
         self.pane.grid(row=1, sticky=N+S+W+E)
 
-        # Row 3
         self.sizegrip = Sizegrip(self)
-        self.sizegrip.grid(row=3, column=0, columnspan=5, sticky=S+E)
+
 
     @called_from_foreign_thread
     def signal_refresh(self):
@@ -369,6 +387,7 @@ class DBManagerApp(Tk):
     def refresh(self):
         self.global_data_frame.refresh()
         self.node_display.refresh()
+        self.command_browser.refresh()
 
     def set_running(self, running):
         self.running = running

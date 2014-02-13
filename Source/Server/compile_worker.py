@@ -221,7 +221,7 @@ class CompileSession:
         return self.Sender(self.id, None if other_thread else self.socket)
 
     def async_run_compiler(self, start_time):
-        self.times['async_compiler_delay'] = time() - start_time
+        self.times['waiting for job slot'] = time() - start_time
         try:
             object_file_handle, object_file_name = tempfile.mkstemp(
                 suffix='.obj')
@@ -284,9 +284,7 @@ class CompileSession:
                 self.process.returncode, time()
             with self.compiler_state_lock:
                 del self.process
-            self.times['compiler'] = done - start
-            self.times['server_time'] = self.server_time_timer.get()
-            del self.server_time_timer
+            self.times['compiler time'] = done - start
         except Exception as e:
             with self.compiler_state_lock:
                 if self.state == self.STATE_RUNNING_COMPILER:
@@ -367,7 +365,6 @@ class CompileSession:
             self.session_done()
 
         elif self.state == self.STATE_GET_TASK:
-            self.server_time_timer = SimpleTimer()
             self.waiting_for_header_list = SimpleTimer()
             assert len(msg) == 2
             assert msg[0] == b'SERVER_TASK'
@@ -377,7 +374,7 @@ class CompileSession:
             missing_files, self.repo_transaction_id = \
                 self.runner.header_repository().missing_files(self.task['fqdn'],
                 self.task['filelist'])
-            self.times['process_hdr_list'] = missing_files_timer.get()
+            self.times['determine missing files'] = missing_files_timer.get()
             # Determine if we have this compiler
             self.compiler_required = not \
                 self.runner.compiler_repository().has_compiler(self.compiler_id())
@@ -409,6 +406,7 @@ class CompileSession:
                 self.state = self.STATE_DOWNLOADING_PCH
                 handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
                     os.O_NOINHERIT)
+                self.pch_timer = SimpleTimer()
                 self.pch_desc = os.fdopen(handle, 'wb')
             else:
                 self.run_compiler()
@@ -427,6 +425,7 @@ class CompileSession:
                 if self.pch_required:
                     self.state = self.STATE_DOWNLOADING_PCH
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
+                    self.pch_timer = SimpleTimer()
                     self.pch_desc = os.fdopen(handle, 'wb')
                 else:
                     self.run_compiler()
@@ -436,11 +435,16 @@ class CompileSession:
             if more == b'\x00':
                 self.pch_desc.close()
                 del self.pch_desc
+                self.times['upload precompiled header'] = self.pch_timer.get()
                 self.runner.pch_repository().file_completed(*self.task['pch_file'])
                 self.run_compiler()
         elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
             tag, verdict = msg
-            assert tag == b'SEND_CONFIRMATION'
+            try:
+                assert tag == b'SEND_CONFIRMATION'
+            except AssertionError:
+                print(tag, verdict)
+                raise
             if verdict == b'\x01':
                 self.send_object_file(self.runner.misc_thread_pool())
             else:
@@ -452,7 +456,7 @@ class CompileSession:
     def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
         result = self.runner.header_repository().prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
-        self.times['shared_prepare_dir'] = shared_prepare_dir_timer.get()
+        self.times['prepare include directory'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result
 

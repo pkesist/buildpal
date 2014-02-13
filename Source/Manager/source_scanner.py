@@ -77,18 +77,24 @@ def header_info(task):
 
 
 class SourceScanner:
-    def __init__(self, notify, ui_data, thread_count=cpu_count() + 1):
+    def __init__(self, notify, thread_count=cpu_count() + 1):
         self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
         self.closing = False
         self.threads = set()
-        self.ui_data = ui_data
         for i in range(thread_count):
             thread = threading.Thread(target=self.__process_task_worker, args=(notify,))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
         self.hostname = getfqdn()
+
+    def get_cache_stats(self):
+        hits, misses = cache.get_stats()
+        total = hits + misses
+        if total == 0:
+            total = 1
+        return (hits, misses, hits / total)
 
     def add_task(self, task):
         task.note_time('queued for preprocessing')
@@ -110,7 +116,6 @@ class SourceScanner:
                     header_info(task.preprocess_task_info)
                 task.note_time('preprocessed')
                 # Synchronized by GIL.
-                self.ui_data.cache_stats.update(cache.get_stats())
                 notify(task)
             except queue.Empty:
                 if self.closing:

@@ -11,6 +11,7 @@ class HeaderRepository:
     def __init__(self):
         self.checksums = {}
         self.dir = tempfile.mkdtemp(dir=os.path.join(tempfile.gettempdir(), 'BuildPal', 'Headers'))
+        os.makedirs(self.dir, exist_ok=True)
         self.session_lock = Lock()
         self.counter = 0
         self.session_data = {}

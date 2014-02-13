@@ -137,3 +137,19 @@ def test_pragma_once(tmpdir):
         == {'a.h', 'yyy.h'}
     assert env.run('test2.cpp') == {'a.h', 'yyy.h'}
 
+def test_cache_stat(tmpdir):
+    env = Environment(tmpdir)
+    env.make_file('xxx.h')
+    env.make_file('yyy.h')
+    env.make_file('a.h', '''
+#include "xxx.h"
+''')
+    env.make_file('test.cpp', '''
+#include "a.h"
+''')
+    assert env.run('test.cpp') == {'a.h', 'xxx.h'}
+
+    env.make_file('a.h', '''
+#include "yyy.h"
+''')
+    assert env.run('test.cpp') == {'a.h', 'yyy.h'}

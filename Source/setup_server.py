@@ -26,10 +26,12 @@ for f in files_to_locate:
         raise Exception("Could not locate '{}'.".format(os.path.join(*f)))
 
 
-buildOptions = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
+build_options = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
 include_files=include_files,
-include_msvcr=True
+include_msvcr=True,
 )
+
+msi_opts = {'upgrade_code' : '{EC37317C-03E0-4348-8D70-E5D891EE9115}'}
 
 base = 'Console'
 
@@ -40,5 +42,5 @@ executables = [
 setup(name='BuildPal_Server',
       version = '0.1',
       description = 'BuildPal Server',
-      options = dict(build_exe = buildOptions),
+      options = dict(build_exe = build_options, bdist_msi=msi_opts),
       executables = executables)

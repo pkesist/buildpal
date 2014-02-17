@@ -27,7 +27,7 @@ msi_opts = {'upgrade_code' : '{BC7F4969-6098-4E53-A040-2AEE0683FC9F}'}
 base = 'Console'
 
 executables = [
-    Executable('distribute_manager.py', base=base)
+    Executable('buildpal_manager.py', base=base)
 ]
 
 setup(name='BuildPal_Manager',

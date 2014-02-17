@@ -6,7 +6,7 @@ import configparser
 import os
 import sys
 
-default_script = 'distribute_manager.ini'
+default_script = 'buildpal_manager.ini'
 
 def get_nodes_from_ini_file(config):
     if not opts.profile in config:
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
     parser.add_argument('--use-beacon', action='store_true', help='Autodetect LAN servers')
     parser.add_argument('--port', dest='port', type=int, default=None, help='TCP Port number on which manager should run.')
-    parser.add_argument('--ini', dest='ini_file', type=str, default='distribute_manager.ini', help='Specify .ini file.')
+    parser.add_argument('--ini', dest='ini_file', type=str, default='buildpal_manager.ini', help='Specify .ini file.')
     parser.add_argument('profile', nargs='?', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
     
     opts = parser.parse_args()

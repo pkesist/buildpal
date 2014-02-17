@@ -14,7 +14,7 @@ import zmq
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for '
-        'distribute_server')
+        'buildpal_server')
     parser.add_argument('--port', '-p', metavar="#", dest='port', type=int, default=0,
         help='TCP port on which server will listen. (default=ephemeral)')
     parser.add_argument('--jobs', '-j', metavar="#", dest='compile_slots', type=int,

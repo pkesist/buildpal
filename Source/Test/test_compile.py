@@ -19,7 +19,7 @@ def terminate_proc(proc):
 @pytest.fixture(scope='module')
 def run_manager(request):
     dir = tempfile.mkdtemp()
-    ini_file = os.path.join(dir, 'distribute_manager.ini')
+    ini_file = os.path.join(dir, 'buildpal_manager.ini')
     with create_file(ini_file) as ini:
         ini.write("""\
 [Manager]
@@ -30,7 +30,7 @@ node[0]=localhost:{}:4
 
 """.format(MGR_PORT, SRV_PORT))
     mgr_script = os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', 'distribute_manager.py'))
+        os.path.realpath(__file__)), '..', 'buildpal_manager.py'))
     proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir,
         stdout=subprocess.PIPE, stderr=sys.stderr, universal_newlines=True)
     def teardown():
@@ -43,7 +43,7 @@ node[0]=localhost:{}:4
 def run_server(request):
     dir = tempfile.mkdtemp()
     srv_script = os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', 'distribute_server.py'))
+        os.path.realpath(__file__)), '..', 'buildpal_server.py'))
     proc = subprocess.Popen([sys.executable, srv_script,
         '--port={}'.format(SRV_PORT)], cwd=dir, stdout=subprocess.PIPE,
         stderr=sys.stderr, universal_newlines=True)

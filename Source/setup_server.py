@@ -36,7 +36,7 @@ msi_opts = {'upgrade_code' : '{EC37317C-03E0-4348-8D70-E5D891EE9115}'}
 base = 'Console'
 
 executables = [
-    Executable('distribute_server.py', base=base)
+    Executable('buildpal_server.py', base=base)
 ]
 
 setup(name='BuildPal_Server',

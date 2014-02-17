@@ -304,6 +304,10 @@ Bugs and caveats
     a directory on include path before the old header file, this will not be
     seen by the cache, and old header will be used instead.
 
+* Visual Studio 2008
+    Using BuildPal with Visual Studio 2008 can trigger a compiler bug with
+    precompiled headers. To fix the issue see `KB976656 <http://archive.msdn.microsoft.com/KB976656>`_.
+
 .. _future-dev-plans:
 
 Future development plans

@@ -6,8 +6,8 @@ from shutil import rmtree
 from hashlib import md5
 
 class PCHRepository:
-    def __init__(self):
-        self.__dir=os.path.join(tempfile.gettempdir(), "BuildPal", "PCH")
+    def __init__(self, scratch_dir):
+        self.__dir = dir=os.path.join(scratch_dir, 'PCH')
         os.makedirs(self.__dir, exist_ok=True)
         self.__lock = Lock()
         self.__files = {}

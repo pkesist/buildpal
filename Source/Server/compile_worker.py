@@ -26,6 +26,7 @@ import sys
 import traceback
 import tempfile
 import zipfile
+import zlib
 import zmq
 import queue
 import map_files
@@ -145,9 +146,10 @@ class CompileSession:
     STATE_DOWNLOADING_PCH = 3
     STATE_RUNNING_COMPILER = 4
     STATE_WAIT_FOR_CONFIRMATION = 5
-    STATE_DONE = 6
-    STATE_FAILED = 7
-    STATE_CANCELLED = 8
+    STATE_UPLOADING_FILE = 6
+    STATE_DONE = 7
+    STATE_FAILED = 8
+    STATE_CANCELLED = 9
 
     def async(func):
         def wrapper(self, runner, *args, **kwds):
@@ -159,9 +161,7 @@ class CompileSession:
         self.socket = socket
         self.runner = runner
         self.state = self.STATE_GET_TASK
-        temp_dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        self.include_path = tempfile.mkdtemp(dir=temp_dir)
+        self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
         self.times = {}
         self.compiler_state_lock = Lock()
         self.completed = False
@@ -346,8 +346,8 @@ class CompileSession:
             os.O_NOINHERIT)
         with os.fdopen(fh, 'rb') as obj, self.sender(True) as sender:
             send_compressed_file(sender.send_multipart, obj, copy=False)
-        os.remove(self.object_file)
         self.session_done()
+        os.remove(self.object_file)
 
     def process_msg(self, msg):
         self.reschedule_selfdestruct()
@@ -376,8 +376,8 @@ class CompileSession:
                 self.task['filelist'])
             self.times['determine missing files'] = missing_files_timer.get()
             # Determine if we have this compiler
-            self.compiler_required = not \
-                self.runner.compiler_repository().has_compiler(self.compiler_id())
+            self.compiler_required = self.runner.compiler_repository(
+                ).has_compiler(self.compiler_id()) is None
 
             # Determine whether we need pch PCH file.
             if self.task['pch_file'] is None:
@@ -408,6 +408,7 @@ class CompileSession:
                     os.O_NOINHERIT)
                 self.pch_timer = SimpleTimer()
                 self.pch_desc = os.fdopen(handle, 'wb')
+                self.pch_decompressor = zlib.decompressobj()
             else:
                 self.run_compiler()
         elif self.state == self.STATE_DOWNLOADING_COMPILER:
@@ -427,12 +428,14 @@ class CompileSession:
                     handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
                     self.pch_timer = SimpleTimer()
                     self.pch_desc = os.fdopen(handle, 'wb')
+                    self.pch_decompressor = zlib.decompressobj()
                 else:
                     self.run_compiler()
         elif self.state == self.STATE_DOWNLOADING_PCH:
             more, data = msg
-            self.pch_desc.write(data)
+            self.pch_desc.write(self.pch_decompressor.decompress(data))
             if more == b'\x00':
+                self.pch_desc.write(self.pch_decompressor.flush())
                 self.pch_desc.close()
                 del self.pch_desc
                 self.times['upload precompiled header'] = self.pch_timer.get()
@@ -443,9 +446,10 @@ class CompileSession:
             try:
                 assert tag == b'SEND_CONFIRMATION'
             except AssertionError:
-                print(tag, verdict)
+                print(tag.tobytes(), verdict.tobytes())
                 raise
             if verdict == b'\x01':
+                self.state = self.STATE_UPLOADING_FILE
                 self.send_object_file(self.runner.misc_thread_pool())
             else:
                 self.session_done()
@@ -466,11 +470,15 @@ class CompileWorker:
         self.__compile_slots = compile_slots
         self.sessions = {}
 
+        dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
+        os.makedirs(dir, exist_ok=True)
+        self.scratch_dir = tempfile.mkdtemp(dir=dir)
+
         # Data shared between sessions.
         self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
-        self.__header_repository = HeaderRepository()
-        self.__pch_repository = PCHRepository()
+        self.__header_repository = HeaderRepository(self.scratch_dir)
+        self.__pch_repository = PCHRepository(self.scratch_dir)
         self.__compiler_repository = CompilerRepository()
         self.__scheduler = sched.scheduler()
 

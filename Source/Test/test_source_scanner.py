@@ -1,6 +1,7 @@
 import preprocessing
 import threading
 import os
+from time import sleep
 
 def collect_headers(filename, includes=[], defines=[],
         sysincludes=[], ignored_headers=[]):
@@ -34,10 +35,22 @@ class Environment:
             file.write(content)
 
     def run(self, filename, includes=[], defines=[]):
-        return set(x[1] for x in collect_headers(
+        return set(x[0] for dir, headers in collect_headers(
             os.path.join(self.dir, filename),
             includes=[os.path.join(self.dir, i) for i in includes],
-            defines=defines))
+            defines=defines) for x in headers)
+
+    def full_path(self, filename):
+        return os.path.join(self.dir, filename)
+
+    def touch(self, filename):
+        # File change resolution is currently 1 sec.
+        # Update modified time, so we are sure preprocessor detected change.
+        filename = self.full_path(filename)
+        statinfo = os.stat(filename)
+        os.utime(filename, times=(statinfo.st_atime, statinfo.st_mtime + 1))
+
+
 
 def test_simple(tmpdir):
     env = Environment(tmpdir)
@@ -152,4 +165,32 @@ def test_cache_stat(tmpdir):
     env.make_file('a.h', '''
 #include "yyy.h"
 ''')
+
+    env.touch('a.h')
     assert env.run('test.cpp') == {'a.h', 'yyy.h'}
+
+def test_cache_stat_indirect(tmpdir):
+    env = Environment(tmpdir)
+    env.make_file('xxx.h')
+    env.make_file('yyy.h')
+    env.make_file('a.h', '''
+#include "xxx.h"
+''')
+
+    env.make_file('zozo.h', '''
+#include "a.h"
+''')
+
+    env.make_file('test2.cpp', '''
+#include "zozo.h"
+''')
+
+    assert env.run('test2.cpp') == {'zozo.h', 'a.h', 'xxx.h'}
+    env.make_file('a.h', '''
+#include "yyy.h"
+''')
+    env.touch('a.h')
+    assert env.run('test2.cpp') == {'zozo.h', 'a.h', 'yyy.h'}
+
+
+

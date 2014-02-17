@@ -60,7 +60,7 @@ namespace
         {
             if ( !file )
             {
-                std::cerr << "ERROR: Could not find header <" << fileName.str() << ">.";
+                std::cerr << "ERROR: Could not find header <" << fileName.str() << ">.\n";
                 return;
             }
             headerTracker_.inclusionDirective( SearchPath, RelativePath, isAngled, file );
@@ -182,7 +182,7 @@ namespace
         // unexpectedly.
         virtual clang::MemorizeStatCalls::LookupResult
             getStat( char const * path, clang::FileData & fileData, bool isFile,
-            int * )
+            int * ) LLVM_OVERRIDE
         {
             return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
         }

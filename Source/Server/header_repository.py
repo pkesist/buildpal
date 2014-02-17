@@ -8,9 +8,9 @@ from threading import Lock
 from hashlib import md5
 
 class HeaderRepository:
-    def __init__(self):
+    def __init__(self, scratch_dir):
         self.checksums = {}
-        self.dir = tempfile.mkdtemp(dir=os.path.join(tempfile.gettempdir(), 'BuildPal', 'Headers'))
+        self.dir = os.path.join(scratch_dir, 'Headers')
         os.makedirs(self.dir, exist_ok=True)
         self.session_lock = Lock()
         self.counter = 0

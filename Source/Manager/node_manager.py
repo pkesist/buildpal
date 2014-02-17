@@ -2,17 +2,64 @@ from .compile_session import CompileSession
 from .poller import ZMQSelectPoller
 
 import pickle
+import zlib
 import zmq
 import queue
 
 from functools import cmp_to_key
+from io import BytesIO
 from math import floor
 from struct import pack
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from Common import create_socket, recv_multipart
 
 Poller = ZMQSelectPoller
+
+class Compressor:
+    def __init__(self, poller):
+        self.executor = ThreadPoolExecutor(2)
+        self.poller = poller
+        self.compressed = {}
+        self.mylock = Lock()
+        self.waiters = defaultdict(list)
+        self.events = {}
+
+    def compress(self, file, on_completion):
+        self.mylock.acquire()
+        if file in self.compressed:
+            self.mylock.release()
+            on_completion(BytesIO(self.compressed[file]))
+        else:
+            try:
+                if file not in self.events:
+                    event = self.poller.create_event(lambda : self.__compression_completed(file))
+                    self.events[file] = event
+                    self.executor.submit(self.__do_compress, file)
+                self.waiters.setdefault(file, []).append(on_completion)
+            finally:
+                self.mylock.release()
+
+    def __compression_completed(self, file):
+        self.events[file].close()
+        del self.events[file]
+        for on_completion in self.waiters[file]:
+            on_completion(BytesIO(self.compressed[file]))
+        del self.waiters[file]
+
+    def __do_compress(self, file):
+        buffer = BytesIO()
+        compressor = zlib.compressobj()
+        with open(file, 'rb') as fileobj:
+            for data in iter(lambda : fileobj.read(256 * 1024), b''):
+                buffer.write(compressor.compress(data))
+        buffer.write(compressor.flush())
+        buffer.seek(0)
+        with self.mylock:
+            self.compressed[file] = buffer.read()
+        self.events[file]()
 
 class NodeManager:
     def __init__(self, node_info):
@@ -27,6 +74,7 @@ class NodeManager:
         self.tasks_running = defaultdict(list)
         self.sessions = {}
         self.unassigned_tasks = []
+        self.compressor = Compressor(self.poller)
 
     def unassigned_tasks_count(self):
         return len(self.unassigned_tasks)
@@ -62,7 +110,7 @@ class NodeManager:
             self.unassigned_tasks.append(task)
             return
         server_conn, node = result
-        session = CompileSession(task, server_conn, node)
+        session = CompileSession(task, server_conn, node, self.compressor)
         self.sessions[server_conn] = session
         self.tasks_running[node].append(task)
         node.add_tasks_sent()

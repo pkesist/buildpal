@@ -1,6 +1,4 @@
-from .source_scanner import header_beginning
-
-from Common import SimpleTimer, send_file
+from Common import SimpleTimer, send_file, send_compressed_file
 
 from io import BytesIO
 
@@ -23,7 +21,7 @@ class CompileSession:
     STATE_TOO_LATE = 7
     STATE_TIMED_OUT = 8
 
-    def __init__(self, task, server_conn, node):
+    def __init__(self, task, server_conn, node, compressor):
         self.state = self.STATE_START
         self.task = task
         self.task.register_session(self)
@@ -31,6 +29,7 @@ class CompileSession:
         self.server_conn = server_conn
         self.cancelled = False
         self.node = node
+        self.compressor = compressor
 
     def start(self):
         assert self.state == self.STATE_START
@@ -78,11 +77,10 @@ class CompileSession:
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None
-                with open(os.path.join(os.getcwd(), self.task.pch_file[0]),
-                        'rb') as pch_file:
-                    mytime = time()
-                    send_file(self.server_conn.send_multipart,
-                        pch_file, copy=False)
+                def send_pch_file(fileobj):
+                    send_file(self.server_conn.send_multipart, fileobj, copy=False)
+                pch_file = os.path.join(os.getcwd(), self.task.pch_file[0])
+                self.compressor.compress(pch_file, send_pch_file)
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
@@ -133,6 +131,17 @@ class CompileSession:
                 return True
         return False
 
+    @classmethod
+    def header_beginning(cls, filename):
+        # 'sourceannotations.h' header is funny. If you add a #line directive to
+        # it it will start tossing incomprehensible compiler erros. It would
+        # seem that cl.exe has some hardcoded logic for this header. Person
+        # responsible for this should be severely punished.
+        if 'sourceannotations.h' in filename:
+            return b''
+        pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
+        return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
+
     def task_files_bundle(self, in_filelist):
         header_info = self.task.header_info
         source_file = self.task.source
@@ -159,7 +168,7 @@ class CompileSession:
             found = False
             while not found:
                 try:
-                    dir, (file, relative, content, checksum, header) = \
+                    dir, (file, relative, content, checksum) = \
                         next(header_info_iter)
                     if entry == (dir, file):
                         assert not relative
@@ -176,6 +185,7 @@ class CompileSession:
             # Handle '.' in include directive.
             path_elements = [p for p in path_elements if p != '.']
             # Handle '..' in include directive.
+            header = self.header_beginning(os.path.join(dir, file))
             if relative:
                 while '..' in path_elements:
                     index = path_elements.index('..')
@@ -202,5 +212,5 @@ class CompileSession:
                 files[('', curr_dir + file)] = header + content
         rel_file = curr_dir + os.path.basename(source_file)
         with open(source_file, 'rb') as src:
-            files[('', rel_file)] = header_beginning(source_file) + src.read()
+            files[('', rel_file)] = self.header_beginning(source_file) + src.read()
         return files, rel_file

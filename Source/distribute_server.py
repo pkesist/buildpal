@@ -12,8 +12,6 @@ import os
 import sys
 import zmq
 
-default_script = 'distribute_server.ini'
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for '
         'distribute_server')

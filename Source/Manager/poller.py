@@ -6,8 +6,6 @@ import threading
 import pickle
 from time import time
 
-import cProfile
-
 from Common import recv_multipart, create_socket
 
 class PollerBase:
@@ -157,12 +155,14 @@ class ZMQSelectPoller(PollerBase):
                 self.notify_sockets[thread_id] = notify_socket
             notify_socket.send(b'x')
 
-        def close(self):
+        def close(self, from_poller=False):
             for thread_id, notify_socket in self.notify_sockets.items():
                 notify_socket.close()
             self.notify_sockets.clear()
             self.poller.unregister(self.event_socket)
             self.event_socket.close()
+            if not from_poller:
+                self.poller.event_closed(self)
 
     def __init__(self, zmq_ctx):
         self.poller = zmq.Poller()
@@ -211,8 +211,12 @@ class ZMQSelectPoller(PollerBase):
             if self.stopped():
                 return
 
+    def event_closed(self, event):
+        if event in self.events:
+            self.events.remove(event)
+
     def close(self):
         for event in self.events:
-            event.close()
+            event.close(from_poller=True)
         for socket in self.sockets.keys():
             socket.close()

@@ -4,6 +4,8 @@ import preprocessing
 import os
 import queue
 import threading
+import cProfile
+import pstats
 
 from collections import defaultdict
 from multiprocessing import cpu_count
@@ -29,51 +31,34 @@ def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]
         ppc.add_include_path(path, True)
     for define in defines:
         define = define.split('=')
-        assert len(define) == 1 or len(define) == 2
+        assert len(define) in (1, 2)
         macro = define[0]
         # /Dxxx is actually equivalent to /Dxxx=1.
         value = define[1] if len(define) == 2 else "1"
         ppc.add_macro(macro, value)
     for ignored_header in ignored_headers:
         ppc.add_ignored_header(ignored_header)
-    # Group result by dir.
-    result = defaultdict(list)
-    for dir, name, relative, buff, checksum in preprocessor.scan_headers(ppc, filename):
-        result[dir].append([name, relative, buff, checksum])
-    return tuple(result.items())
+    return preprocessor.scan_headers(ppc, filename)
 
 def dump_cache():
     print("Dumping cache.")
     cache.dump('cacheDump.txt')
 
-def header_beginning(filename):
-    # 'sourceannotations.h' header is funny. If you add a #line directive to
-    # it it will start tossing incomprehensible compiler erros. It would
-    # seem that cl.exe has some hardcoded logic for this header. Person
-    # responsible for this should be severely punished.
-    if 'sourceannotations.h' in filename:
-        return b''
-    pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
-    return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
-
 def header_info(task):
     header_info = collect_headers(task['source'], task['includes'],
         task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
-    filelist = []
+    shared_file_list = []
     for dir, data in header_info:
-        dir_data = []
-        for entry in data:
-            file, relative, content, checksum = entry
-            abs = os.path.join(dir, file)
-            entry.append(header_beginning(abs))
+        shared_files_in_dir = []
+        # Headers which are relative to source file are not
+        # considered as candidates for server cache, and are
+        # always sent together with the source file.
+        for file, relative, content, checksum in data:
             if not relative:
-                # Headers which are relative to source file are not
-                # considered as candidates for server cache, and are
-                # always sent together with the source file.
-                dir_data.append((file, checksum))
-        filelist.append((dir, dir_data))
-    return header_info, tuple(filelist)
+                shared_files_in_dir.append((file, checksum))
+        shared_file_list.append((dir, shared_files_in_dir))
+    return header_info, tuple(shared_file_list)
 
 
 class SourceScanner:
@@ -82,8 +67,9 @@ class SourceScanner:
         self.out_queue = queue.Queue()
         self.closing = False
         self.threads = set()
+        self.stats = pstats.Stats()
         for i in range(thread_count):
-            thread = threading.Thread(target=self.__process_task_worker, args=(notify,))
+            thread = threading.Thread(target=self.__process_task_worker, args=(notify, self.stats))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
@@ -107,7 +93,9 @@ class SourceScanner:
         except queue.Empty:
             return None
 
-    def __process_task_worker(self, notify):
+    def __process_task_worker(self, notify, stats):
+        #profile = cProfile.Profile()
+        #profile.enable()
         while True:
             try:
                 task = self.in_queue.get(timeout=1)
@@ -119,9 +107,13 @@ class SourceScanner:
                 notify(task)
             except queue.Empty:
                 if self.closing:
+                    #profile.disable()
+                    #stats.add(profile)
                     return
 
     def close(self):
         self.closing = True
         for thread in self.threads:
             thread.join()
+        #self.stats.sort_stats('cumtime')
+        #self.stats.print_stats()

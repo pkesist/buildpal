@@ -54,9 +54,9 @@ def run_server(request):
     return proc
 
 @pytest.fixture(scope='module')
-def db_cl():
+def bp_cl():
     return os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', 'db_cl.exe'))
+        os.path.realpath(__file__)), '..', 'bp_cl.exe'))
 
 @pytest.fixture(scope='module')
 def vcvarsall():
@@ -77,13 +77,13 @@ def vcvarsall():
     return os.path.join(dir, 'vcvarsall.bat')
 
 
-def test_dummy(tmpdir, vcvarsall, db_cl):
-    with subprocess.Popen([vcvarsall, '&&', db_cl, 'silly_option'],
+def test_dummy(tmpdir, vcvarsall, bp_cl):
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, 'silly_option'],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         stdout, stderr = proc.communicate()
         assert proc.returncode != 0
 
-def test_relative(tmpdir, run_server, run_manager, vcvarsall, db_cl):
+def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
     cpp_file = os.path.join(tmpdir, 'aaa', 'a.cpp')
     os.makedirs(os.path.dirname(cpp_file))
@@ -95,12 +95,12 @@ def test_relative(tmpdir, run_server, run_manager, vcvarsall, db_cl):
     
     env = os.environ
     env.update({'DB_MGR_PORT' : str(MGR_PORT)})
-    with subprocess.Popen([vcvarsall, '&&', db_cl, '/c', cpp_file],
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
         stdout, stderr = proc.communicate()
         assert proc.returncode == 0
 
-def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, db_cl):
+def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
     cpp_file = os.path.join(tmpdir, 'a.cpp')
     with create_file(cpp_file) as cpp:
@@ -111,19 +111,19 @@ def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, db_cl):
 ''')
     env = os.environ
     env.update({'DB_MGR_PORT' : str(MGR_PORT)})
-    with subprocess.Popen([vcvarsall, '&&', db_cl, '/c', cpp_file],
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
         stdout, stderr = proc.communicate()
         assert proc.returncode != 0
 
-def test_link(tmpdir, run_server, run_manager, vcvarsall, db_cl):
+def test_link(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
     cpp_file = os.path.join(tmpdir, 'linkme.cpp')
     with create_file(cpp_file) as cpp:
         cpp.write("int main() {}\n")
     env = os.environ
     env.update({'DB_MGR_PORT' : str(MGR_PORT)})
-    with subprocess.Popen([vcvarsall, '&&', db_cl, '/EHsc', cpp_file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:a_dist.exe"],
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, '/EHsc', cpp_file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:a_dist.exe"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=tmpdir) as proc:
         stdout, stderr = proc.communicate()
         assert proc.returncode == 0

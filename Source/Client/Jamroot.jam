@@ -2,9 +2,9 @@ project distribute_client ;
 
 local release-variants = release profile ;
 
-exe db_cl
+exe bp_cl
 :
-    db_cl.cpp
+    bp_cl.cpp
     /clang//LLVMSupport
     /boost//chrono/<link>static
     /boost//system/<link>static
@@ -16,6 +16,6 @@ exe db_cl
     <target-os>windows:<define>_WIN32_WINNT=0x0501
 ;
 
-explicit db_cl ;
+explicit bp_cl ;
 
-install install-client : db_cl : <location>.. <install-dependencies>on <install-type>EXE <install-type>SHARED_LIB ;
+install install-client : bp_cl : <location>.. <install-dependencies>on <install-type>EXE <install-type>SHARED_LIB ;

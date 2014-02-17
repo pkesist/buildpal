@@ -68,17 +68,17 @@ Setting up the Server (slave) node
 ----------------------------------
 
 * Install BuildPal Server.
-* Run distribute_server.py (distribute_server.exe).
+* Run buildpal_server.py (buildpal_server.exe).
     * You can pass the TCP port for server to listen on.
     * You can set the number of jobs.
 
-Run ``distribute_server.py -h`` for more information.
+Run ``buildpal_server.py -h`` for more information.
 
 ::
 
-    usage: distribute_server.py [-h] [--port #] [--jobs #]
+    usage: buildpal_server.py [-h] [--port #] [--jobs #]
 
-    Command line parameters for distribute_server.py
+    Command line parameters for buildpal_server.py
 
     optional arguments:
       -h, --help      show this help message and exit
@@ -90,7 +90,7 @@ Setting up the Client
 ---------------------
 
 * Install BuildPal Manager.
-* Create :file:`distribute_manager.ini`.
+* Create :file:`buildpal_manager.ini`.
     * This file must contain configuration for the Manager, namely -- it should
       specify TCP port on which the Manager should listen on, and enumerate
       Server nodes used for compilation.
@@ -105,16 +105,16 @@ Setting up the Client
     node[1]=machine1:6064
     node[2]=machine2:6064
 
-* Run :file:`distribute_manager.py` (:file:`distribute_manager.exe`), optionally
+* Run :file:`buildpal_manager.py` (:file:`buildpal_manager.exe`), optionally
   passing the name of .ini file, and profile to use. The default .ini file is
-  :file:`distribute_manager.ini` in the current directory. Default profile name
+  :file:`buildpal_manager.ini` in the current directory. Default profile name
   is `Default Profile`.
 
 ::
 
-    usage: distribute_manager.py [-h] [--ini INI_FILE] [profile]
+    usage: buildpal_manager.py [-h] [--ini INI_FILE] [profile]
 
-    Command line parameters for distribute_manager.py
+    Command line parameters for buildpal_manager.py
 
     positional arguments:
       profile         Profile to use. Must be present in the .ini file.
@@ -123,17 +123,16 @@ Setting up the Client
       -h, --help      show this help message and exit
       --ini INI_FILE  Specify .ini file.
 
-
 * Call the compiler
     * Set the environment variable DB_MGR_PORT to the port on which the manager is running on.
-    * Replace the :file:`cl.exe` call with :file:`db_cl.exe`.
-    * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. :file:`db_cl.exe`
+    * Replace the :file:`cl.exe` call with :file:`bp_cl.exe`.
+    * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. :file:`bp_cl.exe`
       will use its current environment to determine which compiler should be used.
 
 Client
 ======
 
-The Client (:file:`db_cl.exe`) works as a drop-in replacement for the real
+The Client (:file:`bp_cl.exe`) works as a drop-in replacement for the real
 compiler (:file:`cl.exe`). It is designed to be very thin - it contains
 almost no compiler-specific knowledge. It sends the command line and any other
 relevant environment information to the Manager. After that, it acts as a
@@ -246,7 +245,7 @@ Runs locally, on the client machine.
 * `Boost <http://www.boost.org>`_
 
     Used by all C++ parts of the project.
-        * *Boost.ASIO* for Client's (:file:`db_cl.exe`) TCP communication.
+        * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) TCP communication.
         * *Boost.MultiIndex* for Managers header cache.
         * *Boost.Spirit* as an alternative to ``atoi``/``itoa``/etc.
         * *Boost.Thread* for read-write mutexes.

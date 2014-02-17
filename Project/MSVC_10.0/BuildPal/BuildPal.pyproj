@@ -29,8 +29,8 @@
     <Compile Include="Source\Common\__init__.py" />
     <Compile Include="Source\Compilers\msvc.py" />
     <Compile Include="Source\Compilers\__init__.py" />
-    <Compile Include="Source\distribute_manager.py" />
-    <Compile Include="Source\distribute_server.py" />
+    <Compile Include="Source\buildpal_manager.py" />
+    <Compile Include="Source\buildpal_server.py" />
     <Compile Include="Source\Manager\command_processor.py" />
     <Compile Include="Source\Manager\compile_session.py" />
     <Compile Include="Source\Manager\console.py" />
@@ -77,7 +77,7 @@
     <Content Include="Source\ArgParser\argList_.cpp" />
     <Content Include="Source\ArgParser\test.cpp" />
     <Content Include="Source\Client\build-config.ini" />
-    <Content Include="Source\Client\db_cl.cpp" />
+    <Content Include="Source\Client\bp_cl.cpp" />
     <Content Include="Source\Client\Jamroot.jam" />
     <Content Include="Source\HeaderScanner\build-config.ini" />
     <Content Include="Source\HeaderScanner\contentCache_.cpp" />

@@ -42,24 +42,34 @@ Features
     Build nodes on LAN are automatically detected and used.
 
 * **Build consistency**
-    BuildPal takes special care to produce object files which are equivalent
+    BuildPal takes care to produce object files which are equivalent
     (for all intents and purposes) to the files which would be produced on
     local compilation.
 
 * **Remote preprocessing**
     BuildPal does not preprocess headers on the local machine.
-    Instead, all headers required by a source file are collected and
-    transfered to the slave [#f1]_ .
+    Headers used by a source file are collected and
+    transfered to the slave [#f1]_ . These headers will be reused for
+    subsequent compilations.
 
 * **PCH support**
     BuildPal supports precompiled headers. Precompiled headers are
     created locally, on the client machine and are transferred on-demand
     to specific slave nodes.
 
+* **Self-balancing**
+    BuildPal tries to balance the work between the nodes appropriately by
+    keeping track of their statistics, giving more work to faster machines.
+    Additionally, if a node runs out of work, it may decide to help out a
+    slower node.
+
 Requirements
 ============
 
-BuildPal Server and Manager are written and tested with Python 3.3. It *will not* work with Python 2.x. It *might* work with Python 3.0 - 3.2
+BuildPal Server and Manager are written and tested with Python 3.4.
+
+Server *might* work with any Python 3.x version.
+Manager *requires* Python 3.4, as it uses its new ´asyncio module <http://docs.python.org/3.4/library/asyncio.html#module-asyncio>`_.
 
 Quick-start
 ===========
@@ -69,8 +79,8 @@ Setting up the Server (slave) node
 
 * Install BuildPal Server.
 * Run buildpal_server.py (buildpal_server.exe).
-    * You can pass the TCP port for server to listen on.
-    * You can set the number of jobs.
+    * You can specify the TCP port for server to listen on.
+    * You can set the max number of jobs.
 
 Run ``buildpal_server.py -h`` for more information.
 
@@ -82,7 +92,7 @@ Run ``buildpal_server.py -h`` for more information.
 
     optional arguments:
       -h, --help      show this help message and exit
-      --port #, -p #  TCP port on which server will listen. (default=6064)
+      --port #, -p #  TCP port on which server will listen. (default=ephemeral)
       --jobs #, -j #  Number of jobs, i.e. number of compiler processes that can
                       run concurrently. (default=number of cores)
 
@@ -133,43 +143,37 @@ Client
 ======
 
 The Client (:file:`bp_cl.exe`) works as a drop-in replacement for the real
-compiler (:file:`cl.exe`). It is designed to be very thin - it contains
-almost no compiler-specific knowledge. It sends the command line and any other
-relevant environment information to the Manager. After that, it acts as a
-puppet -- it enters an event loop in which it processes commands sent by the
-Manager. These commands can be:
+compiler (:file:`cl.exe`). As you will usually run dosens of these concurrently,
+it is designed to be very thin - it contains almost no compiler-specific
+knowledge. It sends the command line and any other relevant environment
+information to the Manager. After that, it acts as a string-puppet -- it enters
+an event loop in which it processes commands sent by the Manager.
 
-* ``EXECUTE_AND_EXIT(cmdline)``
-    Client creates a process from the given `cmdline` command line and
-    exits with the return code from that process. Used e.g. when the Manager
-    determines that the call should be completed locally, without
-    distributing it to slave nodes.
+These commands can be:
+
+* ``EXECUTE_AND_EXIT(cmdline_opts)``
+    Spawn a compiler process from the given `cmdline_opts` command line options
+    and exits with the return code from that process. Used e.g. when the Manager
+    determines that the call should be completed locally, without distributing
+    it to slave nodes.
 * ``EXECUTE_GET_OUTPUT(cmdline)``
-    Client creates a process from the given `cmdline` command line, 
-    captures return code, stdout, stderr and sends them back to the
-    manager. This is used by Manager to determine compiler version.
+    Spawn a compiler process from the given `cmdline_opts` command line options,
+    capture return code, stdout, stderr and send them back to the manager. This
+    is used by Manager to determine compiler version.
 * ``EXIT(retcode, stdout, stderr)``
     Client prints `stdout` to standard output, `stderr` to standard
     error and exits with `retcode` return code.
 * ``LOCATE_FILES(file1, file2, ...)``
-    For each argument `fileN`, Client locates the file (using first its
-    current directory, and then PATH environment variable). Client returns
-    the list of absolute path names to the manager. Used to locate compiler
-    files when manager needs to send them to one of the slaves.
+    Locate specified files, first relative to the compiler executable location
+    and then PATH environment variable). Return the list of absolute path
+    names. Used to locate compiler files when manager needs to send them to one
+    of the slaves.
 
 .. note::
 
     In order for Client to work, the Manager must already be listening on
     the same machine, and DB_MGR_PORT must be set to its TCP port. Otherwise the
     Client will fail with appropriate error message.
-
-.. todo:: Change client commands to be more secure
-
-    ``EXECUTE_GET_OUTPUT`` and ``EXECUTE_AND_EXIT`` commands can currently run
-    any process. This is not needed, as they always run the compiler
-    executable. Change it so that only command line arguments are sent, and the
-    executable is implied.
-
 
 Server
 ======
@@ -227,11 +231,8 @@ Runs locally, on the client machine.
 
 * `ZeroMQ <http://www.zeromq.org>`_
 
-    Used to implement all IPC.
-    Current windows implementation has limitations. There is no pipe/shm
-    support, which would be ideal for Client-Manager IPC, as they
-    always reside on the same machine. Currently loopback TCP interface
-    is used instead.
+    Used for server-manager communication. Its requirements are very limiting,
+    so will probably be replaced with plain TCP in future versions.
 
 * `LLVM <http://www.llvm.org>`_
 
@@ -245,7 +246,7 @@ Runs locally, on the client machine.
 * `Boost <http://www.boost.org>`_
 
     Used by all C++ parts of the project.
-        * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) TCP communication.
+        * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) IPC communication.
         * *Boost.MultiIndex* for Managers header cache.
         * *Boost.Spirit* as an alternative to ``atoi``/``itoa``/etc.
         * *Boost.Thread* for read-write mutexes.
@@ -274,21 +275,21 @@ Environment.
     * Slave #2. Speedtest (8 cores).
     * Slave #3. Asus notebook, 4 cores.
 
-+---------------+------------+-----------+-----------+-----------+
-|               |            |           |           |           |
-| type          | parallel # |  local    |  2 nodes  |  3 nodes  |
-|               |            |           |           |           |
-+===============+============+===========+===========+===========+
-| regular build | 4  tasks   |  8:01.02  |           |           |
-+---------------+------------+-----------+-----------+-----------+
-| distributed   | 4  tasks   |           |  5:11.88  |  5:29.39  |
-+---------------+------------+-----------+-----------+-----------+
-| distributed   | 16 tasks   |           |  2:30.74  |  2:20.66  |
-+---------------+------------+-----------+-----------+-----------+
-| distributed   | 32 tasks   |           |  2:07.34  |  2:06.61  |
-+---------------+------------+-----------+-----------+-----------+
-| distributed   | 40 tasks   |           |  2:06.59  |  2:00.73  |
-+---------------+------------+-----------+-----------+-----------+
++---------------+---------+-----------+-----------+-----------+
+|               |         |           |           |           |
+| type          | jobs #  |  local    |  2 nodes  |  3 nodes  |
+|               |         |           |           |           |
++===============+=========+===========+===========+===========+
+| regular build | 4  jobs |  8:01.02  |           |           |
++---------------+---------+-----------+-----------+-----------+
+| distributed   | 4  jobs |           |  5:11.88  |  5:29.39  |
++---------------+---------+-----------+-----------+-----------+
+| distributed   | 16 jobs |           |  2:30.74  |  2:20.66  |
++---------------+---------+-----------+-----------+-----------+
+| distributed   | 32 jobs |           |  2:07.34  |  2:06.61  |
++---------------+---------+-----------+-----------+-----------+
+| distributed   | 40 jobs |           |  2:06.59  |  2:00.73  |
++---------------+---------+-----------+-----------+-----------+
 
 Note that these values are just informative. There is a circa 10 second standard
 deviation due to the fact that benchmarking was done in an office network.
@@ -299,9 +300,9 @@ Bugs and caveats
 
 * Header cache and volatile search path
     Cache assumes that a concrete search path and header name will always
-    resolve to the same file. In case a new header file is generated and put in
-    a directory on include path before the old header file, this will not be
-    seen by the cache, and old header will be used instead.
+    resolve to the same file. In case a new header file is placed in a directory
+    on include path before the old header file, it might be omitted due to cache
+    hit.
 
 * Visual Studio 2008
     Using BuildPal with Visual Studio 2008 can trigger a compiler bug with
@@ -313,9 +314,8 @@ Future development plans
 ========================
 
 * Support more platforms.
-    * Support GCC on Windows (MinGW).
-    * Support GCC on Linux.
-    * Support Clang.
+    * Support GCC on (Windows/UNIX).
+    * Support Clang (Windows/UNIX).
     * ...
 
 * Implement broken (invalid) connection detection using heart-beats.

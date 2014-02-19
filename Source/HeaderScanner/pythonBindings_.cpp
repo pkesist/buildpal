@@ -1,3 +1,4 @@
+#include "contentCache_.hpp"
 #include "headerCache_.hpp"
 #include "headerScanner_.hpp"
 
@@ -489,12 +490,23 @@ PyTypeObject PyPreprocessorType = {
 };
 
 
+PyObject * Preprocessing_clearContentCache( PyObject * something, PyObject * somethingElse )
+{
+    ContentCache::singleton().clear();
+    Py_RETURN_NONE;
+}
+
+static PyMethodDef preprocessingMethods[] = {
+    {"clear_content_cache", Preprocessing_clearContentCache, METH_NOARGS, "Execute a shell command."},
+    {NULL, NULL, 0, NULL}
+};
+
 static PyModuleDef preprocessingModule = {
     PyModuleDef_HEAD_INIT,
     "preprocessor",
     "Module for scanning and collecting header files from C source.",
     -1,
-    NULL, NULL, NULL, NULL, NULL
+    preprocessingMethods, NULL, NULL, NULL, NULL
 };
 
 PyMODINIT_FUNC PyInit_preprocessing(void)

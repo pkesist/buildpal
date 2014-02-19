@@ -75,6 +75,8 @@ public:
 
     ContentEntry const & getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache & );
 
+    void clear() { contentMap_.clear(); }
+
 public:
     static ContentCache & singleton() { return singleton_; }
 

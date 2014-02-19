@@ -12,16 +12,7 @@ from multiprocessing import cpu_count
 from socket import getfqdn
 from time import time
 
-data = threading.local()
-cache = preprocessing.Cache()
-
-def get_preprocessor():
-    if not hasattr(data, 'pp'):
-        data.pp = preprocessing.Preprocessor(cache)
-    return data.pp
-
-def collect_headers(filename, includes, sysincludes, defines, ignored_headers=[]):
-    preprocessor = get_preprocessor()
+def collect_headers(preprocessor, filename, includes, sysincludes, defines, ignored_headers=[]):
     preprocessor.set_ms_mode(True) # If MSVC.
     preprocessor.set_ms_ext(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
@@ -44,8 +35,8 @@ def dump_cache():
     print("Dumping cache.")
     cache.dump('cacheDump.txt')
 
-def header_info(task):
-    header_info = collect_headers(task['source'], task['includes'],
+def header_info(preprocessor, task):
+    header_info = collect_headers(preprocessor, task['source'], task['includes'],
         task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
     shared_file_list = []
@@ -63,6 +54,8 @@ def header_info(task):
 
 class SourceScanner:
     def __init__(self, notify, thread_count=cpu_count() + 1):
+        preprocessing.clear_content_cache()
+        self.cache = preprocessing.Cache()
         self.in_queue = queue.Queue()
         self.out_queue = queue.Queue()
         self.closing = False
@@ -76,7 +69,7 @@ class SourceScanner:
         self.hostname = getfqdn()
 
     def get_cache_stats(self):
-        hits, misses = cache.get_stats()
+        hits, misses = self.cache.get_stats()
         total = hits + misses
         if total == 0:
             total = 1
@@ -96,12 +89,14 @@ class SourceScanner:
     def __process_task_worker(self, notify, stats):
         #profile = cProfile.Profile()
         #profile.enable()
+
+        preprocessor = preprocessing.Preprocessor(self.cache)
         while True:
             try:
                 task = self.in_queue.get(timeout=1)
                 task.note_time('dequeued by preprocessor')
                 task.header_info, task.server_task_info['filelist'] = \
-                    header_info(task.preprocess_task_info)
+                    header_info(preprocessor, task.preprocess_task_info)
                 task.note_time('preprocessed')
                 # Synchronized by GIL.
                 notify(task)

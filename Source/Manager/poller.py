@@ -10,7 +10,7 @@ from Common import recv_multipart, create_socket
 
 class PollerBase:
     def __init__(self):
-        def dummy(): pass
+        def dummy(ev): pass
         self._stop_event = self.create_event(dummy)
         self._stopped = False
 
@@ -75,7 +75,7 @@ class OSSelectPoller(PollerBase):
 
                 self.read = socket.socket()
                 self.read.connect(('localhost', listen_socket.getsockname()[1]))
-                self.poller.register(self.read, lambda ignore, ignore2 : handler())
+                self.poller.register(self.read, lambda ignore, ignore2 : handler(self))
 
                 self.write, whatever = listen_socket.accept()
 
@@ -143,7 +143,7 @@ class ZMQSelectPoller(PollerBase):
             self.address = 'inproc://preprocessing_{}'.format(id(self))
             self.event_socket = create_socket(self.poller.zmq_ctx, zmq.PULL)
             self.event_socket.bind(self.address)
-            poller.register(self.event_socket, lambda socket, msgs : handler(), True)
+            poller.register(self.event_socket, lambda socket, msgs : handler(self), True)
             self.notify_sockets = {}
 
         def __call__(self):

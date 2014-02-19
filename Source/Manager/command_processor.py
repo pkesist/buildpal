@@ -35,7 +35,10 @@ class Task:
     def register_session(self, session):
         if not self.sessions_running:
             self.first_session = session
+            session.node.add_tasks_sent()
             self.note_time('assigned to a server session')
+        else:
+            session.node.add_tasks_stolen()
         self.sessions_running.add(session)
 
     def register_completion(self, session):
@@ -43,6 +46,8 @@ class Task:
             return False
         self.note_time('task completed notification received')
         self.session_completed = session
+        if session != self.first_session:
+            session.node.add_tasks_successfully_stolen()
         assert session in self.sessions_running
         self.sessions_running.remove(session)
         for session in self.sessions_running:
@@ -52,25 +57,30 @@ class Task:
     def completed(self, session, *args):
         self.note_time('task result received')
         assert session == self.session_completed
+        session.node.add_tasks_completed()
         self.command_processor.task_done(self, *args)
 
     def cancelled(self, session):
         assert session in self.sessions_running
+        session.node.add_tasks_cancelled()
         self.sessions_running.remove(session)
         self.sessions_cancelled.add(session)
 
     def failed(self, session):
         assert session in self.sessions_running
+        session.node.add_tasks_failed()
         self.sessions_running.remove(session)
         self.sessions_failed.add(session)
 
     def timed_out(self, session):
         assert session in self.sessions_running
+        session.node.add_tasks_timed_out()
         self.sessions_running.remove(session)
         self.sessions_timed_out.add(session)
 
     def too_late(self, session):
         assert session in self.sessions_running
+        session.node.add_tasks_too_late()
         self.sessions_running.remove(session)
         self.sessions_too_late.add(session)
 

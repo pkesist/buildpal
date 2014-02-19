@@ -24,17 +24,19 @@ class MyTreeView(Treeview):
 
 class NodeList(MyTreeView):
     columns = (
-        {'cid' : "#0"          , 'text' : "Hostname"  , 'minwidth' : 150, 'anchor' : W     },
-        {'cid' : "JobSlots"    , 'text' : "Slots"     , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TasksSent"   , 'text' : "Sent"      , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Completed"   , 'text' : "Completed" , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TooLate"     , 'text' : "Too Late"  , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "TimedOut"    , 'text' : "Timed Out" , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Cancelled"   , 'text' : "Cancelled" , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Failed"      , 'text' : "Failed"    , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Pending"     , 'text' : "Pending"   , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "AvgTasks"    , 'text' : "Avg. Tasks", 'minwidth' : 40 , 'anchor' : CENTER},
-        {'cid' : "AvgTime"     , 'text' : "Avg. Time" , 'minwidth' : 40 , 'anchor' : CENTER})
+        {'cid' : "#0"        , 'text' : "Hostname"   , 'minwidth' : 150, 'anchor' : W     },
+        {'cid' : "JobSlots"  , 'text' : "Slots"      , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TasksSent" , 'text' : "Sent"       , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Completed" , 'text' : "Completed"  , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TooLate"   , 'text' : "Too Late"   , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "TimedOut"  , 'text' : "Timed Out"  , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Stolen"    , 'text' : "Stolen"     , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "StolenDone", 'text' : "Stolen Done", 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Cancelled" , 'text' : "Cancelled"  , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Failed"    , 'text' : "Failed"     , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Pending"   , 'text' : "Pending"    , 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "AvgTasks"  , 'text' : "Avg. Tasks" , 'minwidth' : 40 , 'anchor' : CENTER},
+        {'cid' : "AvgTime"   , 'text' : "Avg. Time"  , 'minwidth' : 40 , 'anchor' : CENTER})
 
     def __init__(self, parent, nodes, ui_data, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
@@ -58,6 +60,8 @@ class NodeList(MyTreeView):
                 node.tasks_completed(),
                 node.tasks_too_late (),
                 node.tasks_timed_out(),
+                node.tasks_stolen   (),
+                node.tasks_successfully_stolen(),
                 node.tasks_cancelled(),
                 node.tasks_failed   (),
                 node.tasks_pending  (),

@@ -22,44 +22,44 @@ class Compressor:
     def __init__(self, poller):
         self.executor = ThreadPoolExecutor(2)
         self.poller = poller
-        self.compressed = {}
+        self.compressed_files = []
+        self.compressed_file_data = {}
         self.mylock = Lock()
         self.waiters = defaultdict(list)
-        self.events = {}
 
     def compress(self, file, on_completion):
         self.mylock.acquire()
-        if file in self.compressed:
+        if file in self.compressed_files:
             self.mylock.release()
-            on_completion(BytesIO(self.compressed[file]))
+            on_completion(BytesIO(self.compressed_file_data[file]))
         else:
             try:
-                if file not in self.events:
-                    event = self.poller.create_event(lambda : self.__compression_completed(file))
-                    self.events[file] = event
-                    self.executor.submit(self.__do_compress, file)
+                if file not in self.waiters:
+                    event = self.poller.create_event(lambda ev : self.__compression_completed(file, ev))
+                    self.executor.submit(self.__do_compress, file).add_done_callback(lambda f : event())
                 self.waiters.setdefault(file, []).append(on_completion)
             finally:
                 self.mylock.release()
 
-    def __compression_completed(self, file):
-        self.events[file].close()
-        del self.events[file]
+    def __compression_completed(self, file, event):
+        event.close()
         for on_completion in self.waiters[file]:
-            on_completion(BytesIO(self.compressed[file]))
+            on_completion(BytesIO(self.compressed_file_data[file]))
         del self.waiters[file]
 
     def __do_compress(self, file):
         buffer = BytesIO()
-        compressor = zlib.compressobj()
+        compressor = zlib.compressobj(1)
         with open(file, 'rb') as fileobj:
             for data in iter(lambda : fileobj.read(256 * 1024), b''):
                 buffer.write(compressor.compress(data))
         buffer.write(compressor.flush())
         buffer.seek(0)
         with self.mylock:
-            self.compressed[file] = buffer.read()
-        self.events[file]()
+            if len(self.compressed_file_data) > 4:
+                del self.compressed_file_data[self.compressed_files.pop(0)]
+            self.compressed_files.append(file)
+            self.compressed_file_data[file] = buffer.read()
 
 class NodeManager:
     def __init__(self, node_info):
@@ -89,7 +89,7 @@ class NodeManager:
     def stop(self):
         self.poller.stop()
 
-    def __process_input_tasks(self):
+    def __process_input_tasks(self, event):
         try:
             while True:
                 task = self.input_tasks.get_nowait()
@@ -113,7 +113,6 @@ class NodeManager:
         session = CompileSession(task, server_conn, node, self.compressor)
         self.sessions[server_conn] = session
         self.tasks_running[node].append(task)
-        node.add_tasks_sent()
         session.start()
 
     def close(self):
@@ -138,7 +137,7 @@ class NodeManager:
         return socket
             
     def __target_tasks_per_node(self, node):
-        return 2 * node.node_dict()['job_slots']
+        return node.node_dict()['job_slots'] + 1
 
     def __can_steal_task(self, node):
         return len(self.tasks_running[node]) < node.node_dict()['job_slots']
@@ -162,7 +161,7 @@ class NodeManager:
         nodes.sort(key=current_node_weight)
         for node in nodes:
             if node.average_task_time() == 0:
-                if len(self.tasks_running[node]) < 4:
+                if len(self.tasks_running[node]) < self.__target_tasks_per_node(node):
                     return node
             elif self.__free_slots(node) > 0:
                 return node
@@ -178,7 +177,6 @@ class NodeManager:
                 tasks_to_steal -= 1
                 if tasks_to_steal == 0:
                     return
-            return
             if not self.__can_steal_task(node):
                 return
             for from_node in self.tasks_running:
@@ -186,7 +184,6 @@ class NodeManager:
                     continue
                 for task in reversed(self.__tasks_viable_for_stealing(from_node, node)):
                     if not task.is_completed() and task not in self.tasks_running[node]:
-                        print("{} STOLE A TASK FROM {}".format(node.node_dict()['hostname'], from_node.node_dict()['hostname']))
                         self.schedule_task(task, node)
                         tasks_to_steal -= 1
                         if tasks_to_steal <= 0:
@@ -206,7 +203,10 @@ class NodeManager:
 
     def __handle_server_socket(self, socket, msg):
         session = self.sessions.get(socket)
-        assert session
+        if not session:
+            print("Got data for non-session")
+            print([m.tobytes()[:50] for m in msg])
+            return
         if not session.got_data_from_server(msg):
             return
         # Session is finished.
@@ -217,26 +217,19 @@ class NodeManager:
         self.tasks_running[node].remove(task)
         self.__steal_tasks(node)
         if session.state == session.STATE_DONE:
-            node.add_tasks_completed()
             task.completed(session, session.retcode,
                 session.stdout, session.stderr)
         elif session.state == session.STATE_SERVER_FAILURE:
-            node.add_tasks_failed()
             task.failed(session)
             if task.is_completed():
                 assert task.session_completed != session
                 return
-            # TODO: Do something smarter.
-            if task.register_completion(session):
-                task.completed(session, session.retcode,
-                    session.stdout, session.stderr)
+            if not task.sessions_running:
+                self.schedule_task(task)
         elif session.state == session.STATE_CANCELLED:
             task.cancelled(session)
-            node.add_tasks_cancelled()
         elif session.state == session.STATE_TIMED_OUT:
             task.timed_out(session)
-            node.add_tasks_timed_out()
         else:
             assert session.state == session.STATE_TOO_LATE
             task.too_late(session)
-            node.add_tasks_too_late()

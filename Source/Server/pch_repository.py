@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+from collections import defaultdict
 from threading import Lock
 from shutil import rmtree
 from hashlib import md5
@@ -12,27 +13,31 @@ class PCHRepository:
         self.__lock = Lock()
         self.__files = {}
         self.__partial_files = {}
+        self.__waiters = defaultdict(list)
 
-    def register_file(self, filename, size, last_modified):
-        key = (filename, size, last_modified)
+    def register_file(self, pch_file):
         with self.__lock:
-            if key in self.__files:
-                return self.__files[key], False
-            if key in self.__partial_files:
-                return self.__partial_files[key], False
-            dir, fn = os.path.split(filename)
+            if pch_file in self.__files:
+                return self.__files[pch_file], False
+            if pch_file in self.__partial_files:
+                return self.__partial_files[pch_file], False
+            dir, fn = os.path.split(pch_file[0])
             local_filename = os.path.join(self.__dir, md5(dir.encode()).hexdigest(), fn)
             os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-            self.__partial_files[key] = local_filename
+            self.__partial_files[pch_file] = local_filename
             return local_filename, True
 
-    def file_arrived(self, filename, size, last_modified):
-        key = (filename, size, last_modified)
+    def when_pch_is_available(self, pch_file, handler):
         with self.__lock:
-            return key in self.__files
+            if pch_file in self.__files:
+                handler()
+            else:
+                self.__waiters[pch_file].append(handler)
 
-    def file_completed(self, filename, size, last_modified):
-        key = (filename, size, last_modified)
+    def file_completed(self, pch_file):
         with self.__lock:
-            self.__files[key] = self.__partial_files[key]
-            del self.__partial_files[key]
+            self.__files[pch_file] = self.__partial_files[pch_file]
+            del self.__partial_files[pch_file]
+        for handler in self.__waiters[pch_file]:
+            handler()
+        del self.__waiters[pch_file]

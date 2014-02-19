@@ -55,9 +55,9 @@ def test_event(poller_class):
 
     zmq_ctx = zmq.Context()
     poller = poller_class(zmq_ctx)
-    event1 = poller.create_event(lambda : __handle_event(1))
-    event2 = poller.create_event(lambda : __handle_event(2))
-    event3 = poller.create_event(lambda : __handle_event(3))
+    event1 = poller.create_event(lambda ev : __handle_event(1))
+    event2 = poller.create_event(lambda ev : __handle_event(2))
+    event3 = poller.create_event(lambda ev : __handle_event(3))
 
     thread = threading.Thread(target=fire_event, args=(event1,))
     thread.start()

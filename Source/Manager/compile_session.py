@@ -24,11 +24,11 @@ class CompileSession:
     def __init__(self, task, server_conn, node, compressor):
         self.state = self.STATE_START
         self.task = task
+        self.node = node
         self.task.register_session(self)
         self.compiler = task.compiler()
         self.server_conn = server_conn
         self.cancelled = False
-        self.node = node
         self.compressor = compressor
 
     def start(self):

@@ -203,12 +203,6 @@ class CompileSession:
             if self.close_socket:
                 self.socket.close()
 
-    def run_compiler(self):
-        self.state = self.STATE_RUNNING_COMPILER
-        self.cancel_selfdestruct()
-        self.runner.compile_thread_pool().submit(
-            self.async_run_compiler, time())
-
     def compiler_id(self):
         return self.task['compiler_info']['id']
 
@@ -220,7 +214,24 @@ class CompileSession:
     def sender(self, other_thread=True):
         return self.Sender(self.id, None if other_thread else self.socket)
 
-    def async_run_compiler(self, start_time):
+    def compile(self):
+        self.state = self.STATE_RUNNING_COMPILER
+        self.cancel_selfdestruct()
+        if self.task['pch_file']:
+            self.runner.pch_repository().when_pch_is_available(
+                    self.task['pch_file'], self.__check_compiler_files)
+        else:
+            self.__check_compiler_files()
+
+    def __check_compiler_files(self):
+        self.runner.compiler_repository().when_compiler_is_available(
+            self.compiler_id(), self.__run_compiler)
+
+    def __run_compiler(self):
+        self.runner.compile_thread_pool().submit(
+            self.__async_run_compiler, time())
+
+    def __async_run_compiler(self, start_time):
         self.times['waiting for job slot'] = time() - start_time
         try:
             object_file_handle, object_file_name = tempfile.mkstemp(
@@ -254,19 +265,6 @@ class CompileSession:
                 pch_switch.append(compiler_info['set_pch_file'].format(
                     self.pch_file
                 ))
-                while not self.runner.pch_repository().file_arrived(
-                    *self.task['pch_file']):
-                    # The PCH file is being downloaded by another session.
-                    # This could be made prettier by introducing another state
-                    # in this state machine. However, wake-up event for that
-                    # state would require inter-session communication.
-                    # Just not worth the additional complexity.
-                    sleep(1)
-
-            while not self.runner.compiler_repository().has_compiler(self.compiler_id()):
-                # Compiler is being downloaded by another session.
-                # Similar to the PCH hack above.
-                sleep(1)
 
             include_dirs = self.include_dirs_future.result()
             includes = [compiler_info['set_include_option'].format(incpath)
@@ -340,6 +338,14 @@ class CompileSession:
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
+    def download_pch(self):
+        self.state = self.STATE_DOWNLOADING_PCH
+        handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
+            os.O_NOINHERIT)
+        self.pch_timer = SimpleTimer()
+        self.pch_desc = os.fdopen(handle, 'wb')
+        self.pch_decompressor = zlib.decompressobj()
+
     @async
     def send_object_file(self):
         fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
@@ -377,7 +383,7 @@ class CompileSession:
             self.times['determine missing files'] = missing_files_timer.get()
             # Determine if we have this compiler
             self.compiler_required = self.runner.compiler_repository(
-                ).has_compiler(self.compiler_id()) is None
+                ).compiler_required(self.compiler_id())
 
             # Determine whether we need pch PCH file.
             if self.task['pch_file'] is None:
@@ -385,7 +391,7 @@ class CompileSession:
             else:
                 self.pch_file, self.pch_required = \
                     self.runner.pch_repository().register_file(
-                    *self.task['pch_file'])
+                        self.task['pch_file'])
             with self.sender(False) as sender:
                 sender.send_multipart([b'MISSING_FILES', pickle.dumps(
                     (missing_files, self.compiler_required,
@@ -403,14 +409,9 @@ class CompileSession:
                 self.state = self.STATE_DOWNLOADING_COMPILER
                 self.compiler_data = BytesIO()
             elif self.pch_required:
-                self.state = self.STATE_DOWNLOADING_PCH
-                handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
-                    os.O_NOINHERIT)
-                self.pch_timer = SimpleTimer()
-                self.pch_desc = os.fdopen(handle, 'wb')
-                self.pch_decompressor = zlib.decompressobj()
+                self.download_pch()
             else:
-                self.run_compiler()
+                self.compile()
         elif self.state == self.STATE_DOWNLOADING_COMPILER:
             more, data = msg
             self.compiler_data.write(data)
@@ -422,15 +423,12 @@ class CompileSession:
                 with zipfile.ZipFile(self.compiler_data) as zip:
                     zip.extractall(path=dir)
                 del self.compiler_data
-                self.runner.compiler_repository().set_compiler_ready(self.compiler_id())
+                self.runner.compiler_repository().set_compiler_ready(
+                    self.compiler_id())
                 if self.pch_required:
-                    self.state = self.STATE_DOWNLOADING_PCH
-                    handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
-                    self.pch_timer = SimpleTimer()
-                    self.pch_desc = os.fdopen(handle, 'wb')
-                    self.pch_decompressor = zlib.decompressobj()
+                    self.download_pch()
                 else:
-                    self.run_compiler()
+                    self.compile()
         elif self.state == self.STATE_DOWNLOADING_PCH:
             more, data = msg
             self.pch_desc.write(self.pch_decompressor.decompress(data))
@@ -439,8 +437,8 @@ class CompileSession:
                 self.pch_desc.close()
                 del self.pch_desc
                 self.times['upload precompiled header'] = self.pch_timer.get()
-                self.runner.pch_repository().file_completed(*self.task['pch_file'])
-                self.run_compiler()
+                self.runner.pch_repository().file_completed(self.task['pch_file'])
+                self.compile()
         elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
             tag, verdict = msg
             try:

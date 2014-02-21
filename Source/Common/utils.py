@@ -43,6 +43,7 @@ echo {delimiter}
         for a in added:
             eq = a.index('=')
             to_add[a[:eq].upper()] = a[eq+1:]
+    os.path.remove(test_batch_filename)
     return to_add
 
 def send_compressed_file(sender, fileobj, *args, **kwargs):

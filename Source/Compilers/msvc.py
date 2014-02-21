@@ -87,11 +87,6 @@ class CompileOptions:
     def link_options(self):
         return self.arg_dict.get(self.compiler.link_option())
 
-
-class CompilerInfo:
-    pass
-
-
 class MSVCWrapper:
     @classmethod
     def object_name_option(cls): return 'Fo'

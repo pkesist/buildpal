@@ -172,7 +172,7 @@ class TaskProcessor:
         self.port = port
         self.compiler_info = {}
         self.timer = Timer()
-        self.node_info = [NodeInfo(nodes[x], x) for x in range(len(nodes))]
+        self.node_info = [NodeInfo(nodes[x]) for x in range(len(nodes))]
         self.server = None
 
         self.n_pp_threads = n_pp_threads

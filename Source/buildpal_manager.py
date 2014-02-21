@@ -100,10 +100,9 @@ def get_config(ini_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
-    parser.add_argument('--use-beacon', action='store_true', help='Autodetect LAN servers')
     parser.add_argument('--port', dest='port', type=int, default=None, help='TCP Port number on which manager should run.')
     parser.add_argument('--ini', dest='ini_file', type=str, default='buildpal_manager.ini', help='Specify .ini file.')
-    parser.add_argument('profile', nargs='?', type=str, default='Default Profile', help='Profile to use. Must be present in the .ini file.')
+    parser.add_argument('profile', nargs='?', type=str, default=None, help='Profile to use. Must be present in the .ini file.')
     
     opts = parser.parse_args()
 
@@ -113,7 +112,7 @@ if __name__ == "__main__":
         config = get_config(opts.ini_file)
         port = config.get('Manager', 'port')
 
-    if opts.use_beacon:
+    if opts.profile is None:
         nodes = get_nodes_from_beacon()
     else:
         if not config:

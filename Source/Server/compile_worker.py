@@ -2,11 +2,11 @@ from Common import send_compressed_file, SimpleTimer, create_socket, \
     recv_multipart, bind_to_random_port
 
 from io import BytesIO, StringIO
-from multiprocessing import Process, cpu_count
-from time import sleep, time
+from multiprocessing import cpu_count
+from time import time
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock, Thread
+from threading import Lock, current_thread
 from subprocess import list2cmdline
 
 from .header_repository import HeaderRepository
@@ -140,16 +140,118 @@ class Popen(subprocess.Popen):
         subprocess._winapi.CloseHandle(ht)
 
 class CompileSession:
-    STATE_GET_TASK = 0
-    STATE_DOWNLOADING_MISSING_HEADERS = 1
-    STATE_DOWNLOADING_COMPILER = 2
-    STATE_DOWNLOADING_PCH = 3
-    STATE_RUNNING_COMPILER = 4
-    STATE_WAIT_FOR_CONFIRMATION = 5
-    STATE_UPLOADING_FILE = 6
-    STATE_DONE = 7
-    STATE_FAILED = 8
-    STATE_CANCELLED = 9
+    class SessionState:
+        can_be_cancelled = False
+
+        @classmethod
+        def cancel(cls, session):
+            pass
+
+    class StateGetTask(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            assert len(msg) == 2
+            assert msg[0] == b'SERVER_TASK'
+            session.task = pickle.loads(msg[1])
+            # Determine headers which are missing
+            missing_files_timer = SimpleTimer()
+            missing_files, session.repo_transaction_id = \
+                session.runner.header_repository().missing_files(
+                session.task['fqdn'], session.task['filelist'])
+            session.times['determine missing files'] = missing_files_timer.get()
+            # Determine if we have this compiler
+            session.compiler_required = session.runner.compiler_repository(
+                ).compiler_required(session.compiler_id())
+
+            # Determine whether we need pch PCH file.
+            if session.task['pch_file'] is None:
+                session.pch_required = False
+            else:
+                session.pch_file, session.pch_required = \
+                    session.runner.pch_repository().register_file(
+                        session.task['pch_file'])
+            with session.sender() as sender:
+                sender.send_multipart([b'MISSING_FILES', pickle.dumps(
+                    (missing_files, session.compiler_required,
+                    session.pch_required))])
+            session.state = CompileSession.StateDownloadMissingHeaders
+
+    class StateDownloadMissingHeaders(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            assert msg[0] == b'TASK_FILES'
+            fqdn = session.task['fqdn']
+            new_files = pickle.loads(msg[1])
+            session.src_loc = msg[2].tobytes().decode()
+            session.waiting_for_manager_data = SimpleTimer()
+            session.include_dirs_future = session.prepare_include_dirs(
+                session.runner.misc_thread_pool(), fqdn, new_files)
+            if session.compiler_required:
+                session.state = CompileSession.StateDownloadingCompiler
+                session.compiler_data = BytesIO()
+            elif session.pch_required:
+                session.download_pch()
+            else:
+                session.compile()
+
+    class StateDownloadingCompiler(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            more, data = msg
+            session.compiler_data.write(data)
+            if more == b'\x00':
+                session.compiler_data.seek(0)
+                dir = session.runner.compiler_repository().compiler_dir(
+                    session.compiler_id())
+                os.makedirs(dir, exist_ok=True)
+                with zipfile.ZipFile(session.compiler_data) as zip:
+                    zip.extractall(path=dir)
+                del session.compiler_data
+                session.runner.compiler_repository().set_compiler_ready(
+                    session.compiler_id())
+                if session.pch_required:
+                    session.download_pch()
+                else:
+                    session.compile()
+
+    class StateDownloadingPCH(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            more, data = msg
+            session.pch_desc.write(session.pch_decompressor.decompress(data))
+            if more == b'\x00':
+                session.pch_desc.write(session.pch_decompressor.flush())
+                session.pch_desc.close()
+                del session.pch_desc
+                session.times['upload precompiled header'] = session.pch_timer.get()
+                session.runner.pch_repository().file_completed(session.task['pch_file'])
+                session.compile()
+
+    class StateRunningCompiler(SessionState):
+        can_be_cancelled = True
+
+        @classmethod
+        def cancel(cls, session):
+            if hasattr(session, 'process'):
+                session.process.terminate()
+
+    class StateWaitForConfirmation(SessionState):
+        can_be_cancelled = True
+
+        @classmethod
+        def process_msg(cls, session, msg):
+            tag, verdict = msg
+            assert tag == b'SEND_CONFIRMATION'
+            if verdict == b'\x01':
+                session.state = CompileSession.StateUploadingFile
+                session.send_object_file(session.runner.misc_thread_pool())
+            else:
+                session.session_done()
+
+    class StateUploadingFile(SessionState): pass
+    class StateDone(SessionState): pass
+    class StateFailed(SessionState): pass
+    class StateCancelled(SessionState): pass
 
     def async(func):
         def wrapper(self, runner, *args, **kwds):
@@ -160,11 +262,12 @@ class CompileSession:
         self.id = id
         self.socket = socket
         self.runner = runner
-        self.state = self.STATE_GET_TASK
+        self.state = self.StateGetTask
         self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
         self.times = {}
         self.compiler_state_lock = Lock()
         self.completed = False
+        self.cancel_pending = False
 
     def __del__(self):
         try:
@@ -211,11 +314,13 @@ class CompileSession:
             self.runner.compiler_repository().compiler_dir(self.compiler_id()),
             self.task['compiler_info']['executable'])
 
-    def sender(self, other_thread=True):
-        return self.Sender(self.id, None if other_thread else self.socket)
+    def sender(self):
+        from_foreign_thread = current_thread() != self.runner.main_thread
+        return self.Sender(self.id, None if from_foreign_thread else self.socket)
 
     def compile(self):
-        self.state = self.STATE_RUNNING_COMPILER
+        self.state = self.StateRunningCompiler
+
         self.cancel_selfdestruct()
         if self.task['pch_file']:
             self.runner.pch_repository().when_pch_is_available(
@@ -228,6 +333,11 @@ class CompileSession:
             self.compiler_id(), self.__run_compiler)
 
     def __run_compiler(self):
+        # Before we actually run the expensive compile operation, make sure that
+        # we have not been cancelled yet.
+        if self.cancel_pending:
+            self.cancel_session()
+            return
         self.runner.compile_thread_pool().submit(
             self.__async_run_compiler, time())
 
@@ -235,7 +345,7 @@ class CompileSession:
         self.times['waiting for job slot'] = time() - start_time
         try:
             object_file_handle, object_file_name = tempfile.mkstemp(
-                suffix='.obj')
+                dir=self.runner.scratch_dir, suffix='.obj')
             os.close(object_file_handle)
 
             self.source_file = os.path.join(self.include_path, self.src_loc)
@@ -274,7 +384,7 @@ class CompileSession:
 
             start = time()
             with self.compiler_state_lock:
-                if self.state == self.STATE_CANCELLED:
+                if self.state == self.StateCancelled:
                     return
                 self.process = Popen(overrides, command, cwd=self.include_path,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -285,8 +395,8 @@ class CompileSession:
             self.times['compiler time'] = done - start
         except Exception as e:
             with self.compiler_state_lock:
-                if self.state == self.STATE_RUNNING_COMPILER:
-                    self.state = self.STATE_FAILED
+                if self.state == self.StateRunningCompiler:
+                    self.state = self.StateFailed
                     tb = StringIO()
                     tb.write("============================\n")
                     tb.write("     SERVER TRACEBACK\n")
@@ -299,13 +409,13 @@ class CompileSession:
                             tb.read().encode()])
                     self.session_done()
                 else:
-                    assert self.state == self.STATE_CANCELLED
+                    assert self.state == self.StateCancelled
         else:
             with self.compiler_state_lock:
-                if self.state == self.STATE_RUNNING_COMPILER:
+                if self.state == self.StateRunningCompiler:
                     with self.sender() as sender:
                         if retcode == 0:
-                            self.state = self.STATE_WAIT_FOR_CONFIRMATION
+                            self.state = self.StateWaitForConfirmation
                             self.object_file = object_file_name
                         sender.send_multipart([b'SERVER_DONE', pickle.dumps(
                             (retcode, stdout, stderr, self.times))])
@@ -314,14 +424,14 @@ class CompileSession:
                         else:
                             self.session_done()
                 else:
-                    assert self.state == self.STATE_CANCELLED
+                    assert self.state == self.StateCancelled
 
     def session_done(self, from_selfdestruct=False):
         if from_selfdestruct and self.completed:
             return
         assert not self.completed
         if from_selfdestruct:
-            with self.sender(False) as sender:
+            with self.sender() as sender:
                 sender.send_multipart([b'TIMED_OUT'])
         else:
             self.cancel_selfdestruct()
@@ -339,7 +449,7 @@ class CompileSession:
             del self.selfdestruct
 
     def download_pch(self):
-        self.state = self.STATE_DOWNLOADING_PCH
+        self.state = self.StateDownloadingPCH
         handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
             os.O_NOINHERIT)
         self.pch_timer = SimpleTimer()
@@ -350,109 +460,45 @@ class CompileSession:
     def send_object_file(self):
         fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
             os.O_NOINHERIT)
-        with os.fdopen(fh, 'rb') as obj, self.sender(True) as sender:
+        with os.fdopen(fh, 'rb') as obj, self.sender() as sender:
             send_compressed_file(sender.send_multipart, obj, copy=False)
         self.session_done()
         os.remove(self.object_file)
 
+    def cancel_session(self):
+        with self.sender() as sender:
+            sender.send(b'SESSION_CANCELLED')
+        self.state = self.StateCancelled
+        self.session_done()
+
     def process_msg(self, msg):
         self.reschedule_selfdestruct()
         if msg[0] == b'CANCEL_SESSION':
-            if self.completed:
-                # We are already dead, just don't know it yet.
-                return
-            if self.state == self.STATE_RUNNING_COMPILER:
-                with self.compiler_state_lock:
-                    self.state = self.STATE_CANCELLED
-                    if hasattr(self, 'process'):
-                        self.process.terminate()
-            with self.sender(False) as sender:
-                sender.send(b'SESSION_CANCELLED')
-            self.session_done()
-
-        elif self.state == self.STATE_GET_TASK:
-            self.waiting_for_header_list = SimpleTimer()
-            assert len(msg) == 2
-            assert msg[0] == b'SERVER_TASK'
-            self.task = pickle.loads(msg[1])
-            # Determine headers which are missing
-            missing_files_timer = SimpleTimer()
-            missing_files, self.repo_transaction_id = \
-                self.runner.header_repository().missing_files(self.task['fqdn'],
-                self.task['filelist'])
-            self.times['determine missing files'] = missing_files_timer.get()
-            # Determine if we have this compiler
-            self.compiler_required = self.runner.compiler_repository(
-                ).compiler_required(self.compiler_id())
-
-            # Determine whether we need pch PCH file.
-            if self.task['pch_file'] is None:
-                self.pch_required = False
-            else:
-                self.pch_file, self.pch_required = \
-                    self.runner.pch_repository().register_file(
-                        self.task['pch_file'])
-            with self.sender(False) as sender:
-                sender.send_multipart([b'MISSING_FILES', pickle.dumps(
-                    (missing_files, self.compiler_required,
-                    self.pch_required))])
-            self.state = self.STATE_DOWNLOADING_MISSING_HEADERS
-        elif self.state == self.STATE_DOWNLOADING_MISSING_HEADERS:
-            assert msg[0] == b'TASK_FILES'
-            fqdn = self.task['fqdn']
-            new_files = pickle.loads(msg[1])
-            self.src_loc = msg[2].tobytes().decode()
-            self.waiting_for_manager_data = SimpleTimer()
-            self.include_dirs_future = self.prepare_include_dirs(
-                self.runner.misc_thread_pool(), fqdn, new_files)
-            if self.compiler_required:
-                self.state = self.STATE_DOWNLOADING_COMPILER
-                self.compiler_data = BytesIO()
-            elif self.pch_required:
-                self.download_pch()
-            else:
-                self.compile()
-        elif self.state == self.STATE_DOWNLOADING_COMPILER:
-            more, data = msg
-            self.compiler_data.write(data)
-            if more == b'\x00':
-                self.compiler_data.seek(0)
-                dir = self.runner.compiler_repository().compiler_dir(
-                    self.compiler_id())
-                os.makedirs(dir, exist_ok=True)
-                with zipfile.ZipFile(self.compiler_data) as zip:
-                    zip.extractall(path=dir)
-                del self.compiler_data
-                self.runner.compiler_repository().set_compiler_ready(
-                    self.compiler_id())
-                if self.pch_required:
-                    self.download_pch()
+            # Special care must be taken not to send cancellation confirmation
+            # too early. Once it is sent, it must be final.
+            with self.compiler_state_lock:
+                if self.completed:
+                    self.cancel_selfdestruct()
+                    return
+                # If a state does not have a 'process_msg' function this means
+                # that no data will be sent while in this state. This kind of
+                # state can send cancel confirmation directly.
+                if not hasattr(self.state, 'process_msg'):
+                    self.state.cancel(self)
+                    self.cancel_session()
                 else:
-                    self.compile()
-        elif self.state == self.STATE_DOWNLOADING_PCH:
-            more, data = msg
-            self.pch_desc.write(self.pch_decompressor.decompress(data))
-            if more == b'\x00':
-                self.pch_desc.write(self.pch_decompressor.flush())
-                self.pch_desc.close()
-                del self.pch_desc
-                self.times['upload precompiled header'] = self.pch_timer.get()
-                self.runner.pch_repository().file_completed(self.task['pch_file'])
-                self.compile()
-        elif self.state == self.STATE_WAIT_FOR_CONFIRMATION:
-            tag, verdict = msg
-            try:
-                assert tag == b'SEND_CONFIRMATION'
-            except AssertionError:
-                print(tag.tobytes(), verdict.tobytes())
-                raise
-            if verdict == b'\x01':
-                self.state = self.STATE_UPLOADING_FILE
-                self.send_object_file(self.runner.misc_thread_pool())
-            else:
-                self.session_done()
+                # Otherwise, state expects some data. We will wait for this data
+                # to arrive and send cancel confirmation as a reply.
+                    self.cancel_pending = True
+                    return
         else:
-            raise Exception("Invalid state.")
+            # Some states do not allow cancellation. For instance, Compiler and
+            # PCH downloads. These parts are 'bigger' than this session, as some
+            # other session might depend on this download.
+            if self.cancel_pending and self.state.can_be_cancelled:
+                self.cancel_session()
+                return
+            self.state.process_msg(self, msg)
 
     @async
     def prepare_include_dirs(self, fqdn, new_files):
@@ -515,6 +561,8 @@ class CompileWorker:
 
         beacon = Beacon(self.__compile_slots, self.__port)
         beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
+
+        self.main_thread = current_thread()
 
         try:
             while True:

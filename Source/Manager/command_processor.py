@@ -97,7 +97,6 @@ class CommandProcessor:
         self.__compiler = compiler
         self.__options = compiler.parse_options(command)
         self.__ui_data = ui_data
-        ui_data.command_info.append(command)
 
     def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
@@ -194,6 +193,7 @@ class CommandProcessor:
         stdout = ''
         stderr = ''
         if self.tasks == self.completed_tasks.keys():
+            self.__ui_data.command_info.append((", ".join(self.__options.input_files()), time(), self.tasks))
             self.postprocess()
 
     def should_invoke_linker(self):

@@ -4,6 +4,7 @@ import tkinter.font as font
 import tkinter.messagebox as msgbox
 from tkinter.ttk import *
 import zmq
+from datetime import datetime
 
 import threading
 
@@ -311,22 +312,45 @@ class SettingsFrame(LabelFrame):
         self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
         self.stop_but.grid(row=3, column=1, sticky=E+W)
 
-class CommandBrowser(MyTreeView):
-    columns = ({'cid' : "#0", 'text' : "Command", 'minwidth' : 400, 'anchor' : W },)
+class CommandBrowser(PanedWindow):
+    columns = ({'cid' : "#0"           , 'text' : "Input Files", 'minwidth' : 250, 'anchor' : W },
+               {'cid' : "TimeCompleted", 'text' : "Time Completed", 'minwidth' : 100, 'anchor' : W },)
 
     def __init__(self, parent, ui_data, *args, **kw):
-        MyTreeView.__init__(self, parent, self.columns, *args, **kw)
+        PanedWindow.__init__(self, parent, orient=HORIZONTAL)
+        frame = Frame(self)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        sb = Scrollbar(frame)
+        sb.grid(row=0, column=1, sticky=N+S)
+        self.tv = MyTreeView(frame, self.columns, *args, **kw)
+        self.tv.grid(row=0, column=0, sticky=N+S+W+E)
+        self.tv['yscrollcommand'] = sb.set
+        sb.config(command=self.tv.yview)
+        self.add(frame)
+
         self.ui_data = ui_data
         self.idmap = {}
+
+        command_info = Frame(self)
+        command_info.grid(row=0, column=2, sticky=N+S+W+E)
+        self.add(command_info)
+
+        task_info = Frame(self)
+        task_info.grid(row=0, column=2, sticky=N+S+W+E)
+        self.add(task_info)
 
     def refresh(self):
         if not hasattr(self.ui_data, 'command_info'):
             return
 
-        for index, command in enumerate(self.ui_data.command_info):
+        for index, (input_files, time, tasks) in enumerate(self.ui_data.command_info):
             iid = self.idmap.get(index)
             if iid is None:
-                self.idmap[index] = self.insert('', 'end', text=command)
+                iid = self.tv.insert('', 'end', text=input_files, values=(datetime.fromtimestamp(time).strftime("%a %H:%M:%S.%f"),))
+                self.idmap[index] = iid
+                for task in tasks:
+                    self.tv.insert(iid, 'end', text=task.source, values=())
 
 class DBManagerApp(Tk):
     state_stopped = 0

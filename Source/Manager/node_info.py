@@ -3,9 +3,8 @@ from .timer import Timer
 from time import time
 
 class NodeInfo:
-    def __init__(self, node_dict, index):
+    def __init__(self, node_dict):
         self._node_dict = node_dict
-        self._index = index
         self._tasks_completed  = 0
         self._tasks_failed     = 0
         self._tasks_sent       = 0
@@ -22,9 +21,6 @@ class NodeInfo:
     def zmq_address(self):
         return 'tcp://{}:{}'.format(self._node_dict['address'],
             self._node_dict['port'])
-
-    def index(self):
-        return self._index
 
     def average_task_time(self):
         tasks_completed = self.tasks_completed()

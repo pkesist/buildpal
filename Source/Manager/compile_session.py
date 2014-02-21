@@ -38,7 +38,8 @@ class CompileSession:
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
 
     def cancel(self):
-        self.server_conn.send_multipart([b'CANCEL_SESSION'])
+        if not self.cancelled:
+            self.server_conn.send_multipart([b'CANCEL_SESSION'])
         self.cancelled = True
 
     @property
@@ -61,7 +62,7 @@ class CompileSession:
 
         # This state requires a response, so the session must be still alive
         # on the server.
-        if not self.cancelled and self.state == self.STATE_WAIT_FOR_MISSING_FILES:
+        if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
@@ -93,7 +94,7 @@ class CompileSession:
                 self.retcode = -1
                 self.stdout = b''
                 self.stderr = msg[1].tobytes()
-                self.state = self.STATE_CANCELLED if self.cancelled else self.STATE_SERVER_FAILURE
+                self.state = self.STATE_SERVER_FAILURE
                 return True
             else:
                 assert server_status == b'SERVER_DONE'
@@ -114,9 +115,9 @@ class CompileSession:
                         return True
                 else:
                     self.state = self.STATE_TOO_LATE
-                    if not self.cancelled and self.retcode == 0:
+                    if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
-                    return not self.cancelled or self.retcode != 0
+                    return self.retcode != 0
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled

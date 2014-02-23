@@ -13,6 +13,7 @@ from struct import pack
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+from time import time
 
 from Common import create_socket, recv_multipart
 
@@ -210,6 +211,7 @@ class NodeManager:
         if not session.got_data_from_server(msg):
             return
         # Session is finished.
+        session.time_completed = time()
         del self.sessions[socket]
         task = session.task
         node = session.node
@@ -217,6 +219,7 @@ class NodeManager:
         self.tasks_running[node].remove(task)
         self.__steal_tasks(node)
         if session.state == session.STATE_DONE:
+            node.timer().add_time("session duration", session.time_completed - session.time_started)
             task.completed(session, session.retcode,
                 session.stdout, session.stderr)
         elif session.state == session.STATE_SERVER_FAILURE:

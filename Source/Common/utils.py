@@ -75,7 +75,6 @@ def create_socket(zmq_ctx, socket_type):
     socket = zmq_ctx.socket(socket_type)
     return socket
 
-
 def recv_multipart(socket, flags=0):
     # The 'cast' is here because PyZMQ sets memoryview.ndim to 0, causing index
     # operations to fail. Not really sure why they do that.

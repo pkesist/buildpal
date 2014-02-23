@@ -34,8 +34,8 @@ class CompileSession:
     def start(self):
         assert self.state == self.STATE_START
         self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
-        self.server_time = SimpleTimer()
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
+        self.time_started = time()
 
     def cancel(self):
         if not self.cancelled:
@@ -85,10 +85,6 @@ class CompileSession:
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
-            server_time = self.server_time.get()
-            del self.server_time
-            self.timer.add_time('cumulative task time', server_time)
-            self.node.add_total_time(server_time)
             server_status = msg[0]
             if server_status == b'SERVER_FAILED':
                 self.retcode = -1

@@ -134,7 +134,7 @@ Setting up the Client
       --ini INI_FILE  Specify .ini file.
 
 * Call the compiler
-    * Set the environment variable DB_MGR_PORT to the port on which the manager is running on.
+    * Set the environment variable BP_MGR_PORT to the port on which the manager is running on.
     * Replace the :file:`cl.exe` call with :file:`bp_cl.exe`.
     * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. :file:`bp_cl.exe`
       will use its current environment to determine which compiler should be used.
@@ -172,7 +172,7 @@ These commands can be:
 .. note::
 
     In order for Client to work, the Manager must already be listening on
-    the same machine, and DB_MGR_PORT must be set to its TCP port. Otherwise the
+    the same machine, and BP_MGR_PORT must be set to its TCP port. Otherwise the
     Client will fail with appropriate error message.
 
 Server

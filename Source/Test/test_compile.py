@@ -94,7 +94,7 @@ def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
         hpp.write('\n')
     
     env = os.environ
-    env.update({'DB_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
         stdout, stderr = proc.communicate()
@@ -110,7 +110,7 @@ def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
 #endif
 ''')
     env = os.environ
-    env.update({'DB_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
         stdout, stderr = proc.communicate()
@@ -122,7 +122,7 @@ def test_link(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     with create_file(cpp_file) as cpp:
         cpp.write("int main() {}\n")
     env = os.environ
-    env.update({'DB_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/EHsc', cpp_file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:a_dist.exe"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=tmpdir) as proc:
         stdout, stderr = proc.communicate()

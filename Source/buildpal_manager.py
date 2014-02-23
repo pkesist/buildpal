@@ -60,7 +60,7 @@ def get_nodes_from_beacon():
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp.setblocking(False)
     udp.bind(('', 0))
-    udp.sendto(b'DB_MGR_DISCOVER', (multicast_group, multicast_port))
+    udp.sendto(b'BP_MGR_DISCOVER', (multicast_group, multicast_port))
     nodes = []
     while True:
         udp.settimeout(0.2)
@@ -68,7 +68,7 @@ def get_nodes_from_beacon():
             data, (address, port) = udp.recvfrom(256)
         except socket.timeout:
             break
-        prefix = b'DB_MGR_SERVER'
+        prefix = b'BP_MGR_SERVER'
         prefix_len = len(prefix)
         if data[:prefix_len] != prefix:
             continue

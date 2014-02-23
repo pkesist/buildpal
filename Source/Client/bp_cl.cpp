@@ -203,19 +203,19 @@ int main( int argc, char * argv[] )
     }
 
     bool runLocally = false;
-    DWORD size = GetEnvironmentVariable("DB_MGR_PORT", NULL, 0 );
+    DWORD size = GetEnvironmentVariable("BP_MGR_PORT", NULL, 0 );
     if ( size == 0 )
     {
         if ( GetLastError() == ERROR_ENVVAR_NOT_FOUND )
-            std::cerr << "You must define DB_MGR_PORT environment variable.\n";
+            std::cerr << "You must define BP_MGR_PORT environment variable.\n";
         else
-            std::cerr << "Failed to get DB_MGR_PORT environment variable.\n";
+            std::cerr << "Failed to get BP_MGR_PORT environment variable.\n";
         runLocally = true;
     }
 
     if ( !runLocally && ( size > 256 ) )
     {
-        std::cerr << "Invalid DB_MGR_PORT environment variable value (value too big).\n";
+        std::cerr << "Invalid BP_MGR_PORT environment variable value (value too big).\n";
         runLocally = true;
     }
 
@@ -225,7 +225,7 @@ int main( int argc, char * argv[] )
 
     char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + size ) );
     std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
-    GetEnvironmentVariable( "DB_MGR_PORT", pipeName + pipeStreamPrefixSize, size );
+    GetEnvironmentVariable( "BP_MGR_PORT", pipeName + pipeStreamPrefixSize, size );
 
     HANDLE pipe;
     for ( ; ;  )
@@ -263,11 +263,11 @@ int main( int argc, char * argv[] )
     if ( !runLocally )
     {
         char * buffer = static_cast<char *>( alloca( size ) );
-        GetEnvironmentVariable( "DB_MGR_PORT", buffer, size );
+        GetEnvironmentVariable( "BP_MGR_PORT", buffer, size );
     
         if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
         {
-            std::cerr << "Failed to parse DB_MGR_PORT environment variable value.\n";
+            std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
             runLocally = true;
         }
     }

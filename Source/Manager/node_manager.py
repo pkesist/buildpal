@@ -1,66 +1,17 @@
 from .compile_session import CompileSession, SessionResult
+from .compressor import Compressor
 from .poller import ZMQSelectPoller
 
-import pickle
-import zlib
 import zmq
 import queue
 
-from functools import cmp_to_key
-from io import BytesIO
 from math import floor
-from struct import pack
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
 from time import time
 
 from Common import create_socket, recv_multipart
 
 Poller = ZMQSelectPoller
-
-class Compressor:
-    def __init__(self, poller):
-        self.executor = ThreadPoolExecutor(2)
-        self.poller = poller
-        self.compressed_files = []
-        self.compressed_file_data = {}
-        self.mylock = Lock()
-        self.waiters = defaultdict(list)
-
-    def compress(self, file, on_completion):
-        self.mylock.acquire()
-        if file in self.compressed_files:
-            self.mylock.release()
-            on_completion(BytesIO(self.compressed_file_data[file]))
-        else:
-            try:
-                if file not in self.waiters:
-                    event = self.poller.create_event(lambda ev : self.__compression_completed(file, ev))
-                    self.executor.submit(self.__do_compress, file).add_done_callback(lambda f : event())
-                self.waiters.setdefault(file, []).append(on_completion)
-            finally:
-                self.mylock.release()
-
-    def __compression_completed(self, file, event):
-        event.close()
-        for on_completion in self.waiters[file]:
-            on_completion(BytesIO(self.compressed_file_data[file]))
-        del self.waiters[file]
-
-    def __do_compress(self, file):
-        buffer = BytesIO()
-        compressor = zlib.compressobj(1)
-        with open(file, 'rb') as fileobj:
-            for data in iter(lambda : fileobj.read(256 * 1024), b''):
-                buffer.write(compressor.compress(data))
-        buffer.write(compressor.flush())
-        buffer.seek(0)
-        with self.mylock:
-            if len(self.compressed_file_data) > 4:
-                del self.compressed_file_data[self.compressed_files.pop(0)]
-            self.compressed_files.append(file)
-            self.compressed_file_data[file] = buffer.read()
 
 class NodeManager:
     def __init__(self, node_info):
@@ -151,22 +102,18 @@ class NodeManager:
             return self.tasks_running[src_node]
         if tgt_node.average_task_time() == 0:
             return self.tasks_running[src_node]
-        task_index = floor(tgt_node.average_task_time() / src_node.average_task_time()) * src_node.node_dict()['job_slots']
+        task_index = floor(tgt_node.average_task_time() /
+            src_node.average_task_time()) * src_node.node_dict()['job_slots']
         return self.tasks_running[src_node][task_index:]
 
     def __best_node(self):
         def current_node_weight(node):
             return (len(self.tasks_running[node]) * node.average_task_time(),
                 node.average_task_time())
-        nodes = self.node_info[:]
-        nodes.sort(key=current_node_weight)
-        for node in nodes:
-            if node.average_task_time() == 0:
-                if len(self.tasks_running[node]) < self.__target_tasks_per_node(node):
-                    return node
-            elif self.__free_slots(node) > 0:
-                return node
-        return None
+        free_nodes = [node for node in self.node_info if self.__free_slots(node) > 0]
+        if not free_nodes:
+            return None
+        return min(free_nodes, key=current_node_weight)
 
     def __steal_tasks(self, node):
         tasks_to_steal = self.__free_slots(node)
@@ -211,9 +158,12 @@ class NodeManager:
         if not session.got_data_from_server(msg):
             return
         del self.sessions[socket]
-        task = session.task
-        node = session.node
         self.sockets_ready[session.node].append(socket)
         self.tasks_running[session.node].remove(session.task)
-        self.__steal_tasks(node)
-        task.session_completed(session)
+        self.__steal_tasks(session.node)
+        # In case we got a server failure, reschedule the task.
+        if session.result == SessionResult.failure and \
+            not session.task.is_completed() and \
+            len(session.task.sessions_running) == 1:
+                self.schedule_task(task)
+        session.task.session_completed(session)

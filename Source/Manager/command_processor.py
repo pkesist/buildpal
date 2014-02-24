@@ -62,20 +62,28 @@ class Task:
             session.node.add_tasks_completed()
             session.node.timer().add_time("session duration",
                 session.time_completed - session.time_started)
-            self.command_processor.task_done(self, session.retcode,
+            session.node.add_total_time(
+                session.time_completed - session.time_started)
+            self.command_processor.task_completed(self, session.retcode,
                 session.stdout, session.stderr)
         elif session.result == SessionResult.failure:
             session.node.add_tasks_failed()
-            if session.task.is_completed():
-                return
-            if not task.sessions_running:
-                self.schedule_task(task)
         elif session.result == SessionResult.cancelled:
             session.node.add_tasks_cancelled()
         elif session.result == SessionResult.timed_out:
             session.node.add_tasks_timed_out()
         elif session.result == SessionResult.too_late:
             session.node.add_tasks_too_late()
+
+    def get_info(self):
+        assert not self.sessions_running
+        assert self.completed_by_session is not None
+        return {
+            'source' : self.source,
+            'pch_file' : self.pch_file,
+            'sessions' : list(session.get_info() for session in
+                self.sessions_finished)
+        }
 
 class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 0
@@ -180,7 +188,7 @@ class CommandProcessor:
         self.completed_tasks = {}
         return self.tasks
 
-    def task_done(self, task, retcode, stdout, stderr):
+    def task_completed(self, task, retcode, stdout, stderr):
         assert task in self.tasks
         assert task not in self.completed_tasks
         self.update_task_ui(task)

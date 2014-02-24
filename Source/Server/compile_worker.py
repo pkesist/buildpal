@@ -466,6 +466,13 @@ class CompileSession:
         os.remove(self.object_file)
 
     def cancel_session(self):
+        # FIXME:
+        # What if session cancellation is sent when session completion
+        # message is already on its way? The other side will not
+        # understand and might even cancel the wrong session, the one
+        # which is reusing this sessions connection.
+        # TODO: We should probably send a session id when doing this, thus
+        # allowing the other side to discriminate messages.
         with self.sender() as sender:
             sender.send(b'SESSION_CANCELLED')
         self.state = self.StateCancelled

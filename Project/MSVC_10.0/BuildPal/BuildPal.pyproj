@@ -33,6 +33,7 @@
     <Compile Include="Source\buildpal_server.py" />
     <Compile Include="Source\Manager\command_processor.py" />
     <Compile Include="Source\Manager\compile_session.py" />
+    <Compile Include="Source\Manager\compressor.py" />
     <Compile Include="Source\Manager\console.py" />
     <Compile Include="Source\Manager\gui.py" />
     <Compile Include="Source\Manager\node_info.py" />

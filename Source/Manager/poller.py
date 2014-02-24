@@ -24,6 +24,16 @@ class PollerBase:
     def stopped(self):
         return self._stopped
 
+    def close(self):
+        raise NotImplementedError()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
 class OSSelectPoller(PollerBase):
     class ZmqSocket:
         def __init__(self, socket, handler):
@@ -87,11 +97,11 @@ class OSSelectPoller(PollerBase):
             self.read.close()
 
     def __init__(self, zmq_ctx):
-        PollerBase.__init__(self)
         self.pollin = set()
         self.pollout = set()
         self.sockets = {}
         self.events = set()
+        PollerBase.__init__(self)
 
     @classmethod
     def __wrap_type(cls, sock):
@@ -124,6 +134,7 @@ class OSSelectPoller(PollerBase):
         return bool(pollin)
 
     def run(self, observer):
+        observer()
         while True:
             if self.run_for_a_while(1):
                 observer()
@@ -204,10 +215,10 @@ class ZMQSelectPoller(PollerBase):
         return bool(result)
 
     def run(self, observer):
-        last_time = time()
+        observer()
         while True:
-            if self.run_for_a_while(1):
-                observer()
+            self.run_for_a_while(1)
+            observer()
             if self.stopped():
                 return
 

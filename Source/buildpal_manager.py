@@ -5,6 +5,9 @@ import argparse
 import configparser
 import os
 import sys
+import threading
+
+from time import sleep
 
 default_script = 'buildpal_manager.ini'
 
@@ -128,8 +131,16 @@ if __name__ == "__main__":
     if opts.ui == 'gui':
         run_gui(nodes, port)
     else:
+        ui_data = type('UIData', (), {})()
+        task_processor = TaskProcessor(nodes, port, 0, ui_data)
+        def run():
+            task_processor.run()
+        thread = threading.Thread(target=run)
+        thread.start()
         try:
-            ui_data = type('UIData', (), {})()
-            TaskProcessor(nodes, port, 0, ui_data).run()
+            while True:
+                sleep(60)
         except KeyboardInterrupt:
             print("Shutting down.")
+            task_processor.stop()
+            thread.join()

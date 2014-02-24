@@ -1,4 +1,4 @@
-from .compile_session import CompileSession
+from .compile_session import CompileSession, SessionResult
 from .poller import ZMQSelectPoller
 
 import pickle
@@ -208,9 +208,10 @@ class NodeManager:
             print("Got data for non-session")
             print([m.tobytes()[:50] for m in msg])
             return
-        if not session.got_data_from_server(msg):
+        session_result = session.got_data_from_server(msg)
+        if session_result is None:
             return
-        # Session is finished.
+        assert session.state == session.STATE_FINISH
         session.time_completed = time()
         del self.sessions[socket]
         task = session.task
@@ -218,21 +219,22 @@ class NodeManager:
         self.sockets_ready[node].append(socket)
         self.tasks_running[node].remove(task)
         self.__steal_tasks(node)
-        if session.state == session.STATE_DONE:
+        if session_result == SessionResult.success:
             node.timer().add_time("session duration", session.time_completed - session.time_started)
             task.completed(session, session.retcode,
                 session.stdout, session.stderr)
-        elif session.state == session.STATE_SERVER_FAILURE:
+        elif session_result == SessionResult.failure:
             task.failed(session)
             if task.is_completed():
                 assert task.session_completed != session
                 return
             if not task.sessions_running:
                 self.schedule_task(task)
-        elif session.state == session.STATE_CANCELLED:
+        elif session_result == SessionResult.cancelled:
             task.cancelled(session)
-        elif session.state == session.STATE_TIMED_OUT:
+        elif session_result == SessionResult.timed_out:
             task.timed_out(session)
-        else:
-            assert session.state == session.STATE_TOO_LATE
+        elif session.state == SessionResult.too_late:
             task.too_late(session)
+        else:
+            assert not "Invalid session result"

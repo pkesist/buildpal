@@ -250,7 +250,7 @@ int main( int argc, char * argv[] )
         }
             
         boost::system::error_code const error( ::GetLastError(), boost::system::system_category() );
-        std::cerr << "Failed to create pipe (" << error.message() << ").\n";
+        std::cerr << "Failed to create pipe '" << pipeName << "'. (" << error.message() << ").\n";
         return -1;
     }
 

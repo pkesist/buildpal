@@ -6,6 +6,8 @@ import tempfile
 import shutil
 import signal
 
+from time import sleep
+
 MGR_PORT=33221
 SRV_PORT=33222
 
@@ -25,14 +27,15 @@ def run_manager(request):
 [Manager]
 port={}
 
-[Default Profile]
+[test]
 node[0]=localhost:{}:4
 
 """.format(MGR_PORT, SRV_PORT))
     mgr_script = os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'buildpal_manager.py'))
-    proc = subprocess.Popen([sys.executable, mgr_script], cwd=dir,
+    proc = subprocess.Popen([sys.executable, mgr_script, '--ui', 'console', 'test'], cwd=dir,
         stdout=subprocess.PIPE, stderr=sys.stderr, universal_newlines=True)
+    sleep(0.5)
     def teardown():
         terminate_proc(proc)
         shutil.rmtree(dir)

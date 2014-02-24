@@ -176,7 +176,7 @@ class TaskProcessor:
         self.server = None
 
         self.n_pp_threads = n_pp_threads
-        if not self.n_pp_threads:
+        if self.n_pp_threads <= 0:
             self.n_pp_threads = cpu_count()
         self.client_list = []
 

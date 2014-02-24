@@ -1,5 +1,6 @@
 from Common import SimpleTimer, send_file, send_compressed_file
 
+from enum import Enum
 from io import BytesIO
 
 import os
@@ -10,16 +11,19 @@ import zmq
 
 from time import time
 
+class SessionResult(Enum):
+    success = 1
+    failure = 2
+    cancelled = 3
+    too_late = 4
+    timed_out = 5
+
 class CompileSession:
     STATE_START = 0
     STATE_WAIT_FOR_MISSING_FILES = 1
     STATE_RECEIVE_RESULT_FILE = 2
     STATE_WAIT_FOR_SERVER_RESPONSE = 3
-    STATE_DONE = 4
-    STATE_SERVER_FAILURE = 5
-    STATE_CANCELLED = 6
-    STATE_TOO_LATE = 7
-    STATE_TIMED_OUT = 8
+    STATE_FINISH = 4
 
     def __init__(self, task, server_conn, node, compressor):
         self.state = self.STATE_START
@@ -49,12 +53,11 @@ class CompileSession:
     def got_data_from_server(self, msg):
         if msg[0] == b'SESSION_CANCELLED':
             assert self.cancelled
-            if self.state != self.STATE_TOO_LATE:
-                self.state = self.STATE_CANCELLED
-            return True
+            self.state = self.STATE_FINISH
+            return SessionResult.cancelled
         elif msg[0] == b'TIMED_OUT':
-            self.state = self.STATE_TIMED_OUT
-            return True
+            self.state = self.STATE_FINISH
+            return SessionResult.timed_out
         # It is possible that cancellation arrived too late,
         # that the server already sent the final message and
         # unregistered its session. In that case we will never
@@ -90,8 +93,8 @@ class CompileSession:
                 self.retcode = -1
                 self.stdout = b''
                 self.stderr = msg[1].tobytes()
-                self.state = self.STATE_SERVER_FAILURE
-                return True
+                self.state = self.STATE_FINISH
+                return SessionResult.failure
             else:
                 assert server_status == b'SERVER_DONE'
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
@@ -107,13 +110,13 @@ class CompileSession:
                         self.state = self.STATE_RECEIVE_RESULT_FILE
                         self.receive_result_time = SimpleTimer()
                     else:
-                        self.state = self.STATE_DONE
-                        return True
+                        self.state = self.STATE_FINISH
+                        return SessionResult.success
                 else:
-                    self.state = self.STATE_TOO_LATE
+                    self.state = self.STATE_FINISH
                     if self.retcode == 0:
                         self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
-                    return self.retcode != 0
+                    return SessionResult.too_late
 
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled
@@ -124,9 +127,11 @@ class CompileSession:
                 self.timer.add_time('download object file', self.receive_result_time.get())
                 del self.receive_result_time
                 self.obj_desc.close()
-                self.state = self.STATE_DONE
-                return True
-        return False
+                self.state = self.STATE_FINISH
+                return SessionResult.success
+        else:
+            assert not "Invalid state"
+        return None
 
     @classmethod
     def header_beginning(cls, filename):

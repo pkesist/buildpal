@@ -344,22 +344,22 @@ class CompileSession:
     def __async_run_compiler(self, start_time):
         self.times['waiting for job slot'] = time() - start_time
         try:
-            object_file_handle, object_file_name = tempfile.mkstemp(
+            obj_handle, obj_name= tempfile.mkstemp(
                 dir=self.runner.scratch_dir, suffix='.obj')
-            os.close(object_file_handle)
+            os.close(obj_handle)
 
             self.source_file = os.path.join(self.include_path, self.src_loc)
 
             compiler_info = self.task['compiler_info']
-            output = compiler_info['set_object_name'].format(object_file_name)
+            output = compiler_info['set_object_name'].format(obj_name)
             pch_switch = []
             overrides = {}
             if self.task['pch_file']:
+                # TODO: MSVC specific, remove from here.
                 if '/GL' in self.task['call']:
-                    # TODO: MSVC specific, remove from here.
                     # In case /GL command line option is present, PCH file will
                     # not be fully resolved during compilation. Instead,
-                    # resulting .obj file will have a reference to it, and
+                    # resulting .obj file will contain a reference to it, and
                     # consequently PCH file will be needed at link phase.
                     # The problem we face is that PCH path on slave machine
                     # will not be the same as the client machine. This is why
@@ -416,7 +416,7 @@ class CompileSession:
                     with self.sender() as sender:
                         if retcode == 0:
                             self.state = self.StateWaitForConfirmation
-                            self.object_file = object_file_name
+                            self.object_file = obj_name
                         sender.send_multipart([b'SERVER_DONE', pickle.dumps(
                             (retcode, stdout, stderr, self.times))])
                         if retcode == 0:

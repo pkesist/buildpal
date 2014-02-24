@@ -126,6 +126,8 @@ class CommandProcessor:
             self.compiler_files = list(zip(msg, self.compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
+        else:
+            assert not "Invalid state"
 
     def update_task_ui(self, task):
         for name, time in task.times.items():

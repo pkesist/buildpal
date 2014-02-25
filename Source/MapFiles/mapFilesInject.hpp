@@ -11,8 +11,6 @@
 extern "C" BOOL WINAPI addFileMapping( char const * virtualEntry, char const * realEntry );
 extern "C" BOOL WINAPI removeFileMapping( char const * virtualEntry );
 extern "C" BOOL WINAPI clearFileMappings();
-extern "C" DWORD WINAPI hookWinAPIs( void * );
-extern "C" DWORD WINAPI unhookWinAPIs( void * );
 
 typedef std::unordered_map<std::string, std::string> FileMapping;
 

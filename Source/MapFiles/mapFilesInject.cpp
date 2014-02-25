@@ -17,6 +17,8 @@
 
 HMODULE WINAPI hookLoadLibraryA( char * );
 HMODULE WINAPI hookLoadLibraryW( wchar_t * );
+extern "C" DWORD WINAPI hookWinAPIs( void * );
+extern "C" DWORD WINAPI unhookWinAPIs( void * );
 
 FileMapping fileMapping;
 HMODULE thisModule;

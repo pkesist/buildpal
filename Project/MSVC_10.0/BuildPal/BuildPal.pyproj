@@ -35,6 +35,7 @@
     <Compile Include="Source\Manager\compile_session.py" />
     <Compile Include="Source\Manager\compressor.py" />
     <Compile Include="Source\Manager\console.py" />
+    <Compile Include="Source\Manager\database.py" />
     <Compile Include="Source\Manager\gui.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\node_manager.py" />
@@ -54,6 +55,7 @@
     <Compile Include="Source\setup_manager.py" />
     <Compile Include="Source\setup_server.py" />
     <Compile Include="Source\Test\test_compile.py" />
+    <Compile Include="Source\Test\test_database.py" />
     <Compile Include="Source\Test\test_poller.py" />
     <Compile Include="Source\Test\test_source_scanner.py" />
   </ItemGroup>

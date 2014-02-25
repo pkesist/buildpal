@@ -510,7 +510,8 @@ class CompileSession:
     @async
     def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.runner.header_repository().prepare_dir(fqdn, new_files, self.repo_transaction_id, self.include_path)
+        result = self.runner.header_repository().prepare_dir(fqdn, new_files,
+            self.repo_transaction_id, self.include_path)
         self.times['prepare include directory'] = shared_prepare_dir_timer.get()
         del shared_prepare_dir_timer
         return result

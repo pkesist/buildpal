@@ -3,7 +3,7 @@ from .compressor import Compressor
 from .poller import ZMQSelectPoller
 
 import zmq
-import queue
+from queue import Queue, Empty
 
 from math import floor
 from collections import defaultdict
@@ -19,7 +19,7 @@ class NodeManager:
         self.poller = Poller(self.zmq_ctx)
         self.task_ready_event = self.poller.create_event(
             self.__process_input_tasks)
-        self.input_tasks = queue.Queue()
+        self.input_tasks = Queue()
         self.node_info = node_info
         self.all_sockets = defaultdict(list)
         self.sockets_ready = defaultdict(list)
@@ -47,7 +47,7 @@ class NodeManager:
                 task = self.input_tasks.get_nowait()
                 task.note_time('collected from preprocessor')
                 self.schedule_task(task)
-        except queue.Empty:
+        except Empty:
             pass
 
     def schedule_task(self, task, node=None):

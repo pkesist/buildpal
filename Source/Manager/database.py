@@ -3,6 +3,9 @@ import sqlite3
 
 from .compile_session import SessionResult
 
+from queue import Queue
+from threading import Thread
+
 class Database:
     tables = ['command', 'task', 'session']
 
@@ -41,11 +44,11 @@ class Database:
     def desc_for_table(cls, table_name):
         return cls.__dict__[table_name + '_table']
 
-    def __init__(self, scratch_dir=None):
-        if scratch_dir is None:
+    def __init__(self, db_file=None):
+        if db_file is None:
             self.db_file = ':memory:'
         else:
-            self.db_file = os.path.join(scratch_dir, 'build_info.db')
+            self.db_file = db_file
             try:
                 os.remove(self.db_file)
             except FileNotFoundError:
@@ -77,19 +80,26 @@ class Database:
 
     def __insert(self, conn, table, data, **extra_data):
         table_desc = self.desc_for_table(table)
-        sql = "INSERT INTO {} VALUES ({})".format(table,
-            ", ".join('?' for x in range(len(table_desc))))
         converted_data = []
         for col_desc in table_desc:
             col_name = col_desc['col_name']
-            col_data = data.get(col_name) or extra_data[col_name]
+            col_data = data.get(col_name) or extra_data.get(col_name)
+            if col_data is None:
+                if col_desc['null']:
+                    col_data = None
+                else:
+                    raise Exception("Missing non-nullable column value '{}'".format(col_name))
             converter = col_desc.get('converter')
             converted_data.append(converter.to_db(col_data) if converter else col_data)
+        sql = "INSERT INTO {} VALUES ({})".format(table,
+            ", ".join('?' for x in range(len(converted_data))))
         cursor = conn.execute(sql, converted_data)
+        cursor.close()
         return cursor.lastrowid
 
     def __select(self, conn, table, col, value):
-        cursor = conn.execute("SELECT rowid, * FROM {} WHERE {}=?".format(table, col), (value,))
+        cursor = conn.execute("SELECT rowid, * FROM {} WHERE {}=?".format(
+            table, col), (value,))
         table_desc = self.desc_for_table(table)
         res = []
         rowids = []
@@ -97,6 +107,9 @@ class Database:
             entry = {}
             for col_desc, col in zip(table_desc, result[1:]):
                 if 'ref' not in col_desc:
+                    if col is None:
+                        assert col_desc['null']
+                        continue
                     converter = col_desc.get('converter')
                     if converter:
                         col = converter.from_db(col)
@@ -126,3 +139,32 @@ class Database:
             task['sessions'] = sessions
         command['tasks'] = tasks
         return command
+
+class DatabaseInserter:
+    class Quit: pass
+
+    def __init__(self, database):
+        self.database = database
+        self.queue = Queue()
+        self.thread = Thread(target=self.__worker_thread)
+        self.thread.start()
+
+    def __worker_thread(self):
+        with self.database.get_connection() as conn:
+            while True:
+                what = self.queue.get()
+                if what is self.Quit:
+                    break
+                command_info, on_completion = what
+                command_id = self.database.insert_command(conn, command_info)
+                conn.commit()
+                on_completion(command_id)
+
+    def async_insert(self, command_info, on_completion):
+        self.queue.put((command_info, on_completion))
+
+    def close(self):
+        self.queue.put(self.Quit)
+        self.thread.join()
+
+   

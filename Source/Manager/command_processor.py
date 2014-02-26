@@ -2,6 +2,7 @@ from .compile_session import SessionResult
 from .task import Task
 
 from subprocess import list2cmdline
+from threading import Lock, current_thread
 
 import os
 from time import time
@@ -11,7 +12,8 @@ class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
     STATE_HAS_COMPILER_INFO = 2
 
-    def __init__(self, client_conn, executable, cwd, sysincludes, compiler, command, ui_data):
+    def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
+            command, database_inserter, ui_data):
         self.client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
@@ -20,6 +22,7 @@ class CommandProcessor:
         self.__command = command
         self.__options = compiler.parse_options(command)
         self.__ui_data = ui_data
+        self.__database_inserter = database_inserter
 
     def set_compiler_info(self, compiler_info, compiler_files):
         self.compiler_info = compiler_info
@@ -118,7 +121,9 @@ class CommandProcessor:
         stdout = ''
         stderr = ''
         if self.tasks == self.completed_tasks.keys():
-            self.__ui_data.command_info.append((", ".join(self.__options.input_files()), time(), self.tasks))
+            def update_ui(command_id):
+                self.__ui_data.command_info.append((", ".join(self.__options.input_files()), command_id))
+            self.__database_inserter.async_insert(self.get_info(), update_ui)
             self.postprocess()
 
     def should_invoke_linker(self):
@@ -164,7 +169,7 @@ class CommandProcessor:
     def get_info(self):
         assert self.tasks == self.completed_tasks.keys()
         return {
-            'command' : self.__command,
-            'tasks' : [task.get_info for task in self.tasks]
+            'command' : list2cmdline(self.__command),
+            'tasks' : [task.get_info() for task in self.tasks]
         }
 

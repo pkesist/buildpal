@@ -217,8 +217,8 @@ class ZMQSelectPoller(PollerBase):
     def run(self, observer):
         observer()
         while True:
-            self.run_for_a_while(1)
-            observer()
+            if self.run_for_a_while(1):
+                observer()
             if self.stopped():
                 return
 

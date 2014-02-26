@@ -2,7 +2,7 @@ import pytest
 
 import zmq
 import sys
-import threading
+from threading import Thread
 
 sys.path.append('..')
 
@@ -61,7 +61,7 @@ def test_event(poller_class):
         event2 = poller.create_event(lambda ev : __handle_event(2))
         event3 = poller.create_event(lambda ev : __handle_event(3))
 
-        thread = threading.Thread(target=fire_event, args=(event1,))
+        thread = Thread(target=fire_event, args=(event1,))
         thread.start()
         poller.run_for_a_while()
         thread.join()
@@ -69,7 +69,7 @@ def test_event(poller_class):
         assert events_fired == {1}
         events_fired.clear()
 
-        thread = threading.Thread(target=fire_event, args=(event2,))
+        thread = Thread(target=fire_event, args=(event2,))
         thread.start()
         poller.run_for_a_while()
         thread.join()
@@ -77,7 +77,7 @@ def test_event(poller_class):
         assert events_fired == {2}
         events_fired.clear()
 
-        thread = threading.Thread(target=fire_event, args=(event3,))
+        thread = Thread(target=fire_event, args=(event3,))
         thread.start()
         poller.run_for_a_while()
         thread.join()

@@ -5,8 +5,8 @@ import argparse
 import configparser
 import os
 import sys
-import threading
 
+from threading import Thread
 from time import sleep
 
 default_script = 'buildpal_manager.ini'
@@ -135,7 +135,7 @@ if __name__ == "__main__":
         task_processor = TaskProcessor(nodes, port, 0, ui_data)
         def run():
             task_processor.run()
-        thread = threading.Thread(target=run)
+        thread = Thread(target=run)
         thread.start()
         try:
             while True:

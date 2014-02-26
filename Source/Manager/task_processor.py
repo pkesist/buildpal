@@ -1,8 +1,9 @@
 from Compilers import MSVCWrapper
-from Common import SimpleTimer, recv_multipart, create_socket
+from Common import SimpleTimer
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor
+from .database import Database, DatabaseInserter
 from .timer import Timer
 from .node_manager import NodeManager
 from .console import ConsolePrinter
@@ -11,28 +12,25 @@ from .node_info import NodeInfo
 from Common import bind_to_random_port
 
 import asyncio
-import operator
-import pickle
+import os
 import sys
-import zmq
-import sched
-import selectors
-import socket
-import threading
 
 from multiprocessing import cpu_count
-from time import time
 from subprocess import list2cmdline
+from tempfile import mkstemp
+from threading import Thread
+from time import time
 
 class ClientProcessor:
-    def __init__(self, compiler_info, task_created_func, ui_data, register,
-            unregister):
+    def __init__(self, compiler_info, task_created_func, database_inserter,
+            ui_data, register, unregister):
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
         self.ui_data = ui_data
         self.data = b''
         self.transport = None
         self.command_processor = None
+        self.database_inserter = database_inserter
         self.register, self.unregister = register, unregister
 
     def close(self):
@@ -94,7 +92,7 @@ class ClientProcessor:
         assert compiler_name == 'msvc'
         compiler = MSVCWrapper()
         self.command_processor = CommandProcessor(self, executable,
-            cwd, sysincludes, compiler, command, self.ui_data)
+            cwd, sysincludes, compiler, command, self.database_inserter, self.ui_data)
 
         if self.command_processor.build_local():
             self.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
@@ -125,17 +123,18 @@ class ClientProcessor:
             self.task_created_func(task)
 
 class ClientProcessorFactory:
-    def __init__(self, compiler_info, task_created_func, ui_data, on_closed):
+    def __init__(self, compiler_info, task_created_func, database, ui_data, on_closed):
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
         self.ui_data = ui_data
         self.clients = set()
         self.closing = False
         self.on_closed = on_closed
+        self.database_inserter = DatabaseInserter(database)
 
     def __call__(self):
-        return ClientProcessor(self.compiler_info,
-            self.task_created_func, self.ui_data, self.__register,
+        return ClientProcessor(self.compiler_info, self.task_created_func,
+            self.database_inserter, self.ui_data, self.__register,
             self.__unregister)
             
     def __register(self, client):
@@ -147,6 +146,7 @@ class ClientProcessorFactory:
             self.on_closed()
 
     def close(self):
+        self.database_inserter.close()
         self.closing = True
         if not self.clients:
             self.on_closed()
@@ -184,10 +184,17 @@ class TaskProcessor:
         self.source_scanner = SourceScanner(self.node_manager.task_ready,
             self.n_pp_threads)
 
+        handle, db_file = mkstemp(prefix='cmd', suffix='.db')
+        os.close(handle)
+        self.database = Database(db_file)
+        with self.database.get_connection() as conn:
+            self.database.create_structure(conn)
+
         self.ui_data = ui_data
         self.ui_data.timer = self.timer
         self.ui_data.node_info = self.node_info
         self.ui_data.command_info = []
+        self.ui_data.command_db = self.database
         self.ui_data.cache_stats = self.source_scanner.get_cache_stats
         self.ui_data.unassigned_tasks = self.node_manager.unassigned_tasks_count
 
@@ -200,8 +207,8 @@ class TaskProcessor:
             self.loop.call_soon(self.loop.stop)
 
         self.client_processor_factory = ClientProcessorFactory(
-            self.compiler_info, self.source_scanner.add_task, self.ui_data,
-            stop_loop)
+            self.compiler_info, self.source_scanner.add_task,
+            self.database, self.ui_data, stop_loop)
 
         self.loop = asyncio.ProactorEventLoop()
         task = asyncio.async(self.loop.start_serving_pipe(
@@ -219,9 +226,7 @@ class TaskProcessor:
 
     def run(self, observer=None):
         self.terminating = False
-        zmq_ctx = zmq.Context()
-
-        self.client_thread = threading.Thread(target=self.client_thread)
+        self.client_thread = Thread(target=self.client_thread)
         self.client_thread.start()
 
         try:

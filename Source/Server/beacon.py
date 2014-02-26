@@ -1,6 +1,7 @@
-import threading
 import socket
 import struct
+
+from threading import Thread
 
 class Beacon:
     discover_string = b'BP_MGR_DISCOVER'
@@ -15,7 +16,7 @@ class Beacon:
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
         if self.running:
             raise Exception("Tried to start beacon twice.")
-        self.thread = threading.Thread(target=self.__run_beacon, args=(multicast_address, multicast_port,))
+        self.thread = Thread(target=self.__run_beacon, args=(multicast_address, multicast_port,))
         self.thread.start()
         self.running = True
 

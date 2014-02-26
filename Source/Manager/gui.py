@@ -6,9 +6,8 @@ from tkinter.ttk import *
 import zmq
 from datetime import datetime
 
-import threading
-
 from operator import itemgetter
+from threading import Thread, Event
 from time import time
 from multiprocessing import cpu_count
 
@@ -313,8 +312,8 @@ class SettingsFrame(LabelFrame):
         self.stop_but.grid(row=3, column=1, sticky=E+W)
 
 class CommandBrowser(PanedWindow):
-    columns = ({'cid' : "#0"           , 'text' : "Input Files", 'minwidth' : 250, 'anchor' : W },
-               {'cid' : "TimeCompleted", 'text' : "Time Completed", 'minwidth' : 100, 'anchor' : W },)
+    columns = ({'cid' : "#0"   , 'text' : "Commands", 'minwidth' : 250, 'anchor' : W },
+               {'cid' : "RowId", 'text' : "Row Id"  , 'minwidth' :  20, 'anchor' : CENTER },)
 
     def __init__(self, parent, ui_data, *args, **kw):
         PanedWindow.__init__(self, parent, orient=HORIZONTAL)
@@ -344,13 +343,12 @@ class CommandBrowser(PanedWindow):
         if not hasattr(self.ui_data, 'command_info'):
             return
 
-        for index, (input_files, time, tasks) in enumerate(self.ui_data.command_info):
+        for index, (input_files, row_id) in enumerate(self.ui_data.command_info):
             iid = self.idmap.get(index)
             if iid is None:
-                iid = self.tv.insert('', 'end', text=input_files, values=(datetime.fromtimestamp(time).strftime("%a %H:%M:%S.%f"),))
+                # datetime.fromtimestamp(time).strftime("%a %H:%M:%S.%f")
+                iid = self.tv.insert('', 'end', text=input_files, values=(row_id,))
                 self.idmap[index] = iid
-                for task in tasks:
-                    self.tv.insert(iid, 'end', text=task.source, values=())
 
 class DBManagerApp(Tk):
     state_stopped = 0
@@ -363,7 +361,7 @@ class DBManagerApp(Tk):
         self.port = port
         self.running = False
         self.initialize()
-        self.refresh_event = threading.Event()
+        self.refresh_event = Event()
         self.refresh_event.clear()
         self.__periodic_refresh()
 
@@ -371,7 +369,7 @@ class DBManagerApp(Tk):
         if self.refresh_event.is_set():
             self.refresh()
             self.refresh_event.clear()
-        self.after(100, self.__periodic_refresh)
+        self.after(250, self.__periodic_refresh)
 
     def initialize(self):
         self.columnconfigure(0, weight=1)
@@ -454,7 +452,7 @@ class DBManagerApp(Tk):
         
         self.task_processor = TaskProcessor(self.nodes, port, threads,
             self.ui_data)
-        self.thread = threading.Thread(target=self.__run_task_processor)
+        self.thread = Thread(target=self.__run_task_processor)
         self.thread.start()
         self.set_running(True)
 

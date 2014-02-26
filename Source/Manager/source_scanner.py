@@ -2,14 +2,14 @@ from Common import SimpleTimer
 
 import preprocessing
 import os
-import queue
-import threading
 import cProfile
 import pstats
 
 from collections import defaultdict
 from multiprocessing import cpu_count
+from queue import Queue, Empty
 from socket import getfqdn
+from threading import Thread
 from time import time
 
 def collect_headers(preprocessor, filename, includes, sysincludes, defines, ignored_headers=[]):
@@ -56,13 +56,13 @@ class SourceScanner:
     def __init__(self, notify, thread_count=cpu_count() + 1):
         preprocessing.clear_content_cache()
         self.cache = preprocessing.Cache()
-        self.in_queue = queue.Queue()
-        self.out_queue = queue.Queue()
+        self.in_queue = Queue()
+        self.out_queue = Queue()
         self.closing = False
         self.threads = set()
         self.stats = pstats.Stats()
         for i in range(thread_count):
-            thread = threading.Thread(target=self.__process_task_worker, args=(notify, self.stats))
+            thread = Thread(target=self.__process_task_worker, args=(notify, self.stats))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
@@ -83,7 +83,7 @@ class SourceScanner:
     def completed_task(self):
         try:
             return self.out_queue.get(block=False)
-        except queue.Empty:
+        except Empty:
             return None
 
     def __process_task_worker(self, notify, stats):
@@ -100,7 +100,7 @@ class SourceScanner:
                 task.note_time('preprocessed')
                 # Synchronized by GIL.
                 notify(task)
-            except queue.Empty:
+            except Empty:
                 if self.closing:
                     #profile.disable()
                     #stats.add(profile)

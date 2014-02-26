@@ -73,13 +73,12 @@ class Task:
             self.command_processor.task_completed(self, session.retcode,
                 session.stdout, session.stderr)
 
-
     def get_info(self):
         assert not self.sessions_running
         assert self.completed_by_session is not None
         return {
             'source' : self.source,
-            'pch_file' : self.pch_file,
+            'pch_file' : self.pch_file[0] if self.pch_file else None,
             'sessions' : list(session.get_info() for session in
                 self.sessions_finished)
         }

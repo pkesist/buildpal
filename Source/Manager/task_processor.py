@@ -184,7 +184,7 @@ class TaskProcessor:
         self.source_scanner = SourceScanner(self.node_manager.task_ready,
             self.n_pp_threads)
 
-        handle, db_file = mkstemp(prefix='cmd', suffix='.db')
+        handle, db_file = mkstemp(prefix='buildpal_cmd', suffix='.db')
         os.close(handle)
         self.database = Database(db_file)
         with self.database.get_connection() as conn:

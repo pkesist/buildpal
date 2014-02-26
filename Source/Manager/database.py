@@ -28,6 +28,11 @@ class Database:
             @classmethod
             def from_db(cls, data):
                 return type(data)
+
+            @classmethod
+            def db_type(cls):
+                return 'INTEGER'
+
         return ConvertEnum
 
     session_table = [
@@ -37,18 +42,27 @@ class Database:
         {'col_name': 'port'     , 'col_type': 'TEXT'   , 'null': False},
         {'col_name': 'started'  , 'col_type': 'REAL'   , 'null': False},
         {'col_name': 'completed', 'col_type': 'REAL'   , 'null': False},
-        {'col_name': 'result'   , 'col_type': 'INTEGER', 'null': False,
-            'converter': convert_enum(SessionResult)}]
+        {'col_name': 'result'   , 'converter': convert_enum(SessionResult),
+            'null': False}]
 
     @classmethod
     def desc_for_table(cls, table_name):
         return cls.__dict__[table_name + '_table']
 
     def __init__(self, db_file=None):
+        self.cleanup = True
         if db_file is None:
             self.db_file = ':memory:'
+            self.cleanup = False
         else:
             self.db_file = db_file
+            try:
+                os.remove(self.db_file)
+            except FileNotFoundError:
+                pass
+
+    def close(self):
+        if self.cleanup:
             try:
                 os.remove(self.db_file)
             except FileNotFoundError:
@@ -58,7 +72,11 @@ class Database:
         return sqlite3.connect(self.db_file)
 
     def create_structure(self, conn):
-        def col_desc_to_string(col_name, col_type, null, ref=None, converter="currently unused"):
+        def col_desc_to_string(col_name, null, ref=None, col_type=None, converter=None):
+            # Either column type or coverter must be specified.
+            assert (col_type is None) != (converter is None)
+            if converter is not None:
+                col_type = converter.db_type()
             null = '' if null else ' NOT NULL'
             ref = 'FOREIGN KEY({}) REFERENCES {}({})'.format(col_name, *ref) if ref else None
             return '{} {}{}'.format(col_name, col_type, null), ref

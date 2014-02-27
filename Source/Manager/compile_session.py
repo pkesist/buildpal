@@ -244,7 +244,7 @@ class CompileSession:
         assert self.state == self.STATE_FINISH
         assert self.result is not None
         return {
-            "hostname" : self.node.node_dict()['address'],
+            "hostname" : self.node.node_dict()['hostname'],
             "port" : self.node.node_dict()['port'],
             "started" : self.time_started,
             "completed" : self.time_completed,

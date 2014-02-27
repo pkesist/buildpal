@@ -311,6 +311,36 @@ class SettingsFrame(LabelFrame):
         self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
         self.stop_but.grid(row=3, column=1, sticky=E+W)
 
+class CommandInfo(Frame):
+    columns = ({'cid' : '#0'       , 'text': 'Source File' , 'minwidth': 250, 'anchor' : W},
+               {'cid' : 'Node'     , 'text': 'Node'        , 'minwidth': 30 , 'anchor' : W},
+               {'cid' : 'Started'  , 'text': 'Started at'  , 'minwidth': 60 , 'anchor' : CENTER},
+               {'cid' : 'Completed', 'text': 'Completed at', 'minwidth': 60 , 'anchor' : CENTER},
+               {'cid' : 'Result'   , 'text': 'Result'      , 'minwidth': 20 , 'anchor' : CENTER})
+
+    def __init__(self, parent, *args, **kw):
+        Frame.__init__(self, parent, *args, **kw)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.task_list = MyTreeView(self, self.columns)
+        self.task_list.grid(row=0, column=0, sticky=N+S+E+W)
+
+    def refresh(self, command_data):
+        children = self.task_list.get_children()
+        if children:
+            self.task_list.delete(children)
+        if command_data is None:
+            return
+        def format_time(time_real):
+            return datetime.fromtimestamp(time_real).strftime("%a %H:%M:%S.%f")
+
+        for task in command_data['tasks']:
+            task_id = self.task_list.insert('', 'end', text=task['source'], open=True)
+            for session in task['sessions']:
+                self.task_list.insert(task_id, 'end', text='', values=(
+                session['hostname'], format_time(session['started']),
+                format_time(session['completed']), session['result'].name))
+
 class CommandBrowser(PanedWindow):
     columns = ({'cid' : "#0"   , 'text' : "Commands", 'minwidth' : 250, 'anchor' : W },
                {'cid' : "RowId", 'text' : "Row Id"  , 'minwidth' :  20, 'anchor' : CENTER },)
@@ -322,33 +352,55 @@ class CommandBrowser(PanedWindow):
         frame.columnconfigure(0, weight=1)
         sb = Scrollbar(frame)
         sb.grid(row=0, column=1, sticky=N+S)
-        self.tv = MyTreeView(frame, self.columns, *args, **kw)
+        self.tv = MyTreeView(frame, self.columns)
         self.tv.grid(row=0, column=0, sticky=N+S+W+E)
         self.tv['yscrollcommand'] = sb.set
+        self.tv.bind('<<TreeviewSelect>>', self.command_selected)
         sb.config(command=self.tv.yview)
         self.add(frame)
+        self.displayed_rows = {}
+
+        self.db = None
+        self.db_conn = None
 
         self.ui_data = ui_data
-        self.idmap = {}
+        self.row_to_db = {}
+        self.db_to_row = {}
 
-        command_info = Frame(self)
-        command_info.grid(row=0, column=2, sticky=N+S+W+E)
-        self.add(command_info)
+        self.command_info = CommandInfo(self)
+        self.add(self.command_info)
 
-        task_info = Frame(self)
-        task_info.grid(row=0, column=2, sticky=N+S+W+E)
-        self.add(task_info)
+    def command_selected(self, event):
+        selection = self.tv.selection()
+        if not selection:
+            data = None
+        else:
+            row_id = self.row_to_db[selection[0]]
+            assert self.db_conn is not None
+            data = self.db.get_command(self.db_conn, row_id)
+        self.command_info.refresh(data)
 
     def refresh(self):
-        if not hasattr(self.ui_data, 'command_info'):
+        if not hasattr(self.ui_data, 'command_db'):
             return
+        
+        if self.db_conn is None:
+            if self.db is None:
+                self.db = self.ui_data.command_db
+            self.db_conn = self.db.get_connection()
+            self.db_conn.execute("PRAGMA read_uncommitted = 1")
 
-        for index, (input_files, row_id) in enumerate(self.ui_data.command_info):
-            iid = self.idmap.get(index)
-            if iid is None:
-                # datetime.fromtimestamp(time).strftime("%a %H:%M:%S.%f")
-                iid = self.tv.insert('', 'end', text=input_files, values=(row_id,))
-                self.idmap[index] = iid
+        if self.db_to_row:
+            last_row_id = max(self.db_to_row.keys())
+        else:
+            last_row_id = 0
+        cursor = self.db_conn.execute(
+            "SELECT rowid, command FROM command WHERE rowid > ?",
+            (last_row_id,))
+        for rowid, command in cursor:
+            iid = self.tv.insert('', 'end', text=command, values=(rowid,))
+            self.row_to_db[iid] = rowid
+            self.db_to_row[rowid] = iid
 
 class DBManagerApp(Tk):
     state_stopped = 0

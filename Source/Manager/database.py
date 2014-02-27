@@ -3,7 +3,7 @@ import sqlite3
 
 from .compile_session import SessionResult
 
-from queue import Queue
+from queue import Queue, Empty
 from threading import Thread
 
 class Database:
@@ -60,6 +60,7 @@ class Database:
                 os.remove(self.db_file)
             except FileNotFoundError:
                 pass
+        sqlite3.enable_shared_cache(True)
 
     def close(self):
         if self.cleanup:
@@ -95,6 +96,8 @@ class Database:
                 refs = ", " + refs
             cmd = "CREATE TABLE {}({}{})".format(table_name, descs, refs)
             conn.execute(cmd)
+        conn.execute("PRAGMA jorunal_mode=OFF")
+        conn.execute("PRAGMA synchronous=OFF")
 
     def __insert(self, conn, table, data, **extra_data):
         table_desc = self.desc_for_table(table)
@@ -169,14 +172,23 @@ class DatabaseInserter:
 
     def __worker_thread(self):
         with self.database.get_connection() as conn:
+            changed = False
             while True:
-                what = self.queue.get()
-                if what is self.Quit:
-                    break
-                command_info, on_completion = what
-                command_id = self.database.insert_command(conn, command_info)
-                conn.commit()
-                on_completion(command_id)
+                try:
+                    what = self.queue.get(timeout=2)
+                    if what is self.Quit:
+                        if changed:
+                            conn.commit()
+                        return
+                    command_info, on_completion = what
+                    command_id = self.database.insert_command(conn, command_info)
+                    changed = True
+                    on_completion(command_id)
+                except Empty:
+                    if changed:
+                        conn.commit()
+                        changed = False
+
 
     def async_insert(self, command_info, on_completion):
         self.queue.put((command_info, on_completion))

@@ -34,27 +34,28 @@ class CompileSession:
         def send_multipart(self, data, copy=False):
             self.socket.send_multipart([self.session_id] + list(data), copy=copy)
 
-    def __init__(self, task, server_conn, node, compressor):
+    def __init__(self, task, socket, node, compressor):
         self.state = self.STATE_START
         self.task = task
         self.node = node
         self.task.register_session(self)
         self.compiler = task.compiler()
-        self.server_conn = server_conn
+        self.socket = socket
         self.cancelled = False
         self.compressor = compressor
         self.result = None
         self.local_id = uuid4().bytes
         self.remote_id = None
+        self.sender = None
 
     def start(self):
         assert self.state == self.STATE_START
-        self.server_conn.send_multipart([b'NEW_SESSION', self.local_id, b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
+        self.socket.send_multipart([b'NEW_SESSION', self.local_id, b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
         self.time_started = time()
 
     def cancel(self):
-        if not self.cancelled:
+        if self.sender:
             self.sender.send_multipart([b'CANCEL_SESSION'])
         self.cancelled = True
 
@@ -68,11 +69,11 @@ class CompileSession:
         return self.node.timer()
 
     def got_data_from_server(self, msg):
-        if msg[1] == b'SESSION_CANCELLED':
+        if msg[0] == b'SESSION_CANCELLED':
             assert self.cancelled
             self.__complete(SessionResult.cancelled)
             return True
-        elif msg[1] == b'TIMED_OUT':
+        elif msg[0] == b'TIMED_OUT':
             self.__complete(SessionResult.timed_out)
             return True
 
@@ -87,7 +88,9 @@ class CompileSession:
             assert len(msg) == 3 and msg[1] == b'MISSING_FILES'
             assert self.remote_id is None
             self.remote_id = msg[0].tobytes()
-            self.sender = self.Sender(self.server_conn, self.remote_id)
+            self.sender = self.Sender(self.socket, self.remote_id)
+            if self.cancelled:
+                self.sender.send_multipart([b'CANCEL_SESSION'])
             missing_files, need_compiler, need_pch = pickle.loads(msg[2])
             new_files, src_loc = self.task_files_bundle(missing_files)
             self.sender.send_multipart([b'TASK_FILES',

@@ -22,7 +22,6 @@ class NodeManager:
         self.input_tasks = Queue()
         self.node_info = node_info
         self.all_sockets = defaultdict(list)
-        self.sockets_ready = defaultdict(list)
         self.tasks_running = defaultdict(list)
         self.sessions = {}
         self.unassigned_tasks = []
@@ -84,7 +83,6 @@ class NodeManager:
         except zmq.ZMQError:
             print("Failed to connect to '{}'".format(node_address))
             raise Exception("Invalid node")
-        self.sockets_ready[node].append(socket)
         self.all_sockets[node].append(socket)
         return socket
             
@@ -143,11 +141,11 @@ class NodeManager:
             node = self.__best_node()
         if not node:
             return None
-        node_sockets = self.sockets_ready[node]
-        if len(node_sockets) <= 1:
+        node_sockets = self.all_sockets[node]
+        if not node_sockets:
             self.__connect_to_node(node)
         assert node_sockets
-        return node_sockets.pop(0), node
+        return node_sockets[0], node
 
     def __handle_server_socket(self, socket, msg):
         session_id, *msg = msg
@@ -159,7 +157,6 @@ class NodeManager:
         if not session.got_data_from_server(msg):
             return
         del self.sessions[session_id]
-        self.sockets_ready[session.node].append(socket)
         self.tasks_running[session.node].remove(session.task)
         self.__steal_tasks(session.node)
         # In case we got a server failure, reschedule the task.

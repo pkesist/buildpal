@@ -25,6 +25,14 @@ class CompileSession:
     STATE_WAIT_FOR_SERVER_RESPONSE = 3
     STATE_FINISH = 4
 
+    class Sender:
+        def __init__(self, socket, session_id):
+            self.session_id = session_id
+            self.socket = socket
+
+        def send_multipart(self, data, copy=False):
+            self.socket.send_multipart([self.session_id] + list(data), copy=copy)
+
     def __init__(self, task, server_conn, node, compressor):
         self.state = self.STATE_START
         self.task = task
@@ -35,16 +43,17 @@ class CompileSession:
         self.cancelled = False
         self.compressor = compressor
         self.result = None
+        self.session_id = None
 
     def start(self):
         assert self.state == self.STATE_START
-        self.server_conn.send_multipart([b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
+        self.server_conn.send_multipart([b'NEW_SESSION', b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
         self.time_started = time()
 
     def cancel(self):
         if not self.cancelled:
-            self.server_conn.send_multipart([b'CANCEL_SESSION'])
+            self.server_conn.send_multipart([self.session_id, b'CANCEL_SESSION'], copy=False)
         self.cancelled = True
 
     def __complete(self, result):
@@ -57,13 +66,24 @@ class CompileSession:
         return self.node.timer()
 
     def got_data_from_server(self, msg):
-        if msg[0] == b'SESSION_CANCELLED':
-            assert self.cancelled
-            self.__complete(SessionResult.cancelled)
-            return True
-        elif msg[0] == b'TIMED_OUT':
+        if msg[1] == b'SESSION_CANCELLED':
+            # TODO: Ugly.
+            if self.session_id is not None and self.session_id == msg[0]:
+                assert self.cancelled
+                self.__complete(SessionResult.cancelled)
+                return True
+            else:
+                return False
+        elif msg[1] == b'TIMED_OUT':
             self.__complete(SessionResult.timed_out)
             return True
+
+        session_id, *msg = msg
+        if self.session_id is None:
+            self.session_id = session_id
+        else:
+            assert self.session_id == session_id
+
         # It is possible that cancellation arrived too late,
         # that the server already sent the final message and
         # unregistered its session. In that case we will never
@@ -71,11 +91,12 @@ class CompileSession:
 
         # This state requires a response, so the session must be still alive
         # on the server.
+        sender = self.Sender(self.server_conn, self.session_id)
         if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 2 and msg[0] == b'MISSING_FILES'
             missing_files, need_compiler, need_pch = pickle.loads(msg[1])
             new_files, src_loc = self.task_files_bundle(missing_files)
-            self.server_conn.send_multipart([b'TASK_FILES',
+            sender.send_multipart([b'TASK_FILES',
                 pickle.dumps(new_files), src_loc.encode()])
             if need_compiler:
                 zip_data = BytesIO()
@@ -83,14 +104,14 @@ class CompileSession:
                     for path, file in self.task.compiler_files:
                         zip_file.write(path.decode(), file.decode())
                 zip_data.seek(0)
-                send_file(self.server_conn.send_multipart, zip_data)
+                send_file(sender.send_multipart, zip_data)
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None
                 def send_pch_file(fileobj):
-                    send_file(self.server_conn.send_multipart, fileobj, copy=False)
+                    send_file(sender.send_multipart, fileobj, copy=False)
                 pch_file = os.path.join(os.getcwd(), self.task.pch_file[0])
-                self.compressor.compress(pch_file, send_pch_file)
+                self.compressor.compress_file(pch_file, send_pch_file)
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
 
         elif self.state == self.STATE_WAIT_FOR_SERVER_RESPONSE:
@@ -110,7 +131,7 @@ class CompileSession:
                     # We could not have been cancelled if we completed the task.
                     assert not self.cancelled
                     if self.retcode == 0:
-                        self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
+                        sender.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
                         self.obj_desc = open(self.task.output, "wb")
                         self.obj_decompressor = zlib.decompressobj()
                         self.state = self.STATE_RECEIVE_RESULT_FILE
@@ -120,7 +141,7 @@ class CompileSession:
                         return True
                 else:
                     if self.retcode == 0:
-                        self.server_conn.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
+                        sender.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
                     self.__complete(SessionResult.too_late)
                     return True
 

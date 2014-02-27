@@ -14,7 +14,7 @@ class Compressor:
         self.compressed_file_data = {}
         self.waiters = defaultdict(list)
 
-    def compress(self, file, on_completion):
+    def compress_file(self, file, on_completion):
         self.compressed_files_lock.acquire()
         if file in self.compressed_files:
             self.compressed_files_lock.release()
@@ -23,14 +23,14 @@ class Compressor:
             try:
                 if file not in self.waiters:
                     event = self.poller.create_event(
-                        lambda ev : self.__compression_completed(file, ev))
+                        lambda ev : self.__file_compression_completed(file, ev))
                     self.executor.submit(self.__do_compress, file
                         ).add_done_callback(lambda f : event())
                 self.waiters.setdefault(file, []).append(on_completion)
             finally:
                 self.compressed_files_lock.release()
 
-    def __compression_completed(self, file, event):
+    def __file_compression_completed(self, file, event):
         event.close()
         for on_completion in self.waiters[file]:
             on_completion(BytesIO(self.compressed_file_data[file]))

@@ -8,6 +8,7 @@ from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, current_thread
 from subprocess import list2cmdline
+from uuid import uuid4
 
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
@@ -144,12 +145,17 @@ class CompileSession:
         can_be_cancelled = False
 
         @classmethod
-        def cancel(cls, session):
-            pass
+        def cancel(cls, session): pass
+
+        @classmethod
+        def enter_state(cls, session): pass
+
+        @classmethod
+        def exit_state(cls, session): pass
 
     class StateGetTask(SessionState):
         @classmethod
-        def process_msg(cls, session, msg):
+        def process_msg(cls, session, msg, conn_id):
             assert len(msg) == 2
             assert msg[0] == b'SERVER_TASK'
             session.task = pickle.loads(msg[1])
@@ -170,15 +176,15 @@ class CompileSession:
                 session.pch_file, session.pch_required = \
                     session.runner.pch_repository().register_file(
                         session.task['pch_file'])
-            with session.sender() as sender:
+            with session.sender(conn_id) as sender:
                 sender.send_multipart([b'MISSING_FILES', pickle.dumps(
                     (missing_files, session.compiler_required,
                     session.pch_required))])
-            session.state = CompileSession.StateDownloadMissingHeaders
+            session.change_state(CompileSession.StateDownloadMissingHeaders)
 
     class StateDownloadMissingHeaders(SessionState):
         @classmethod
-        def process_msg(cls, session, msg):
+        def process_msg(cls, session, msg, conn_id):
             assert msg[0] == b'TASK_FILES'
             fqdn = session.task['fqdn']
             new_files = pickle.loads(msg[1])
@@ -187,16 +193,16 @@ class CompileSession:
             session.include_dirs_future = session.prepare_include_dirs(
                 session.runner.misc_thread_pool(), fqdn, new_files)
             if session.compiler_required:
-                session.state = CompileSession.StateDownloadingCompiler
+                session.change_state(CompileSession.StateDownloadingCompiler)
                 session.compiler_data = BytesIO()
             elif session.pch_required:
-                session.download_pch()
+                session.change_state(session.StateDownloadingPCH)
             else:
-                session.compile()
+                session.compile(conn_id)
 
     class StateDownloadingCompiler(SessionState):
         @classmethod
-        def process_msg(cls, session, msg):
+        def process_msg(cls, session, msg, conn_id):
             more, data = msg
             session.compiler_data.write(data)
             if more == b'\x00':
@@ -210,22 +216,34 @@ class CompileSession:
                 session.runner.compiler_repository().set_compiler_ready(
                     session.compiler_id())
                 if session.pch_required:
-                    session.download_pch()
+                    session.change_state(session.StateDownloadingPCH)
                 else:
-                    session.compile()
+                    session.compile(conn_id)
 
     class StateDownloadingPCH(SessionState):
         @classmethod
-        def process_msg(cls, session, msg):
+        def enter_state(cls, session):
+            handle = os.open(session.pch_file, os.O_CREAT | os.O_WRONLY |
+                os.O_NOINHERIT)
+            session.pch_timer = SimpleTimer()
+            session.pch_desc = os.fdopen(handle, 'wb')
+            session.pch_decompressor = zlib.decompressobj()
+
+        @classmethod
+        def process_msg(cls, session, msg, conn_id):
             more, data = msg
             session.pch_desc.write(session.pch_decompressor.decompress(data))
             if more == b'\x00':
                 session.pch_desc.write(session.pch_decompressor.flush())
-                session.pch_desc.close()
-                del session.pch_desc
                 session.times['upload precompiled header'] = session.pch_timer.get()
                 session.runner.pch_repository().file_completed(session.task['pch_file'])
-                session.compile()
+                session.compile(conn_id)
+
+        @classmethod
+        def exit_state(cls, session):
+            session.pch_desc.close()
+            del session.pch_desc
+            del session.pch_decompressor
 
     class StateRunningCompiler(SessionState):
         can_be_cancelled = True
@@ -239,12 +257,12 @@ class CompileSession:
         can_be_cancelled = True
 
         @classmethod
-        def process_msg(cls, session, msg):
+        def process_msg(cls, session, msg, conn_id):
             tag, verdict = msg
             assert tag == b'SEND_CONFIRMATION'
             if verdict == b'\x01':
-                session.state = CompileSession.StateUploadingFile
-                session.send_object_file(session.runner.misc_thread_pool())
+                session.change_state(CompileSession.StateUploadingFile)
+                session.send_object_file(session.runner.misc_thread_pool(), conn_id)
             else:
                 session.session_done()
 
@@ -258,16 +276,18 @@ class CompileSession:
             return runner.submit(func, self, *args, **kwds)
         return wrapper
 
-    def __init__(self, runner, socket, id):
-        self.id = id
+    def __init__(self, runner, socket):
+        self.conn_id = None
+        self.session_id = uuid4().bytes
         self.socket = socket
         self.runner = runner
-        self.state = self.StateGetTask
         self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
         self.times = {}
         self.compiler_state_lock = Lock()
         self.completed = False
         self.cancel_pending = False
+        self.__state = None
+        self.change_state(self.StateGetTask)
 
     def __del__(self):
         try:
@@ -277,7 +297,7 @@ class CompileSession:
             pass
 
     class Sender:
-        def __init__(self, id, socket=None):
+        def __init__(self, conn_id, session_id, socket=None):
             if not socket:
                 self.socket = create_socket(zmq_ctx, zmq.DEALER)
                 self.socket.connect('inproc://sessions_socket')
@@ -285,16 +305,11 @@ class CompileSession:
             else:
                 self.socket = socket
                 self.close_socket = False
-            self.id = id
-
-        def send(self, data, copy=False):
-            self.socket.send_multipart([self.id, data], copy=copy)
-
-        def send_pyobj(self, data, copy=False):
-            self.socket.send_multipart([self.id, pickle.dumps(data)], copy=copy)
+            self.conn_id = conn_id
+            self.session_id = session_id
 
         def send_multipart(self, data, copy=False):
-            self.socket.send_multipart([self.id] + list(data), copy=copy)
+            self.socket.send_multipart([self.conn_id, self.session_id] + list(data), copy=copy)
 
         def __enter__(self):
             return self
@@ -306,6 +321,16 @@ class CompileSession:
             if self.close_socket:
                 self.socket.close()
 
+    @property
+    def state(self):
+        return self.__state
+
+    def change_state(self, state):
+        if self.__state is not None:
+            self.__state.exit_state(self)
+        self.__state = state
+        self.__state.enter_state(self)
+
     def compiler_id(self):
         return self.task['compiler_info']['id']
 
@@ -314,34 +339,34 @@ class CompileSession:
             self.runner.compiler_repository().compiler_dir(self.compiler_id()),
             self.task['compiler_info']['executable'])
 
-    def sender(self):
+    def sender(self, conn_id):
         from_foreign_thread = current_thread() != self.runner.main_thread
-        return self.Sender(self.id, None if from_foreign_thread else self.socket)
+        return self.Sender(conn_id, self.session_id, None if from_foreign_thread else self.socket)
 
-    def compile(self):
-        self.state = self.StateRunningCompiler
+    def compile(self, conn_id):
+        self.change_state(self.StateRunningCompiler)
 
         self.cancel_selfdestruct()
         if self.task['pch_file']:
             self.runner.pch_repository().when_pch_is_available(
-                    self.task['pch_file'], self.__check_compiler_files)
+                    self.task['pch_file'], lambda : self.__check_compiler_files(conn_id))
         else:
-            self.__check_compiler_files()
+            self.__check_compiler_files(conn_id)
 
-    def __check_compiler_files(self):
+    def __check_compiler_files(self, conn_id):
         self.runner.compiler_repository().when_compiler_is_available(
-            self.compiler_id(), self.__run_compiler)
+            self.compiler_id(), lambda : self.__run_compiler(conn_id))
 
-    def __run_compiler(self):
+    def __run_compiler(self, conn_id):
         # Before we actually run the expensive compile operation, make sure that
         # we have not been cancelled yet.
         if self.cancel_pending:
-            self.cancel_session()
+            self.cancel_session(conn_id)
             return
         self.runner.compile_thread_pool().submit(
-            self.__async_run_compiler, time())
+            self.__async_run_compiler, conn_id, time())
 
-    def __async_run_compiler(self, start_time):
+    def __async_run_compiler(self, conn_id, start_time):
         self.times['waiting for job slot'] = time() - start_time
         try:
             obj_handle, obj_name= tempfile.mkstemp(
@@ -396,7 +421,7 @@ class CompileSession:
         except Exception as e:
             with self.compiler_state_lock:
                 if self.state == self.StateRunningCompiler:
-                    self.state = self.StateFailed
+                    self.change_state(self.StateFailed)
                     tb = StringIO()
                     tb.write("============================\n")
                     tb.write("     SERVER TRACEBACK\n")
@@ -404,7 +429,7 @@ class CompileSession:
                     traceback.print_exc(file=tb)
                     tb.write("============================\n")
                     tb.seek(0)
-                    with self.sender() as sender:
+                    with self.sender(conn_id) as sender:
                         sender.send_multipart([b'SERVER_FAILED',
                             tb.read().encode()])
                     self.session_done()
@@ -413,59 +438,52 @@ class CompileSession:
         else:
             with self.compiler_state_lock:
                 if self.state == self.StateRunningCompiler:
-                    with self.sender() as sender:
+                    with self.sender(conn_id) as sender:
                         if retcode == 0:
-                            self.state = self.StateWaitForConfirmation
+                            self.change_state(self.StateWaitForConfirmation)
                             self.object_file = obj_name
                         sender.send_multipart([b'SERVER_DONE', pickle.dumps(
                             (retcode, stdout, stderr, self.times))])
                         if retcode == 0:
-                            self.reschedule_selfdestruct()
+                            self.reschedule_selfdestruct(conn_id)
                         else:
                             self.session_done()
                 else:
                     assert self.state == self.StateCancelled
 
-    def session_done(self, from_selfdestruct=False):
+    def session_done(self, from_selfdestruct=False, conn_id=None):
         if from_selfdestruct and self.completed:
             return
         assert not self.completed
         if from_selfdestruct:
-            with self.sender() as sender:
+            assert conn_id
+            with self.sender(conn_id) as sender:
                 sender.send_multipart([b'TIMED_OUT'])
         else:
             self.cancel_selfdestruct()
+        self.runner.terminate(self.session_id)
         self.completed = True
-        self.runner.terminate(self.id)
 
-    def reschedule_selfdestruct(self):
+    def reschedule_selfdestruct(self, conn_id):
         self.cancel_selfdestruct()
         self.selfdestruct = self.runner.scheduler().enter(60, 1,
-            self.session_done, (True,))
+            self.session_done, (True, conn_id))
 
     def cancel_selfdestruct(self):
         if hasattr(self, 'selfdestruct'):
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
-    def download_pch(self):
-        self.state = self.StateDownloadingPCH
-        handle = os.open(self.pch_file, os.O_CREAT | os.O_WRONLY |
-            os.O_NOINHERIT)
-        self.pch_timer = SimpleTimer()
-        self.pch_desc = os.fdopen(handle, 'wb')
-        self.pch_decompressor = zlib.decompressobj()
-
     @async
-    def send_object_file(self):
+    def send_object_file(self, conn_id):
         fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
             os.O_NOINHERIT)
-        with os.fdopen(fh, 'rb') as obj, self.sender() as sender:
+        with os.fdopen(fh, 'rb') as obj, self.sender(conn_id) as sender:
             send_compressed_file(sender.send_multipart, obj, copy=False)
         self.session_done()
         os.remove(self.object_file)
 
-    def cancel_session(self):
+    def cancel_session(self, conn_id):
         # FIXME:
         # What if session cancellation is sent when session completion
         # message is already on its way? The other side will not
@@ -473,26 +491,24 @@ class CompileSession:
         # which is reusing this sessions connection.
         # TODO: We should probably send a session id when doing this, thus
         # allowing the other side to discriminate messages.
-        with self.sender() as sender:
-            sender.send(b'SESSION_CANCELLED')
-        self.state = self.StateCancelled
+        with self.sender(conn_id) as sender:
+            sender.send_multipart([b'SESSION_CANCELLED'])
+        self.change_state(self.StateCancelled)
         self.session_done()
 
-    def process_msg(self, msg):
-        self.reschedule_selfdestruct()
+    def process_msg(self, msg, conn_id):
+        assert not self.completed
+        self.reschedule_selfdestruct(conn_id)
         if msg[0] == b'CANCEL_SESSION':
             # Special care must be taken not to send cancellation confirmation
             # too early. Once it is sent, it must be final.
             with self.compiler_state_lock:
-                if self.completed:
-                    self.cancel_selfdestruct()
-                    return
                 # If a state does not have a 'process_msg' function this means
                 # that no data will be sent while in this state. This kind of
                 # state can send cancel confirmation directly.
-                if not hasattr(self.state, 'process_msg'):
+                if self.state.can_be_cancelled and not hasattr(self.state, 'process_msg'):
                     self.state.cancel(self)
-                    self.cancel_session()
+                    self.cancel_session(conn_id)
                 else:
                 # Otherwise, state expects some data. We will wait for this data
                 # to arrive and send cancel confirmation as a reply.
@@ -503,9 +519,9 @@ class CompileSession:
             # PCH downloads. These parts are 'bigger' than this session, as some
             # other session might depend on this download.
             if self.cancel_pending and self.state.can_be_cancelled:
-                self.cancel_session()
+                self.cancel_session(conn_id)
                 return
-            self.state.process_msg(self, msg)
+            self.state.process_msg(self, msg, conn_id)
 
     @async
     def prepare_include_dirs(self, fqdn, new_files):
@@ -541,9 +557,8 @@ class CompileWorker:
     def pch_repository(self): return self.__pch_repository
     def compiler_repository(self): return self.__compiler_repository
 
-    def terminate(self, id):
-        if id in self.sessions:
-            del self.sessions[id]
+    def terminate(self, session_id):
+        del self.sessions[session_id]
 
     def run(self):
         import signal
@@ -582,16 +597,20 @@ class CompileWorker:
                 for sock, event in dict(poller.poll(1000)).items():
                     assert event == zmq.POLLIN
                     if sock is client_socket:
-                        client_id, *msg = recv_multipart(client_socket)
+                        conn_id, *msg = recv_multipart(client_socket)
                         if len(msg) == 1 and msg[0] == b'PING':
-                            client_socket.send_multipart([client_id, b'PONG'])
+                            client_socket.send_multipart([conn_id, b'PONG'])
                             continue
-                        elif not client_id in self.sessions:
-                            session = CompileSession(self, client_socket, client_id)
-                            self.sessions[client_id] = session
                         else:
-                            session = self.sessions[client_id]
-                        session.process_msg(msg)
+                            session_id, *msg = msg
+                            if session_id == b'NEW_SESSION':
+                                session = CompileSession(self, client_socket)
+                                self.sessions[session.session_id] = session
+                            else:
+                                session = self.sessions.get(session_id)
+                        if session:
+                            session.process_msg(msg, conn_id)
+                            session.last_conn_id = conn_id
                     else:
                         assert sock is session_socket
                         client_socket.send_multipart(recv_multipart(session_socket))

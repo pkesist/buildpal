@@ -165,5 +165,5 @@ class NodeManager:
         if session.result == SessionResult.failure and \
             not session.task.is_completed() and \
             len(session.task.sessions_running) == 1:
-                self.schedule_task(task)
+                self.schedule_task(session.task)
         session.task.session_completed(session)

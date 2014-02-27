@@ -155,21 +155,14 @@ class ZMQSelectPoller(PollerBase):
             self.event_socket = create_socket(self.poller.zmq_ctx, zmq.PULL)
             self.event_socket.bind(self.address)
             poller.register(self.event_socket, lambda socket, msgs : handler(self), True)
-            self.notify_sockets = {}
 
         def __call__(self):
-            thread_id = threading.get_ident()
-            notify_socket = self.notify_sockets.get(thread_id)
-            if notify_socket is None:
-                notify_socket = create_socket(self.poller.zmq_ctx, zmq.PUSH)
-                notify_socket.connect(self.address)
-                self.notify_sockets[thread_id] = notify_socket
+            notify_socket = create_socket(self.poller.zmq_ctx, zmq.PUSH)
+            notify_socket.connect(self.address)
             notify_socket.send(b'x')
+            notify_socket.close()
 
         def close(self, from_poller=False):
-            for thread_id, notify_socket in self.notify_sockets.items():
-                notify_socket.close()
-            self.notify_sockets.clear()
             self.poller.unregister(self.event_socket)
             self.event_socket.close()
             if not from_poller:

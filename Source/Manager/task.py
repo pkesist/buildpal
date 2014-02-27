@@ -61,6 +61,8 @@ class Task:
                 session.time_completed - session.time_started)
             session.node.add_total_time(
                 session.time_completed - session.time_started)
+            self.session_result = (session.retcode, session.stdout,
+                session.stderr)
         elif session.result == SessionResult.failure:
             session.node.add_tasks_failed()
         elif session.result == SessionResult.cancelled:
@@ -70,8 +72,7 @@ class Task:
         elif session.result == SessionResult.too_late:
             session.node.add_tasks_too_late()
         if not self.sessions_running:
-            self.command_processor.task_completed(self, session.retcode,
-                session.stdout, session.stderr)
+            self.command_processor.task_completed(self, *self.session_result)
 
     def get_info(self):
         assert not self.sessions_running

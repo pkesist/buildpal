@@ -122,7 +122,8 @@ class CommandProcessor:
         stderr = ''
         if self.tasks == self.completed_tasks.keys():
             def update_ui(command_id):
-                self.__ui_data.command_info.append((", ".join(self.__options.input_files()), command_id))
+                self.__ui_data.command_info.append(
+                    (", ".join(self.__options.input_files()), command_id))
             self.__database_inserter.async_insert(self.get_info(), update_ui)
             self.postprocess()
 

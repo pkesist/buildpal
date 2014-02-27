@@ -177,8 +177,8 @@ class CompileSession:
                     session.runner.pch_repository().register_file(
                         session.task['pch_file'])
             with session.sender(conn_id) as sender:
-                sender.send_multipart([b'MISSING_FILES', pickle.dumps(
-                    (missing_files, session.compiler_required,
+                sender.send_multipart([session.local_id, b'MISSING_FILES',
+                    pickle.dumps((missing_files, session.compiler_required,
                     session.pch_required))])
             session.change_state(CompileSession.StateDownloadMissingHeaders)
 
@@ -276,9 +276,10 @@ class CompileSession:
             return runner.submit(func, self, *args, **kwds)
         return wrapper
 
-    def __init__(self, runner, socket):
+    def __init__(self, runner, socket, remote_id):
         self.conn_id = None
-        self.session_id = uuid4().bytes
+        self.local_id = uuid4().bytes
+        self.remote_id = remote_id
         self.socket = socket
         self.runner = runner
         self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
@@ -297,7 +298,7 @@ class CompileSession:
             pass
 
     class Sender:
-        def __init__(self, conn_id, session_id, socket=None):
+        def __init__(self, conn_id, remote_id, socket=None):
             if not socket:
                 self.socket = create_socket(zmq_ctx, zmq.DEALER)
                 self.socket.connect('inproc://sessions_socket')
@@ -306,10 +307,10 @@ class CompileSession:
                 self.socket = socket
                 self.close_socket = False
             self.conn_id = conn_id
-            self.session_id = session_id
+            self.remote_id = remote_id
 
         def send_multipart(self, data, copy=False):
-            self.socket.send_multipart([self.conn_id, self.session_id] + list(data), copy=copy)
+            self.socket.send_multipart([self.conn_id, self.remote_id] + list(data), copy=copy)
 
         def __enter__(self):
             return self
@@ -341,7 +342,7 @@ class CompileSession:
 
     def sender(self, conn_id):
         from_foreign_thread = current_thread() != self.runner.main_thread
-        return self.Sender(conn_id, self.session_id, None if from_foreign_thread else self.socket)
+        return self.Sender(conn_id, self.remote_id, None if from_foreign_thread else self.socket)
 
     def compile(self, conn_id):
         self.change_state(self.StateRunningCompiler)
@@ -461,7 +462,7 @@ class CompileSession:
                 sender.send_multipart([b'TIMED_OUT'])
         else:
             self.cancel_selfdestruct()
-        self.runner.terminate(self.session_id)
+        self.runner.terminate(self.local_id)
         self.completed = True
 
     def reschedule_selfdestruct(self, conn_id):
@@ -604,13 +605,13 @@ class CompileWorker:
                         else:
                             session_id, *msg = msg
                             if session_id == b'NEW_SESSION':
-                                session = CompileSession(self, client_socket)
-                                self.sessions[session.session_id] = session
+                                remote_id, *msg = msg
+                                session = CompileSession(self, client_socket, remote_id)
+                                self.sessions[session.local_id] = session
                             else:
                                 session = self.sessions.get(session_id)
                         if session:
                             session.process_msg(msg, conn_id)
-                            session.last_conn_id = conn_id
                     else:
                         assert sock is session_socket
                         client_socket.send_multipart(recv_multipart(session_socket))

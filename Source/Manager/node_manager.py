@@ -63,7 +63,7 @@ class NodeManager:
             return
         server_conn, node = result
         session = CompileSession(task, server_conn, node, self.compressor)
-        self.sessions[server_conn] = session
+        self.sessions[session.local_id] = session
         self.tasks_running[node].append(task)
         session.start()
 
@@ -150,14 +150,15 @@ class NodeManager:
         return node_sockets.pop(0), node
 
     def __handle_server_socket(self, socket, msg):
-        session = self.sessions.get(socket)
+        session_id, *msg = msg
+        session = self.sessions.get(session_id)
         if not session:
             print("Got data for non-session")
             print([m.tobytes()[:50] for m in msg])
             return
         if not session.got_data_from_server(msg):
             return
-        del self.sessions[socket]
+        del self.sessions[session_id]
         self.sockets_ready[session.node].append(socket)
         self.tasks_running[session.node].remove(session.task)
         self.__steal_tasks(session.node)

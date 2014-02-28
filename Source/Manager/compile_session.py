@@ -50,7 +50,8 @@ class CompileSession:
 
     def start(self):
         assert self.state == self.STATE_START
-        self.socket.send_multipart([b'NEW_SESSION', self.local_id, b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
+        self.socket.send_multipart([b'NEW_SESSION', self.local_id,
+            b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
         self.time_started = time()
 
@@ -188,23 +189,11 @@ class CompileSession:
         #  (dir2, a21, a22),
         #  (dir2, b21, b22),
         #
-        header_info_iter = ((dir, stuff) for dir, data in header_info for stuff in data)
-        for entry in in_filelist:
-            found = False
-            while not found:
-                try:
-                    dir, (file, relative, content, checksum) = \
-                        next(header_info_iter)
-                    if entry == (dir, file):
-                        assert not relative
-                        found = True
-                        break
-                    elif relative:
-                        break
-                except StopIteration:
-                    raise Exception("Could not find information for {}.".format(
-                        in_name))
-            assert found or relative
+        for dir, (file, relative, content, checksum) in ((dir, stuff) for
+            dir, data in header_info for stuff in data):
+            if not relative and not (dir, file) in in_filelist:
+                # Not needed.
+                continue
             depth = 0
             path_elements = file.split('/')
             # Handle '.' in include directive.
@@ -228,7 +217,7 @@ class CompileSession:
                     files['/'.join(path_elements)] = header + content
             else:
                 files[(dir, file)] = header + content
-            
+
         curr_dir = ''
         for depth in range(max_depth):
             assert relative

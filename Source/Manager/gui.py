@@ -312,11 +312,8 @@ class SettingsFrame(LabelFrame):
         self.stop_but.grid(row=3, column=1, sticky=E+W)
 
 class CommandInfo(Frame):
-    columns = ({'cid' : '#0'       , 'text': 'Source File' , 'minwidth': 250, 'anchor' : W},
-               {'cid' : 'Node'     , 'text': 'Node'        , 'minwidth': 30 , 'anchor' : W},
-               {'cid' : 'Started'  , 'text': 'Started at'  , 'minwidth': 60 , 'anchor' : CENTER},
-               {'cid' : 'Completed', 'text': 'Completed at', 'minwidth': 60 , 'anchor' : CENTER},
-               {'cid' : 'Result'   , 'text': 'Result'      , 'minwidth': 20 , 'anchor' : CENTER})
+    columns = ({'cid' : '#0'   , 'text': 'Info' , 'minwidth': 300, 'anchor' : W},
+               {'cid' : 'Value', 'text': 'Value', 'minwidth': 50 , 'anchor' : W},)
 
     def __init__(self, parent, *args, **kw):
         Frame.__init__(self, parent, *args, **kw)
@@ -333,13 +330,24 @@ class CommandInfo(Frame):
             return
         def format_time(time_real):
             return datetime.fromtimestamp(time_real).strftime("%a %H:%M:%S.%f")
+        def task_string(task):
+            return task['source']
+        def session_string(session):
+            return "{}:{}".format(session['hostname'], session['port']), \
+                session['result'].name
+        def session_subdata(session):
+            return [
+                ("Started:", format_time(session['started'])),
+                ("Completed:", format_time(session['completed'])),
+                ("Duration:", "{:.2f}".format(session['completed'] - session['started']))]
 
         for task in command_data['tasks']:
-            task_id = self.task_list.insert('', 'end', text=task['source'], open=True)
+            task_id = self.task_list.insert('', 'end', text=task_string(task), open=True)
             for session in task['sessions']:
-                self.task_list.insert(task_id, 'end', text='', values=(
-                session['hostname'], format_time(session['started']),
-                format_time(session['completed']), session['result'].name))
+                text, value = session_string(session)
+                session_id = self.task_list.insert(task_id, 'end', text=text, values=(value,))
+                for text, value in session_subdata(session):
+                    self.task_list.insert(session_id, 'end', text=text, values=(value,))
 
 class CommandBrowser(PanedWindow):
     columns = ({'cid' : "#0"   , 'text' : "Commands", 'minwidth' : 250, 'anchor' : W },

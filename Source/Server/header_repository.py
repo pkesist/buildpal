@@ -26,7 +26,7 @@ class HeaderRepository:
 
     def missing_files(self, machine_id, in_list):
         needed_files = {}
-        out_list = []
+        out_list = set()
         checksums, lock = self.checksums.setdefault(machine_id, ({}, Lock()))
         dirs = set()
         for dir, data in in_list:
@@ -35,7 +35,7 @@ class HeaderRepository:
                 key = (dir, name)
                 if key not in checksums or checksums[key] != checksum:
                     needed_files[(dir, name)] = checksum
-                    out_list.append((dir, name))
+                    out_list.add((dir, name))
         with self.session_lock:
             self.counter += 1
             self.session_data[self.counter] = needed_files, dirs

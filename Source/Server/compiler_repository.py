@@ -16,9 +16,7 @@ class CompilerRepository:
 
     @classmethod
     def __unique_id(cls, compiler_id):
-        digest = hashlib.md5()
-        digest.update(pickle.dumps(compiler_id))
-        return digest.hexdigest()
+        return hashlib.md5(pickle.dumps(compiler_id)).hexdigest()
 
     def compiler_dir(self, compiler_id):
         return os.path.join(self.__dir, self.__unique_id(compiler_id))

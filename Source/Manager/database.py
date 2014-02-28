@@ -118,9 +118,10 @@ class Database:
         cursor.close()
         return cursor.lastrowid
 
-    def __select(self, conn, table, col, value):
-        cursor = conn.execute("SELECT rowid, * FROM {} WHERE {}=?".format(
-            table, col), (value,))
+    def __select(self, conn, table, col, value, orderby=None):
+        cursor = conn.execute("SELECT rowid, * FROM {} WHERE {}=?{}".format(
+            table, col, "ORDER BY {}".format(orderby) if orderby else ''),
+            (value,))
         table_desc = self.desc_for_table(table)
         res = []
         rowids = []
@@ -156,7 +157,7 @@ class Database:
         command = commands[0]
         tasks, task_row_ids = self.__select(conn, 'task', 'command_id', rowid)
         for task, task_id in zip(tasks, task_row_ids):
-            sessions, session_row_ids = self.__select(conn, 'session', 'task_id', task_id)
+            sessions, session_row_ids = self.__select(conn, 'session', 'task_id', task_id, orderby='started')
             task['sessions'] = sessions
         command['tasks'] = tasks
         return command

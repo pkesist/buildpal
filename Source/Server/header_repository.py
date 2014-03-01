@@ -4,12 +4,15 @@ import logging
 import os
 import shutil
 import tempfile
+
+from collections import defaultdict
 from threading import Lock
 from hashlib import md5
 
 class HeaderRepository:
     def __init__(self, scratch_dir):
-        self.checksums = {}
+        self.checksums = defaultdict(dict)
+        self.locks = defaultdict(Lock)
         self.dir = os.path.join(scratch_dir, 'Headers')
         os.makedirs(self.dir, exist_ok=True)
         self.session_lock = Lock()
@@ -27,13 +30,12 @@ class HeaderRepository:
     def missing_files(self, machine_id, in_list):
         needed_files = {}
         out_list = set()
-        checksums, lock = self.checksums.setdefault(machine_id, ({}, Lock()))
         dirs = set()
         for dir, data in in_list:
             dirs.add(self.map_dir(dir))
             for name, checksum in data:
                 key = (dir, name)
-                if key not in checksums or checksums[key] != checksum:
+                if self.checksums[machine_id].get(key) != checksum:
                     needed_files[(dir, name)] = checksum
                     out_list.add((dir, name))
         with self.session_lock:
@@ -48,8 +50,6 @@ class HeaderRepository:
         include_paths.extend(include_dirs)
         del self.session_data[id]
 
-        checksums, lock = self.checksums.get(machine_id)
-
         def create_file_in_dir(dir, name, content):
             filename = os.path.normpath(os.path.join(dir, name))
             upperdirs = os.path.dirname(filename)
@@ -60,6 +60,8 @@ class HeaderRepository:
             fd = os.open(filename, os.O_CREAT | os.O_WRONLY | os.O_NOINHERIT)
             with os.fdopen(fd, 'wb') as file:
                 file.write(content)
+
+        checksums = self.checksums[machine_id]
 
         # Update headers.
         for (remote_dir, name), content in new_files.items():
@@ -74,7 +76,7 @@ class HeaderRepository:
                 create_shared = False
                 create_local = False
                 key = (remote_dir, name)
-                with lock:
+                with self.locks[machine_id]:
                     old_checksum = checksums.get(key)
                     if old_checksum is None:
                         checksums[key] = 'IN_PROGRESS'

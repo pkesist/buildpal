@@ -2,7 +2,6 @@ import os
 import subprocess
 import tempfile
 import zlib
-import zmq
 
 from time import time
 
@@ -49,7 +48,10 @@ echo {delimiter}
 def send_compressed_file(sender, fileobj, *args, **kwargs):
     compressor = zlib.compressobj(1)
     for data in iter(lambda : fileobj.read(256 * 1024), b''):
-        sender((b'\x01', compressor.compress(data)), *args, **kwargs)
+        compressed_data = compressor.compress(data)
+        if not compressed_data:
+            compressed_data = compressor.flush(zlib.Z_FULL_FLUSH)
+        sender((b'\x01', compressed_data), *args, **kwargs)
     sender((b'\x00', compressor.flush(zlib.Z_FINISH)), *args, **kwargs)
 
 def send_file(sender, file, *args, **kwargs):
@@ -57,25 +59,9 @@ def send_file(sender, file, *args, **kwargs):
         sender((b'\x01', data), *args, **kwargs)
     sender((b'\x00', b''), *args, **kwargs)
 
-def bind_to_random_port(socket):
-    socket.bind('tcp://*:*')
-    address = socket.getsockopt(zmq.LAST_ENDPOINT)
-    while address[-1] == 0:
-        address = address[:-1]
-    return int(address[address.index(b':', 4) + 1:])
-
 class SimpleTimer:
     def __init__(self):
         self.__start = time()
 
     def get(self):
         return time() - self.__start
-
-def create_socket(zmq_ctx, socket_type):
-    socket = zmq_ctx.socket(socket_type)
-    return socket
-
-def recv_multipart(socket, flags=0):
-    # The 'cast' is here because PyZMQ sets memoryview.ndim to 0, causing index
-    # operations to fail. Not really sure why they do that.
-    return tuple(frame.buffer.cast('B') for frame in socket.recv_multipart(copy=False, flags=flags))

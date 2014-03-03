@@ -26,6 +26,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Source\Common\message.py" />
     <Compile Include="Source\Common\__init__.py" />
     <Compile Include="Source\Compilers\msvc.py" />
     <Compile Include="Source\Compilers\__init__.py" />
@@ -39,7 +40,6 @@
     <Compile Include="Source\Manager\gui.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\node_manager.py" />
-    <Compile Include="Source\Manager\poller.py" />
     <Compile Include="Source\Manager\task.py" />
     <Compile Include="Source\Manager\timer.py" />
     <Compile Include="Source\Manager\source_scanner.py" />
@@ -56,7 +56,7 @@
     <Compile Include="Source\setup_server.py" />
     <Compile Include="Source\Test\test_compile.py" />
     <Compile Include="Source\Test\test_database.py" />
-    <Compile Include="Source\Test\test_poller.py" />
+    <Compile Include="Source\Test\test_message.py" />
     <Compile Include="Source\Test\test_source_scanner.py" />
   </ItemGroup>
   <ItemGroup>

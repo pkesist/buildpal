@@ -8,7 +8,6 @@ import pickle
 from uuid import uuid4
 import zipfile
 import zlib
-import zmq
 
 from time import time
 
@@ -27,37 +26,37 @@ class CompileSession:
     STATE_FINISH = 4
 
     class Sender:
-        def __init__(self, socket, session_id):
-            self.session_id = session_id
-            self.socket = socket
+        def __init__(self, send_msg, session_id):
+            self._session_id = session_id
+            self._send_msg = send_msg
 
-        def send_multipart(self, data, copy=False):
-            self.socket.send_multipart([self.session_id] + list(data), copy=copy)
+        def send_msg(self, data):
+            self._send_msg([self._session_id] + list(data))
 
-    def __init__(self, task, socket, node, compressor):
+    def __init__(self, task, send_msg, node, compressor):
         self.state = self.STATE_START
         self.task = task
         self.node = node
         self.task.register_session(self)
         self.compiler = task.compiler()
-        self.socket = socket
         self.cancelled = False
         self.compressor = compressor
         self.result = None
         self.local_id = uuid4().bytes
         self.remote_id = None
+        self.send_msg = send_msg
         self.sender = None
 
     def start(self):
         assert self.state == self.STATE_START
-        self.socket.send_multipart([b'NEW_SESSION', self.local_id,
+        self.send_msg([b'NEW_SESSION', self.local_id,
             b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
         self.time_started = time()
 
     def cancel(self):
         if self.sender:
-            self.sender.send_multipart([b'CANCEL_SESSION'])
+            self.sender.send_msg([b'CANCEL_SESSION'])
         self.cancelled = True
 
     def __complete(self, result):
@@ -89,12 +88,12 @@ class CompileSession:
             assert len(msg) == 3 and msg[1] == b'MISSING_FILES'
             assert self.remote_id is None
             self.remote_id = msg[0].tobytes()
-            self.sender = self.Sender(self.socket, self.remote_id)
+            self.sender = self.Sender(self.send_msg, self.remote_id)
             if self.cancelled:
-                self.sender.send_multipart([b'CANCEL_SESSION'])
+                self.sender.send_msg([b'CANCEL_SESSION'])
             missing_files, need_compiler, need_pch = pickle.loads(msg[2])
             new_files, src_loc = self.task_files_bundle(missing_files)
-            self.sender.send_multipart([b'TASK_FILES',
+            self.sender.send_msg([b'TASK_FILES',
                 pickle.dumps(new_files), src_loc.encode()])
             if need_compiler:
                 zip_data = BytesIO()
@@ -102,12 +101,12 @@ class CompileSession:
                     for path, file in self.task.compiler_files:
                         zip_file.write(path.decode(), file.decode())
                 zip_data.seek(0)
-                send_file(self.sender.send_multipart, zip_data)
+                send_file(self.sender.send_msg, zip_data)
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None
                 def send_pch_file(fileobj):
-                    send_file(self.sender.send_multipart, fileobj, copy=False)
+                    send_file(self.sender.send_msg, fileobj)
                 pch_file = os.path.join(os.getcwd(), self.task.pch_file[0])
                 self.compressor.compress_file(pch_file, send_pch_file)
             self.state = self.STATE_WAIT_FOR_SERVER_RESPONSE
@@ -128,7 +127,7 @@ class CompileSession:
                 if self.task.register_completion(self):
                     assert not self.cancelled
                     if self.retcode == 0:
-                        self.sender.send_multipart([b'SEND_CONFIRMATION', b'\x01'])
+                        self.sender.send_msg([b'SEND_CONFIRMATION', b'\x01'])
                         self.obj_desc = open(self.task.output, "wb")
                         self.obj_decompressor = zlib.decompressobj()
                         self.state = self.STATE_RECEIVE_RESULT_FILE
@@ -138,7 +137,7 @@ class CompileSession:
                         return True
                 else:
                     if self.retcode == 0:
-                        self.sender.send_multipart([b'SEND_CONFIRMATION', b'\x00'])
+                        self.sender.send_msg([b'SEND_CONFIRMATION', b'\x00'])
                     self.__complete(SessionResult.too_late)
                     return True
 

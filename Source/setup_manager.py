@@ -8,17 +8,7 @@ from cx_Freeze import setup, Executable
 # fine tuning.
 site_packages = site.getsitepackages()
 
-possible_libzmq_locations = [os.path.join(s, 'zmq', 'libzmq.pyd') for s in site_packages]
-libzmq_pyd = None
-for p in (os.path.join(s, 'zmq', 'libzmq.pyd') for s in site_packages):
-    if os.path.exists(p):
-        libzmq_pyd = p
-        break
-if not libzmq_pyd:
-    raise Exception("Could not find 'libzmq.pyd'.")
-
-build_options = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
-    include_files=[(libzmq_pyd, '')],
+build_options = dict(packages = ['Compilers'],
     include_msvcr=True,
 )
 

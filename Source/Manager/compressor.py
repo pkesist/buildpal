@@ -6,9 +6,9 @@ from collections import defaultdict
 import zlib
 
 class Compressor:
-    def __init__(self, poller):
+    def __init__(self, loop):
         self.executor = ThreadPoolExecutor(2)
-        self.poller = poller
+        self.loop = loop
         self.compressed_files_lock = Lock()
         self.compressed_files = []
         self.compressed_file_data = {}
@@ -22,19 +22,10 @@ class Compressor:
         else:
             try:
                 if file not in self.waiters:
-                    event = self.poller.create_event(
-                        lambda ev : self.__file_compression_completed(file, ev))
-                    self.executor.submit(self.__do_compress, file
-                        ).add_done_callback(lambda f : event())
-                self.waiters.setdefault(file, []).append(on_completion)
+                    self.executor.submit(self.__do_compress, file)
+                self.waiters[file].append(on_completion)
             finally:
                 self.compressed_files_lock.release()
-
-    def __file_compression_completed(self, file, event):
-        event.close()
-        for on_completion in self.waiters[file]:
-            on_completion(BytesIO(self.compressed_file_data[file]))
-        del self.waiters[file]
 
     def __do_compress(self, file):
         buffer = BytesIO()
@@ -49,3 +40,9 @@ class Compressor:
                 del self.compressed_file_data[self.compressed_files.pop(0)]
             self.compressed_files.append(file)
             self.compressed_file_data[file] = buffer.read()
+        def notify_waiters(byte_data, waiters):
+            for on_completion in waiters:
+                on_completion(BytesIO(byte_data))
+        self.loop.call_soon_threadsafe(notify_waiters,
+            self.compressed_file_data[file], self.waiters[file])
+        del self.waiters[file]

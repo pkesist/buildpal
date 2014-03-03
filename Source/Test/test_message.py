@@ -14,15 +14,16 @@ def test_protocol():
         def __init__(self, protocol):
             self.protocol = protocol
 
-        def sendall(self, data):
-            self.protocol.data_received(data)
+        def writelines(self, data):
+            self.protocol.data_received(b''.join(data))
 
     def fake_connect(protocol1, protocol2):
         protocol1.connection_made(FakeTransport(protocol2))
         protocol2.connection_made(FakeTransport(protocol1))
 
-    class Processor:
+    class Protocol(MessageProtocol):
         def __init__(self):
+            MessageProtocol.__init__(self)
             self.msgs = []
 
         def process_msg(self, msg):
@@ -33,14 +34,11 @@ def test_protocol():
 
     def test_transfer(protocol1, protocol2, msg):
         protocol1.send_msg(msg)
-        assert all(x==y for x, y in zip(protocol2.message_processor.get_msg(),
+        assert all(x==y for x, y in zip(protocol2.get_msg(),
             msg))
 
-    processor1 = Processor()
-    processor2 = Processor()
-
-    protocol1 = MessageProtocol(processor1)
-    protocol2 = MessageProtocol(processor2)
+    protocol1 = Protocol()
+    protocol2 = Protocol()
 
     fake_connect(protocol1, protocol2)
 

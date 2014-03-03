@@ -11,6 +11,7 @@ class Task:
         self.completed_by_session = None
         self.last_time = time()
         self.times = {}
+        self.task_result = None
 
     def note_time(self, name):
         curr_time = time()
@@ -53,6 +54,7 @@ class Task:
         assert session in self.sessions_running
         self.sessions_running.remove(session)
         self.sessions_finished.add(session)
+        session_succeeded = False
         if session.result == SessionResult.success:
             assert session == self.completed_by_session
             self.note_time('task result received')
@@ -61,7 +63,7 @@ class Task:
                 session.time_completed - session.time_started)
             session.node.add_total_time(
                 session.time_completed - session.time_started)
-            self.session_result = (session.retcode, session.stdout,
+            self.task_result = (session.retcode, session.stdout,
                 session.stderr)
         elif session.result == SessionResult.failure:
             session.node.add_tasks_failed()
@@ -72,7 +74,8 @@ class Task:
         elif session.result == SessionResult.too_late:
             session.node.add_tasks_too_late()
         if not self.sessions_running:
-            self.command_processor.task_completed(self, *self.session_result)
+            assert self.task_result is not None
+            self.command_processor.task_completed(self)
 
     def get_info(self):
         assert not self.sessions_running

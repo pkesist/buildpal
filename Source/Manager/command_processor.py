@@ -113,9 +113,11 @@ class CommandProcessor:
         self.completed_tasks = {}
         return self.tasks
 
-    def task_completed(self, task, retcode, stdout, stderr):
+    def task_completed(self, task):
         assert task in self.tasks
         assert task not in self.completed_tasks
+        assert task.task_result is not None
+        retcode, stdout, stderr = task.task_result
         self.update_task_ui(task)
         self.completed_tasks[task] = (retcode, stdout, stderr)
         stdout = ''

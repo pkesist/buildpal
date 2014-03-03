@@ -1,7 +1,6 @@
 #! python3.3
 from time import sleep
 
-from Common import bind_to_random_port
 from Server import CompileWorker
     
 from multiprocessing import cpu_count
@@ -10,7 +9,6 @@ import argparse
 import configparser
 import os
 import sys
-import zmq
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Command line parameters for '

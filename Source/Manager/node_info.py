@@ -18,10 +18,6 @@ class NodeInfo:
         self._avg_tasks = {}
         self._timer = Timer()
 
-    def zmq_address(self):
-        return 'tcp://{}:{}'.format(self._node_dict['address'],
-            self._node_dict['port'])
-
     def average_task_time(self):
         tasks_completed = self.tasks_completed()
         return self.total_time() / tasks_completed if tasks_completed else 0

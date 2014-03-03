@@ -1,90 +1,90 @@
 from .compile_session import CompileSession, SessionResult
 from .compressor import Compressor
-from .poller import ZMQSelectPoller
 
-import zmq
-from queue import Queue, Empty
+from Common import MessageProtocol
+
+import asyncio
 
 from math import floor
 from collections import defaultdict
+from queue import Queue, Empty
 from time import time
 
-from Common import create_socket, recv_multipart
+class Protocol(MessageProtocol):
+    def __init__(self, node_mgr):
+        MessageProtocol.__init__(self)
+        self.node_mgr = node_mgr
 
-Poller = ZMQSelectPoller
+    def process_msg(self, msg):
+        self.node_mgr.process_msg(msg)
 
 class NodeManager:
     def __init__(self, node_info):
-        self.zmq_ctx = zmq.Context()
-        self.poller = Poller(self.zmq_ctx)
-        self.task_ready_event = self.poller.create_event(
-            self.__process_input_tasks)
-        self.input_tasks = Queue()
+        self.loop = asyncio.ProactorEventLoop()
         self.node_info = node_info
         self.all_sockets = defaultdict(list)
         self.tasks_running = defaultdict(list)
         self.sessions = {}
         self.unassigned_tasks = []
-        self.compressor = Compressor(self.poller)
+        self.compressor = Compressor(self.loop)
 
     def unassigned_tasks_count(self):
         return len(self.unassigned_tasks)
 
     def task_ready(self, task):
-        self.input_tasks.put(task)
-        self.task_ready_event()
+        def schedule_task(task):
+            task.note_time('collected from preprocessor')
+            self.schedule_task(task)
+        self.loop.call_soon_threadsafe(schedule_task, task)
 
     def run(self, observer):
-        self.poller.run(observer)
+        @asyncio.coroutine
+        def observe():
+            observer()
+            yield from asyncio.sleep(0.5, loop=self.loop)
+            asyncio.async(observe(), loop=self.loop)
+
+        asyncio.async(observe(), loop=self.loop)
+        self.loop.run_forever()
 
     def stop(self):
-        self.poller.stop()
-
-    def __process_input_tasks(self, event):
-        try:
-            while True:
-                task = self.input_tasks.get_nowait()
-                task.note_time('collected from preprocessor')
-                self.schedule_task(task)
-        except Empty:
-            pass
+        self.loop.stop()
 
     def schedule_task(self, task, node=None):
+        asyncio.async(self.schedule_task_coro(task, node), loop=self.loop)
+
+    @asyncio.coroutine
+    def schedule_task_coro(self, task, node=None):
         if node is None and self.unassigned_tasks:
             task.note_time('queue as unassigned task')
             self.unassigned_tasks.append(task)
             return
-        result = self.__get_server_conn(node)
+        result = yield from self.__get_server_conn(node)
         if result is None:
             assert node is None
             task.note_time('queue as unassigned task')
             self.unassigned_tasks.append(task)
             return
-        server_conn, node = result
-        session = CompileSession(task, server_conn, node, self.compressor)
+        protocol, node = result
+        session = CompileSession(task, protocol.send_msg, node, self.compressor)
         self.sessions[session.local_id] = session
         self.tasks_running[node].append(task)
         session.start()
 
     def close(self):
-        for node, socketlist in self.all_sockets.items():
-            for socket in socketlist:
-                self.poller.unregister(socket)
-                socket.close()
-        self.poller.close()
-        self.zmq_ctx.term()
+        self.loop.close()
 
+    def protocol_factory(self):
+        return Protocol(self)
+
+    @asyncio.coroutine
     def __connect_to_node(self, node):
-        node_address = node.zmq_address()
-        try:
-            socket = create_socket(self.zmq_ctx, zmq.DEALER)
-            socket.connect(node_address)
-            self.poller.register(socket, self.__handle_server_socket)
-        except zmq.ZMQError:
-            print("Failed to connect to '{}'".format(node_address))
-            raise Exception("Invalid node")
-        self.all_sockets[node].append(socket)
-        return socket
+        print(node.node_dict())
+        (transport, protocol) = yield from self.loop.create_connection(
+            self.protocol_factory, host=node.node_dict()['address'],
+            port=node.node_dict()['port'])
+        self.all_sockets[node].append(protocol)
+        return protocol
             
     def __target_tasks_per_node(self, node):
         return node.node_dict()['job_slots'] + 1
@@ -136,6 +136,7 @@ class NodeManager:
                             return
             return
 
+    @asyncio.coroutine
     def __get_server_conn(self, node):
         if not node:
             node = self.__best_node()
@@ -143,16 +144,16 @@ class NodeManager:
             return None
         node_sockets = self.all_sockets[node]
         if not node_sockets:
-            self.__connect_to_node(node)
+            yield from self.__connect_to_node(node)
         assert node_sockets
         return node_sockets[0], node
 
-    def __handle_server_socket(self, socket, msg):
+    def process_msg(self, msg):
         session_id, *msg = msg
         session = self.sessions.get(session_id)
         if not session:
             print("Got data for non-session")
-            print([m.tobytes()[:50] for m in msg])
+            print([session_id.tobytes()] + [m.tobytes()[:50] for m in msg])
             return
         if not session.got_data_from_server(msg):
             return
@@ -160,8 +161,8 @@ class NodeManager:
         self.tasks_running[session.node].remove(session.task)
         self.__steal_tasks(session.node)
         # In case we got a server failure, reschedule the task.
-        if session.result == SessionResult.failure and \
-            not session.task.is_completed() and \
+        if session.result in (SessionResult.failure, SessionResult.timed_out) \
+            and not session.task.is_completed() and \
             len(session.task.sessions_running) == 1:
                 self.schedule_task(session.task)
         session.task.session_completed(session)

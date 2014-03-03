@@ -9,8 +9,6 @@ from .node_manager import NodeManager
 from .console import ConsolePrinter
 from .node_info import NodeInfo
 
-from Common import bind_to_random_port
-
 import asyncio
 import os
 import sys

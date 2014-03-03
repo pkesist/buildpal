@@ -76,7 +76,8 @@ class HeaderRepository:
                 create_shared = False
                 create_local = False
                 key = (remote_dir, name)
-                with self.locks[machine_id]:
+                lock = self.locks[machine_id]
+                with lock:
                     old_checksum = checksums.get(key)
                     if old_checksum is None:
                         checksums[key] = 'IN_PROGRESS'

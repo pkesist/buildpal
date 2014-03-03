@@ -10,7 +10,12 @@ def msg_to_bytes(msg):
     return msg_to_bytes_gen(msg), sum(len(m) for m in msg) + (4 * len(msg)) + 2
 
 def msg_from_bytes(byte_data):
-    memview = memoryview(byte_data)
+    # TODO:
+    # We want read-only memory views here. Unfortunately, when created
+    # from bytearray, they are writable and consequently cannot be
+    # hashed. I found no way of converting bytearray to bytes without
+    # making a copy.
+    memview = memoryview(bytes(byte_data))
     offset = 0
     (len,) = struct.unpack('!H', memview[offset:offset+2])
     offset += 2
@@ -21,9 +26,7 @@ def msg_from_bytes(byte_data):
         offset += part_len
 
 class MessageProtocol(asyncio.Protocol):
-    def __init__(self, message_processor):
-        self.message_processor = message_processor
-
+    def __init__(self):
         self.len_buff = bytearray(4)
         self.len_offset = 0
         self.msg_len = None
@@ -37,9 +40,7 @@ class MessageProtocol(asyncio.Protocol):
         data, length = msg_to_bytes(msg)
         buffers = [struct.pack('!I', length)]
         buffers.extend(data)
-        data_to_send = b''.join(buffers)
-        assert len(data_to_send) == length + 4
-        self.transport.sendall(data_to_send)
+        self.transport.writelines(buffers)
 
     def data_received(self, data):
         data_offset = 0
@@ -50,6 +51,7 @@ class MessageProtocol(asyncio.Protocol):
                 to_add = min(remaining, len(data) - data_offset)
                 self.len_buff[self.len_offset:self.len_offset + to_add] = \
                     data[data_offset:data_offset + to_add]
+                self.len_offset += to_add
                 data_offset += to_add
 
                 if to_add == remaining:
@@ -62,13 +64,17 @@ class MessageProtocol(asyncio.Protocol):
                 to_add = min(remaining, len(data) - data_offset)
                 self.msg_data[self.msg_offset:self.msg_offset + to_add] = \
                     data[data_offset:data_offset + to_add]
+                self.msg_offset += to_add
                 data_offset += to_add
 
                 if to_add == remaining:
-                    self.message_processor.process_msg(tuple(msg_from_bytes(
-                        self.msg_data)))
+                    msg = tuple(msg_from_bytes(self.msg_data))
+                    self.process_msg(msg)
                     self.msg_len = None
                     self.msg_data = None
                     self.msg_offset = 0
+
+    def process_msg(self, msg):
+        raise NotImplementedError()
 
 

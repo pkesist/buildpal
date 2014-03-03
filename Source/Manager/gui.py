@@ -3,7 +3,6 @@ from tkinter import *
 import tkinter.font as font
 import tkinter.messagebox as msgbox
 from tkinter.ttk import *
-import zmq
 from datetime import datetime
 
 from operator import itemgetter
@@ -128,7 +127,6 @@ class NodeDisplay(Frame):
         self.ui_data = ui_data
         self.node_index = None
         self.draw()
-        self.zmq_ctx = zmq.Context()
 
     def draw(self):
         self.columnconfigure(0, weight=1)
@@ -153,32 +151,7 @@ class NodeDisplay(Frame):
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
 
     def ping(self):
-        assert self.node_index is not None
-        node = self.nodes[self.node_index]
-        s = self.zmq_ctx.socket(zmq.DEALER)
-        address = 'tcp://{}:{}'.format(node['address'], node['port'])
-        s.connect(address)
-        s.RCVTIMEO = 1000
-        times = []
-        for x in range(5):
-            ping_time = time()
-            s.send(b'PING')
-            try:
-                response = s.recv()
-            except zmq.ZMQError:
-                self.node_info_display.ping_result.set("FAILURE")
-                return
-            else:
-                times.append(time() - ping_time)
-
-        diff = sum(times) / len(times)
-        diff *= 1000
-        if diff < 1:
-            diff = "<1"
-        else:
-            diff = round(diff)
-        self.node_info_display.ping_result.set("{} ms".format(diff))
-        s.close()
+        pass
 
     def node_selected(self, event):
         selection = self.node_list.selection()

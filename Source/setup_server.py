@@ -8,9 +8,7 @@ from cx_Freeze import setup, Executable
 # fine tuning.
 site_packages = site.getsitepackages()
 
-files_to_locate= [('zmq', 'libzmq.pyd'), ('map_files_inj32.dll',), ('map_files_inj64.dll',)]
-
-possible_libzmq_locations = [os.path.join(s, 'zmq', 'libzmq.pyd') for s in site_packages]
+files_to_locate= [('map_files_inj32.dll',), ('map_files_inj64.dll',)]
 
 include_files=[]
 
@@ -26,17 +24,15 @@ for f in files_to_locate:
         raise Exception("Could not locate '{}'.".format(os.path.join(*f)))
 
 
-build_options = dict(packages = ['zmq.backend.cython', 'zmq.utils.garbage', 'Compilers'], excludes = ['zmq.libzmq'],
+build_options = dict(packages = ['Compilers'],
 include_files=include_files,
 include_msvcr=True,
 )
 
 msi_opts = {'upgrade_code' : '{EC37317C-03E0-4348-8D70-E5D891EE9115}'}
 
-base = 'Console'
-
 executables = [
-    Executable('buildpal_server.py', base=base)
+    Executable('buildpal_server.py', base='Console')
 ]
 
 setup(name='BuildPal_Server',

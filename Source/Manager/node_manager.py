@@ -12,14 +12,6 @@ from collections import defaultdict
 from queue import Queue, Empty
 from time import time
 
-class Protocol(MessageProtocol):
-    def __init__(self, node_mgr):
-        MessageProtocol.__init__(self)
-        self.node_mgr = node_mgr
-
-    def process_msg(self, msg):
-        self.node_mgr.process_msg(msg)
-
 class NodeManager:
     def __init__(self, loop, node_info):
         self.loop = loop
@@ -68,7 +60,9 @@ class NodeManager:
         return struct.pack('!I', self.counter)
 
     def protocol_factory(self):
-        return Protocol(self)
+        protocol = MessageProtocol()
+        protocol.process_msg = self.process_msg
+        return protocol
 
     @asyncio.coroutine
     def __connect_to_node(self, node):

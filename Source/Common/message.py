@@ -56,7 +56,8 @@ class MessageProtocol(asyncio.Protocol):
         self.transport = None
 
     def send_msg(self, msg):
-        self.transport.writelines(msg_to_bytes(msg))
+        if self.transport:
+            self.transport.writelines(msg_to_bytes(msg))
 
     def data_received(self, data):
         data_offset = 0

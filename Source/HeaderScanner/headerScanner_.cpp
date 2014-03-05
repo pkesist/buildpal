@@ -198,15 +198,15 @@ clang::TargetOptions * createTargetOptions()
 
 Preprocessor::Preprocessor( Cache * cache )
     :
-    diagID_       ( new clang::DiagnosticIDs() ),
-    diagOpts_     ( new clang::DiagnosticOptions() ),
-    diagEng_      ( new clang::DiagnosticsEngine( diagID_, &*diagOpts_ ) ),
-    ppOpts_       ( new clang::PreprocessorOptions() ),
-    langOpts_     ( new clang::LangOptions() ),
-    targetOpts_   ( createTargetOptions() ),
-    targetInfo_   ( clang::TargetInfo::CreateTargetInfo( *diagEng_, &*targetOpts_) ),
-    hsOpts_       ( new clang::HeaderSearchOptions() ),
-    cache_( cache )
+    diagID_    ( new clang::DiagnosticIDs() ),
+    diagOpts_  ( new clang::DiagnosticOptions() ),
+    diagEng_   ( new clang::DiagnosticsEngine( diagID_, &*diagOpts_ ) ),
+    ppOpts_    ( new clang::PreprocessorOptions() ),
+    langOpts_  ( new clang::LangOptions() ),
+    targetOpts_( createTargetOptions() ),
+    targetInfo_( clang::TargetInfo::CreateTargetInfo( *diagEng_, &*targetOpts_) ),
+    hsOpts_    ( new clang::HeaderSearchOptions() ),
+    cache_     ( cache )
 {
     diagEng_->setClient( new DiagnosticConsumer() );
    
@@ -215,7 +215,6 @@ Preprocessor::Preprocessor( Cache * cache )
     hsOpts_->UseStandardSystemIncludes = false;
     hsOpts_->UseStandardCXXIncludes = false;
     hsOpts_->Sysroot.clear();
-
 }
 
 std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )

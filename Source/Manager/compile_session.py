@@ -5,7 +5,6 @@ from io import BytesIO
 
 import os
 import pickle
-from uuid import uuid4
 import zipfile
 import zlib
 
@@ -33,17 +32,17 @@ class CompileSession:
         def send_msg(self, data):
             self._send_msg([self._session_id] + list(data))
 
-    def __init__(self, task, send_msg, node, compressor):
+    def __init__(self, id, task, send_msg, node, executor, compressor):
         self.state = self.STATE_START
         self.task = task
         self.node = node
         self.task.register_session(self)
         self.compiler = task.compiler()
         self.cancelled = False
+        self.executor = executor
         self.compressor = compressor
         self.result = None
-        self.local_id = uuid4().bytes
-        self.remote_id = None
+        self.local_id = id
         self.send_msg = send_msg
         self.sender = None
 
@@ -86,12 +85,11 @@ class CompileSession:
         # on the server.
         if self.state == self.STATE_WAIT_FOR_MISSING_FILES:
             assert len(msg) == 3 and msg[1] == b'MISSING_FILES'
-            assert self.remote_id is None
-            self.remote_id = msg[0].tobytes()
-            self.sender = self.Sender(self.send_msg, self.remote_id)
+            assert self.sender is None
+            self.sender = self.Sender(self.send_msg, msg[0].tobytes())
             if self.cancelled:
                 self.sender.send_msg([b'CANCEL_SESSION'])
-            missing_files, need_compiler, need_pch = pickle.loads(msg[2])
+            missing_files, need_compiler, need_pch = pickle.loads(msg[2].memory())
             new_files, src_loc = self.task_files_bundle(missing_files)
             self.sender.send_msg([b'TASK_FILES',
                 pickle.dumps(new_files), src_loc.encode()])
@@ -121,14 +119,14 @@ class CompileSession:
                 return True
             else:
                 assert server_status == b'SERVER_DONE'
-                self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1])
+                self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1].memory())
                 for name, duration in server_times.items():
                     self.timer.add_time(name, duration)
                 if self.task.register_completion(self):
                     assert not self.cancelled
                     if self.retcode == 0:
                         self.sender.send_msg([b'SEND_CONFIRMATION', b'\x01'])
-                        self.obj_desc = open(self.task.output, "wb")
+                        self.obj_desc = BytesIO()
                         self.obj_decompressor = zlib.decompressobj()
                         self.state = self.STATE_RECEIVE_RESULT_FILE
                         self.receive_result_time = SimpleTimer()
@@ -144,12 +142,18 @@ class CompileSession:
         elif self.state == self.STATE_RECEIVE_RESULT_FILE:
             assert not self.cancelled
             more, data = msg
-            self.obj_desc.write(self.obj_decompressor.decompress(data))
+            self.obj_desc.write(self.obj_decompressor.decompress(data.memory()))
             if more == b'\x00':
                 self.obj_desc.write(self.obj_decompressor.flush())
+                def write_to_disk(fileobj):
+                    fileobj.seek(0)
+                    with open(self.task.output, "wb") as obj:
+                        for data in iter(lambda : fileobj.read(256 * 1024), b''):
+                            obj.write(data)
+                self.write_to_disk_future = self.executor.submit(write_to_disk, self.obj_desc)
+                del self.obj_desc
                 self.timer.add_time('download object file', self.receive_result_time.get())
                 del self.receive_result_time
-                self.obj_desc.close()
                 self.__complete(SessionResult.success)
                 return True
         else:

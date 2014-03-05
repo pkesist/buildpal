@@ -87,8 +87,8 @@ class SourceScanner:
             return None
 
     def __process_task_worker(self, notify, stats):
-        profile = cProfile.Profile()
-        profile.enable()
+        #profile = cProfile.Profile()
+        #profile.enable()
 
         preprocessor = preprocessing.Preprocessor(self.cache)
         while True:
@@ -98,17 +98,16 @@ class SourceScanner:
                 task.header_info, task.server_task_info['filelist'] = \
                     header_info(preprocessor, task.preprocess_task_info)
                 task.note_time('preprocessed')
-                # Synchronized by GIL.
                 notify(task)
             except Empty:
                 if self.closing:
-                    profile.disable()
-                    stats.add(profile)
+                    #profile.disable()
+                    #stats.add(profile)
                     return
 
     def close(self):
         self.closing = True
         for thread in self.threads:
             thread.join()
-        self.stats.sort_stats('cumtime')
-        self.stats.print_stats()
+        #self.stats.sort_stats('cumtime')
+        #self.stats.print_stats()

@@ -121,13 +121,11 @@ class ClientProcessor:
             self.task_created_func(task)
 
 class ClientProcessorFactory:
-    def __init__(self, compiler_info, task_created_func, database, ui_data, on_closed):
+    def __init__(self, compiler_info, task_created_func, database, ui_data):
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
         self.ui_data = ui_data
         self.clients = set()
-        self.closing = False
-        self.on_closed = on_closed
         self.database_inserter = DatabaseInserter(database)
 
     def __call__(self):
@@ -140,15 +138,9 @@ class ClientProcessorFactory:
 
     def __unregister(self, client):
         self.clients.discard(client)
-        if self.closing and not self.clients:
-            self.on_closed()
 
     def close(self):
         self.database_inserter.close()
-        self.closing = True
-        if not self.clients:
-            self.on_closed()
-            return
         for client in self.clients:
             client.abort()
 
@@ -178,7 +170,8 @@ class TaskProcessor:
             self.n_pp_threads = cpu_count()
         self.client_list = []
 
-        self.node_manager = NodeManager(self.node_info)
+        self.loop = asyncio.ProactorEventLoop()
+        self.node_manager = NodeManager(self.loop, self.node_info)
         self.source_scanner = SourceScanner(self.node_manager.task_ready,
             self.n_pp_threads)
 
@@ -196,47 +189,36 @@ class TaskProcessor:
         self.ui_data.cache_stats = self.source_scanner.get_cache_stats
         self.ui_data.unassigned_tasks = self.node_manager.unassigned_tasks_count
 
-    def client_thread(self):
-        def stop_loop():
-            # First close the server.
-            self.server.close()
-            # Queue loop stop, so that the loop gets a chance to cleanup after
-            # failed pipe accept.
-            self.loop.call_soon(self.loop.stop)
+    def run(self, observer=None):
+        if observer is None:
+            observer = ConsolePrinter(self.node_info, self.ui_data)
+
+        @asyncio.coroutine
+        def observe():
+            observer()
+            yield from asyncio.sleep(0.5, loop=self.loop)
+            asyncio.async(observe(), loop=self.loop)
+        asyncio.async(observe(), loop=self.loop)
 
         self.client_processor_factory = ClientProcessorFactory(
             self.compiler_info, self.source_scanner.add_task,
-            self.database, self.ui_data, stop_loop)
+            self.database, self.ui_data)
 
-        self.loop = asyncio.ProactorEventLoop()
-        task = asyncio.async(self.loop.start_serving_pipe(
+        [self.client_server] = self.loop.run_until_complete(
+            self.loop.start_serving_pipe(
             self.client_processor_factory,
-            "\\\\.\\pipe\\BuildPal_{}".format(self.port)),
-            loop=self.loop)
-        [self.server] = self.loop.run_until_complete(task)
-        self.loop.run_forever()
-        self.loop.close()
-
-    def stop_client_thread(self):
-        def stop_loop():
-            self.client_processor_factory.close()
-        self.loop.call_soon_threadsafe(stop_loop)
-
-    def run(self, observer=None):
-        self.terminating = False
-        self.client_thread = Thread(target=self.client_thread)
-        self.client_thread.start()
+            "\\\\.\\pipe\\BuildPal_{}".format(self.port)))
 
         try:
-            if observer is None:
-                observer = ConsolePrinter(self.node_info, self.ui_data)
-            self.node_manager.run(observer)
+            self.loop.run_forever()
         finally:
-            self.terminating = True
-            self.client_thread.join()
             self.source_scanner.close()
-            self.node_manager.close()
+            self.client_server.close()
+            self.loop.close()
 
     def stop(self):
-        self.stop_client_thread()
-        self.node_manager.stop()
+        def close_stuff():
+            self.client_processor_factory.close()
+            self.node_manager.close()
+        self.loop.call_soon_threadsafe(close_stuff)
+        self.loop.stop()

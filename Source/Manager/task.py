@@ -65,6 +65,8 @@ class Task:
                 session.time_completed - session.time_started)
             self.task_result = (session.retcode, session.stdout,
                 session.stderr)
+            if session.retcode == 0:
+                self.disk_future = session.write_to_disk_future
         elif session.result == SessionResult.failure:
             session.node.add_tasks_failed()
         elif session.result == SessionResult.cancelled:
@@ -73,8 +75,7 @@ class Task:
             session.node.add_tasks_timed_out()
         elif session.result == SessionResult.too_late:
             session.node.add_tasks_too_late()
-        if not self.sessions_running:
-            assert self.task_result is not None
+        if not self.sessions_running and self.task_result is not None:
             self.command_processor.task_completed(self)
 
     def get_info(self):

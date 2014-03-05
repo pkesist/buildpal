@@ -1,4 +1,4 @@
-from Common import send_compressed_file, SimpleTimer, MessageProtocol
+from Common import SimpleTimer, MessageProtocol, compress_file
     
 import asyncio
 
@@ -9,7 +9,6 @@ from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread, Lock, current_thread
 from subprocess import list2cmdline
-from uuid import uuid4
 
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
@@ -21,10 +20,11 @@ import logging
 
 import os
 import pickle
-import signal
-import shutil
-import socket
 import sched
+import shutil
+import signal
+import socket
+import struct
 import sys
 import traceback
 import tempfile
@@ -157,7 +157,7 @@ class CompileSession:
         def process_msg(cls, session, msg):
             assert len(msg) == 2
             assert msg[0] == b'SERVER_TASK'
-            session.task = pickle.loads(msg[1])
+            session.task = pickle.loads(msg[1].memory())
             # Determine headers which are missing
             missing_files_timer = SimpleTimer()
             missing_files, session.repo_transaction_id = \
@@ -185,7 +185,7 @@ class CompileSession:
         def process_msg(cls, session, msg):
             assert msg[0] == b'TASK_FILES'
             fqdn = session.task['fqdn']
-            new_files = pickle.loads(msg[1])
+            new_files = pickle.loads(msg[1].memory())
             session.src_loc = msg[2].tobytes().decode()
             session.waiting_for_manager_data = SimpleTimer()
             session.include_dirs_future = session.prepare_include_dirs(
@@ -230,7 +230,7 @@ class CompileSession:
         @classmethod
         def process_msg(cls, session, msg):
             more, data = msg
-            session.pch_desc.write(session.pch_decompressor.decompress(data))
+            session.pch_desc.write(session.pch_decompressor.decompress(data.memory()))
             if more == b'\x00':
                 session.pch_desc.write(session.pch_decompressor.flush())
                 session.times['upload precompiled header'] = session.pch_timer.get()
@@ -248,8 +248,9 @@ class CompileSession:
 
         @classmethod
         def cancel(cls, session):
-            if hasattr(session, 'process'):
-                session.process.terminate()
+            with session.compiler_state_lock:
+                if hasattr(session, 'process'):
+                    session.process.terminate()
 
     class StateWaitForConfirmation(SessionState):
         can_be_cancelled = True
@@ -260,7 +261,7 @@ class CompileSession:
             assert tag == b'SEND_CONFIRMATION'
             if verdict == b'\x01':
                 session.change_state(CompileSession.StateUploadingFile)
-                session.send_object_file(session.runner.misc_thread_pool())
+                session.send_object_file(session.object_file)
             else:
                 session.session_done()
 
@@ -275,7 +276,7 @@ class CompileSession:
         return wrapper
 
     def __init__(self, runner, send_msg, remote_id):
-        self.local_id = uuid4().bytes
+        self.local_id = runner.generate_unique_id()
         self.sender = self.Sender(send_msg, remote_id)
         self.runner = runner
         self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
@@ -321,8 +322,6 @@ class CompileSession:
 
     def compile(self):
         self.change_state(self.StateRunningCompiler)
-
-        self.cancel_selfdestruct()
         if self.task['pch_file']:
             self.runner.pch_repository().when_pch_is_available(
                     self.task['pch_file'], self.__check_compiler_files)
@@ -339,91 +338,95 @@ class CompileSession:
         if self.cancel_pending:
             self.cancel_session()
             return
-        self.runner.compile_thread_pool().submit(
-            self.__async_run_compiler, time())
+        self.cancel_selfdestruct()
+        asyncio.async(self.runner.loop.run_in_executor(
+            self.runner.compile_thread_pool(),
+            self.__async_run_compiler,
+            time()), loop=self.runner.loop).add_done_callback(
+                self.__compile_completed)
 
     def __async_run_compiler(self, start_time):
         self.times['waiting for job slot'] = time() - start_time
+        obj_handle, obj_name= tempfile.mkstemp(
+            dir=self.runner.scratch_dir, suffix='.obj')
+        os.close(obj_handle)
+
+        self.source_file = os.path.join(self.include_path, self.src_loc)
+
+        compiler_info = self.task['compiler_info']
+        output = compiler_info['set_object_name'].format(obj_name)
+        pch_switch = []
+        overrides = {}
+        if self.task['pch_file']:
+            # TODO: MSVC specific, remove from here.
+            if '/GL' in self.task['call']:
+                # In case /GL command line option is present, PCH file will
+                # not be fully resolved during compilation. Instead,
+                # resulting .obj file will contain a reference to it, and
+                # consequently PCH file will be needed at link phase.
+                # The problem we face is that PCH path on slave machine
+                # will not be the same as the client machine. This is why
+                # we mimic the client's PCH path on the slave.
+                # The filesystem hook used here is implemented using
+                # DLL injection/API hooking, so is entirely in userland.
+                # It affects compiler performance, so is used only when
+                # absolutely necessary.
+                overrides[self.task['pch_file'][0]] = self.pch_file
+                self.pch_file = self.task['pch_file'][0]
+            assert self.pch_file is not None
+            assert os.path.exists(self.pch_file)
+            pch_switch.append(compiler_info['set_pch_file'].format(
+                self.pch_file
+            ))
+
+        include_dirs = self.include_dirs_future.result()
+        includes = [compiler_info['set_include_option'].format(incpath)
+            for incpath in include_dirs]
+        command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
+            includes + [output, self.source_file])
+
+        start = time()
+        with self.compiler_state_lock:
+            self.process = Popen(overrides, command, cwd=self.include_path,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (stdout, stderr), retcode, done = self.process.communicate(), \
+            self.process.returncode, time()
+        with self.compiler_state_lock:
+            del self.process
+        self.times['compiler time'] = done - start
+        return obj_name, stdout, stderr, retcode
+
+    def __compile_completed(self, future):
         try:
-            obj_handle, obj_name= tempfile.mkstemp(
-                dir=self.runner.scratch_dir, suffix='.obj')
-            os.close(obj_handle)
-
-            self.source_file = os.path.join(self.include_path, self.src_loc)
-
-            compiler_info = self.task['compiler_info']
-            output = compiler_info['set_object_name'].format(obj_name)
-            pch_switch = []
-            overrides = {}
-            if self.task['pch_file']:
-                # TODO: MSVC specific, remove from here.
-                if '/GL' in self.task['call']:
-                    # In case /GL command line option is present, PCH file will
-                    # not be fully resolved during compilation. Instead,
-                    # resulting .obj file will contain a reference to it, and
-                    # consequently PCH file will be needed at link phase.
-                    # The problem we face is that PCH path on slave machine
-                    # will not be the same as the client machine. This is why
-                    # we mimic the client's PCH path on the slave.
-                    # The filesystem hook used here is implemented using
-                    # DLL injection/API hooking, so is entirely in userland.
-                    # It affects compiler performance, so is used only when
-                    # absolutely necessary.
-                    overrides[self.task['pch_file'][0]] = self.pch_file
-                    self.pch_file = self.task['pch_file'][0]
-                assert self.pch_file is not None
-                assert os.path.exists(self.pch_file)
-                pch_switch.append(compiler_info['set_pch_file'].format(
-                    self.pch_file
-                ))
-
-            include_dirs = self.include_dirs_future.result()
-            includes = [compiler_info['set_include_option'].format(incpath)
-                for incpath in include_dirs]
-            command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
-                includes + [output, self.source_file])
-
-            start = time()
-            with self.compiler_state_lock:
-                if self.state == self.StateCancelled:
-                    return
-                self.process = Popen(overrides, command, cwd=self.include_path,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            (stdout, stderr), retcode, done = self.process.communicate(), \
-                self.process.returncode, time()
-            with self.compiler_state_lock:
-                del self.process
-            self.times['compiler time'] = done - start
+            obj_name, stdout, stderr, retcode = future.result()
         except Exception as e:
-            with self.compiler_state_lock:
-                if self.state == self.StateRunningCompiler:
-                    self.change_state(self.StateFailed)
-                    tb = StringIO()
-                    tb.write("============================\n")
-                    tb.write("     SERVER TRACEBACK\n")
-                    tb.write("============================\n")
-                    traceback.print_exc(file=tb)
-                    tb.write("============================\n")
-                    tb.seek(0)
-                    self.send_threadsafe([b'SERVER_FAILED',
-                            tb.read().encode()])
-                    self.session_done()
-                else:
-                    assert self.state == self.StateCancelled
+            if self.state == self.StateRunningCompiler:
+                self.change_state(self.StateFailed)
+                tb = StringIO()
+                tb.write("============================\n")
+                tb.write("     SERVER TRACEBACK\n")
+                tb.write("============================\n")
+                traceback.print_exc(file=tb)
+                tb.write("============================\n")
+                tb.seek(0)
+                self.sender.send_msg([b'SERVER_FAILED',
+                        tb.read().encode()])
+                self.session_done()
+            else:
+                assert self.state == self.StateCancelled
         else:
-            with self.compiler_state_lock:
-                if self.state == self.StateRunningCompiler:
-                    if retcode == 0:
-                        self.change_state(self.StateWaitForConfirmation)
-                        self.object_file = obj_name
-                    self.send_threadsafe([b'SERVER_DONE', pickle.dumps(
-                        (retcode, stdout, stderr, self.times))])
-                    if retcode == 0:
-                        self.reschedule_selfdestruct()
-                    else:
-                        self.session_done()
+            if self.state == self.StateRunningCompiler:
+                if retcode == 0:
+                    self.change_state(self.StateWaitForConfirmation)
+                    self.object_file = obj_name
+                self.sender.send_msg([b'SERVER_DONE', pickle.dumps(
+                    (retcode, stdout, stderr, self.times))])
+                if retcode == 0:
+                    self.reschedule_selfdestruct()
                 else:
-                    assert self.state == self.StateCancelled
+                    self.session_done()
+            else:
+                assert self.state == self.StateCancelled
 
     def session_done(self, from_selfdestruct=False):
         if from_selfdestruct and self.completed:
@@ -450,16 +453,27 @@ class CompileSession:
         self.runner.loop.call_soon_threadsafe(
             self.sender.send_msg, msg)
 
-    @async
-    def send_object_file(self):
-        fh = os.open(self.object_file, os.O_RDONLY | os.O_BINARY |
-            os.O_NOINHERIT)
-        with os.fdopen(fh, 'rb') as obj:
-            send_compressed_file(self.send_threadsafe, obj)
-        self.session_done()
-        os.remove(self.object_file)
+    def send_object_file(self, obj_file):
+        def send_compressed_file():
+            fh = os.open(obj_file, os.O_RDONLY | os.O_BINARY |
+                os.O_NOINHERIT)
+            try:
+                with os.fdopen(fh, 'rb') as file:
+                    for buffer in compress_file(file):
+                        self.send_threadsafe([b'\x01', buffer])
+                    self.send_threadsafe([b'\x00', b''])
+            finally:
+                os.remove(obj_file)
+
+        def complete_session(future):
+            future.result()
+            self.session_done()
+
+        self.runner.loop.run_in_executor(self.runner.misc_thread_pool(),
+            send_compressed_file).add_done_callback(complete_session)
 
     def cancel_session(self):
+        assert self.state != self.StateCancelled
         self.sender.send_msg([b'SESSION_CANCELLED'])
         self.change_state(self.StateCancelled)
         self.session_done()
@@ -470,18 +484,17 @@ class CompileSession:
         if msg[0] == b'CANCEL_SESSION':
             # Special care must be taken not to send cancellation confirmation
             # too early. Once it is sent, it must be final.
-            with self.compiler_state_lock:
-                # If a state does not have a 'process_msg' function this means
-                # that no data will be sent while in this state. This kind of
-                # state can send cancel confirmation directly.
-                if self.state.can_be_cancelled and not hasattr(self.state, 'process_msg'):
-                    self.state.cancel(self)
-                    self.cancel_session()
-                else:
-                # Otherwise, state expects some data. We will wait for this data
-                # to arrive and send cancel confirmation as a reply.
-                    self.cancel_pending = True
-                    return
+            # If a state does not have a 'process_msg' function this means
+            # that no data will be sent while in this state. This kind of
+            # state can send cancel confirmation directly.
+            if self.state.can_be_cancelled and not hasattr(self.state, 'process_msg'):
+                self.state.cancel(self)
+                self.cancel_session()
+            else:
+            # Otherwise, state expects some data. We will wait for this data
+            # to arrive and send cancel confirmation as a reply.
+                self.cancel_pending = True
+                return
         else:
             # Some states do not allow cancellation. For instance, Compiler and
             # PCH downloads. These parts are 'bigger' than this session, as some
@@ -509,19 +522,12 @@ class ServerProtocol(MessageProtocol):
         session_id, *msg = msg
         if session_id == b'NEW_SESSION':
             remote_id, *msg = msg
-            session = CompileSession(self.runner, self.send_msg, remote_id)
+            session = CompileSession(self.runner, self.send_msg, remote_id.tobytes())
             self.runner.sessions[session.local_id] = session
         else:
             session = self.runner.sessions.get(session_id)
         if session:
-            if not hasattr(session, 'process_msg'):
-                print("GOT ", [m.tobytes()[:30] for m in msg], "in state", self.state)
-            else:
                 session.process_msg(msg)
-        else:
-            print("Got data for non-session")
-            print([session_id.tobytes()] + [m.tobytes()[:50] for m in msg])
-            return
 
 
 class CompileWorker:
@@ -533,6 +539,7 @@ class CompileWorker:
         dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
         os.makedirs(dir, exist_ok=True)
         self.scratch_dir = tempfile.mkdtemp(dir=dir)
+        self.counter = 0
 
         # Data shared between sessions.
         self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
@@ -548,6 +555,10 @@ class CompileWorker:
     def header_repository(self): return self.__header_repository
     def pch_repository(self): return self.__pch_repository
     def compiler_repository(self): return self.__compiler_repository
+
+    def generate_unique_id(self):
+        self.counter += 1
+        return struct.pack('!I', self.counter)
 
     def terminate(self, session_id):
         del self.sessions[session_id]

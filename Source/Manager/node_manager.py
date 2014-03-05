@@ -4,7 +4,9 @@ from .compressor import Compressor
 from Common import MessageProtocol
 
 import asyncio
+import struct
 
+from concurrent.futures import ThreadPoolExecutor
 from math import floor
 from collections import defaultdict
 from queue import Queue, Empty
@@ -19,14 +21,16 @@ class Protocol(MessageProtocol):
         self.node_mgr.process_msg(msg)
 
 class NodeManager:
-    def __init__(self, node_info):
-        self.loop = asyncio.ProactorEventLoop()
+    def __init__(self, loop, node_info):
+        self.loop = loop
         self.node_info = node_info
         self.all_sockets = defaultdict(list)
         self.tasks_running = defaultdict(list)
         self.sessions = {}
         self.unassigned_tasks = []
-        self.compressor = Compressor(self.loop)
+        self.executor = ThreadPoolExecutor(2)
+        self.compressor = Compressor(self.loop, self.executor)
+        self.counter = 0
 
     def unassigned_tasks_count(self):
         return len(self.unassigned_tasks)
@@ -36,19 +40,6 @@ class NodeManager:
             task.note_time('collected from preprocessor')
             self.schedule_task(task)
         self.loop.call_soon_threadsafe(schedule_task, task)
-
-    def run(self, observer):
-        @asyncio.coroutine
-        def observe():
-            observer()
-            yield from asyncio.sleep(0.5, loop=self.loop)
-            asyncio.async(observe(), loop=self.loop)
-
-        asyncio.async(observe(), loop=self.loop)
-        self.loop.run_forever()
-
-    def stop(self):
-        self.loop.stop()
 
     def schedule_task(self, task, node=None):
         asyncio.async(self.schedule_task_coro(task, node), loop=self.loop)
@@ -66,25 +57,30 @@ class NodeManager:
             self.unassigned_tasks.append(task)
             return
         protocol, node = result
-        session = CompileSession(task, protocol.send_msg, node, self.compressor)
+        session = CompileSession(self.generate_unique_id(), task,
+            protocol.send_msg, node, self.executor, self.compressor)
         self.sessions[session.local_id] = session
         self.tasks_running[node].append(task)
         session.start()
 
-    def close(self):
-        self.loop.close()
+    def generate_unique_id(self):
+        self.counter += 1
+        return struct.pack('!I', self.counter)
 
     def protocol_factory(self):
         return Protocol(self)
 
     @asyncio.coroutine
     def __connect_to_node(self, node):
-        print(node.node_dict())
         (transport, protocol) = yield from self.loop.create_connection(
             self.protocol_factory, host=node.node_dict()['address'],
             port=node.node_dict()['port'])
-        self.all_sockets[node].append(protocol)
-        return protocol
+        self.all_sockets[node].append((transport, protocol))
+
+    def close(self):
+        for node, ptlist in self.all_sockets.items():
+            for transport, protocol in ptlist:
+                transport.abort()
             
     def __target_tasks_per_node(self, node):
         return node.node_dict()['job_slots'] + 1
@@ -97,9 +93,9 @@ class NodeManager:
 
     def __tasks_viable_for_stealing(self, src_node, tgt_node):
         if src_node.average_task_time() == 0:
-            return self.tasks_running[src_node]
+            return []
         if tgt_node.average_task_time() == 0:
-            return self.tasks_running[src_node]
+            return []
         task_index = floor(tgt_node.average_task_time() /
             src_node.average_task_time()) * src_node.node_dict()['job_slots']
         return self.tasks_running[src_node][task_index:]
@@ -146,14 +142,12 @@ class NodeManager:
         if not node_sockets:
             yield from self.__connect_to_node(node)
         assert node_sockets
-        return node_sockets[0], node
+        return node_sockets[0][1], node
 
     def process_msg(self, msg):
         session_id, *msg = msg
         session = self.sessions.get(session_id)
         if not session:
-            print("Got data for non-session")
-            print([session_id.tobytes()] + [m.tobytes()[:50] for m in msg])
             return
         if not session.got_data_from_server(msg):
             return

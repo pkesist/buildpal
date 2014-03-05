@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from threading import Lock
 from collections import defaultdict
@@ -6,8 +5,8 @@ from collections import defaultdict
 import zlib
 
 class Compressor:
-    def __init__(self, loop):
-        self.executor = ThreadPoolExecutor(2)
+    def __init__(self, loop, executor):
+        self.executor = executor
         self.loop = loop
         self.compressed_files_lock = Lock()
         self.compressed_files = []

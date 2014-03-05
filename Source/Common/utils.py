@@ -45,19 +45,25 @@ echo {delimiter}
     os.path.remove(test_batch_filename)
     return to_add
 
-def send_compressed_file(sender, fileobj, *args, **kwargs):
+def compress_file(fileobj):
     compressor = zlib.compressobj(1)
     for data in iter(lambda : fileobj.read(256 * 1024), b''):
         compressed_data = compressor.compress(data)
         if not compressed_data:
             compressed_data = compressor.flush(zlib.Z_FULL_FLUSH)
+        yield compressed_data
+    yield compressor.flush(zlib.Z_FINISH)
+
+def send_compressed_file(sender, fileobj, *args, **kwargs):
+    for block in compress_file(fileobj):
         sender((b'\x01', compressed_data), *args, **kwargs)
-    sender((b'\x00', compressor.flush(zlib.Z_FINISH)), *args, **kwargs)
+    sender((b'\x00', b''), *args, **kwargs)
 
 def send_file(sender, file, *args, **kwargs):
     for data in iter(lambda : file.read(256 * 1024), b''):
         sender((b'\x01', data), *args, **kwargs)
     sender((b'\x00', b''), *args, **kwargs)
+
 
 class SimpleTimer:
     def __init__(self):

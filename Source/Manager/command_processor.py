@@ -110,19 +110,16 @@ class CommandProcessor:
                 'source' : source,
             })
         self.tasks = set(create_task(source) for source in sources)
-        self.completed_tasks = {}
+        self.completed_tasks = set()
         return self.tasks
 
     def task_completed(self, task):
         assert task in self.tasks
         assert task not in self.completed_tasks
         assert task.task_result is not None
-        retcode, stdout, stderr = task.task_result
         self.update_task_ui(task)
-        self.completed_tasks[task] = (retcode, stdout, stderr)
-        stdout = ''
-        stderr = ''
-        if self.tasks == self.completed_tasks.keys():
+        self.completed_tasks.add(task)
+        if self.tasks == self.completed_tasks:
             def update_ui(command_id):
                 self.__ui_data.command_info.append(
                     (", ".join(self.__options.input_files()), command_id))
@@ -136,11 +133,15 @@ class CommandProcessor:
         error_code = None
         stdout = b''
         stderr = b''
-        for task, result in self.completed_tasks.items():
-            if result[0] != 0:
-                error_code = str(result[0]).encode()
-            stdout += result[1]
-            stderr += result[2]
+        for task in self.completed_tasks:
+            retcode, tmp_stdout, tmp_stderr = task.task_result
+            if retcode != 0:
+                error_code = str(retcode).encode()
+            else:
+                task.disk_future.result()
+            stdout += tmp_stdout
+            stderr += tmp_stderr
+
         if error_code:
             self.client_conn.send([b'EXIT', error_code, stdout, stderr])
             self.client_conn.close()
@@ -170,7 +171,7 @@ class CommandProcessor:
         self.client_conn.close()
 
     def get_info(self):
-        assert self.tasks == self.completed_tasks.keys()
+        assert self.tasks == self.completed_tasks
         return {
             'command' : list2cmdline(self.__command),
             'tasks' : [task.get_info() for task in self.tasks]

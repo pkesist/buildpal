@@ -140,136 +140,6 @@ class Popen(subprocess.Popen):
         subprocess._winapi.CloseHandle(ht)
 
 class CompileSession:
-    class SessionState:
-        can_be_cancelled = False
-
-        @classmethod
-        def cancel(cls, session): pass
-
-        @classmethod
-        def enter_state(cls, session): pass
-
-        @classmethod
-        def exit_state(cls, session): pass
-
-    class StateGetTask(SessionState):
-        @classmethod
-        def process_msg(cls, session, msg):
-            assert len(msg) == 2
-            assert msg[0] == b'SERVER_TASK'
-            session.task = pickle.loads(msg[1].memory())
-            # Determine headers which are missing
-            missing_files_timer = SimpleTimer()
-            missing_files, session.repo_transaction_id = \
-                session.runner.header_repository().missing_files(
-                session.task['fqdn'], session.task['filelist'])
-            session.times['determine missing files'] = missing_files_timer.get()
-            # Determine if we have this compiler
-            session.compiler_required = session.runner.compiler_repository(
-                ).compiler_required(session.compiler_id())
-
-            # Determine whether we need pch PCH file.
-            if session.task['pch_file'] is None:
-                session.pch_required = False
-            else:
-                session.pch_file, session.pch_required = \
-                    session.runner.pch_repository().register_file(
-                        session.task['pch_file'])
-            session.sender.send_msg([session.local_id, b'MISSING_FILES',
-                pickle.dumps((missing_files, session.compiler_required,
-                session.pch_required))])
-            session.change_state(CompileSession.StateDownloadMissingHeaders)
-
-    class StateDownloadMissingHeaders(SessionState):
-        @classmethod
-        def process_msg(cls, session, msg):
-            assert msg[0] == b'TASK_FILES'
-            fqdn = session.task['fqdn']
-            new_files = pickle.loads(msg[1].memory())
-            session.src_loc = msg[2].tobytes().decode()
-            session.waiting_for_manager_data = SimpleTimer()
-            session.include_dirs_future = session.prepare_include_dirs(
-                session.runner.misc_thread_pool(), fqdn, new_files)
-            if session.compiler_required:
-                session.change_state(CompileSession.StateDownloadingCompiler)
-                session.compiler_data = BytesIO()
-            elif session.pch_required:
-                session.change_state(session.StateDownloadingPCH)
-            else:
-                session.compile()
-
-    class StateDownloadingCompiler(SessionState):
-        @classmethod
-        def process_msg(cls, session, msg):
-            more, data = msg
-            session.compiler_data.write(data)
-            if more == b'\x00':
-                session.compiler_data.seek(0)
-                dir = session.runner.compiler_repository().compiler_dir(
-                    session.compiler_id())
-                os.makedirs(dir, exist_ok=True)
-                with zipfile.ZipFile(session.compiler_data) as zip:
-                    zip.extractall(path=dir)
-                del session.compiler_data
-                session.runner.compiler_repository().set_compiler_ready(
-                    session.compiler_id())
-                if session.pch_required:
-                    session.change_state(session.StateDownloadingPCH)
-                else:
-                    session.compile()
-
-    class StateDownloadingPCH(SessionState):
-        @classmethod
-        def enter_state(cls, session):
-            handle = os.open(session.pch_file, os.O_CREAT | os.O_WRONLY |
-                os.O_NOINHERIT)
-            session.pch_timer = SimpleTimer()
-            session.pch_desc = os.fdopen(handle, 'wb')
-            session.pch_decompressor = zlib.decompressobj()
-
-        @classmethod
-        def process_msg(cls, session, msg):
-            more, data = msg
-            session.pch_desc.write(session.pch_decompressor.decompress(data.memory()))
-            if more == b'\x00':
-                session.pch_desc.write(session.pch_decompressor.flush())
-                session.times['upload precompiled header'] = session.pch_timer.get()
-                session.runner.pch_repository().file_completed(session.task['pch_file'])
-                session.compile()
-
-        @classmethod
-        def exit_state(cls, session):
-            session.pch_desc.close()
-            del session.pch_desc
-            del session.pch_decompressor
-
-    class StateRunningCompiler(SessionState):
-        can_be_cancelled = True
-
-        @classmethod
-        def cancel(cls, session):
-            with session.compiler_state_lock:
-                if hasattr(session, 'process'):
-                    session.process.terminate()
-
-    class StateWaitForConfirmation(SessionState):
-        can_be_cancelled = True
-
-        @classmethod
-        def process_msg(cls, session, msg):
-            tag, verdict = msg
-            assert tag == b'SEND_CONFIRMATION'
-            if verdict == b'\x01':
-                session.change_state(CompileSession.StateUploadingFile)
-                session.send_object_file(session.object_file)
-            else:
-                session.session_done()
-
-    class StateUploadingFile(SessionState): pass
-    class StateDone(SessionState): pass
-    class StateFailed(SessionState): pass
-    class StateCancelled(SessionState): pass
-
     def async(func):
         def wrapper(self, runner, *args, **kwds):
             return runner.submit(func, self, *args, **kwds)
@@ -606,3 +476,133 @@ class CompileWorker:
     def shutdown(self):
         self.__compile_thread_pool.shutdown()
         self.__misc_thread_pool.shutdown()
+
+    class SessionState:
+        can_be_cancelled = False
+
+        @classmethod
+        def cancel(cls, session): pass
+
+        @classmethod
+        def enter_state(cls, session): pass
+
+        @classmethod
+        def exit_state(cls, session): pass
+
+    class StateGetTask(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            assert len(msg) == 2
+            assert msg[0] == b'SERVER_TASK'
+            session.task = pickle.loads(msg[1].memory())
+            # Determine headers which are missing
+            missing_files_timer = SimpleTimer()
+            missing_files, session.repo_transaction_id = \
+                session.runner.header_repository().missing_files(
+                session.task['fqdn'], session.task['filelist'])
+            session.times['determine missing files'] = missing_files_timer.get()
+            # Determine if we have this compiler
+            session.compiler_required = session.runner.compiler_repository(
+                ).compiler_required(session.compiler_id())
+
+            # Determine whether we need pch PCH file.
+            if session.task['pch_file'] is None:
+                session.pch_required = False
+            else:
+                session.pch_file, session.pch_required = \
+                    session.runner.pch_repository().register_file(
+                        session.task['pch_file'])
+            session.sender.send_msg([session.local_id, b'MISSING_FILES',
+                pickle.dumps((missing_files, session.compiler_required,
+                session.pch_required))])
+            session.change_state(CompileSession.StateDownloadMissingHeaders)
+
+    class StateDownloadMissingHeaders(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            assert msg[0] == b'TASK_FILES'
+            fqdn = session.task['fqdn']
+            new_files = pickle.loads(msg[1].memory())
+            session.src_loc = msg[2].tobytes().decode()
+            session.waiting_for_manager_data = SimpleTimer()
+            session.include_dirs_future = session.prepare_include_dirs(
+                session.runner.misc_thread_pool(), fqdn, new_files)
+            if session.compiler_required:
+                session.change_state(CompileSession.StateDownloadingCompiler)
+                session.compiler_data = BytesIO()
+            elif session.pch_required:
+                session.change_state(session.StateDownloadingPCH)
+            else:
+                session.compile()
+
+    class StateDownloadingCompiler(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            more, data = msg
+            session.compiler_data.write(data)
+            if more == b'\x00':
+                session.compiler_data.seek(0)
+                dir = session.runner.compiler_repository().compiler_dir(
+                    session.compiler_id())
+                os.makedirs(dir, exist_ok=True)
+                with zipfile.ZipFile(session.compiler_data) as zip:
+                    zip.extractall(path=dir)
+                del session.compiler_data
+                session.runner.compiler_repository().set_compiler_ready(
+                    session.compiler_id())
+                if session.pch_required:
+                    session.change_state(session.StateDownloadingPCH)
+                else:
+                    session.compile()
+
+    class StateDownloadingPCH(SessionState):
+        @classmethod
+        def enter_state(cls, session):
+            handle = os.open(session.pch_file, os.O_CREAT | os.O_WRONLY |
+                os.O_NOINHERIT)
+            session.pch_timer = SimpleTimer()
+            session.pch_desc = os.fdopen(handle, 'wb')
+            session.pch_decompressor = zlib.decompressobj()
+
+        @classmethod
+        def process_msg(cls, session, msg):
+            more, data = msg
+            session.pch_desc.write(session.pch_decompressor.decompress(data.memory()))
+            if more == b'\x00':
+                session.pch_desc.write(session.pch_decompressor.flush())
+                session.times['upload precompiled header'] = session.pch_timer.get()
+                session.runner.pch_repository().file_completed(session.task['pch_file'])
+                session.compile()
+
+        @classmethod
+        def exit_state(cls, session):
+            session.pch_desc.close()
+            del session.pch_desc
+            del session.pch_decompressor
+
+    class StateRunningCompiler(SessionState):
+        can_be_cancelled = True
+
+        @classmethod
+        def cancel(cls, session):
+            with session.compiler_state_lock:
+                if hasattr(session, 'process'):
+                    session.process.terminate()
+
+    class StateWaitForConfirmation(SessionState):
+        can_be_cancelled = True
+
+        @classmethod
+        def process_msg(cls, session, msg):
+            tag, verdict = msg
+            assert tag == b'SEND_CONFIRMATION'
+            if verdict == b'\x01':
+                session.change_state(CompileSession.StateUploadingFile)
+                session.send_object_file(session.object_file)
+            else:
+                session.session_done()
+
+    class StateUploadingFile(SessionState): pass
+    class StateDone(SessionState): pass
+    class StateFailed(SessionState): pass
+    class StateCancelled(SessionState): pass

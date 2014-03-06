@@ -1,7 +1,8 @@
 import asyncio
-import pickle
 import struct
 import sys
+
+from io import BytesIO
 
 class MemoryViewWrapper:
     def __init__(self, obj):
@@ -18,6 +19,9 @@ class MemoryViewWrapper:
 
     def tobytes(self):
         return self.obj.tobytes()
+
+    def decode(self):
+        return self.obj.tobytes().decode()
 
     def memory(self):
         return self.obj
@@ -45,7 +49,7 @@ class MessageProtocol(asyncio.Protocol):
         self.len_buff = bytearray(4)
         self.len_offset = 0
         self.msg_len = None
-        self.msg_data = bytearray(10 * 1024)
+        self.msg_data = BytesIO()
         self.msg_offset = 0
         self.transport = None
 
@@ -74,26 +78,17 @@ class MessageProtocol(asyncio.Protocol):
                 if to_add == remaining:
                     (self.msg_len,) = struct.unpack('!I', self.len_buff)
                     self.len_offset = 0
-                    if len(self.msg_data) < self.msg_len:
-                        self.msg_data = bytearray(self.msg_len)
-                    self.msg_offset = 0
+                    self.msg_data.seek(0)
             else:
-                remaining = self.msg_len - self.msg_offset
+                remaining = self.msg_len - self.msg_data.tell()
                 to_add = min(remaining, len(data) - data_offset)
-                self.msg_data[self.msg_offset:self.msg_offset + to_add] = \
-                    data[data_offset:data_offset + to_add]
-                self.msg_offset += to_add
+                self.msg_data.write(data[data_offset:data_offset + to_add])
                 data_offset += to_add
 
                 if to_add == remaining:
-                    mv = memoryview(self.msg_data)
-                    msg = tuple(msg_from_bytes(mv[:self.msg_len]))
-                    self.process_msg(msg)
-                    del msg
-                    del mv
+                    self.process_msg(tuple(msg_from_bytes(self.msg_data.getbuffer()[:self.msg_len])))
                     assert sys.getrefcount(self.msg_data) == 2, "never store message references!"
                     self.msg_len = None
-                    self.msg_offset = 0
 
     def process_msg(self, msg):
         raise NotImplementedError()

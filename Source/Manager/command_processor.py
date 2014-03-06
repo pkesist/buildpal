@@ -32,24 +32,24 @@ class CommandProcessor:
     def request_compiler_info(self, on_completion):
         self.got_compiler_info = on_completion
         self.test_source = self.__compiler.prepare_test_source()
-        self.client_conn.send([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
+        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
         self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
         if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
             self.test_source.destroy()
             del self.test_source
-            retcode = int(msg[0])
-            stdout = msg[1]
-            stderr = msg[2]
+            retcode = int(msg[0].tobytes())
+            stdout = msg[1].tobytes()
+            stderr = msg[2].tobytes()
             info, self.compiler_files = self.__compiler.compiler_info(
                 self.__executable, stdout, stderr)
             self.compiler_info = info
-            self.client_conn.send([b'LOCATE_FILES'] + self.compiler_files)
+            self.client_conn.send_msg([b'LOCATE_FILES'] + self.compiler_files)
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
             assert len(msg) == len(self.compiler_files)
-            self.compiler_files = list(zip(msg, self.compiler_files))
+            self.compiler_files = list(zip([m.tobytes() for m in msg], self.compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
         else:
@@ -143,12 +143,12 @@ class CommandProcessor:
             stderr += tmp_stderr
 
         if error_code:
-            self.client_conn.send([b'EXIT', error_code, stdout, stderr])
+            self.client_conn.send_msg([b'EXIT', error_code, stdout, stderr])
             self.client_conn.close()
             return
 
         if not self.should_invoke_linker():
-            self.client_conn.send([b'EXIT', b'0', stdout, stderr])
+            self.client_conn.send_msg([b'EXIT', b'0', stdout, stderr])
             self.client_conn.close()
             return
 
@@ -167,7 +167,7 @@ class CommandProcessor:
         if link_opts:
             call.extend(*link_opts)
 
-        self.client_conn.send([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
+        self.client_conn.send_msg([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
         self.client_conn.close()
 
     def get_info(self):

@@ -98,8 +98,7 @@ class CompileSession:
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
                     for path, file in self.task.compiler_files:
                         zip_file.write(path.decode(), file.decode())
-                zip_data.seek(0)
-                send_file(self.sender.send_msg, zip_data)
+                send_file(self.sender.send_msg, BytesIO(zip_data.getbuffer()))
                 del zip_data
             if need_pch:
                 assert self.task.pch_file is not None

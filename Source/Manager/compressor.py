@@ -38,7 +38,7 @@ class Compressor:
             if len(self.compressed_file_data) > 4:
                 del self.compressed_file_data[self.compressed_files.pop(0)]
             self.compressed_files.append(file)
-            self.compressed_file_data[file] = buffer.read()
+            self.compressed_file_data[file] = buffer.getbuffer()
         def notify_waiters(byte_data, waiters):
             for on_completion in waiters:
                 on_completion(BytesIO(byte_data))

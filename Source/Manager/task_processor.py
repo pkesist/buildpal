@@ -1,5 +1,5 @@
 from Compilers import MSVCWrapper
-from Common import SimpleTimer
+from Common import SimpleTimer, MessageProtocol
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor
@@ -19,9 +19,10 @@ from tempfile import mkstemp
 from threading import Thread
 from time import time
 
-class ClientProcessor:
+class ClientProcessor(MessageProtocol):
     def __init__(self, compiler_info, task_created_func, database_inserter,
             ui_data, register, unregister):
+        MessageProtocol.__init__(self)
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
         self.ui_data = ui_data
@@ -44,38 +45,17 @@ class ClientProcessor:
         self.transport.abort()
 
     def connection_made(self, transport):
-        self.transport = transport
+        super().connection_made(transport)
         self.register(self)
 
     def connection_lost(self, exception):
+        super().connection_lost(exception)
         self.unregister(self)
 
     def eof_received(self):
         return False
 
-    def send(self, msg):
-        assert self.transport is not None
-        self.transport.write(b'\x00'.join(msg) + b'\x00\x01')
-
-    def data_received(self, data):
-        self.data = self.data + data
-        while True:
-            msg = self.__get_message()
-            if msg is not None:
-                self.__handle_message(msg)
-            else:
-                break
-
-    def __get_message(self):
-        try:
-            end_index = self.data.index(b'\x00\x01')
-        except ValueError:
-            return None
-        result = self.data[:end_index].split(b'\x00')
-        self.data = self.data[end_index + 2:]
-        return result
-
-    def __handle_message(self, msg):
+    def process_msg(self, msg):
         if self.command_processor is not None:
             self.command_processor.got_data_from_client(msg)
         else:
@@ -93,7 +73,7 @@ class ClientProcessor:
             cwd, sysincludes, compiler, command, self.database_inserter, self.ui_data)
 
         if self.command_processor.build_local():
-            self.send([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
+            self.send_msg([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
             self.close()
             return True
 

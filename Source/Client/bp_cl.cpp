@@ -3,6 +3,7 @@
 #include "boost/filesystem/convenience.hpp"
 #include "boost/filesystem/path.hpp"
 #include "boost/spirit/include/qi.hpp"
+#include "boost/spirit/include/karma.hpp"
 #include <boost/timer/timer.hpp>
 
 #include <llvm/Support/CommandLine.h>
@@ -11,6 +12,7 @@
 #include <deque>
 #include <iostream>
 #include <memory>
+#include <list>
 #include <set>
 #include <string>
 #include <sstream>
@@ -91,40 +93,112 @@ std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
     return buffer;
 }
 
-template <class Stream>
+
+class MsgSender
+{
+public:
+    MsgSender() { initMessage(); }
+
+    void addPart( char const * ptr, std::size_t size )
+    {
+        std::array<unsigned char, 4> const ar = {(size >> 24) & 0xFF, (size >> 16) & 0xFF, (size >> 8) & 0xFF, size & 0xFF};
+        lengths_.push_back( ar );
+        buffers_.push_back( boost::asio::buffer( &lengths_.back()[0], sizeof( lengths_.back() ) ) );
+        if ( size != 0 )
+            buffers_.push_back( boost::asio::buffer( ptr, size ) );
+        totalLength_ += 4 + size;
+        partCount_ += 1;
+    }
+
+    template <class Stream>
+    void send( Stream & sock )
+    {
+        lengthBuffer_[0] = (totalLength_ >> 24) & 0xFF;
+        lengthBuffer_[1] = (totalLength_ >> 16) & 0xFF;
+        lengthBuffer_[2] = (totalLength_ >>  8) & 0xFF;
+        lengthBuffer_[3] = (totalLength_      ) & 0xFF;
+        lengthBuffer_[4] = (partCount_ >> 8 ) & 0xFF;
+        lengthBuffer_[5] = (partCount_      ) & 0xFF;
+        boost::system::error_code writeError;
+        boost::asio::write( sock, buffers_, writeError );
+        initMessage();
+    }
+
+private:
+    void initMessage()
+    {
+        buffers_.clear();
+        lengths_.clear();
+        partCount_ = 0;
+        buffers_.push_back( boost::asio::buffer( &lengthBuffer_[0], sizeof( lengthBuffer_ ) ) );
+        totalLength_ = sizeof(lengthBuffer_) - 4;
+    }
+
+private:
+    std::size_t totalLength_;
+    std::size_t partCount_;
+    std::array<unsigned char, 6> lengthBuffer_;
+    std::list<std::array<unsigned char, 4> > lengths_;
+    std::vector<boost::asio::const_buffer> buffers_;
+};
+
+
 class MsgReceiver
 {
 public:
-    explicit MsgReceiver( Stream & sock )
-        :
-        socket_( sock ),
-        currentSize_( 0 )
+    template <class Stream>
+    void getMessage( Stream & sock )
     {
-    }
+        parts_.clear();
 
-    void getMessage()
-    {
-        if ( currentSize_ )
-        {
-            parts_.clear();
-            buf_.consume( currentSize_ );
-            currentSize_ = 0;
-        }
+        std::array<unsigned char, 6> lengthBuffer;
         boost::system::error_code readError;
-        char const * start;
-        currentSize_ = boost::asio::read_until( socket_, buf_, std::string( "\0\1", 2 ), readError );
+        boost::asio::read( sock, boost::asio::buffer( &lengthBuffer[0], sizeof( lengthBuffer ) ), readError );
         if ( readError )
         {
             std::cerr << "FATAL: Read failure (" << readError.message() << ")\n";
             exit( 1 );
         }
-        boost::asio::streambuf::const_buffers_type bufs = buf_.data();
-        start = boost::asio::buffer_cast<char const *>( bufs );
-        for ( std::size_t stride( 0 ); stride < currentSize_ - 1; )
+        std::size_t const totalSize =
+            (lengthBuffer[0] << 24) |
+            (lengthBuffer[1] << 16) |
+            (lengthBuffer[2] << 8 ) |
+            (lengthBuffer[3]      );
+
+        std::size_t const partCount =
+            (lengthBuffer[4] << 8) |
+            (lengthBuffer[5]     );
+
+        buf_.resize( totalSize - 2 );
+        boost::asio::read( sock, boost::asio::buffer( &buf_[0], totalSize - 2 ), readError );
+        if ( readError )
         {
-            std::size_t const partLen( strlen( start + stride ) );
-            parts_.push_back( std::make_pair( start + stride, partLen ) );
-            stride += partLen + 1;
+            std::cerr << "FATAL: Read failure (" << readError.message() << ")\n";
+            exit( 1 );
+        }
+
+        char const * const start = buf_.data();
+        unsigned char const * const ustart = reinterpret_cast<unsigned char const *>( start );
+        std::size_t offset( 0 );
+        std::size_t partsFound = 0;
+        while ( offset < totalSize - 2 )
+        {
+            std::size_t const partLen = 
+                (ustart[offset + 0] << 24) |
+                (ustart[offset + 1] << 16) |
+                (ustart[offset + 2] << 8 ) |
+                (ustart[offset + 3]      );
+            offset += 4;
+            parts_.push_back( std::make_pair( start + offset, partLen ) );
+            offset += partLen;
+            ++partsFound;
+        }
+        if ( ( offset != totalSize - 2 ) || ( partsFound != partCount ) )
+        {
+            std::cerr << "FATAL: Invalid message\n";
+            std::cerr << "    offset " << offset << ", should be " << totalSize - 2 << "\n";
+            std::cerr << "    parts " << partsFound << ", should be " << partCount << "\n";
+            exit( 1 );
         }
     }
 
@@ -145,17 +219,21 @@ public:
     std::size_t parts() const { return parts_.size(); }
 
 private:
-    Stream & socket_;
-    boost::asio::streambuf buf_;
+    std::vector<char> buf_;
     std::vector<std::pair<char const *, std::size_t> > parts_;
-    std::size_t currentSize_;
 };
 
 template <typename Parser, typename Attribute>
-bool parse( char const * buffer, Parser const & parser, typename Attribute & val )
+bool parse( char const * buffer, Parser const & parser, Attribute & val )
 {
     char const * end = buffer + strlen( buffer );
     return boost::spirit::qi::parse( buffer, end, parser, val ) && ( buffer == end );
+}
+
+template <typename Generator, typename Attribute>
+bool generate( char * & buffer, Generator const & generator, Attribute const & attr )
+{
+    return boost::spirit::karma::generate( buffer, generator, attr );
 }
 
 int createProcess( char * commandLine )
@@ -354,28 +432,27 @@ int main( int argc, char * argv[] )
         return createProcess( buffer );
     }
 
-    std::vector<boost::asio::const_buffer> req;
+    MsgSender msgSender;
 
-    req.push_back( boost::asio::buffer( compiler, compilerSize + 1 ) );
+    msgSender.addPart( compiler, compilerSize );
     std::string const compilerExeStr( compilerExecutable.string() );
-    req.push_back( boost::asio::buffer( compilerExeStr.c_str(), compilerExeStr.size() + 1 ) );
+    msgSender.addPart( compilerExeStr.c_str(), compilerExeStr.size() );
 
     DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
     if ( includeSize == 0 )
-        req.push_back( boost::asio::buffer( "\0", 1 ) );
+        msgSender.addPart( "", 0 );
     else
     {
         char * includeBuffer = static_cast<char *>( _alloca( includeSize ) );
         GetEnvironmentVariable( "INCLUDE", includeBuffer, includeSize );
         includeBuffer[ includeSize ] = '\0';
-        req.push_back( boost::asio::buffer( includeBuffer, includeSize ) );
+        msgSender.addPart( includeBuffer, includeSize - 1 );
     }
 
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
     char * currentPathBuffer = static_cast<char *>( _alloca( currentPathSize ) );
     GetCurrentDirectory( currentPathSize, currentPathBuffer );
-    req.push_back( boost::asio::buffer( currentPathBuffer, currentPathSize ) );
-
+    msgSender.addPart( currentPathBuffer, currentPathSize - 1 );
 
     llvm::SmallVector<char const *, 16> newArgv;
     for ( int i( 1 ); i < argc; ++i )
@@ -391,17 +468,15 @@ int main( int argc, char * argv[] )
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
     {
-        req.push_back( boost::asio::buffer( newArgv[ arg ], strlen( newArgv[arg] ) + 1 ) );
+        msgSender.addPart( newArgv[ arg ], strlen( newArgv[arg] ) );
     }
 
-    req.push_back( boost::asio::buffer( "\1", 1 ) );
-    boost::system::error_code writeError;
-    boost::asio::write( sock, req, writeError );
+    msgSender.send( sock );
 
-    MsgReceiver<StreamType> receiver( sock );
+    MsgReceiver receiver;
     while ( true )
     {
-        receiver.getMessage();
+        receiver.getMessage( sock );
 
         assert( receiver.parts() >= 1 );
 
@@ -477,31 +552,27 @@ int main( int argc, char * argv[] )
                 &processInfo
             );
 
-            std::vector<boost::asio::const_buffer> res;
             if ( apiResult )
             {
                 ::WaitForSingleObject( processInfo.hProcess, INFINITE );
                 {
                     int result;
                     GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-                    char buffer[20];
-                    _itoa( result, buffer, 10 );
-                    res.push_back( boost::asio::buffer( buffer, strlen( buffer ) + 1 ) );
+                    char * buffer = static_cast<char *>( _alloca( 16 ) );
+                    char * buf = buffer;
+                    bool const genResult = generate( buf, boost::spirit::karma::int_, result );
+                    assert( genResult );
+                    assert( buffer < buf );
+                    assert( buf - buffer <= 16 );
+                    msgSender.addPart( buffer, buf - buffer );
                 }
                 DWORD stdOutSize;
                 std::unique_ptr<char []> stdOut( getPipeData( stdOutRead, stdOutSize ) );
-                res.push_back( boost::asio::buffer( stdOut.get(), stdOutSize + 1 ) );
+                msgSender.addPart( stdOut.get(), stdOutSize );
                 DWORD stdErrSize;
                 std::unique_ptr<char []> stdErr( getPipeData( stdErrRead, stdErrSize ) );
-                res.push_back( boost::asio::buffer( stdErr.get(), stdErrSize + 1 ) );
-                res.push_back( boost::asio::buffer( "\1", 1 ) );
-                boost::system::error_code writeError;
-                boost::asio::write( sock, res, writeError );
-                if ( writeError )
-                {
-                    std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
-                    exit( 1 );
-                }
+                msgSender.addPart( stdErr.get(), stdErrSize );
+                msgSender.send( sock );
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );
                 CloseHandle( stdOutRead );
@@ -549,7 +620,6 @@ int main( int argc, char * argv[] )
         {
             assert( receiver.parts() > 1 );
             std::vector<std::string> files;
-            std::vector<boost::asio::const_buffer> res;
             // First search relative to compiler dir, then path.
             PathList pathList;
             pathList.push_back( compilerExecutable.parent_path() );
@@ -564,16 +634,9 @@ int main( int argc, char * argv[] )
                 boost::filesystem::path result;
                 findOnPath( pathList, boost::filesystem::path( file, file + fileSize ), result );
                 files.push_back( result.string() );
-                res.push_back( boost::asio::buffer( files.back().c_str(), files.back().size() + 1 ) );
+                msgSender.addPart( files.back().c_str(), files.back().size() );
             }
-            res.push_back( boost::asio::buffer( "\1", 1 ) );
-            boost::system::error_code writeError;
-            boost::asio::write( sock, res, writeError );
-            if ( writeError )
-            {
-                std::cerr << "FATAL: Write failure (" << writeError.message() << ")\n";
-                exit( 1 );
-            }
+            msgSender.send( sock );
         }
         else
         {

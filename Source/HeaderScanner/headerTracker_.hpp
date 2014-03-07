@@ -163,7 +163,7 @@ public:
             for ( MacroState::value_type const & entry : definedHere_ )
                 parent_->macroDefined( entry.getKey(), entry.getValue() );
         }
-        
+
         // Sometimes we do not want to propagate headers upwards. More specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.

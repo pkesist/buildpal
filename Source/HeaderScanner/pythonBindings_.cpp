@@ -209,7 +209,7 @@ PyMethodDef PyCache_methods[] =
 
 PyTypeObject PyCacheType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "Preprocessor",             /* tp_name */
+    "Cache",                    /* tp_name */
     sizeof(PyCache),            /* tp_basicsize */
     0,                          /* tp_itemsize */
     (destructor)PyCache_dealloc,/* tp_dealloc */

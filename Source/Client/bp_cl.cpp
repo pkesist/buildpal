@@ -1,5 +1,4 @@
 #include "boost/asio.hpp"
-#include "boost/utility/string_ref.hpp"
 #include "boost/filesystem/convenience.hpp"
 #include "boost/filesystem/path.hpp"
 #include "boost/spirit/include/qi.hpp"
@@ -9,7 +8,6 @@
 #include <llvm/Support/CommandLine.h>
 
 #include <cassert>
-#include <deque>
 #include <iostream>
 #include <memory>
 #include <list>

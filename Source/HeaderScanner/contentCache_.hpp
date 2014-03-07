@@ -73,7 +73,7 @@ public:
         return iter != contentMap_.end() ? &iter->second : 0;
     }
 
-    ContentEntry const & getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache & );
+    ContentEntry const & getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache * );
 
     void clear() { contentMap_.clear(); }
 

@@ -56,7 +56,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // Make sure this file is loaded through globalContentCache, so that it
     // can be shared between different SourceManager instances.
     ContentEntry const & contentEntry = ContentCache::singleton().getOrCreate(
-            preprocessor().getFileManager(), entry, cache() );
+        preprocessor().getFileManager(), entry, cacheDisabled() ? 0 : &cache() );
     if ( !sourceManager().isFileOverridden( entry ) )
     {
         sourceManager().overrideFileContents( entry, contentEntry.buffer.get(), true );
@@ -219,14 +219,10 @@ void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
     PopBackGuard<HeaderCtxStack> const popHeaderCtxStack( headerCtxStack_ );
 
     HeaderCtxStack::size_type const stackSize( headerCtxStack().size() );
-    if ( cacheDisabled() )
-        return;
-
-    if ( isViableForCache( headerCtxStack().back(), file ) )
+    if ( !cacheDisabled() && isViableForCache( headerCtxStack().back(), file ) )
         headerCtxStack().back().addToCache( cache(), searchPathId_, file );
     headerCtxStack().back().propagateToParent( ignoredHeaders );
 }
-
 
 CacheEntryPtr HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file ) const
 {

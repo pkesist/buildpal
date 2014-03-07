@@ -68,16 +68,17 @@ ContentEntry::ContentEntry( llvm::MemoryBuffer * b, time_t const mod )
 {
 }
 
-ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache & cache )
+ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache * cache )
 {
     llvm::sys::fs::UniqueID const uniqueID = file->getUniqueID();
-    ContentEntry const  * contentEntry( get( uniqueID ) );
+    ContentEntry const * contentEntry( get( uniqueID ) );
     if ( contentEntry )
     {
         if ( contentEntry->modified == file->getModificationTime() )
             return *contentEntry;
         boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-        cache.invalidate( *contentEntry );
+        if ( cache )
+            cache->invalidate( *contentEntry );
         contentMap_[ uniqueID ] = ContentEntry( fm.getBufferForFile( file, 0, true ), file->getModificationTime() );
         return contentMap_[ uniqueID ];
     }

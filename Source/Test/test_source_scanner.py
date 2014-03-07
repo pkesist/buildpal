@@ -1,12 +1,12 @@
 import preprocessing
+import pytest
 import threading
 import os
 from time import sleep
 
 def collect_headers(filename, includes=[], defines=[],
-        sysincludes=[], ignored_headers=[]):
-    cache = preprocessing.Cache()
-    preprocessor = preprocessing.Preprocessor(cache)
+        sysincludes=[], ignored_headers=[], use_cache=True):
+    preprocessor = preprocessing.Preprocessor(preprocessing.Cache() if use_cache else None)
     ppc = preprocessing.PreprocessingContext()
     for path in includes:
         ppc.add_include_path(path, False)
@@ -34,11 +34,17 @@ class Environment:
         with open(real_path, 'wt') as file:
             file.write(content)
 
-    def run(self, filename, includes=[], defines=[]):
+    def run_worker(self, filename, includes=[], defines=[], use_cache=False):
         return set(x[0] for dir, headers in collect_headers(
             os.path.join(self.dir, filename),
             includes=[os.path.join(self.dir, i) for i in includes],
-            defines=defines) for x in headers)
+            defines=defines, use_cache=use_cache) for x in headers)
+
+    def run_nocache(self, filename, includes=[], defines=[]):
+        return self.run_worker(filename, includes, defines, use_cache=False)
+
+    def run_withcache(self, filename, includes=[], defines=[]):
+        return self.run_worker(filename, includes, defines, use_cache=True)
 
     def full_path(self, filename):
         return os.path.join(self.dir, filename)
@@ -50,10 +56,13 @@ class Environment:
         statinfo = os.stat(filename)
         os.utime(filename, times=(statinfo.st_atime, statinfo.st_mtime + 1))
 
-
-
-def test_simple(tmpdir):
+@pytest.fixture(params=["run_withcache", "run_nocache"])
+def env(request, tmpdir):
     env = Environment(tmpdir)
+    env.run = getattr(env, request.param)
+    return env
+
+def test_simple(env):
     env.make_file('a.h')
     env.make_file('test1.cpp', r'''
 #include "a.h"
@@ -66,8 +75,7 @@ def test_simple(tmpdir):
     assert not env.run('test2.cpp')
     assert env.run('test2.cpp', includes=['.']) == {'a.h'}
 
-def test_macros(tmpdir):
-    env = Environment(tmpdir)
+def test_macros(env):
     env.make_file('a.h')
     env.make_file('test1.cpp', r'''
 #define XXX "a.h"
@@ -83,8 +91,7 @@ def test_macros(tmpdir):
 ''')
     assert env.run('test1.cpp') == {'a.h'}
 
-def test_header_guard(tmpdir):
-    env = Environment(tmpdir)
+def test_header_guard(env):
     env.make_file('aaa/a.h')
     env.make_file('aaa/x.h', '''
 #if !defined(X_H)
@@ -105,8 +112,7 @@ def test_header_guard(tmpdir):
     assert env.run('test2.cpp', includes=['aaa']) == \
         {'a.h', 'x.h'}
 
-def test_pragma_once(tmpdir):
-    env = Environment(tmpdir)
+def test_pragma_once(env):
     env.make_file('xxx.h')
     env.make_file('yyy.h')
     env.make_file('a.h', '''
@@ -150,8 +156,7 @@ def test_pragma_once(tmpdir):
         == {'a.h', 'yyy.h'}
     assert env.run('test2.cpp') == {'a.h', 'yyy.h'}
 
-def test_cache_stat(tmpdir):
-    env = Environment(tmpdir)
+def test_cache_stat(env):
     env.make_file('xxx.h')
     env.make_file('yyy.h')
     env.make_file('a.h', '''
@@ -169,8 +174,7 @@ def test_cache_stat(tmpdir):
     env.touch('a.h')
     assert env.run('test.cpp') == {'a.h', 'yyy.h'}
 
-def test_cache_stat_indirect(tmpdir):
-    env = Environment(tmpdir)
+def test_cache_stat_indirect(env):
     env.make_file('xxx.h')
     env.make_file('yyy.h')
     env.make_file('a.h', '''

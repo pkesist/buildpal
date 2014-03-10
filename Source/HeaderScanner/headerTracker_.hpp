@@ -46,7 +46,7 @@ public:
     {
     }
 
-    void macroUsed( llvm::StringRef macroName )
+    void macroUsed( MacroName macroName )
     {
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was not also
@@ -55,13 +55,13 @@ public:
             usedHere_.insert( macroName );
     }
 
-    void macroDefined( llvm::StringRef macroName, llvm::StringRef macroValue )
+    void macroDefined( MacroName macroName, MacroValue macroValue )
     {
         assert( !fromCache() );
         definedHere_.defineMacro( macroName, macroValue );
     }
 
-    void macroUndefined( llvm::StringRef macroName )
+    void macroUndefined( MacroName macroName )
     {
         assert( !fromCache() );
         if ( definedHere_.find( macroName ) != definedHere_.end() )
@@ -70,16 +70,16 @@ public:
             undefinedHere_.insert( macroName );
     }
 
-    llvm::StringRef getMacroValue( llvm::StringRef name ) const
+    MacroValue getMacroValue( MacroName name ) const
     {
         MacroState::const_iterator const stateIter( definedHere_.find( name ) );
         if ( stateIter != definedHere_.end() )
-            return stateIter->getValue();
+            return stateIter->second;
         if ( undefinedHere_.find( name ) != undefinedHere_.end() )
-            return undefinedMacroValue();
+            return undefinedMacroValue;
         return parent_
             ? parent_->getMacroValue( name )
-            : undefinedMacroValue()
+            : undefinedMacroValue
         ;
     }
 
@@ -91,11 +91,12 @@ public:
             usedHere_.begin(),
             usedHere_.end(),
             std::inserter( result, result.begin() ),
-            [this]( llvm::StringRef macroName )
+            [this]( MacroName macroName )
             {
-                // When creating cache key we must use old macro values, as they
-                // were in parent at the time of inclusion.
-                return createMacro( macroName, parent_->getMacroValue( macroName ) );
+                //   When creating cache key we must use 'old' macro values, as
+                // they were in parent at the time of inclusion.
+                return std::make_pair( macroName,
+                    parent_->getMacroValue( macroName ) );
             }
         );
         return result;
@@ -104,13 +105,15 @@ public:
     HeaderContent createHeaderContent() const
     {
         HeaderContent headerContent;
-        for ( llvm::StringRef undefinedMacro : undefinedHere_ )
+        for ( MacroName undefinedMacro : undefinedHere_ )
         {
-            headerContent.push_back( std::make_pair( MacroUsage::undefined, createMacro( undefinedMacro, undefinedMacroValue() ) ) );
+            headerContent.push_back( std::make_pair( MacroUsage::undefined,
+                std::make_pair( undefinedMacro, undefinedMacroValue ) ) );
         }
         for ( MacroState::value_type const & value : definedHere_ )
         {
-            headerContent.push_back( std::make_pair( MacroUsage::defined, createMacro( value.getKey(), value.getValue() ) ) );
+            headerContent.push_back( std::make_pair( MacroUsage::defined,
+                value ) );
         }
         return headerContent;
     }
@@ -130,27 +133,27 @@ public:
         if ( fromCache() )
         {
             for ( Macro const & usedMacro : cacheHit_->usedMacros() )
-                parent_->macroUsed( usedMacro.first.get() );
+                parent_->macroUsed( usedMacro.first );
 
             for ( HeaderEntry const & headerEntry : cacheHit_->headerContent() )
             {
                 if ( headerEntry.first == MacroUsage::defined )
-                    parent_->macroDefined( macroName( headerEntry.second ),
-                        macroValue( headerEntry.second ) );
+                    parent_->macroDefined( headerEntry.second.first,
+                        headerEntry.second.second );
                 else
                 {
                     assert( headerEntry.first == MacroUsage::undefined );
-                    parent_->macroUndefined( macroName( headerEntry.second ) );
+                    parent_->macroUndefined( headerEntry.second.first );
                 }
             }
         }
         else
         {
-            for ( llvm::StringRef usedMacro : usedHere_ )
+            for ( MacroName usedMacro : usedHere_ )
                 parent_->macroUsed( usedMacro );
 
             // If child header undefined a macro.
-            for ( llvm::StringRef undefinedMacro : undefinedHere_ )
+            for ( MacroName undefinedMacro : undefinedHere_ )
             {
                 // And did not re-define it.
                 if ( definedHere_.find( undefinedMacro ) == definedHere_.end() )
@@ -161,7 +164,7 @@ public:
             // Add all macro definitions from child (including redefinitions)
             // to parent header macro state.
             for ( MacroState::value_type const & entry : definedHere_ )
-                parent_->macroDefined( entry.getKey(), entry.getValue() );
+                parent_->macroDefined( entry.first, entry.second );
         }
 
         // Sometimes we do not want to propagate headers upwards. More specifically,
@@ -201,7 +204,7 @@ public:
     clang::FileEntry const * replacement() const { return replacement_; }
 
 private:
-    typedef std::unordered_set<llvm::StringRef, HashString> MacroNames;
+    typedef std::set<MacroName> MacroNames;
 
 private:
     clang::Preprocessor const & preprocessor_;
@@ -263,10 +266,9 @@ private:
     typedef std::vector<HeaderWithFileEntry> IncludeStack;
     typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
 
-    llvm::StringRef macroForPragmaOnce( llvm::sys::fs::UniqueID const & );
+    MacroName macroForPragmaOnce( llvm::sys::fs::UniqueID const & );
 
 private:
-    std::unordered_set<std::string> tmpStrings_;
     clang::Preprocessor & preprocessor_;
     std::size_t searchPathId_;
     HeaderCtxStack headerCtxStack_;

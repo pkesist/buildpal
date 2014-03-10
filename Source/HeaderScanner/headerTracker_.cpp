@@ -28,14 +28,14 @@ namespace
 
 }
 
-llvm::StringRef HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val )
+MacroName HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val )
 {
     std::string result;
     using namespace boost::spirit::karma;
     generate( std::back_inserter( result ),
         lit( "____pragma_once__" ) << ulong_long << lit("_") << ulong_long,
         val.getDevice(), val.getFile() );
-    return *tmpStrings_.insert( result ).first;
+    return MacroName( result );
 }
 
 void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * entry )
@@ -105,8 +105,8 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     // empty file.
     // TODO: Try avoiding calling (expensive) macroForPragmaOnce() on every
     // (non-skipped) include directive.
-    llvm::StringRef const pragmaOnceMacro = macroForPragmaOnce( entry->getUniqueID() );
-    if ( headerCtxStack().back().getMacroValue( pragmaOnceMacro ) != undefinedMacroValue() )
+    MacroName const pragmaOnceMacro = macroForPragmaOnce( entry->getUniqueID() );
+    if ( headerCtxStack().back().getMacroValue( pragmaOnceMacro ) != undefinedMacroValue )
     {
         headerCtxStack().back().macroUsed( pragmaOnceMacro );
         clang::FileEntry const * result( sourceManager().getFileManager().getVirtualFile( "__empty_file", 0, 0 ) );
@@ -150,7 +150,7 @@ void HeaderTracker::headerSkipped()
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
         clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
         assert( !headerInfo.ControllingMacroID );
-        llvm::StringRef macroName;
+        MacroName macroName;
         if ( headerInfo.isPragmaOnce )
         {
             macroName = macroForPragmaOnce( hwf.file->getUniqueID() );
@@ -158,7 +158,7 @@ void HeaderTracker::headerSkipped()
         else
         {
             assert( headerInfo.ControllingMacro );
-            macroName = headerInfo.ControllingMacro->getName();
+            macroName = MacroName( headerInfo.ControllingMacro->getName() );
         }
         headerCtxStack().back().macroUsed( macroName );
     }
@@ -249,7 +249,7 @@ void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroUsed( name );
+    headerCtxStack().back().macroUsed( MacroName( name ) );
 }
 
 void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective const * def )
@@ -259,21 +259,21 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
     llvm::StringRef const macroValue( macroValueFromDirective( preprocessor_, name, def ) );
-    headerCtxStack().back().macroDefined( name, macroValue );
+    headerCtxStack().back().macroDefined( MacroName( name ), MacroValue( macroValue ) );
 }
 
 void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective const * def )
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    headerCtxStack().back().macroUndefined( name );
+    headerCtxStack().back().macroUndefined( MacroName( name ) );
 }
 
 void HeaderTracker::pragmaOnce()
 {
     if ( headerCtxStack().empty() || cacheDisabled() || headerCtxStack().back().fromCache() )
         return;
-    llvm::StringRef const pragmaOnceMacro( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
+    MacroName const pragmaOnceMacro( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
     headerCtxStack().back().macroUsed( pragmaOnceMacro );
-    headerCtxStack().back().macroDefined( pragmaOnceMacro, " 1" );
+    headerCtxStack().back().macroDefined( pragmaOnceMacro, MacroValue( " 1" ) );
 }

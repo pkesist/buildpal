@@ -17,7 +17,6 @@
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
   
-#include <llvm/ADT/StringMap.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -38,30 +37,7 @@ namespace clang
 typedef std::pair<MacroName, MacroValue> Macro;
 typedef std::vector<Macro> Macros;
 
-inline Macro createMacro( llvm::StringRef name, llvm::StringRef value )
-{
-    return std::make_pair( MacroName( name ), MacroValue( value ) );
-}
-
-inline llvm::StringRef macroName( Macro const & macro )
-{
-    return macro.first.get();
-}
-
-inline llvm::StringRef macroValue( Macro const & macro )
-{
-    return macro.second.get();
-}
-
-inline llvm::StringRef undefinedMacroValue()
-{
-    return llvm::StringRef( "", 1 );
-}
-
-inline bool isUndefinedMacroValue( llvm::StringRef value )
-{
-    return value.size() == 1 && *value.data() == '\0';
-}
+extern MacroValue undefinedMacroValue;
 
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
@@ -77,20 +53,20 @@ struct HeaderWithFileEntry
 typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
 typedef std::vector<HeaderEntry> HeaderContent;
 
-struct MacroState : public llvm::StringMap<llvm::StringRef, llvm::BumpPtrAllocator>
+struct MacroState : public std::map<MacroName, MacroValue>
 {
-    llvm::StringRef macroValue( llvm::StringRef macroName ) const
+    MacroValue macroValue( MacroName macroName ) const
     {
         MacroState::const_iterator const iter( find( macroName ) );
-        return iter == end() ? undefinedMacroValue() : iter->getValue() ;
+        return iter == end() ? undefinedMacroValue : iter->second;
     }
 
-    void defineMacro( llvm::StringRef name, llvm::StringRef value )
+    void defineMacro( MacroName name, MacroValue value )
     {
         operator[]( name ) = value;
     }
 
-    void undefineMacro( llvm::StringRef name )
+    void undefineMacro( MacroName name )
     {
         erase( name );
     }
@@ -261,7 +237,7 @@ public:
         {
             for ( Macro const & macro : entry->usedMacros() )
             {
-                ostream << "    " << macroName( macro ).str() << macroValue( macro ).str() << '\n';
+                ostream << "    " << macro.first << macro.second << '\n';
             }
         }
         ostream << "    --------\n";
@@ -291,10 +267,10 @@ public:
                     switch ( he.first )
                     {
                     case MacroUsage::defined:
-                        ostream << "    #define " << macroName( he.second ).str() << macroValue( he.second ).str() << '\n';
+                        ostream << "    #define " << he.second.first << he.second.second << '\n';
                         break;
                     case MacroUsage::undefined:
-                        ostream << "    #undef " << macroName( he.second ).str() << '\n';
+                        ostream << "    #undef " << he.second.first << '\n';
                         break;
                     }
                 }

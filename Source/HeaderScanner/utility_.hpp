@@ -12,9 +12,11 @@
 
 #include <boost/functional/hash_fwd.hpp>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <atomic>
 #include <mutex>
+#include <ostream>
 #include <unordered_map>
 //------------------------------------------------------------------------------
 
@@ -194,10 +196,35 @@ struct Flyweight
         return value_ == other.value_;
     }
 
+    bool operator!=( Flyweight<T, Tag> const & other ) const
+    {
+        return value_ != other.value_;
+    }
+
+    bool operator<( Flyweight<T, Tag> const & other ) const
+    {
+        return value_ < other.value_;
+    }
+
 private:
     Value<T> const * value_;
 };
 
+template<typename T, typename Tag>
+std::ostream & operator<<( std::ostream & ostream, Flyweight<T, Tag> const & f )
+{
+    llvm::StringRef const strRef( f.get().str() );
+    ostream.write( strRef.data(), strRef.size() );
+    return ostream;
+}
+
+template<typename T, typename Tag>
+llvm::raw_ostream & operator<<( llvm::raw_ostream & ostream, Flyweight<T, Tag> const & f )
+{
+    llvm::StringRef const strRef( f.get().str() );
+    ostream << strRef;
+    return ostream;
+}
 
 //------------------------------------------------------------------------------
 #endif

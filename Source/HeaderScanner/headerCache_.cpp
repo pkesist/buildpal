@@ -9,6 +9,8 @@
 #include <fstream>
 //------------------------------------------------------------------------------
 
+MacroValue undefinedMacroValue = MacroValue( llvm::StringRef( "", 1 ) );
+
 clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
 {
     clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
@@ -58,10 +60,10 @@ void CacheEntry::generateContent( std::string & buffer )
             switch ( he.first )
             {
             case MacroUsage::defined:
-                defineStream << "#define " << macroName( he.second ) << macroValue( he.second ) << '\n';
+                defineStream << "#define " << he.second.first << he.second.second << '\n';
                 break;
             case MacroUsage::undefined:
-                defineStream << "#undef " << macroName( he.second ) << '\n';
+                defineStream << "#undef " << he.second.first << '\n';
                 break;
             }
         }
@@ -151,7 +153,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::siz
 
         bool operator()( Macro const & macro ) const
         {
-            return headerCtx_.getMacroValue( macroName( macro ) ) == macroValue( macro );
+            return headerCtx_.getMacroValue( macro.first ) == macro.second;
         }
 
         HeaderCtx const & headerCtx_;

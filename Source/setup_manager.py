@@ -20,7 +20,7 @@ executables = [
     Executable('buildpal_manager.py', base=base)
 ]
 
-setup(name='BuildPal_Manager',
+setup(name='BuildPal Manager',
       version = '0.1',
       description = 'BuildPal Manager',
       options = dict(build_exe = build_options, bdist_msi=msi_opts),

@@ -72,6 +72,7 @@ class NodeManager:
         self.all_sockets[node].append((transport, protocol))
 
     def close(self):
+        self.executor.shutdown()
         for node, ptlist in self.all_sockets.items():
             for transport, protocol in ptlist:
                 transport.abort()

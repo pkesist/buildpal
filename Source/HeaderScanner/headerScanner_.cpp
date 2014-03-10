@@ -217,12 +217,12 @@ Preprocessor::Preprocessor( Cache * cache )
     hsOpts_->Sysroot.clear();
 }
 
-std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename )
+std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef fileName )
 {
     // Initialize file manager.
     fileManager_.reset( new clang::FileManager( fsOpts_ ) );
     fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
-    clang::FileEntry const * mainFileEntry = fileManager().getFile( filename );
+    clang::FileEntry const * mainFileEntry = fileManager().getFile( fileName );
     if ( !mainFileEntry )
         throw std::runtime_error( "Could not find source file." );
 
@@ -282,9 +282,9 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     return searchPathId;
 }
 
-void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers & headers )
+void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers )
 {
-    std::size_t const searchPathId = setupPreprocessor( ppc, filename );
+    std::size_t const searchPathId = setupPreprocessor( ppc, fileName );
     struct DiagnosticsSetup
     {
         DiagnosticsSetup( clang::DiagnosticConsumer & client,
@@ -308,7 +308,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     preprocessor().SetMacroExpansionOnlyInDirectives();
 
     HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, filename,
+    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, fileName,
         preprocessor(), ppc.ignoredHeaders(), headers ) );
 
     preprocessor().EnterMainSourceFile();

@@ -35,7 +35,7 @@ executables = [
     Executable('buildpal_server.py', base='Console')
 ]
 
-setup(name='BuildPal_Server',
+setup(name='BuildPal Server',
       version = '0.1',
       description = 'BuildPal Server',
       options = dict(build_exe = build_options, bdist_msi=msi_opts),

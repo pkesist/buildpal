@@ -13,10 +13,14 @@ class CompilerRepository:
         self.__compilers = set()
         self.__partial_compilers = set()
         self.__waiters = defaultdict(list)
+        self.__id_cache = {}
 
-    @classmethod
-    def __unique_id(cls, compiler_id):
-        return hashlib.md5(pickle.dumps(compiler_id)).hexdigest()
+    def __unique_id(self, compiler_id):
+        result = self.__id_cache.get(compiler_id)
+        if result is None:
+            result = hashlib.md5(pickle.dumps(compiler_id)).hexdigest()
+            self.__id_cache[compiler_id] = result
+        return result
 
     def compiler_dir(self, compiler_id):
         return os.path.join(self.__dir, self.__unique_id(compiler_id))

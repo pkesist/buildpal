@@ -364,7 +364,7 @@ class CommandBrowser(PanedWindow):
     def refresh(self):
         if not hasattr(self.ui_data, 'command_db'):
             return
-        
+
         if self.db_conn is None:
             if self.db is None:
                 self.db = self.ui_data.command_db

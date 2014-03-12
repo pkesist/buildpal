@@ -84,7 +84,23 @@ inline bool operator==( Header const & l, Header const & r )
     return l.dir == r.dir && l.name == r.name;
 }
 
-typedef std::unordered_set<Header, HeaderHash> Headers;
+struct Headers : public std::unordered_set<Header, HeaderHash>
+{
+    Headers() : std::unordered_set<Header, HeaderHash>() {};
+    Headers( Headers && h ) :
+        std::unordered_set<Header, HeaderHash>( std::move( h ) ) {};
+
+    Headers & operator=( Headers && h )
+    {
+        std::unordered_set<Header, HeaderHash> tmp( std::move( h ) );
+        swap( tmp );
+        return *this;
+    }
+
+private:
+    Headers( Headers const & headers );
+    Headers & operator=( Headers const & headers );
+};
 
 typedef std::set<std::string> IgnoredHeaders;
 

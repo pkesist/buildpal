@@ -97,7 +97,7 @@ namespace
 
         virtual void EndOfMainFile() override
         {
-            headers_ = headerTracker_.exitSourceFile();
+            headerTracker_.exitSourceFile( headers_ );
         }
 
         virtual void FileSkipped

@@ -177,6 +177,13 @@ struct Flyweight
             Storage::get().remove( value_ );
     }
 
+    Flyweight & operator=( Flyweight && other )
+    {
+        value_ = other.value_;
+        other.value_ = 0;
+        return *this;
+    }
+
     Flyweight & operator=( Flyweight const & other )
     {
         if ( value_ )
@@ -206,6 +213,16 @@ struct Flyweight
         return value_ < other.value_;
     }
 
+    bool operator>( Flyweight<T, Tag> const & other ) const
+    {
+        return value_ > other.value_;
+    }
+
+    std::size_t hash() const
+    {
+        return std::hash<Value<T> const *>()( value_ );
+    }
+
 private:
     Value<T> const * value_;
 };
@@ -225,6 +242,19 @@ llvm::raw_ostream & operator<<( llvm::raw_ostream & ostream, Flyweight<T, Tag> c
     ostream << strRef;
     return ostream;
 }
+
+namespace std
+{
+    template <typename T, typename Tag>
+    struct std::hash<Flyweight<T, Tag> >
+    {
+        size_t operator()( Flyweight<T, Tag> const & f ) const
+        {
+            return f.hash();
+        }
+    };
+}
+
 
 //------------------------------------------------------------------------------
 #endif

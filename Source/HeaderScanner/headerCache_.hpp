@@ -34,14 +34,25 @@ namespace clang
     class FileEntry;
 }
 
-typedef std::pair<MacroName, MacroValue> Macro;
-typedef std::vector<Macro> Macros;
-
 extern MacroValue undefinedMacroValue;
 
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
+
+typedef std::set<MacroName> MacroNamesBase;
+struct MacroNames : public MacroNamesBase
+{
+public:
+    MacroNames() {}
+
+    MacroNames( MacroNames && mn ) :
+        MacroNamesBase( std::move( mn ) ) {}
+
+private:
+    MacroNames( MacroNames const & );
+    MacroNames & operator=( MacroNames const & );
+};
 
 struct HeaderWithFileEntry
 {
@@ -49,12 +60,18 @@ struct HeaderWithFileEntry
     clang::FileEntry const * file;
 };
 
-
-typedef std::pair<MacroUsage::Enum, Macro> HeaderEntry;
-typedef std::vector<HeaderEntry> HeaderContent;
-
-struct MacroState : public std::map<MacroName, MacroValue>
+typedef std::map<MacroName, MacroValue> MacroStateBase;
+struct MacroState : public MacroStateBase
 {
+private:
+    MacroState( MacroState const & ms );
+    MacroState & operator=( MacroState const & ms );
+
+public:
+    MacroState() {}
+    MacroState( MacroState && ms ) :
+        MacroStateBase( std::move( ms ) ) {}
+
     MacroValue macroValue( MacroName macroName ) const
     {
         MacroState::const_iterator const iter( find( macroName ) );
@@ -63,12 +80,47 @@ struct MacroState : public std::map<MacroName, MacroValue>
 
     void defineMacro( MacroName name, MacroValue value )
     {
-        operator[]( name ) = value;
+        std::pair<iterator, bool> const insertResult(
+            insert( std::make_pair( name, value ) ) );
+        if ( !insertResult.second )
+            insertResult.first->second = value;
     }
 
     void undefineMacro( MacroName name )
     {
         erase( name );
+    }
+
+    void merge( MacroState const & other )
+    {
+        iterator firstIter = begin();
+        iterator const firstEnd = end();
+        const_iterator secondIter = other.begin();
+        const_iterator const secondEnd = other.end();
+        while ( ( firstIter != firstEnd ) && ( secondIter != secondEnd ) )
+        {
+            if ( firstIter->first < secondIter->first )
+            {
+                firstIter = lower_bound( secondIter->first );
+            }
+            else if ( firstIter->first > secondIter->first )
+            {
+                const_iterator const tmpEnd = other.upper_bound( firstIter->first );
+                iterator insertHint = firstIter;
+                for ( ; secondIter != tmpEnd; ++secondIter )
+                {
+                    insertHint = insert( insertHint, *secondIter );
+                    ++insertHint;
+                }
+            }
+            else
+            {
+                firstIter->second = secondIter->second;
+                ++firstIter;
+                ++secondIter;
+            }
+        }
+        insert( secondIter, secondEnd );
     }
 };
 
@@ -85,19 +137,21 @@ private:
         FileId fileId,
         std::size_t searchPathId,
         std::string const & uniqueVirtualFileName,
-        Macros && usedMacros,
-        HeaderContent && headerContent,
-        Headers const & headers,
+        MacroState && usedMacros,
+        MacroState && definedMacros,
+        MacroNames && undefinedMacros,
+        Headers && headers,
         std::size_t currentTime
 
     ) :
         refCount_( 0 ),
         searchPathId_( searchPathId ),
         fileId_( fileId ),
-        usedMacros_( usedMacros ),
         fileName_( uniqueVirtualFileName ),
-        headerContent_( headerContent ),
-        headers_( headers ),
+        usedMacros_( std::move( usedMacros ) ),
+        definedMacros_( std::move( definedMacros ) ),
+        undefinedMacros_( std::move( undefinedMacros ) ),
+        headers_( std::move( headers ) ),
         lastTimeHit_( currentTime )
     {
         contentLock_.clear();
@@ -109,9 +163,10 @@ public:
         FileId fileId,
         std::size_t searchPathId,
         std::string const & uniqueVirtualFileName,
-        Macros && usedMacros,
-        HeaderContent && headerContent,
-        Headers const & headers,
+        MacroState && usedMacros,
+        MacroState && definedMacros,
+        MacroNames && undefinedMacros,
+        Headers && headers,
         unsigned currentTime
     )
     {
@@ -121,8 +176,9 @@ public:
             searchPathId,
             uniqueVirtualFileName,
             std::move( usedMacros ),
-            std::move( headerContent ),
-            headers,
+            std::move( definedMacros ),
+            std::move( undefinedMacros ),
+            std::move( headers ),
             currentTime
         );
         return CacheEntryPtr( result );
@@ -143,10 +199,10 @@ public:
         ) != headers_.end();
     }
 
-    Macros        const & usedMacros   () const { return usedMacros_; }
-    HeaderContent       & headerContent()       { return headerContent_; }
-    HeaderContent const & headerContent() const { return headerContent_; }
-    Headers       const & headers      () const { return headers_; }
+    MacroState const & usedMacros     () const { return usedMacros_; }
+    Headers    const & headers        () const { return headers_; }
+    MacroNames const & undefinedMacros() const { return undefinedMacros_; }
+    MacroState const & definedMacros  () const { return definedMacros_; }
 
     FileId fileId() const { return fileId_; }
     std::size_t searchPathId() const { return searchPathId_; }
@@ -187,8 +243,9 @@ private:
     FileId fileId_;
     std::size_t searchPathId_;
     std::string fileName_;
-    Macros usedMacros_;
-    HeaderContent headerContent_;
+    MacroState usedMacros_;
+    MacroNames undefinedMacros_;
+    MacroState definedMacros_;
     Headers headers_;
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
@@ -209,9 +266,10 @@ public:
     (
         llvm::sys::fs::UniqueID const & id,
         std::size_t searchPathId,
-        Macros && macros,
-        HeaderContent && headerContent,
-        Headers const & headers
+        MacroState && usedMacros,
+        MacroState && definedMacros,
+        MacroNames && undefinedMacros,
+        Headers && headers
     );
 
     CacheEntryPtr findEntry
@@ -235,7 +293,7 @@ public:
             ostream << "    Empty key\n";
         else
         {
-            for ( Macro const & macro : entry->usedMacros() )
+            for ( MacroState::value_type const & macro : entry->usedMacros() )
             {
                 ostream << "    " << macro.first << macro.second << '\n';
             }
@@ -255,24 +313,24 @@ public:
         ostream << "    --------\n";
         ostream << "    Content:\n";
         ostream << "    --------\n";
-        if ( entry->headers().empty() )
+        if ( entry->undefinedMacros().empty() && entry->definedMacros().empty() )
             ostream << "    No content\n";
         else
         {
             std::for_each(
-                entry->headerContent().begin(),
-                entry->headerContent().end(),
-                [&]( HeaderEntry const & he )
+                entry->undefinedMacros().begin(),
+                entry->undefinedMacros().end  (),
+                [&]( MacroName macroName )
                 {
-                    switch ( he.first )
-                    {
-                    case MacroUsage::defined:
-                        ostream << "    #define " << he.second.first << he.second.second << '\n';
-                        break;
-                    case MacroUsage::undefined:
-                        ostream << "    #undef " << he.second.first << '\n';
-                        break;
-                    }
+                    ostream << "#undef " << macroName << '\n';
+                }
+            );
+            std::for_each(
+                entry->definedMacros().begin(),
+                entry->definedMacros().end  (),
+                [&]( MacroState::value_type const & macro )
+                {
+                    ostream << "#define " << macro.first << macro.second << '\n';
                 }
             );
         }
@@ -287,7 +345,7 @@ public:
     }
 
 private:
-    void cleanup();
+    void maintenance();
 
     std::string uniqueFileName();
 

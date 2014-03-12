@@ -11,9 +11,11 @@
 
 MacroValue undefinedMacroValue = MacroValue( llvm::StringRef( "", 1 ) );
 
-clang::FileEntry const * CacheEntry::getFileEntry( clang::SourceManager & sourceManager )
+clang::FileEntry const * CacheEntry::getFileEntry(
+    clang::SourceManager & sourceManager )
 {
-    clang::FileEntry const * result( sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
+    clang::FileEntry const * result(
+        sourceManager.getFileManager().getVirtualFile( fileName_, 0, 0 ) );
     if ( !sourceManager.isFileOverridden( result ) )
         sourceManager.overrideFileContents( result, cachedContent(), true );
     return result;
@@ -44,7 +46,8 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
         if ( memoryBuffer_ )
             return memoryBuffer_.get();
         buffer_.swap( tmp );
-        memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer( buffer_, "", true ) );
+        memoryBuffer_.reset( llvm::MemoryBuffer::getMemBuffer(
+            buffer_, "", true ) );
     }
     return memoryBuffer_.get();
 }
@@ -53,35 +56,36 @@ void CacheEntry::generateContent( std::string & buffer )
 {
     llvm::raw_string_ostream defineStream( buffer );
     std::for_each(
-        headerContent().begin(),
-        headerContent().end(),
-        [&]( HeaderEntry const & he )
+        undefinedMacros().begin(),
+        undefinedMacros().end  (),
+        [&]( MacroName macroName )
         {
-            switch ( he.first )
-            {
-            case MacroUsage::defined:
-                defineStream << "#define " << he.second.first << he.second.second << '\n';
-                break;
-            case MacroUsage::undefined:
-                defineStream << "#undef " << he.second.first << '\n';
-                break;
-            }
+            defineStream << "#undef " << macroName << '\n';
         }
     );
-    defineStream.flush();
+    std::for_each(
+        definedMacros().begin(),
+        definedMacros().end  (),
+        [&]( MacroState::value_type const & macro )
+        {
+            defineStream << "#define " << macro.first << macro.second << '\n';
+        }
+    );
 }
 
 CacheEntryPtr Cache::addEntry
 (
     llvm::sys::fs::UniqueID const & fileId,
     std::size_t searchPathId,
-    Macros && macros,
-    HeaderContent && headerContent,
-    Headers const & headers
+    MacroState && usedMacros,
+    MacroState && definedMacros,
+    MacroNames && undefinedMacros,
+    Headers && headers
 )
 {
-    CacheEntryPtr result = CacheEntry::create( fileId, searchPathId, uniqueFileName(),
-        std::move( macros ), std::move( headerContent ), headers, hits_ + misses_ );
+    CacheEntryPtr result = CacheEntry::create( fileId, searchPathId,
+        uniqueFileName(), std::move( usedMacros ), std::move( definedMacros ),
+        std::move( undefinedMacros ), std::move( headers ), hits_ + misses_ );
     boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
     auto insertResult = cacheContainer_.insert( result );
     assert( insertResult.second );
@@ -98,7 +102,7 @@ std::string Cache::uniqueFileName()
     return result;
 }
 
-void Cache::cleanup()
+void Cache::maintenance()
 {
     unsigned int const currentTime = hits_ + misses_;
     unsigned int const cacheCleanupPeriod = 1024 * 5;
@@ -128,17 +132,16 @@ void Cache::invalidate( ContentEntry const & contentEntry )
         cacheContainer_.erase( cacheContainer_.iterator_to( *entry ) );
 }
 
-CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::size_t searchPathId, HeaderCtx const & headerCtx )
+CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId,
+    std::size_t searchPathId, HeaderCtx const & headerCtx )
 {
-    struct CleanupOnExit
+    struct CacheMaintenance
     {
         Cache & cache_;
-        CleanupOnExit( Cache & cache ) : cache_( cache ) {}
-        ~CleanupOnExit()
-        {
-            cache_.cleanup();
-        }
-    } cleanup( *this );
+        CacheMaintenance( Cache & cache ) : cache_( cache ) {}
+        ~CacheMaintenance() { cache_.maintenance(); }
+    } maintenanceGuard( *this );
+
     std::vector<CacheEntryPtr> entriesForUid;
     {
         boost::shared_lock<boost::shared_mutex> const lock( cacheMutex_ );
@@ -147,28 +150,19 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::siz
         std::copy( iterRange.first, iterRange.second, std::back_inserter( entriesForUid ) );
     }
 
-    struct MacroMatchesState
-    {
-        explicit MacroMatchesState( HeaderCtx const & headerCtx ) : headerCtx_( headerCtx ) {}
-
-        bool operator()( Macro const & macro ) const
-        {
-            return headerCtx_.getMacroValue( macro.first ) == macro.second;
-        }
-
-        HeaderCtx const & headerCtx_;
-    };
-
-    for ( CacheEntryPtr pEntry : entriesForUid )
+    for ( CacheEntryPtr cacheEntry : entriesForUid )
     {
         if
         (
             std::find_if_not
             (
-                pEntry->usedMacros().begin(),
-                pEntry->usedMacros().end(),
-                MacroMatchesState( headerCtx )
-            ) == pEntry->usedMacros().end()
+                cacheEntry->usedMacros().begin(),
+                cacheEntry->usedMacros().end(),
+                [&]( MacroState::value_type const & macro )
+                {
+                    return headerCtx.getMacroValue( macro.first ) == macro.second;
+                }
+            ) == cacheEntry->usedMacros().end()
         )
         {
             boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
@@ -177,7 +171,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::siz
             // actual value stored in the container, not a copy.
             typedef CacheContainer::index<ById>::type IndexByIdType;
             IndexByIdType & indexById( cacheContainer_.get<ById>() );
-            IndexByIdType::iterator const iter = indexById.find( &*pEntry );
+            IndexByIdType::iterator const iter = indexById.find( cacheEntry.get() );
             if ( iter != indexById.end() )
             {
                 boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
@@ -185,7 +179,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId, std::siz
                 indexById.modify( iter, [=]( CacheEntryPtr p ) { p->cacheHit( currentTime ); } );
             }
             ++hits_;
-            return pEntry;
+            return cacheEntry;
         }
     }
     ++misses_;

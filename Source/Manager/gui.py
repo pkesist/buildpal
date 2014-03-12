@@ -68,28 +68,6 @@ class NodeList(MyTreeView):
                 "{:.2f}".format(node.average_task_time()))
             self.item(item, values=values)
 
-class NodeControls(Frame):
-    def __init__(self, parent, **kw):
-        Frame.__init__(self, parent, **kw)
-        self.draw()
-
-    def draw(self):
-        self.ping_button = Button(self, text='PING', state=DISABLED)
-        self.ping_button.grid(row=0, column=0)
-        self.ping_result = StringVar()
-        self.ping_result_entry = Entry(self, textvariable=self.ping_result,
-            state=DISABLED, foreground='black')
-        self.ping_result_entry.grid(row=0, column=1)
-
-        self.node_included = IntVar()
-        self.node_included_cb = Checkbutton(self, text="Included in Build",
-            variable=self.node_included, state=DISABLED)
-        self.node_included.set(0)
-        self.node_included_cb.grid(row=0, column=2)
-
-    def refresh(self, has_node):
-        self.ping_button['state'] = 'enabled' if has_node else 'disabled'
-
 class TimerDisplay(LabelFrame):
     columns = (
         { 'cid' : '#0'     , 'text' : 'Name'   , 'minwidth' : 150, 'anchor' : W      },
@@ -134,12 +112,8 @@ class NodeDisplay(Frame):
         self.paned_window = PanedWindow(self, orient=HORIZONTAL)
 
         node_label_frame = LabelFrame(self.paned_window, text='Node List')
-        node_label_frame.rowconfigure(1, weight=1)
+        node_label_frame.rowconfigure(0, weight=1)
         node_label_frame.columnconfigure(0, weight=1)
-
-        self.node_info_display = NodeControls(node_label_frame)
-        self.node_info_display.ping_button['command'] = self.ping
-        self.node_info_display.grid(row=0, column=0, sticky=N+S+W+E)
 
         self.node_list = NodeList(node_label_frame, self.nodes, self.ui_data, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
@@ -162,7 +136,6 @@ class NodeDisplay(Frame):
             if new_index == self.node_index:
                 return
             self.node_index = new_index
-        self.node_info_display.ping_result.set('')
         self.refresh()
 
     def refresh(self):
@@ -174,7 +147,6 @@ class NodeDisplay(Frame):
             node = self.ui_data.node_info[self.node_index]
             node_time_dict = node.timer().as_dict()
         self.node_times.refresh(node_time_dict)
-        self.node_info_display.refresh(self.node_index is not None)
 
 def called_from_foreign_thread(func):
     return func
@@ -316,9 +288,14 @@ class CommandInfo(Frame):
 
         for task in command_data['tasks']:
             task_id = self.task_list.insert('', 'end', text=task_string(task), open=True)
+            times = self.task_list.insert(task_id, 'end', text='Times', open=True)
+            for time_entry in task['times']:
+                self.task_list.insert(times, 'end', text=time_entry['time_point_name'],
+                    values=(format_time(time_entry['time_point']),))
+            sessions = self.task_list.insert(task_id, 'end', text='Sessions', open=True)
             for session in task['sessions']:
                 text, value = session_string(session)
-                session_id = self.task_list.insert(task_id, 'end', text=text, values=(value,))
+                session_id = self.task_list.insert(sessions, 'end', text=text, values=(value,), open=True)
                 for text, value in session_subdata(session):
                     self.task_list.insert(session_id, 'end', text=text, values=(value,))
 

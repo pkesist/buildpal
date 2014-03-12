@@ -29,30 +29,33 @@ class NodeManager:
 
     def task_ready(self, task):
         def schedule_task(task):
-            task.note_time('collected from preprocessor')
+            task.note_time('collected from preprocessor', 'preprocessed notification time')
             self.schedule_task(task)
         self.loop.call_soon_threadsafe(schedule_task, task)
 
     def schedule_task(self, task, node=None):
-        asyncio.async(self.schedule_task_coro(task, node), loop=self.loop)
-
-    @asyncio.coroutine
-    def schedule_task_coro(self, task, node=None):
-        if node is None and self.unassigned_tasks:
-            task.note_time('queue as unassigned task')
+        if node is not None:
+            self.tasks_running[node].append(task)
+        elif self.unassigned_tasks:
             self.unassigned_tasks.append(task)
             return
-        result = yield from self.__get_server_conn(node)
+        asyncio.async(self.__get_server_conn(node), loop=self.loop
+            ).add_done_callback(lambda f : self.kukulele(task, node, f))
+
+    def kukulele(self, task, predetermined_node, future):
+        result = future.result()
         if result is None:
-            assert node is None
-            task.note_time('queue as unassigned task')
             self.unassigned_tasks.append(task)
             return
         protocol, node = result
         session = CompileSession(self.generate_unique_id(), task,
             protocol.send_msg, node, self.executor, self.compressor)
         self.sessions[session.local_id] = session
-        self.tasks_running[node].append(task)
+        if not predetermined_node:
+            self.tasks_running[node].append(task)
+        else:
+            assert task in self.tasks_running[node]
+            assert node == predetermined_node
         session.start()
 
     def generate_unique_id(self):
@@ -109,7 +112,7 @@ class NodeManager:
         while tasks_to_steal > 0:
             while self.unassigned_tasks:
                 task = self.unassigned_tasks.pop(0)
-                task.note_time('taken from unassigned task queue')
+                task.note_time('taken from unassigned task queue', 'unassigned time')
                 self.schedule_task(task, node)
                 tasks_to_steal -= 1
                 if tasks_to_steal == 0:

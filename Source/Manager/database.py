@@ -7,7 +7,7 @@ from queue import Queue, Empty
 from threading import Thread
 
 class Database:
-    tables = ['command', 'task', 'session']
+    tables = ['command', 'task', 'session', 'times']
 
     command_table = [
         {'col_name': 'command', 'col_type': 'TEXT', 'null': False}
@@ -18,6 +18,12 @@ class Database:
             'ref': ('command', 'rowid')},
         {'col_name': 'source'    , 'col_type': 'TEXT'   , 'null': False},
         {'col_name': 'pch_file'  , 'col_type': 'TEXT'   , 'null': True },]
+
+    times_table = [
+        {'col_name': 'task_id'        , 'col_type': 'INTEGER', 'null': False,
+            'ref': ('task', 'rowid')},
+        {'col_name': 'time_point_name', 'col_type': 'TEXT'   , 'null': False},
+        {'col_name': 'time_point'     , 'col_type': 'REAL'   , 'null': False},]
 
     def convert_enum(type):
         class ConvertEnum:
@@ -146,6 +152,10 @@ class Database:
             task_id = self.__insert(conn, 'task', task, command_id=command_id)
             for session in task['sessions']:
                 self.__insert(conn, 'session', session, task_id=task_id)
+            for time_point, time in task['times'].items():
+                self.__insert(conn, 'times',
+                    {'time_point_name' : time_point,
+                     'time_point' : time}, task_id=task_id)
         return command_id
 
     def get_command(self, conn, rowid):
@@ -159,6 +169,8 @@ class Database:
         for task, task_id in zip(tasks, task_row_ids):
             sessions, session_row_ids = self.__select(conn, 'session', 'task_id', task_id, orderby='started')
             task['sessions'] = sessions
+            times, time_row_ids = self.__select(conn, 'times', 'task_id', task_id, orderby='time_point')
+            task['times'] = times
         command['tasks'] = tasks
         return command
 

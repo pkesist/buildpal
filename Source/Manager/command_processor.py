@@ -56,8 +56,8 @@ class CommandProcessor:
             assert not "Invalid state"
 
     def update_task_ui(self, task):
-        for name, time in task.times.items():
-            self.__ui_data.timer.add_time(name, time)
+        for duration_name, duration in task.durations.items():
+            self.__ui_data.timer.add_time(duration_name, duration)
 
     def executable(self):
         return self.__executable
@@ -173,7 +173,7 @@ class CommandProcessor:
     def get_info(self):
         assert self.tasks == self.completed_tasks
         return {
-            'command' : list2cmdline(self.__command),
+            'command' : ', '.join(self.__options.input_files()),
             'tasks' : [task.get_info() for task in self.tasks]
         }
 

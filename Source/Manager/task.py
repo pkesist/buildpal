@@ -10,12 +10,15 @@ class Task:
         self.first_session = None
         self.completed_by_session = None
         self.last_time = time()
+        self.durations = {}
         self.times = {}
         self.task_result = None
 
-    def note_time(self, name):
+    def note_time(self, time_point_name, interval_name=None):
         curr_time = time()
-        self.times[name], self.last_time = curr_time - self.last_time, curr_time
+        self.times[time_point_name] = curr_time
+        if interval_name:
+            self.durations[interval_name], self.last_time = curr_time - self.last_time, curr_time
 
     def compiler_info(self):
         return self.command_processor.compiler_info
@@ -33,7 +36,7 @@ class Task:
         if not self.sessions_running:
             self.first_session = session
             session.node.add_tasks_sent()
-            self.note_time('assigned to a server session')
+            self.note_time('assigned to a server session', 'waiting for server')
         else:
             session.node.add_tasks_stolen()
         self.sessions_running.add(session)
@@ -41,7 +44,7 @@ class Task:
     def register_completion(self, session):
         if self.completed_by_session:
             return False
-        self.note_time('task completed notification received')
+        self.note_time('completed notification', 'remote completion notification')
         self.completed_by_session = session
         if session != self.first_session:
             session.node.add_tasks_successfully_stolen()
@@ -57,7 +60,7 @@ class Task:
         session_succeeded = False
         if session.result == SessionResult.success:
             assert session == self.completed_by_session
-            self.note_time('task result received')
+            self.note_time('result received', 'result download time')
             session.node.add_tasks_completed()
             session.node.timer().add_time("session duration",
                 session.time_completed - session.time_started)
@@ -85,5 +88,6 @@ class Task:
             'source' : self.source,
             'pch_file' : self.pch_file[0] if self.pch_file else None,
             'sessions' : list(session.get_info() for session in
-                self.sessions_finished)
+                self.sessions_finished),
+            'times' : self.times
         }

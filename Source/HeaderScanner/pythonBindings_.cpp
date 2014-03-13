@@ -391,6 +391,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         PyTuple_SET_ITEM( headerEntry, 2, PyMemoryView_FromMemory( data, size, PyBUF_READ ) );
         PyTuple_SET_ITEM( headerEntry, 3, PyLong_FromSize_t( header.checksum ) );
         PyList_Append( iter->second, headerEntry );
+        Py_DECREF( headerEntry );
     }
 
     PyObject * resultTuple = PyTuple_New( dirsAndHeaders.size() );

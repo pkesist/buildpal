@@ -37,7 +37,6 @@ namespace
   };
 }
 
-
 PathList const & getPath()
 {
     static PathList result;
@@ -90,7 +89,6 @@ std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
 
     return buffer;
 }
-
 
 class MsgSender
 {
@@ -268,6 +266,58 @@ int createProcess( char * commandLine )
     }
 }
 
+int runLocally()
+{
+    std::cout << "Running command locally...\n";
+    char const * commandLine = GetCommandLine();
+    std::size_t len = strlen( commandLine );
+    char const * argsPos = commandLine;
+
+    bool inQuote = false;
+    bool foundNonSpace = false;
+    bool escape = false;
+
+    for ( ; ; ++argsPos )
+    {
+        bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
+        if ( *argsPos == '\\' )
+        {
+            escape = !escape;
+        }
+
+        else if ( isSpace )
+        {
+            if ( foundNonSpace && !inQuote )
+                break;
+            escape = false;
+        }
+
+        else if ( *argsPos == '"' && !escape )
+        {
+            inQuote = !inQuote;
+        }
+        else
+        {
+            foundNonSpace = true;
+            escape = false;
+        }
+    }
+
+    std::size_t const argsLen = len - ( argsPos - commandLine );
+    std::size_t const commandLineSize = sizeof(compilerExeFilename) - 1 + argsLen;
+
+    // Create a copy on the stack as required by CreateProcess.
+    std::size_t pos( 0 );
+    char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
+    std::memcpy( buffer, compilerExeFilename, sizeof(compilerExeFilename) - 1 );
+    pos += sizeof(compilerExeFilename) - 1;
+    std::memcpy( buffer + pos, argsPos, argsLen );
+    buffer[ commandLineSize ] = 0;
+
+    return createProcess( buffer );
+}
+
+
 int main( int argc, char * argv[] )
 {
     boost::timer::auto_cpu_timer t( std::cout, "Command took %w seconds.\n" );
@@ -278,7 +328,6 @@ int main( int argc, char * argv[] )
         return -1;
     }
 
-    bool runLocally = false;
     DWORD size = GetEnvironmentVariable("BP_MGR_PORT", NULL, 0 );
     if ( size == 0 )
     {
@@ -286,16 +335,17 @@ int main( int argc, char * argv[] )
             std::cerr << "You must define BP_MGR_PORT environment variable.\n";
         else
             std::cerr << "Failed to get BP_MGR_PORT environment variable.\n";
-        runLocally = true;
+        return runLocally();
     }
 
-    if ( !runLocally && ( size > 256 ) )
+    if ( size > 256 )
     {
         std::cerr << "Invalid BP_MGR_PORT environment variable value (value too big).\n";
-        runLocally = true;
+        return runLocally();
     }
 
 #ifdef BOOST_WINDOWS
+    HANDLE pipe;
     char const pipeStreamPrefix[] = "\\\\.\\pipe\\BuildPal_";
     std::size_t const pipeStreamPrefixSize = sizeof(pipeStreamPrefix) / sizeof(pipeStreamPrefix[0]) - 1;
 
@@ -303,7 +353,6 @@ int main( int argc, char * argv[] )
     std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
     GetEnvironmentVariable( "BP_MGR_PORT", pipeName + pipeStreamPrefixSize, size );
 
-    HANDLE pipe;
     for ( ; ;  )
     {
         pipe = ::CreateFile(
@@ -327,108 +376,47 @@ int main( int argc, char * argv[] )
             
         boost::system::error_code const error( ::GetLastError(), boost::system::system_category() );
         std::cerr << "Failed to create pipe '" << pipeName << "'. (" << error.message() << ").\n";
-        return -1;
+        return runLocally();
     }
-
     typedef boost::asio::windows::stream_handle StreamType;
 
     boost::asio::io_service ioService;
     StreamType sock( ioService, pipe );
 #else
     unsigned short port;
-    if ( !runLocally )
-    {
-        char * buffer = static_cast<char *>( alloca( size ) );
-        GetEnvironmentVariable( "BP_MGR_PORT", buffer, size );
+    char * buffer = static_cast<char *>( alloca( size ) );
+    GetEnvironmentVariable( "BP_MGR_PORT", buffer, size );
     
-        if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
-        {
-            std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
-            runLocally = true;
-        }
+    if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
+    {
+        std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
+        return runLocally();
     }
     
     boost::asio::ip::address localhost;
-    if ( !runLocally )
+    boost::system::error_code addressError;
+    localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
+    if ( addressError )
     {
-        boost::system::error_code addressError;
-        localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
-        if ( addressError )
-        {
-            std::cerr << "Could not resolve address: " << addressError.message() << '\n';
-            runLocally = true;
-        }
+        std::cerr << "Could not resolve address: " << addressError.message() << '\n';
+        return runLocally();
     }
     
     boost::asio::io_service ioService;
     typedef boost::asio::ip::tcp::socket StreamType;
     boost::asio::ip::tcp::socket sock( ioService );
-    if ( !runLocally )
-    {
-        boost::asio::ip::tcp::endpoint endpoint;
-        endpoint.address( localhost );
-        endpoint.port( port );
+    boost::asio::ip::tcp::endpoint endpoint;
+    endpoint.address( localhost );
+    endpoint.port( port );
     
-        boost::system::error_code connectError;
-        sock.connect( endpoint, connectError );
-        if ( connectError )
-        {
-            std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
-            runLocally = true;
-        }
+    boost::system::error_code connectError;
+    sock.connect( endpoint, connectError );
+    if ( connectError )
+    {
+        std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
+        return runLocally();
     }
 #endif
-
-    if ( runLocally )
-    {
-        std::cout << "Running command locally...\n";
-        char const * commandLine = GetCommandLine();
-        std::size_t len = strlen( commandLine );
-        char const * argsPos = commandLine;
-
-        bool inQuote = false;
-        bool foundNonSpace = false;
-        bool escape = false;
-
-        for ( ; ; ++argsPos )
-        {
-            bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
-            if ( *argsPos == '\\' )
-            {
-                escape = !escape;
-            }
-
-            else if ( isSpace )
-            {
-                if ( foundNonSpace && !inQuote )
-                    break;
-                escape = false;
-            }
-
-            else if ( *argsPos == '"' && !escape )
-            {
-                inQuote = !inQuote;
-            }
-            else
-            {
-                foundNonSpace = true;
-                escape = false;
-            }
-        }
-
-        std::size_t const argsLen = len - ( argsPos - commandLine );
-        std::size_t const commandLineSize = sizeof(compilerExeFilename) - 1 + argsLen;
-
-        // Create a copy on the stack as required by CreateProcess.
-        std::size_t pos( 0 );
-        char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
-        std::memcpy( buffer, compilerExeFilename, sizeof(compilerExeFilename) - 1 );
-        pos += sizeof(compilerExeFilename) - 1;
-        std::memcpy( buffer + pos, argsPos, argsLen );
-        buffer[ commandLineSize ] = 0;
-
-        return createProcess( buffer );
-    }
 
     MsgSender msgSender;
 
@@ -482,7 +470,12 @@ int main( int argc, char * argv[] )
         std::size_t requestSize;
         receiver.getPart( 0, &request, &requestSize );
 
-        if ( ( requestSize == 16 ) && strncmp( request, "EXECUTE_AND_EXIT", 16 ) == 0 )
+        if ( ( requestSize == 11 ) && strncmp( request, "RUN_LOCALLY", 11 ) == 0 )
+        {
+            assert( receiver.parts() == 1 );
+            return runLocally();
+        }
+        else if ( ( requestSize == 16 ) && strncmp( request, "EXECUTE_AND_EXIT", 16 ) == 0 )
         {
             assert( receiver.parts() == 2 );
             char const * commandLine;

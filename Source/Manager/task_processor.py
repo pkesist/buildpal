@@ -33,11 +33,8 @@ class ClientProcessor(MessageProtocol):
         self.register, self.unregister = register, unregister
 
     def close(self):
-        # There is currently no good way to close the transport.
-        # If we do self.trasport.close(), it will not wait for
-        # data to be sent. For now we rely that clients will
-        # disconnect once they are done.
-        pass
+        if self.transport:
+            self.transport.close()
 
     def abort(self):
         assert self.transport
@@ -73,7 +70,7 @@ class ClientProcessor(MessageProtocol):
             cwd, sysincludes, compiler, command, self.database_inserter, self.ui_data)
 
         if self.command_processor.build_local():
-            self.send_msg([b'EXECUTE_AND_EXIT', list2cmdline(command).encode()])
+            self.send_msg([b'RUN_LOCALLY'])
             self.close()
             return True
 

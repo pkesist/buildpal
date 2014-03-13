@@ -21,7 +21,7 @@ from time import time
 
 class ClientProcessor(MessageProtocol):
     def __init__(self, compiler_info, task_created_func, database_inserter,
-            ui_data, register, unregister):
+            ui_data):
         MessageProtocol.__init__(self)
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
@@ -30,27 +30,10 @@ class ClientProcessor(MessageProtocol):
         self.transport = None
         self.command_processor = None
         self.database_inserter = database_inserter
-        self.register, self.unregister = register, unregister
 
     def close(self):
         if self.transport:
             self.transport.close()
-
-    def abort(self):
-        assert self.transport
-        # This eventually does the same thing as close().
-        self.transport.abort()
-
-    def connection_made(self, transport):
-        super().connection_made(transport)
-        self.register(self)
-
-    def connection_lost(self, exception):
-        super().connection_lost(exception)
-        self.unregister(self)
-
-    def eof_received(self):
-        return False
 
     def process_msg(self, msg):
         if self.command_processor is not None:
@@ -66,8 +49,9 @@ class ClientProcessor(MessageProtocol):
         command = [x.decode() for x in msg[4:]]
         assert compiler_name == 'msvc'
         compiler = MSVCWrapper()
-        self.command_processor = CommandProcessor(self, executable,
-            cwd, sysincludes, compiler, command, self.database_inserter, self.ui_data)
+        self.command_processor = CommandProcessor(self, executable, cwd,
+            sysincludes, compiler, command, self.database_inserter,
+            self.ui_data)
 
         if self.command_processor.build_local():
             self.send_msg([b'RUN_LOCALLY'])
@@ -96,30 +80,6 @@ class ClientProcessor(MessageProtocol):
                 task.compiler_info()['macros'])
             task.pp_timer = SimpleTimer()
             self.task_created_func(task)
-
-class ClientProcessorFactory:
-    def __init__(self, compiler_info, task_created_func, database, ui_data):
-        self.compiler_info = compiler_info
-        self.task_created_func = task_created_func
-        self.ui_data = ui_data
-        self.clients = set()
-        self.database_inserter = DatabaseInserter(database)
-
-    def __call__(self):
-        return ClientProcessor(self.compiler_info, self.task_created_func,
-            self.database_inserter, self.ui_data, self.__register,
-            self.__unregister)
-            
-    def __register(self, client):
-        self.clients.add(client)
-
-    def __unregister(self, client):
-        self.clients.discard(client)
-
-    def close(self):
-        self.database_inserter.close()
-        for client in self.clients:
-            client.abort()
 
 class TaskProcessor:
     def __init__(self, nodes, port, n_pp_threads, ui_data):
@@ -177,25 +137,33 @@ class TaskProcessor:
             asyncio.async(observe(), loop=self.loop)
         asyncio.async(observe(), loop=self.loop)
 
-        self.client_processor_factory = ClientProcessorFactory(
-            self.compiler_info, self.source_scanner.add_task,
-            self.database, self.ui_data)
+        database_inserter = DatabaseInserter(self.database)
+
+        def client_processor_factory():
+            return ClientProcessor(self.compiler_info, self.source_scanner.add_task,
+                database_inserter, self.ui_data)
 
         [self.client_server] = self.loop.run_until_complete(
             self.loop.start_serving_pipe(
-            self.client_processor_factory,
+            client_processor_factory,
             "\\\\.\\pipe\\BuildPal_{}".format(self.port)))
 
         try:
             self.loop.run_forever()
         finally:
+            database_inserter.close()
             self.source_scanner.close()
-            self.client_server.close()
             self.loop.close()
+            del self.loop
 
     def stop(self):
         def close_stuff():
-            self.client_processor_factory.close()
-            self.node_manager.close()
+            self.client_server.close()
+            # If we do self.loop.stop() directly we (later on) get an exception
+            # that task/future was never retrieved. Adding stop() to task queue
+            # somehow avoids the issue. Reported to python.tulip mailing list.
+            @asyncio.coroutine
+            def stop_loop():
+                self.loop.stop()
+            asyncio.async(stop_loop(), loop=self.loop)
         self.loop.call_soon_threadsafe(close_stuff)
-        self.loop.stop()

@@ -255,6 +255,54 @@ class SettingsFrame(LabelFrame):
         self.start_but.grid(row=3, column=0, sticky=E+W)
         self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
         self.stop_but.grid(row=3, column=1, sticky=E+W)
+        if False:
+            # Debugging stuff
+            self.stop_but = Button(self, text="GC collect", command=self.gc_collect)
+            self.stop_but.grid(row=3, column=2, sticky=E+W)
+            self.stop_but = Button(self, text="Print GC", command=self.print_gc)
+            self.stop_but.grid(row=3, column=3, sticky=E+W)
+            self.stop_but = Button(self, text="Print GC garbage", command=self.print_gc_garbage)
+            self.stop_but.grid(row=3, column=4, sticky=E+W)
+            self.stop_but = Button(self, text="PDB", command=self.start_pdb)
+            self.stop_but.grid(row=3, column=5, sticky=E+W)
+            self.stop_but = Button(self, text="Console", command=self.start_console)
+            self.stop_but.grid(row=3, column=6, sticky=E+W)
+
+    @staticmethod
+    def __print_objlist(objlist, desc):
+        from pprint import pprint
+        print(desc, len(objlist))
+        counts = {}
+        for obj in objlist:
+            counts[type(obj)] = counts.get(type(obj), 0) + 1
+        pprint(list(count for count in counts.items()))
+
+    @staticmethod
+    def gc_collect():
+        import gc
+        gc.collect()
+
+    @staticmethod
+    def print_gc():
+        import gc
+        SettingsFrame.__print_objlist(gc.get_objects(), "GC objects")
+
+    @staticmethod
+    def print_gc_garbage():
+        import gc
+        SettingsFrame.__print_objlist(gc.garbage, "GC garbage")
+
+    @staticmethod
+    def start_pdb():
+        import pdb
+        pdb.set_trace()
+
+    globals = {}
+
+    @classmethod
+    def start_console(cls):
+        import code
+        code.InteractiveConsole(cls.globals).interact()
 
 class CommandInfo(Frame):
     columns = ({'cid' : '#0'   , 'text': 'Info' , 'minwidth': 300, 'anchor' : W},
@@ -300,8 +348,8 @@ class CommandInfo(Frame):
                     self.task_list.insert(session_id, 'end', text=text, values=(value,))
 
 class CommandBrowser(PanedWindow):
-    columns = ({'cid' : "#0"   , 'text' : "Commands", 'minwidth' : 250, 'anchor' : W },
-               {'cid' : "RowId", 'text' : "Row Id"  , 'minwidth' :  20, 'anchor' : CENTER },)
+    columns = ({'cid' : "#0"     , 'text' : "#"      , 'minwidth' :  30, 'anchor' : W },
+               {'cid' : "Targets", 'text' : "Targets", 'minwidth' : 250, 'anchor' : W },)
 
     def __init__(self, parent, ui_data, *args, **kw):
         PanedWindow.__init__(self, parent, orient=HORIZONTAL)
@@ -355,8 +403,8 @@ class CommandBrowser(PanedWindow):
         cursor = self.db_conn.execute(
             "SELECT rowid, command FROM command WHERE rowid > ?",
             (last_row_id,))
-        for rowid, command in cursor:
-            iid = self.tv.insert('', 'end', text=command, values=(rowid,))
+        for rowid, targets in cursor:
+            iid = self.tv.insert('', 'end', text=len(self.tv.get_children('')) + 1, values=(targets,))
             self.row_to_db[iid] = rowid
             self.db_to_row[rowid] = iid
 

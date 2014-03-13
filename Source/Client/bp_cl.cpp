@@ -1,8 +1,9 @@
-#include "boost/asio.hpp"
-#include "boost/filesystem/convenience.hpp"
-#include "boost/filesystem/path.hpp"
-#include "boost/spirit/include/qi.hpp"
-#include "boost/spirit/include/karma.hpp"
+#include <boost/asio.hpp>
+#include <boost/filesystem/convenience.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/spirit/include/qi.hpp>
+#include <boost/spirit/include/karma.hpp>
+#include <boost/system/error_code.hpp>
 #include <boost/timer/timer.hpp>
 
 #include <llvm/Support/CommandLine.h>
@@ -143,18 +144,15 @@ class MsgReceiver
 {
 public:
     template <class Stream>
-    void getMessage( Stream & sock )
+    void getMessage( Stream & sock, boost::system::error_code & error )
     {
         parts_.clear();
 
         std::array<unsigned char, 6> lengthBuffer;
         boost::system::error_code readError;
-        boost::asio::read( sock, boost::asio::buffer( &lengthBuffer[0], sizeof( lengthBuffer ) ), readError );
-        if ( readError )
-        {
-            std::cerr << "FATAL: Read failure (" << readError.message() << ")\n";
-            exit( 1 );
-        }
+        boost::asio::read( sock, boost::asio::buffer( &lengthBuffer[0], sizeof( lengthBuffer ) ), error );
+        if ( error )
+            return;
         std::size_t const totalSize =
             (lengthBuffer[0] << 24) |
             (lengthBuffer[1] << 16) |
@@ -166,12 +164,9 @@ public:
             (lengthBuffer[5]     );
 
         buf_.resize( totalSize - 2 );
-        boost::asio::read( sock, boost::asio::buffer( &buf_[0], totalSize - 2 ), readError );
-        if ( readError )
-        {
-            std::cerr << "FATAL: Read failure (" << readError.message() << ")\n";
-            exit( 1 );
-        }
+        boost::asio::read( sock, boost::asio::buffer( &buf_[0], totalSize - 2 ), error );
+        if ( error )
+            return;
 
         char const * const start = buf_.data();
         unsigned char const * const ustart = reinterpret_cast<unsigned char const *>( start );
@@ -191,10 +186,8 @@ public:
         }
         if ( ( offset != totalSize - 2 ) || ( partsFound != partCount ) )
         {
-            std::cerr << "FATAL: Invalid message\n";
-            std::cerr << "    offset " << offset << ", should be " << totalSize - 2 << "\n";
-            std::cerr << "    parts " << partsFound << ", should be " << partCount << "\n";
-            exit( 1 );
+            error = boost::system::errc::make_error_code( boost::system::errc::protocol_error );
+            return;
         }
     }
 
@@ -462,7 +455,13 @@ int main( int argc, char * argv[] )
     MsgReceiver receiver;
     while ( true )
     {
-        receiver.getMessage( sock );
+        boost::system::error_code error;
+        receiver.getMessage( sock, error );
+        if ( error )
+        {
+            std::cerr << "FATAL: Failed to get message (" << error.message() << ")\n";
+            return runLocally();
+        }
 
         assert( receiver.parts() >= 1 );
 
@@ -591,7 +590,7 @@ int main( int argc, char * argv[] )
             if ( !parse( buffer, boost::spirit::int_, result ) )
             {
                 std::cerr << "Failed to parse exit code.\n";
-                result = -1;
+                return runLocally();
             }
 
             char const * stdOut;
@@ -632,7 +631,7 @@ int main( int argc, char * argv[] )
         else
         {
             std::cout << "ERROR: GOT " << std::string( request, requestSize );
-            return -1;
+            return runLocally();
         }
     }
 

@@ -197,4 +197,14 @@ def test_cache_stat_indirect(env):
     assert env.run('test2.cpp') == {'zozo.h', 'a.h', 'yyy.h'}
 
 
+def test_leakage(env):
+    import gc
+    env.make_file('xxx.h', 'SOME SIGNIFICANTLY LONG CONTENT' * 10 * 1024)
+    env.make_file('a.cpp', '#include "xxx.h"\n')
+
+    memviews = len(list(None for x in gc.get_objects() if type(x) == memoryview))
+    for x in range(16):
+        env.run('a.cpp')
+    memviews2 = len(list(None for x in gc.get_objects() if type(x) == memoryview))
+    assert memviews == memviews2
 

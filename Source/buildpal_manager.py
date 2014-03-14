@@ -103,8 +103,8 @@ def get_config(ini_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
-    parser.add_argument('--port', dest='port', type=int, default=None, help='TCP Port number on which manager should run.')
-    parser.add_argument('--ini', dest='ini_file', type=str, default='buildpal_manager.ini', help='Specify .ini file.')
+    parser.add_argument('--port', dest='port', type=str, default=None, help='Port on which manager should run.')
+    parser.add_argument('--ini', dest='ini_file', type=str, default=None, help='Specify .ini file.')
     parser.add_argument('profile', nargs='?', type=str, default=None, help='Profile to use. Must be present in the .ini file.')
     
     opts = parser.parse_args()
@@ -112,18 +112,22 @@ if __name__ == "__main__":
     config = None
 
     if opts.port is None:
-        config = get_config(opts.ini_file)
-        port = config.get('Manager', 'port')
+        port = os.environ.get('BP_MGR_PORT')
+        if port is None:
+            print("Port name not specified, using default port ('default').", file=sys.stdout)
+            port = 'default'
 
     if opts.profile is None:
         nodes = get_nodes_from_beacon()
     else:
-        if not config:
-            config = get_config(opts.ini_file)
-        nodes = get_nodes_from_ini_file(config)
+        if not opts.ini_file:
+            print("ERROR: Profile specified, but .ini file is not.", file=sys.stderr)
+            sys.exit(-1)
+        nodes = get_nodes_from_ini_file(get_config(opts.ini_file))
 
     if not nodes:
-        raise RuntimeError("No build nodes configured.")
+        print("ERROR: No build nodes detected/configured.", file=sys.stderr)
+        sys.exit(-1)
 
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)

@@ -14,10 +14,8 @@ build_options = dict(packages = ['Compilers'],
 
 msi_opts = {'upgrade_code' : '{BC7F4969-6098-4E53-A040-2AEE0683FC9F}'}
 
-base = 'Console'
-
 executables = [
-    Executable('buildpal_manager.py', base=base)
+    Executable('buildpal_manager.py', base='Win32GUI')
 ]
 
 setup(name='BuildPal Manager',

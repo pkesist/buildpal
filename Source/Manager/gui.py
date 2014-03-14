@@ -236,11 +236,9 @@ class SettingsFrame(LabelFrame):
 
         self.digits_filter = self.register(digits_filter)
         Label(self, text="Port").grid(row=0, column=0, sticky=E+W)
-        self.port_sb = Spinbox(self, from_=1024, to=65535, increment=1,
-            validate='key', validatecommand=(self.digits_filter, '%P'))
-        self.port_sb.delete(0, "end")
-        self.port_sb.insert(0, self.port)
-        self.port_sb.grid(row=0, column=1)
+        self.port_var = StringVar()
+        self.port_var.set(self.port)
+        Entry(self, state=DISABLED, textvariable=self.port_var).grid(row=0, column=1)
 
         Label(self, text="Preprocessor Threads").grid(row=1, column=0, sticky=E+W)
         self.pp_threads_sb = Spinbox(self, from_=1, to=4 * cpu_count(),
@@ -408,7 +406,7 @@ class CommandBrowser(PanedWindow):
             self.row_to_db[iid] = rowid
             self.db_to_row[rowid] = iid
 
-class DBManagerApp(Tk):
+class BPManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
@@ -436,7 +434,6 @@ class DBManagerApp(Tk):
         self.settings_frame = SettingsFrame(self, self.port,
             self.__start_running, self.__stop_running)
         self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
-        self.port_sb = self.settings_frame.port_sb
         self.pp_threads_sb = self.settings_frame.pp_threads_sb
         self.stop_but = self.settings_frame.stop_but
         self.start_but = self.settings_frame.start_but
@@ -477,7 +474,6 @@ class DBManagerApp(Tk):
         self.running = running
         self.stop_but['state'] = 'enable' if self.running else 'disable'
         self.start_but['state'] = 'enable' if not self.running else 'disable'
-        self.port_sb['state'] = 'normal' if not self.running else 'disable'
         self.pp_threads_sb['state'] = 'normal' if not self.running else 'disable'
 
     def destroy(self):
@@ -487,15 +483,6 @@ class DBManagerApp(Tk):
 
     def __start_running(self):
         if self.running:
-            return
-        try:
-            port = int(self.port_sb.get())
-            if not (1024 <= port <= 65535):
-                raise ValueError()
-        except ValueError:
-            msgbox.showerror("Invalid Port Number", "Port number '{}' is invalid.\n"
-                "It should be between 1 and 65535.".format(
-                self.port_sb.get()))
             return
 
         try:
@@ -508,7 +495,7 @@ class DBManagerApp(Tk):
                 self.pp_threads_sb.get(), 4 * cpu_count()))
             return
         
-        self.task_processor = TaskProcessor(self.nodes, port, threads,
+        self.task_processor = TaskProcessor(self.nodes, self.port, threads,
             self.ui_data)
         self.thread = Thread(target=self.__run_task_processor)
         self.thread.start()

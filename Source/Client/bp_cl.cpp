@@ -19,6 +19,8 @@
 
 char const compiler[] = "msvc";
 unsigned int compilerSize = sizeof(compiler) / sizeof(compiler[0]) - 1;
+char const defaultPortName[] = "default";
+unsigned int defaultPortNameSize = sizeof(defaultPortName) / sizeof(defaultPortName[0]);
 
 char const compilerExeFilename[] = "cl.exe";
 
@@ -322,19 +324,22 @@ int main( int argc, char * argv[] )
     }
 
     DWORD size = GetEnvironmentVariable("BP_MGR_PORT", NULL, 0 );
+    char const * portName;
     if ( size == 0 )
     {
-        if ( GetLastError() == ERROR_ENVVAR_NOT_FOUND )
-            std::cerr << "You must define BP_MGR_PORT environment variable.\n";
-        else
-            std::cerr << "Failed to get BP_MGR_PORT environment variable.\n";
-        return runLocally();
+        portName = defaultPortName;
+        size = defaultPortNameSize;
     }
-
-    if ( size > 256 )
+    else if ( size > 256 )
     {
         std::cerr << "Invalid BP_MGR_PORT environment variable value (value too big).\n";
         return runLocally();
+    }
+    else
+    {
+        char * tmp = static_cast<char *>( alloca( size ) );
+        GetEnvironmentVariable( "BP_MGR_PORT", tmp, size );
+        portName = tmp;
     }
 
 #ifdef BOOST_WINDOWS
@@ -344,7 +349,7 @@ int main( int argc, char * argv[] )
 
     char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + size ) );
     std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
-    GetEnvironmentVariable( "BP_MGR_PORT", pipeName + pipeStreamPrefixSize, size );
+    std::memcpy( pipeName + pipeStreamPrefixSize, portName, size );
 
     for ( ; ;  )
     {
@@ -377,10 +382,7 @@ int main( int argc, char * argv[] )
     StreamType sock( ioService, pipe );
 #else
     unsigned short port;
-    char * buffer = static_cast<char *>( alloca( size ) );
-    GetEnvironmentVariable( "BP_MGR_PORT", buffer, size );
-    
-    if ( !parse( buffer, boost::spirit::qi::ushort_, port ) )
+    if ( !parse( portName, boost::spirit::qi::ushort_, port ) )
     {
         std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
         return runLocally();

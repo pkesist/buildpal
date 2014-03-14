@@ -20,22 +20,33 @@ Motivation
 *BuildPal* is a tool for speeding up large C/C++ project builds. Inspired by
 the `distcc <https://code.google.com/p/distcc/>`_ project, it works by
 distributing parts of build process to other machines on the network.
-However, unlike *distcc*, BuildPal's primary target platform is
-Windows/Visual C++.
+
+Requirements
+============
+
+1. A C/C++ project (duh!) which uses a build system capable of running tasks
+concurrently.
+2. A main build machine (client machine) connected to a Local-Area Network (LAN).
+3. As many as possible machines (slaves) on LAN capable of running the compiler
+your C/C++ project uses.
+
 
 Supported platforms and compilers
 =================================
 
-Currently the *only* supported platform is **Windows/Microsoft Visual C++**.
-Support for other platforms is :ref:`planned <future-dev-plans>`
+Currently, the only supported compiler is MS Visual C++ compiler
 
+    * Visual Studio 2005
+    * Visual Studio 2008
+    * Visual Studio 2010
+    * Visual Studio 2012
 
 Features
 ========
 
 * **Easy setup**
     No additional files, other than BuildPal Server, are needed on the
-    slave machines. All required files will be automatically transferred
+    slave machines. All required files are automatically transferred
     on-demand.
 
 * **Node auto-detection**
@@ -49,13 +60,13 @@ Features
 * **Remote preprocessing**
     BuildPal does not preprocess headers on the local machine.
     Headers used by a source file are collected and
-    transfered to the slave [#f1]_ . These headers will be reused for
-    subsequent compilations.
+    transfered to the slave [#f1]_ . These headers will be reused by the slave
+    machines for subsequent compilations.
 
 * **PCH support**
     BuildPal supports precompiled headers. Precompiled headers are
     created locally, on the client machine and are transferred on-demand
-    to specific slave nodes.
+    to slaves.
 
 * **Self-balancing**
     BuildPal tries to balance the work between the nodes appropriately by
@@ -63,87 +74,62 @@ Features
     Additionally, if a node runs out of work, it may decide to help out a
     slower node.
 
-Requirements
-============
-
-BuildPal Server and Manager are written and tested with Python 3.4.
-
-Server *might* work with any Python 3.x version.
-Manager *requires* Python 3.4, as it uses its new ´asyncio module <http://docs.python.org/3.4/library/asyncio.html#module-asyncio>`_.
-
 Quick-start
 ===========
 
-Setting up the Server (slave) node
-----------------------------------
+If the requirements are met, you can proceed to setting up the farm.
+
+Setting up the Server (slave) nodes
+-----------------------------------
+
+On each slave on the network do the following:
 
 * Install BuildPal Server.
 * Run buildpal_server.py (buildpal_server.exe).
-    * You can specify the TCP port for server to listen on.
-    * You can set the max number of jobs.
 
-Run ``buildpal_server.py -h`` for more information.
+.. note:
 
-::
+    There is no need to explicitly specify TCP port to use. Each server is
+    automatically discovered.
 
-    usage: buildpal_server.py [-h] [--port #] [--jobs #]
+.. note:
 
-    Command line parameters for buildpal_server.py
-
-    optional arguments:
-      -h, --help      show this help message and exit
-      --port #, -p #  TCP port on which server will listen. (default=ephemeral)
-      --jobs #, -j #  Number of jobs, i.e. number of compiler processes that can
-                      run concurrently. (default=number of cores)
+    Slaves do not have to have compiler pre-installed.
 
 Setting up the Client
 ---------------------
 
-* Install BuildPal Manager.
-* Create :file:`buildpal_manager.ini`.
-    * This file must contain configuration for the Manager, namely -- it should
-      specify TCP port on which the Manager should listen on, and enumerate
-      Server nodes used for compilation.
+1. Install BuildPal Manager.
+    * This will install a lot of files, of which 2 are interesting.
+        * :file:`buildpal_manager.exe`
+        * :file:`bp_cl.exe`
 
-.. code-block:: ini
+2. Configure the build system.
+    * As mentioned, to utilize the build farm and really see the gain, a build
+      system capable of concurrently running build tasks is required.
+    * You must configure your build system to use BuildPal's :file:`bp_cl.exe`
+      instead of MSVC-s :file:`cl.exe`.
 
-    [Manager]
-    port=6060
+.. note::
 
-    [Default Profile]
-    node[0]=machine0:6064
-    node[1]=machine1:6064
-    node[2]=machine2:6064
+    Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``)
+    is still required. :file:`bp_cl.exe` uses its environment to locate the
+    real compiler :file:`cl.exe`.
 
-* Run :file:`buildpal_manager.py` (:file:`buildpal_manager.exe`), optionally
-  passing the name of .ini file, and profile to use. The default .ini file is
-  :file:`buildpal_manager.ini` in the current directory. Default profile name
-  is `Default Profile`.
+3. Run BuildPal Manager.
+    * This will open Manager's GUI which can be used to view detected farm
+      configuration. If this is satisfactory, run the Manager by pressing its
+      `Start` button.
 
-::
-
-    usage: buildpal_manager.py [-h] [--ini INI_FILE] [profile]
-
-    Command line parameters for buildpal_manager.py
-
-    positional arguments:
-      profile         Profile to use. Must be present in the .ini file.
-
-    optional arguments:
-      -h, --help      show this help message and exit
-      --ini INI_FILE  Specify .ini file.
-
-* Call the compiler
-    * Set the environment variable BP_MGR_PORT to the port on which the manager is running on.
-    * Replace the :file:`cl.exe` call with :file:`bp_cl.exe`.
-    * Note that calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still required. :file:`bp_cl.exe`
-      will use its current environment to determine which compiler should be used.
+4. Run the build.
+    * Number of concurrent jobs should be set to as many as possible - use as
+      much your Client machine can manage.
 
 Client
 ======
 
 The Client (:file:`bp_cl.exe`) works as a drop-in replacement for the real
-compiler (:file:`cl.exe`). As you will usually run dosens of these concurrently,
+compiler (:file:`cl.exe`). As you will usually run dozens of these concurrently,
 it is designed to be very thin - it contains almost no compiler-specific
 knowledge. It sends the command line and any other relevant environment
 information to the Manager. After that, it acts as a string-puppet -- it enters
@@ -151,11 +137,12 @@ an event loop in which it processes commands sent by the Manager.
 
 These commands can be:
 
+* ``COMPILE_LOCALLY()``
+    Instructs the client to run the command locally, just as the real compiler
+    executable was used.
 * ``EXECUTE_AND_EXIT(cmdline_opts)``
     Spawn a compiler process from the given `cmdline_opts` command line options
-    and exits with the return code from that process. Used e.g. when the Manager
-    determines that the call should be completed locally, without distributing
-    it to slave nodes.
+    and exits with the return code from that process.
 * ``EXECUTE_GET_OUTPUT(cmdline)``
     Spawn a compiler process from the given `cmdline_opts` command line options,
     capture return code, stdout, stderr and send them back to the manager. This
@@ -171,9 +158,8 @@ These commands can be:
 
 .. note::
 
-    In order for Client to work, the Manager must already be listening on
-    the same machine, and BP_MGR_PORT must be set to its TCP port. Otherwise the
-    Client will fail with appropriate error message.
+    In case of an error, :file:`bp_cl.exe` will output an error message, and
+    will fallback to running the real compiler.
 
 Server
 ======
@@ -228,11 +214,6 @@ Runs locally, on the client machine.
 ==========
 
 * `Python <http://www.python.org>`_
-
-* `ZeroMQ <http://www.zeromq.org>`_
-
-    Used for server-manager communication. Its requirements are very limiting,
-    so will probably be replaced with plain TCP in future versions.
 
 * `LLVM <http://www.llvm.org>`_
 
@@ -318,9 +299,11 @@ Future development plans
     * Support Clang (Windows/UNIX).
     * ...
 
-* Implement broken (invalid) connection detection using heart-beats.
-    * see `ZeroMQ Guide <http://zguide.zeromq.org/page:all#Chapter-Reliable-Request-Reply-Patterns>`_.
+* Move task delegation from the Client to the farm.
+    * This would make the farm 'Client-aware', providing better performance
+      when multiple Clients use the same farm.
 
+* Object file cacheing support.
 
 .. rubric:: Footnotes
 

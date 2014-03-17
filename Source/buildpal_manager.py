@@ -1,5 +1,5 @@
 #! python3.3
-from Manager import TaskProcessor, run_gui, Timer
+from Manager import TaskProcessor, run_gui
 
 import argparse
 import configparser
@@ -135,8 +135,7 @@ if __name__ == "__main__":
     if opts.ui == 'gui':
         run_gui(nodes, port)
     else:
-        ui_data = type('UIData', (), {})()
-        task_processor = TaskProcessor(nodes, port, 0, ui_data)
+        task_processor = TaskProcessor(nodes, port, 0)
         def run():
             task_processor.run()
         thread = Thread(target=run)

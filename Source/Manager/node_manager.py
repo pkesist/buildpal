@@ -11,11 +11,13 @@ from math import floor
 from collections import defaultdict
 from queue import Queue, Empty
 from time import time
+from .gui_event import GUIEvent
 
 class NodeManager:
-    def __init__(self, loop, node_info):
+    def __init__(self, loop, node_info, update_ui):
         self.loop = loop
         self.node_info = node_info
+        self.update_ui = update_ui
         self.all_sockets = defaultdict(list)
         self.tasks_running = defaultdict(list)
         self.sessions = {}
@@ -23,9 +25,6 @@ class NodeManager:
         self.executor = ThreadPoolExecutor(2)
         self.compressor = Compressor(self.loop, self.executor)
         self.counter = 0
-
-    def unassigned_tasks_count(self):
-        return len(self.unassigned_tasks)
 
     def task_ready(self, task):
         def schedule_task(task):
@@ -38,14 +37,18 @@ class NodeManager:
             self.tasks_running[node].append(task)
         elif self.unassigned_tasks:
             self.unassigned_tasks.append(task)
+            self.update_ui(GUIEvent.update_unassigned_tasks,
+                len(self.unassigned_tasks))
             return
         asyncio.async(self.__get_server_conn(node), loop=self.loop
-            ).add_done_callback(lambda f : self.kukulele(task, node, f))
+            ).add_done_callback(lambda f : self.create_session(task, node, f))
 
-    def kukulele(self, task, predetermined_node, future):
+    def create_session(self, task, predetermined_node, future):
         result = future.result()
         if result is None:
             self.unassigned_tasks.append(task)
+            self.update_ui(GUIEvent.update_unassigned_tasks,
+                len(self.unassigned_tasks))
             return
         protocol, node = result
         session = CompileSession(self.generate_unique_id(), task,
@@ -57,6 +60,7 @@ class NodeManager:
             assert task in self.tasks_running[node]
             assert node == predetermined_node
         session.start()
+        self.update_ui(GUIEvent.update_node_info, self.node_info)
 
     def generate_unique_id(self):
         self.counter += 1
@@ -112,6 +116,8 @@ class NodeManager:
         while tasks_to_steal > 0:
             while self.unassigned_tasks:
                 task = self.unassigned_tasks.pop(0)
+                self.update_ui(GUIEvent.update_unassigned_tasks,
+                    len(self.unassigned_tasks))
                 task.note_time('taken from unassigned task queue', 'unassigned time')
                 self.schedule_task(task, node)
                 tasks_to_steal -= 1
@@ -158,3 +164,4 @@ class NodeManager:
             len(session.task.sessions_running) == 1:
                 self.schedule_task(session.task)
         session.task.session_completed(session)
+        self.update_ui(GUIEvent.update_node_info, self.node_info)

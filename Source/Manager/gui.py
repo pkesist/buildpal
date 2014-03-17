@@ -5,12 +5,14 @@ import tkinter.messagebox as msgbox
 from tkinter.ttk import *
 from datetime import datetime
 
+from collections import defaultdict
 from operator import itemgetter
-from threading import Thread, Event
+from threading import Thread, Lock
 from time import time
 from multiprocessing import cpu_count
 
-from . import TaskProcessor
+from .task_processor import TaskProcessor
+from .gui_event import GUIEvent
 
 class MyTreeView(Treeview):
     def __init__(self, parent, columns, **kwargs):
@@ -18,7 +20,9 @@ class MyTreeView(Treeview):
             columns=tuple(c['cid'] for c in columns[1:]), **kwargs)
         heading_font = font.nametofont('TkHeadingFont')
         for c in columns:
-            self.column(c['cid'], width=max(heading_font.measure(c['text']) + 15, c['minwidth']), minwidth=c['minwidth'], anchor=c['anchor'])
+            width = max(heading_font.measure(c['text']) + 15, c['minwidth'])
+            self.column(c['cid'], width=width, minwidth=c['minwidth'],
+                anchor=c['anchor'])
             self.heading(c['cid'], text=c['text'])
 
 class NodeList(MyTreeView):
@@ -37,20 +41,19 @@ class NodeList(MyTreeView):
         {'cid' : "AvgTasks"  , 'text' : "Avg. Tasks" , 'minwidth' : 40 , 'anchor' : CENTER},
         {'cid' : "AvgTime"   , 'text' : "Avg. Time"  , 'minwidth' : 40 , 'anchor' : CENTER})
 
-    def __init__(self, parent, nodes, ui_data, **kwargs):
+    gui_events = ((GUIEvent.update_node_info, 'refresh'),)
+
+    def __init__(self, parent, nodes, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
-        self.ui_data = ui_data
         for node in nodes:
             text = node['hostname']
             self.insert('', 'end', text=text,
                 values=(node['job_slots'],))
 
-    def refresh(self):
+    def refresh(self, node_info):
         items = self.get_children('')
-        if not hasattr(self.ui_data, 'node_info'):
-            return
-        assert len(items) == len(self.ui_data.node_info)
-        for node, item in zip(self.ui_data.node_info, items):
+        assert len(items) == len(node_info)
+        for node, item in zip(node_info, items):
             # Make sure the order did not change somehow.
             assert self.item(item)['text'] == node.node_dict()['hostname']
             values = (
@@ -87,22 +90,24 @@ class TimerDisplay(LabelFrame):
         self.global_timers.delete(*self.global_timers.get_children(''))
         sorted_times = [(name, total, count, total / count) for name, (total, count) in timer_dict.items()]
         sorted_times.sort(key=itemgetter(1), reverse=True)
-        for timer_name, total, count, average in sorted_times:
+        for index, (timer_name, total, count, average) in enumerate(sorted_times):
             values = (
                 "{:.2f}".format(total),
                 count,
                 "{:.2f}".format(average))
-            self.global_timers.insert('', 'end', text=timer_name, values=values)
-        for row in selected_rows:
-            iid = self.global_timers.identify_row(row)
-            if iid:
+            iid = self.global_timers.insert('', 'end', text=timer_name, values=values)
+            if index in selected_rows:
                 self.global_timers.selection_add(iid)
 
+class GlobalTimerDisplay(TimerDisplay):
+    gui_events = ((GUIEvent.update_global_timers, 'refresh'),)
+
 class NodeDisplay(Frame):
-    def __init__(self, parent, nodes, ui_data):
+    gui_events = ((GUIEvent.update_node_info, 'refresh'),)
+
+    def __init__(self, parent, nodes):
         Frame.__init__(self)
         self.nodes = nodes
-        self.ui_data = ui_data
         self.node_index = None
         self.draw()
 
@@ -115,7 +120,7 @@ class NodeDisplay(Frame):
         node_label_frame.rowconfigure(0, weight=1)
         node_label_frame.columnconfigure(0, weight=1)
 
-        self.node_list = NodeList(node_label_frame, self.nodes, self.ui_data, height=6)
+        self.node_list = NodeList(node_label_frame, self.nodes, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
         self.node_list.grid(sticky=N+S+W+E)
         self.paned_window.add(node_label_frame, weight=1)
@@ -124,8 +129,10 @@ class NodeDisplay(Frame):
         self.paned_window.add(self.node_times)
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
 
-    def ping(self):
-        pass
+    def refresh(self, node_info):
+        self.node_info = node_info
+        if self.node_index is not None:
+            self.update_selection()
 
     def node_selected(self, event):
         selection = self.node_list.selection()
@@ -136,25 +143,22 @@ class NodeDisplay(Frame):
             if new_index == self.node_index:
                 return
             self.node_index = new_index
-        self.refresh()
+        self.update_selection()
 
-    def refresh(self):
-        self.node_list.refresh()
-        if self.node_index is None or not hasattr(self.ui_data, 'node_info'):
+    def update_selection(self):
+        if self.node_index is None or not hasattr(self, 'node_info'):
             node = None
             node_time_dict = {}
         else:
-            node = self.ui_data.node_info[self.node_index]
+            node = self.node_info[self.node_index]
             node_time_dict = node.timer().as_dict()
         self.node_times.refresh(node_time_dict)
 
-def called_from_foreign_thread(func):
-    return func
-
 class CacheStats(LabelFrame):
-    def __init__(self, parent, ui_data, **kw):
+    gui_events = ((GUIEvent.update_cache_stats, 'refresh'),)
+
+    def __init__(self, parent, **kw):
         LabelFrame.__init__(self, parent, text = "Cache Statistics", **kw)
-        self.ui_data = ui_data
         self.draw()
     
     def draw(self):
@@ -171,18 +175,17 @@ class CacheStats(LabelFrame):
         Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=4, column=1)
         Separator(self).grid(row=5, column=0, columnspan=2, pady=5, sticky=E+W)
 
-    def refresh(self):
-        if not hasattr(self.ui_data, 'cache_stats'):
-            return
-        hits, misses, ratio = self.ui_data.cache_stats()
+    def refresh(self, cache_stats):
+        hits, misses, ratio = cache_stats
         self.include_directives.set(hits + misses)
         self.cache_hits.set(hits)
         self.cache_ratio.set("{:.2f}".format(ratio))
 
 class Miscellaneous(LabelFrame):
-    def __init__(self, parent, ui_data, **kw):
+    gui_events = ((GUIEvent.update_unassigned_tasks, 'refresh'),)
+
+    def __init__(self, parent, **kw):
         LabelFrame.__init__(self, parent, text = "Miscellaneous", **kw)
-        self.ui_data = ui_data
         self.draw()
     
     def draw(self):
@@ -192,35 +195,27 @@ class Miscellaneous(LabelFrame):
         Entry(self, state=DISABLED, textvariable=self.unassinged_tasks).grid(row=1, column=1)
         Separator(self).grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
 
-    def refresh(self):
-        if not hasattr(self.ui_data, 'unassigned_tasks'):
-            return
-        self.unassinged_tasks.set(self.ui_data.unassigned_tasks())
+    def refresh(self, unassigned_tasks):
+        self.unassinged_tasks.set(unassigned_tasks)
 
 class GlobalDataFrame(Frame):
-    def __init__(self, parent, ui_data, **kw):
+    def __init__(self, parent, **kw):
         Frame.__init__(self, parent, **kw)
-        self.ui_data = ui_data
         self.draw()
 
     def draw(self):
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.global_times = TimerDisplay(self, height=5, text="Global Timers")
+        self.global_times = GlobalTimerDisplay(self, height=5, text="Global Timers")
         self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
 
         frame = Frame(self)
-        self.cache_stats = CacheStats(frame, self.ui_data)
+        self.cache_stats = CacheStats(frame)
         self.cache_stats.grid(sticky=N+S+W+E)
 
-        self.miscellaneous = Miscellaneous(frame, self.ui_data)
+        self.miscellaneous = Miscellaneous(frame)
         self.miscellaneous.grid(row=1, sticky=N+S+W+E)
         frame.grid(row=0, column=1, sticky=N+S+W+E)
-
-    def refresh(self):
-        self.global_times.refresh(self.ui_data.timer.as_dict())
-        self.cache_stats.refresh()
-        self.miscellaneous.refresh()
 
 class SettingsFrame(LabelFrame):
     def __init__(self, parent, port, start, stop, **kw):
@@ -313,11 +308,11 @@ class CommandInfo(Frame):
         self.task_list = MyTreeView(self, self.columns)
         self.task_list.grid(row=0, column=0, sticky=N+S+E+W)
 
-    def refresh(self, command_data):
+    def refresh(self, command_info):
         children = self.task_list.get_children()
         if children:
             self.task_list.delete(children)
-        if command_data is None:
+        if command_info is None:
             return
         def format_time(time_real):
             return datetime.fromtimestamp(time_real).strftime("%a %H:%M:%S.%f")
@@ -332,7 +327,7 @@ class CommandInfo(Frame):
                 ("Completed:", format_time(session['completed'])),
                 ("Duration:", "{:.2f}".format(session['completed'] - session['started']))]
 
-        for task in command_data['tasks']:
+        for task in command_info['tasks']:
             task_id = self.task_list.insert('', 'end', text=task_string(task), open=True)
             times = self.task_list.insert(task_id, 'end', text='Times', open=True)
             for time_entry in task['times']:
@@ -346,10 +341,12 @@ class CommandInfo(Frame):
                     self.task_list.insert(session_id, 'end', text=text, values=(value,))
 
 class CommandBrowser(PanedWindow):
-    columns = ({'cid' : "#0"     , 'text' : "#"      , 'minwidth' :  30, 'anchor' : W },
+    columns = ({'cid' : "#0"     , 'text' : "#"      , 'minwidth' :  40, 'anchor' : W },
                {'cid' : "Targets", 'text' : "Targets", 'minwidth' : 250, 'anchor' : W },)
 
-    def __init__(self, parent, ui_data, *args, **kw):
+    gui_events = ((GUIEvent.update_command_info, 'refresh'),)
+
+    def __init__(self, parent, *args, **kw):
         PanedWindow.__init__(self, parent, orient=HORIZONTAL)
         frame = Frame(self)
         frame.rowconfigure(0, weight=1)
@@ -367,7 +364,6 @@ class CommandBrowser(PanedWindow):
         self.db = None
         self.db_conn = None
 
-        self.ui_data = ui_data
         self.row_to_db = {}
         self.db_to_row = {}
 
@@ -384,13 +380,10 @@ class CommandBrowser(PanedWindow):
             data = self.db.get_command(self.db_conn, row_id)
         self.command_info.refresh(data)
 
-    def refresh(self):
-        if not hasattr(self.ui_data, 'command_db'):
-            return
-
+    def refresh(self, command_db):
         if self.db_conn is None:
             if self.db is None:
-                self.db = self.ui_data.command_db
+                self.db = command_db
             self.db_conn = self.db.get_connection()
             self.db_conn.execute("PRAGMA read_uncommitted = 1")
 
@@ -406,26 +399,40 @@ class CommandBrowser(PanedWindow):
             self.row_to_db[iid] = rowid
             self.db_to_row[rowid] = iid
 
+def collect_window_events(window):
+    result = defaultdict(list)
+    if hasattr(window, 'gui_events'):
+        for event_type, method_name in window.gui_events:
+            method = getattr(window, method_name)
+            result[event_type].append(method)
+    for child in window.winfo_children():
+        child_events = collect_window_events(child)
+        for event_type, handlers in child_events.items():
+            result[event_type].extend(handlers)
+    return result
+
 class BPManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
     def __init__(self, nodes, port):
         Tk.__init__(self, None)
-        self.ui_data = type('UIData', (), {})()
         self.nodes = nodes
         self.port = port
         self.running = False
         self.initialize()
-        self.refresh_event = Event()
-        self.refresh_event.clear()
+        self.events = collect_window_events(self)
+        self.event_data_lock = Lock()
+        self.event_data = {}
         self.__periodic_refresh()
 
     def __periodic_refresh(self):
-        if self.refresh_event.is_set():
-            self.refresh()
-            self.refresh_event.clear()
-        self.after(250, self.__periodic_refresh)
+        with self.event_data_lock:
+            for event_type, event_data in self.event_data.items():
+                for event_handler in self.events[event_type]:
+                    event_handler(event_data)
+            self.event_data.clear()
+        self.after(150, self.__periodic_refresh)
 
     def initialize(self):
         self.columnconfigure(0, weight=1)
@@ -441,16 +448,16 @@ class BPManagerApp(Tk):
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
 
-        self.node_display = NodeDisplay(self.pane, self.nodes, self.ui_data)
+        self.node_display = NodeDisplay(self.pane, self.nodes)
         self.node_display.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.node_display)
 
         self.notebook = Notebook(self.pane)
 
-        self.global_data_frame = GlobalDataFrame(self.notebook, self.ui_data)
+        self.global_data_frame = GlobalDataFrame(self.notebook)
         self.notebook.add(self.global_data_frame, text="Global Data")
 
-        self.command_browser = CommandBrowser(self.notebook, self.ui_data)
+        self.command_browser = CommandBrowser(self.notebook)
         self.notebook.add(self.command_browser, text="Commands")
 
         self.pane.add(self.notebook)
@@ -460,10 +467,9 @@ class BPManagerApp(Tk):
 
         self.sizegrip = Sizegrip(self)
 
-
-    @called_from_foreign_thread
-    def signal_refresh(self):
-        self.refresh_event.set()
+    def post_event(self, event_type, event_data):
+        with self.event_data_lock:
+            self.event_data[event_type] = event_data
 
     def refresh(self):
         self.global_data_frame.refresh()
@@ -495,14 +501,13 @@ class BPManagerApp(Tk):
                 self.pp_threads_sb.get(), 4 * cpu_count()))
             return
         
-        self.task_processor = TaskProcessor(self.nodes, self.port, threads,
-            self.ui_data)
+        self.task_processor = TaskProcessor(self.nodes, self.port, threads)
         self.thread = Thread(target=self.__run_task_processor)
         self.thread.start()
         self.set_running(True)
 
     def __run_task_processor(self):
-        self.task_processor.run(self.signal_refresh)
+        self.task_processor.run(self.post_event)
 
     def __stop_running(self):
         if not self.running:

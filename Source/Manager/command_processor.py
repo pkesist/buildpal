@@ -1,5 +1,6 @@
 from .compile_session import SessionResult
 from .task import Task
+from .gui_event import GUIEvent
 
 from subprocess import list2cmdline
 from threading import Lock, current_thread
@@ -13,7 +14,7 @@ class CommandProcessor:
     STATE_HAS_COMPILER_INFO = 2
 
     def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
-            command, database_inserter, ui_data):
+            command, database_inserter, global_timer, update_ui):
         self.client_conn = client_conn
         self.__executable = executable
         self.__sysincludes = sysincludes.split(';')
@@ -21,7 +22,8 @@ class CommandProcessor:
         self.__compiler = compiler
         self.__command = command
         self.__options = compiler.parse_options(command)
-        self.__ui_data = ui_data
+        self.__global_timer = global_timer
+        self.__update_ui = update_ui
         self.__database_inserter = database_inserter
 
     def set_compiler_info(self, compiler_info, compiler_files):
@@ -32,7 +34,8 @@ class CommandProcessor:
     def request_compiler_info(self, on_completion):
         self.got_compiler_info = on_completion
         self.test_source = self.__compiler.prepare_test_source()
-        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT', list2cmdline(self.test_source.command()).encode()])
+        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',
+            list2cmdline(self.test_source.command()).encode()])
         self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
@@ -49,7 +52,8 @@ class CommandProcessor:
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
             assert len(msg) == len(self.compiler_files)
-            self.compiler_files = list(zip([m.tobytes() for m in msg], self.compiler_files))
+            self.compiler_files = list(zip([m.tobytes() for m in msg],
+                self.compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
         else:
@@ -57,7 +61,8 @@ class CommandProcessor:
 
     def update_task_ui(self, task):
         for duration_name, duration in task.durations.items():
-            self.__ui_data.timer.add_time(duration_name, duration)
+            self.__global_timer.add_time(duration_name, duration)
+        self.__update_ui(GUIEvent.update_global_timers, self.__global_timer.as_dict())
 
     def executable(self):
         return self.__executable
@@ -72,7 +77,8 @@ class CommandProcessor:
         output = self.__options.output_file()
         sources = self.__options.input_files()
         if output and len(sources) > 1:
-            raise RuntimeError("Cannot specify output file with multiple sources.")
+            raise RuntimeError("Cannot specify output file " \
+                "with multiple sources.")
 
         pch_file = None
         pch_header = self.__options.pch_header()
@@ -82,7 +88,8 @@ class CommandProcessor:
                 pch_file = os.path.splitext(pch_header)[0] + '.pch'
             pch_file = os.path.join(self.__cwd, pch_file)
             if not os.path.exists(pch_file):
-                raise Exception("PCH file '{}' does not exist.".format(pch_file))
+                raise Exception("PCH file '{}' does not exist.".format(
+                    pch_file))
             pch_file = os.path.join(self.__cwd, pch_file)
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
@@ -90,25 +97,28 @@ class CommandProcessor:
         def create_task(source):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
-            return Task({
-                'server_task_info' : {
-                    'call' : self.__options.create_server_call(),
-                    'pch_file' : pch_file,
-                },
-                'preprocess_task_info' : {
-                    'source' : source,
-                    'macros' : self.__options.implicit_macros() + self.__options.defines(),
-                    'includes' : [os.path.join(self.__cwd, rel_inc) for rel_inc in self.__options.includes()],
-                    'sysincludes' : self.__sysincludes,
-                    'pch_header' : pch_header
-                },
-                'compiler_files' : self.compiler_files,
-                'command_processor' : self,
-                'client_conn' : self.client_conn,
-                'output' : os.path.join(self.__cwd, output or os.path.splitext(source)[0] + '.obj'),
-                'pch_file' : pch_file,
-                'source' : source,
-            })
+            return Task(dict(
+                server_task_info=dict(
+                    call=self.__options.create_server_call(),
+                    pch_file=pch_file,
+                ),
+                preprocess_task_info=dict(
+                    source=source,
+                    macros=self.__options.implicit_macros() + 
+                        self.__options.defines(),
+                    includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
+                        self.__options.includes()],
+                    sysincludes=self.__sysincludes,
+                    pch_header=pch_header
+                ),
+                compiler_files=self.compiler_files,
+                command_processor=self,
+                client_conn=self.client_conn,
+                output=os.path.join(self.__cwd, output or
+                    os.path.splitext(source)[0] + '.obj'),
+                pch_file=pch_file,
+                source=source,
+            ))
         self.tasks = set(create_task(source) for source in sources)
         self.completed_tasks = set()
         return self.tasks
@@ -120,10 +130,7 @@ class CommandProcessor:
         self.update_task_ui(task)
         self.completed_tasks.add(task)
         if self.tasks == self.completed_tasks:
-            def update_ui(command_id):
-                self.__ui_data.command_info.append(
-                    (", ".join(self.__options.input_files()), command_id))
-            self.__database_inserter.async_insert(self.get_info(), update_ui)
+            self.__database_inserter.async_insert(self.get_info())
             self.postprocess()
 
     def should_invoke_linker(self):

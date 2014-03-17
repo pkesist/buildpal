@@ -8,6 +8,7 @@ from .timer import Timer
 from .node_manager import NodeManager
 from .console import ConsolePrinter
 from .node_info import NodeInfo
+from .gui_event import GUIEvent
 
 import asyncio
 import os
@@ -21,11 +22,12 @@ from time import time
 
 class ClientProcessor(MessageProtocol):
     def __init__(self, compiler_info, task_created_func, database_inserter,
-            ui_data):
+            global_timer, update_ui):
         MessageProtocol.__init__(self)
         self.compiler_info = compiler_info
         self.task_created_func = task_created_func
-        self.ui_data = ui_data
+        self.global_timer = global_timer
+        self.update_ui = update_ui
         self.data = b''
         self.transport = None
         self.command_processor = None
@@ -51,7 +53,7 @@ class ClientProcessor(MessageProtocol):
         compiler = MSVCWrapper()
         self.command_processor = CommandProcessor(self, executable, cwd,
             sysincludes, compiler, command, self.database_inserter,
-            self.ui_data)
+            self.global_timer, self.update_ui)
 
         if self.command_processor.build_local():
             self.send_msg([b'RUN_LOCALLY'])
@@ -82,7 +84,7 @@ class ClientProcessor(MessageProtocol):
             self.task_created_func(task)
 
 class TaskProcessor:
-    def __init__(self, nodes, port, n_pp_threads, ui_data):
+    def __init__(self, nodes, port, n_pp_threads):
         class CacheStats:
             def __init__(self):
                 self.hits = 0
@@ -99,49 +101,50 @@ class TaskProcessor:
         self.port = port
         self.compiler_info = {}
         self.timer = Timer()
-        self.node_info = [NodeInfo(nodes[x]) for x in range(len(nodes))]
+        self.node_info = [NodeInfo(node) for node in nodes]
         self.server = None
 
         self.n_pp_threads = n_pp_threads
         if self.n_pp_threads <= 0:
             self.n_pp_threads = cpu_count()
-        self.client_list = []
 
-        self.loop = asyncio.ProactorEventLoop()
-        self.node_manager = NodeManager(self.loop, self.node_info)
-        self.source_scanner = SourceScanner(self.node_manager.task_ready,
-            self.n_pp_threads)
+    def run(self, update_ui=None):
+        if update_ui is None:
+            self.update_ui = lambda event_type, event_data : None
+        else:
+            self.update_ui = update_ui
 
         handle, db_file = mkstemp(prefix='buildpal_cmd', suffix='.db')
         os.close(handle)
         self.database = Database(db_file)
+
+        self.loop = asyncio.ProactorEventLoop()
+        self.node_manager = NodeManager(self.loop, self.node_info, self.update_ui)
+        self.source_scanner = SourceScanner(self.node_manager.task_ready,
+            self.update_ui, self.n_pp_threads)
+
+        if update_ui is None:
+            class UIData: pass
+            ui_data = UIData()
+            ui_data.timer = self.timer
+            ui_data.node_info = self.node_info
+            ui_data.command_db = self.database
+            ui_data.cache_stats = self.source_scanner.get_cache_stats
+            observer = ConsolePrinter(self.node_info, ui_data)
+            @asyncio.coroutine
+            def observe():
+                observer()
+                yield from asyncio.sleep(0.5, loop=self.loop)
+                asyncio.async(observe(), loop=self.loop)
+            asyncio.async(observe(), loop=self.loop)
+
         with self.database.get_connection() as conn:
             self.database.create_structure(conn)
 
-        self.ui_data = ui_data
-        self.ui_data.timer = self.timer
-        self.ui_data.node_info = self.node_info
-        self.ui_data.command_info = []
-        self.ui_data.command_db = self.database
-        self.ui_data.cache_stats = self.source_scanner.get_cache_stats
-        self.ui_data.unassigned_tasks = self.node_manager.unassigned_tasks_count
-
-    def run(self, observer=None):
-        if observer is None:
-            observer = ConsolePrinter(self.node_info, self.ui_data)
-
-        @asyncio.coroutine
-        def observe():
-            observer()
-            yield from asyncio.sleep(0.5, loop=self.loop)
-            asyncio.async(observe(), loop=self.loop)
-        asyncio.async(observe(), loop=self.loop)
-
-        database_inserter = DatabaseInserter(self.database)
-
+        database_inserter = DatabaseInserter(self.database, self.update_ui)
         def client_processor_factory():
             return ClientProcessor(self.compiler_info, self.source_scanner.add_task,
-                database_inserter, self.ui_data)
+                database_inserter, self.timer, self.update_ui)
 
         [self.client_server] = self.loop.run_until_complete(
             self.loop.start_serving_pipe(

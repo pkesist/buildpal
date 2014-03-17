@@ -1,3 +1,5 @@
+from .gui_event import GUIEvent
+
 from Common import SimpleTimer
 
 import preprocessing
@@ -53,7 +55,7 @@ def header_info(preprocessor, task):
 
 
 class SourceScanner:
-    def __init__(self, notify, thread_count=cpu_count() + 1):
+    def __init__(self, notify, update_ui, thread_count=cpu_count() + 1):
         preprocessing.clear_content_cache()
         self.cache = preprocessing.Cache()
         self.in_queue = Queue()
@@ -62,7 +64,7 @@ class SourceScanner:
         self.threads = set()
         self.stats = pstats.Stats()
         for i in range(thread_count):
-            thread = Thread(target=self.__process_task_worker, args=(notify, self.stats))
+            thread = Thread(target=self.__process_task_worker, args=(notify, update_ui, self.stats))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
@@ -86,7 +88,7 @@ class SourceScanner:
         except Empty:
             return None
 
-    def __process_task_worker(self, notify, stats):
+    def __process_task_worker(self, notify, update_ui, stats):
         #profile = cProfile.Profile()
         #profile.enable()
 
@@ -98,6 +100,7 @@ class SourceScanner:
                 task.header_info, task.server_task_info['filelist'] = \
                     header_info(preprocessor, task.preprocess_task_info)
                 task.note_time('preprocessed', 'preprocessing time')
+                update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
                 notify(task)
             except Empty:
                 if self.closing:

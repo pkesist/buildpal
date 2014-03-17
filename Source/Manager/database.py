@@ -2,6 +2,7 @@ import os
 import sqlite3
 
 from .compile_session import SessionResult
+from .gui_event import GUIEvent
 
 from queue import Queue, Empty
 from threading import Thread
@@ -177,13 +178,13 @@ class Database:
 class DatabaseInserter:
     class Quit: pass
 
-    def __init__(self, database):
+    def __init__(self, database, update_ui):
         self.database = database
         self.queue = Queue()
-        self.thread = Thread(target=self.__worker_thread)
+        self.thread = Thread(target=self.__worker_thread, args=(update_ui,))
         self.thread.start()
 
-    def __worker_thread(self):
+    def __worker_thread(self, update_ui):
         with self.database.get_connection() as conn:
             changed = False
             while True:
@@ -196,14 +197,16 @@ class DatabaseInserter:
                     command_info, on_completion = what
                     command_id = self.database.insert_command(conn, command_info)
                     changed = True
-                    on_completion(command_id)
+                    update_ui(GUIEvent.update_command_info, self.database)
+                    if on_completion:
+                        on_completion(command_id)
                 except Empty:
                     if changed:
                         conn.commit()
                         changed = False
 
 
-    def async_insert(self, command_info, on_completion):
+    def async_insert(self, command_info, on_completion=None):
         self.queue.put((command_info, on_completion))
 
     def close(self):

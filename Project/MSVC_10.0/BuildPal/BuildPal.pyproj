@@ -38,6 +38,7 @@
     <Compile Include="Source\Manager\console.py" />
     <Compile Include="Source\Manager\database.py" />
     <Compile Include="Source\Manager\gui.py" />
+    <Compile Include="Source\Manager\gui_event.py" />
     <Compile Include="Source\Manager\node_info.py" />
     <Compile Include="Source\Manager\node_manager.py" />
     <Compile Include="Source\Manager\task.py" />

@@ -312,6 +312,20 @@ int runLocally()
     return createProcess( buffer );
 }
 
+class Fallback
+{
+public:
+    explicit Fallback( bool fallbackDisabled )
+        : fallbackDisabled_( fallbackDisabled ) {}
+
+    int complete() const
+    {
+        return fallbackDisabled_ ? -1 : runLocally();
+    }
+private:
+    bool fallbackDisabled_;
+};
+
 
 int main( int argc, char * argv[] )
 {
@@ -323,6 +337,13 @@ int main( int argc, char * argv[] )
         return -1;
     }
 
+    bool disableFallback = false;
+    {
+        DWORD size = GetEnvironmentVariable( "BP_DISABLE_FALLBACK", NULL, 0 );
+        disableFallback = ( size != 0 ) || ( GetLastError() != ERROR_ENVVAR_NOT_FOUND );
+    }
+    Fallback const fallback( disableFallback );
+
     DWORD size = GetEnvironmentVariable("BP_MGR_PORT", NULL, 0 );
     char const * portName;
     if ( size == 0 )
@@ -333,7 +354,7 @@ int main( int argc, char * argv[] )
     else if ( size > 256 )
     {
         std::cerr << "Invalid BP_MGR_PORT environment variable value (value too big).\n";
-        return runLocally();
+        return fallback.complete();
     }
     else
     {
@@ -374,7 +395,7 @@ int main( int argc, char * argv[] )
             
         boost::system::error_code const error( ::GetLastError(), boost::system::system_category() );
         std::cerr << "Failed to create pipe '" << pipeName << "'. (" << error.message() << ").\n";
-        return runLocally();
+        return fallback.complete();
     }
     typedef boost::asio::windows::stream_handle StreamType;
 
@@ -385,7 +406,7 @@ int main( int argc, char * argv[] )
     if ( !parse( portName, boost::spirit::qi::ushort_, port ) )
     {
         std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
-        return runLocally();
+        return fallback.complete();
     }
     
     boost::asio::ip::address localhost;
@@ -394,7 +415,7 @@ int main( int argc, char * argv[] )
     if ( addressError )
     {
         std::cerr << "Could not resolve address: " << addressError.message() << '\n';
-        return runLocally();
+        return fallback.complete();
     }
     
     boost::asio::io_service ioService;
@@ -409,7 +430,7 @@ int main( int argc, char * argv[] )
     if ( connectError )
     {
         std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
-        return runLocally();
+        return fallback.complete();
     }
 #endif
 
@@ -444,7 +465,7 @@ int main( int argc, char * argv[] )
     {
         // Still not fixed in Clang 3.4.
         //std::cerr << "FATAL: Failed to expand response files.";
-        //return -1;
+        //return fallback.complete();
     }
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
@@ -461,8 +482,8 @@ int main( int argc, char * argv[] )
         receiver.getMessage( sock, error );
         if ( error )
         {
-            std::cerr << "FATAL: Failed to get message (" << error.message() << ")\n";
-            return runLocally();
+            std::cerr << "ERROR: Failed to get message (" << error.message() << ")\n";
+            return fallback.complete();
         }
 
         assert( receiver.parts() >= 1 );
@@ -575,7 +596,7 @@ int main( int argc, char * argv[] )
             else
             {
                 std::cerr << "ERROR: CreateProcess()\n";
-                return -1;
+                return fallback.complete();
             }
         }
         else if ( ( requestSize == 4 ) && strncmp( request, "EXIT", 4 ) == 0 )
@@ -591,8 +612,8 @@ int main( int argc, char * argv[] )
             int result;
             if ( !parse( buffer, boost::spirit::int_, result ) )
             {
-                std::cerr << "Failed to parse exit code.\n";
-                return runLocally();
+                std::cerr << "ERROR: Failed to parse exit code.\n" << buffer;
+                return fallback.complete();
             }
 
             char const * stdOut;
@@ -632,8 +653,8 @@ int main( int argc, char * argv[] )
         }
         else
         {
-            std::cout << "ERROR: GOT " << std::string( request, requestSize );
-            return runLocally();
+            std::cerr << "ERROR: GOT " << std::string( request, requestSize );
+            return fallback.complete();
         }
     }
 

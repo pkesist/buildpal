@@ -234,9 +234,7 @@ class MSVCWrapper:
         b'16.00' :
         [
             b'c1.dll',
-            b'c1ast.dll',
             b'c1xx.dll',
-            b'c1xxast.dll',
             b'c2.dll',
             b'cl.exe',
             b'mspdb100.dll',

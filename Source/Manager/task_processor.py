@@ -120,7 +120,7 @@ class TaskProcessor:
 
         self.loop = asyncio.ProactorEventLoop()
         self.node_manager = NodeManager(self.loop, self.node_info, self.update_ui)
-        self.source_scanner = SourceScanner(self.node_manager.task_ready,
+        self.source_scanner = SourceScanner(self.node_manager.task_preprocessed,
             self.update_ui, self.n_pp_threads)
 
         if update_ui is None:

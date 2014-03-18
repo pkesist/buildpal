@@ -153,10 +153,8 @@ class Database:
             task_id = self.__insert(conn, 'task', task, command_id=command_id)
             for session in task['sessions']:
                 self.__insert(conn, 'session', session, task_id=task_id)
-            for time_point, time in task['times'].items():
-                self.__insert(conn, 'times',
-                    {'time_point_name' : time_point,
-                     'time_point' : time}, task_id=task_id)
+            for time_point in task['times']:
+                self.__insert(conn, 'times', time_point, task_id=task_id)
         return command_id
 
     def get_command(self, conn, rowid):

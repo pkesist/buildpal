@@ -81,13 +81,16 @@ class Task:
         if not self.sessions_running and self.task_result is not None:
             self.command_processor.task_completed(self)
 
+    def task_completed(self, retcode, stdout, stderr):
+        self.task_result = (retcode, stdout, stderr)
+        self.command_processor.task_completed(self)
+
     def get_info(self):
         assert not self.sessions_running
-        assert self.completed_by_session is not None
         return {
             'source' : self.source,
             'pch_file' : self.pch_file[0] if self.pch_file else None,
             'sessions' : list(session.get_info() for session in
                 self.sessions_finished),
-            'times' : self.times
+            'times' : list(dict(time_point_name=a, time_point=b) for a, b in self.times.items())
         }

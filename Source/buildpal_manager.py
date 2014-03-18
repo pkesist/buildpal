@@ -116,6 +116,8 @@ if __name__ == "__main__":
         if port is None:
             print("Port name not specified, using default port ('default').", file=sys.stdout)
             port = 'default'
+    else:
+        port = opts.port
 
     if opts.profile is None:
         nodes = get_nodes_from_beacon()

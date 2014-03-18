@@ -97,11 +97,15 @@ class SourceScanner:
             try:
                 task = self.in_queue.get(timeout=1)
                 task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
-                task.header_info, task.server_task_info['filelist'] = \
-                    header_info(preprocessor, task.preprocess_task_info)
-                task.note_time('preprocessed', 'preprocessing time')
-                update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
-                notify(task)
+                try:
+                    task.header_info, task.server_task_info['filelist'] = \
+                        header_info(preprocessor, task.preprocess_task_info)
+                    task.note_time('preprocessed', 'preprocessing time')
+                except Exception as e:
+                    notify(task, e)
+                else:
+                    update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
+                    notify(task)
             except Empty:
                 if self.closing:
                     #profile.disable()

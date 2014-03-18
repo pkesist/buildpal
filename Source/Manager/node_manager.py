@@ -26,7 +26,12 @@ class NodeManager:
         self.compressor = Compressor(self.loop, self.executor)
         self.counter = 0
 
-    def task_ready(self, task):
+    def task_preprocessed(self, task, exception=None):
+        if exception:
+            def task_error():
+                task.task_completed(-1, b'', 'ERROR: {}\n'.format(exception).encode())
+            self.loop.call_soon_threadsafe(task_error)
+            return
         def schedule_task(task):
             task.note_time('collected from preprocessor', 'preprocessed notification time')
             self.schedule_task(task)

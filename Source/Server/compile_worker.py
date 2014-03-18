@@ -202,7 +202,7 @@ class CompileSession:
         @classmethod
         def process_msg(cls, session, msg):
             more, data = msg
-            session.compiler_data.write(data)
+            session.compiler_data.write(data.memory())
             if more == b'\x00':
                 session.compiler_data.seek(0)
                 dir = session.runner.compiler_repository().compiler_dir(

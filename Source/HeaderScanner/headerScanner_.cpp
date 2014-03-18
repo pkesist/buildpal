@@ -224,7 +224,12 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
     clang::FileEntry const * mainFileEntry = fileManager().getFile( fileName );
     if ( !mainFileEntry )
-        throw std::runtime_error( "Could not find source file." );
+    {
+        std::string error( "Could not find source file '" );
+        error.append( fileName.str() );
+        error.append( "'." );
+        throw std::runtime_error( error );
+    }
 
     // Initialize source manager.
     sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );

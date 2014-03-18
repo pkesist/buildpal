@@ -21,21 +21,19 @@ def terminate_proc(proc):
 @pytest.fixture(scope='module')
 def run_manager(request):
     dir = tempfile.mkdtemp()
-    ini_file = os.path.join(dir, 'buildpal_manager.ini')
+    ini_file = os.path.join(dir, 'test.ini')
     with create_file(ini_file) as ini:
         ini.write("""\
-[Manager]
-port={}
-
 [test]
 node[0]=localhost:{}:4
 
-""".format(MGR_PORT, SRV_PORT))
+""".format(SRV_PORT))
     mgr_script = os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'buildpal_manager.py'))
-    proc = subprocess.Popen([sys.executable, mgr_script, '--ui', 'console', 'test'], cwd=dir,
+    proc = subprocess.Popen([sys.executable, mgr_script, '--ui=console',
+        '--ini=test.ini', '--port={}'.format(MGR_PORT), 'test'], cwd=dir,
         stdout=subprocess.PIPE, stderr=sys.stderr, universal_newlines=True)
-    sleep(0.5)
+    sleep(1)
     def teardown():
         terminate_proc(proc)
         shutil.rmtree(dir)
@@ -61,30 +59,29 @@ def bp_cl():
     return os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'bp_cl.exe'))
 
-@pytest.fixture(scope='module')
-def vcvarsall():
+@pytest.fixture(scope='module', params=['9.0', '10.0', '11.0'])
+def vcvarsall(request):
     import winreg
-    versions = ['9.0', '10.0', '11.0']
+    version = request.param
     dir = None
-    for version in versions:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                r'SOFTWARE\Microsoft\VisualStudio\{}\Setup\VC'.
-                format(version)) as key:
-                dir = winreg.QueryValueEx(key, 'ProductDir')[0]
-                break
-        except:
-            pass
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\VisualStudio\{}\Setup\VC'.
+            format(version)) as key:
+            dir = winreg.QueryValueEx(key, 'ProductDir')[0]
+    except:
+        pass
     if not dir:
-        raise Exception("Failed to locate Visual Studio on system")
+        raise Exception("Failed to locate Visual Studio {} on system".format(version))
     return os.path.join(dir, 'vcvarsall.bat')
 
 
-def test_dummy(tmpdir, vcvarsall, bp_cl):
-    with subprocess.Popen([vcvarsall, '&&', bp_cl, 'silly_option'],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-        stdout, stderr = proc.communicate()
-        assert proc.returncode != 0
+def test_dummy(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
+    env = os.environ
+    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, 'silly_option'], env=env,
+        stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() != 0
 
 def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
@@ -97,11 +94,22 @@ def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
         hpp.write('\n')
     
     env = os.environ
-    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
-        stdout, stderr = proc.communicate()
-        assert proc.returncode == 0
+        env=env, stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() == 0
+
+def test_system_headers(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
+    tmpdir = str(tmpdir)
+    cpp_file = 'a.cpp'
+    with create_file(cpp_file) as cpp:
+        cpp.write('#include <vector>\n')
+    
+    env = os.environ
+    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
+    with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
+        env=env, stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() == 0
 
 def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
@@ -113,11 +121,10 @@ def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
 #endif
 ''')
     env = os.environ
-    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/c', cpp_file],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
-        stdout, stderr = proc.communicate()
-        assert proc.returncode != 0
+        env=env, stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() != 0
 
 def test_link(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
@@ -125,17 +132,15 @@ def test_link(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     with create_file(cpp_file) as cpp:
         cpp.write("int main() {}\n")
     env = os.environ
-    env.update({'BP_MGR_PORT' : str(MGR_PORT)})
+    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
     with subprocess.Popen([vcvarsall, '&&', bp_cl, '/EHsc', cpp_file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:a_dist.exe"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=tmpdir) as proc:
-        stdout, stderr = proc.communicate()
-        assert proc.returncode == 0
+        env=env, cwd=tmpdir, stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() == 0
     assert os.path.exists(os.path.join(tmpdir, 'a_dist.exe'))
 
     with subprocess.Popen([vcvarsall, '&&', 'cl', '/EHsc', cpp_file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:a_local.exe"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=tmpdir) as proc:
-        stdout, stderr = proc.communicate()
-        assert proc.returncode == 0
+        env=env, cwd=tmpdir, stdout=sys.stdout, stderr=sys.stderr) as proc:
+        assert proc.wait() == 0
     assert os.path.exists(os.path.join(tmpdir, 'a_local.exe'))
 
     assert os.stat(os.path.join(tmpdir, 'a_local.exe')).st_size == os.stat(os.path.join(tmpdir, 'a_dist.exe')).st_size

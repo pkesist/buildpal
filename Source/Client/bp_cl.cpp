@@ -23,6 +23,7 @@ char const defaultPortName[] = "default";
 unsigned int defaultPortNameSize = sizeof(defaultPortName) / sizeof(defaultPortName[0]);
 
 char const compilerExeFilename[] = "cl.exe";
+std::size_t compilerExeFilenameSize = sizeof(compilerExeFilename) / sizeof(compilerExeFilename[0]) - 1;
 
 typedef std::vector<boost::filesystem::path> PathList;
 
@@ -84,12 +85,12 @@ std::unique_ptr<char []> getPipeData( HANDLE pipe, DWORD & size )
     if ( !PeekNamedPipe( pipe, 0, 0, 0, &available, 0 ) )
         available = 0;
 
-    std::unique_ptr<char []> buffer;
-    buffer.reset( new char[ available + 1 ] );
+    std::unique_ptr<char []> buffer( new char[ available + 1 ] );
     if ( available )
         ReadFile( pipe, buffer.get(), available, &size, NULL );
+    else
+        size = 0;
     buffer[ available ] = '\0';
-
     return buffer;
 }
 
@@ -110,7 +111,7 @@ public:
     }
 
     template <class Stream>
-    void send( Stream & sock )
+    void send( Stream & sock, boost::system::error_code & error )
     {
         lengthBuffer_[0] = (totalLength_ >> 24) & 0xFF;
         lengthBuffer_[1] = (totalLength_ >> 16) & 0xFF;
@@ -118,8 +119,7 @@ public:
         lengthBuffer_[3] = (totalLength_      ) & 0xFF;
         lengthBuffer_[4] = (partCount_ >> 8 ) & 0xFF;
         lengthBuffer_[5] = (partCount_      ) & 0xFF;
-        boost::system::error_code writeError;
-        boost::asio::write( sock, buffers_, writeError );
+        boost::asio::write( sock, buffers_, error );
         initMessage();
     }
 
@@ -182,7 +182,7 @@ public:
                 (ustart[offset + 2] << 8 ) |
                 (ustart[offset + 3]      );
             offset += 4;
-            parts_.push_back( std::make_pair( start + offset, partLen ) );
+            parts_.push_back( llvm::StringRef( start + offset, partLen ) );
             offset += partLen;
             ++partsFound;
         }
@@ -193,25 +193,18 @@ public:
         }
     }
 
-    std::pair<char const *, std::size_t> getPart( std::size_t index )
+    llvm::StringRef getPart( std::size_t index )
     {
         if ( index >= parts_.size() )
-            return std::make_pair<char const *, std::size_t>( 0, 0 );
+            return llvm::StringRef();
         return parts_[ index ];
-    }
-
-    void getPart( std::size_t index, char const * * buff, std::size_t * size )
-    {
-        std::pair<char const *, std::size_t> const result( getPart( index ) );
-        if ( buff ) *buff = result.first;
-        if ( size ) *size = result.second;
     }
 
     std::size_t parts() const { return parts_.size(); }
 
 private:
     std::vector<char> buf_;
-    std::vector<std::pair<char const *, std::size_t> > parts_;
+    std::vector<llvm::StringRef> parts_;
 };
 
 template <typename Parser, typename Attribute>
@@ -473,7 +466,13 @@ int main( int argc, char * argv[] )
         msgSender.addPart( newArgv[ arg ], strlen( newArgv[arg] ) );
     }
 
-    msgSender.send( sock );
+    boost::system::error_code writeError;
+    msgSender.send( sock, writeError );
+    if ( writeError )
+    {
+        std::cerr << "Failed to send message (" << writeError.message() << ").\n";
+        return fallback.complete();
+    }
 
     MsgReceiver receiver;
     while ( true )
@@ -486,49 +485,59 @@ int main( int argc, char * argv[] )
             return fallback.complete();
         }
 
-        assert( receiver.parts() >= 1 );
-
-        char const * request;
-        std::size_t requestSize;
-        receiver.getPart( 0, &request, &requestSize );
-
-        if ( ( requestSize == 11 ) && strncmp( request, "RUN_LOCALLY", 11 ) == 0 )
+        if ( receiver.parts() == 0 )
         {
-            assert( receiver.parts() == 1 );
+            std::cerr << "ERROR: Empty message\n";
+            return fallback.complete();
+        }
+
+        llvm::StringRef const request = receiver.getPart( 0 );
+
+        if ( request == "RUN_LOCALLY" )
+        {
+            if ( receiver.parts() != 1 )
+            {
+                std::cerr << "ERROR: Invalid message length\n";
+                return fallback.complete();
+            }
             return runLocally();
         }
-        else if ( ( requestSize == 16 ) && strncmp( request, "EXECUTE_AND_EXIT", 16 ) == 0 )
+        else if ( request == "EXECUTE_AND_EXIT" )
         {
-            assert( receiver.parts() == 2 );
-            char const * commandLine;
-            std::size_t commandLineSize;
-            receiver.getPart( 1, &commandLine, &commandLineSize );
+            if ( receiver.parts() != 2 )
+            {
+                std::cerr << "ERROR: Invalid message length\n";
+                return fallback.complete();
+            }
+            llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
             std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
 
-            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLineSize + 1 ) );
+            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLine.size() + 1 ) );
             std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize );
             buffer[ compilerExecutableSize ] = ' ';
-            std::memcpy( buffer + compilerExecutableSize + 1, commandLine, commandLineSize );
-            buffer[ compilerExecutableSize + 1 + commandLineSize ] = 0;
+            std::memcpy( buffer + compilerExecutableSize + 1, commandLine.data(), commandLine.size() );
+            buffer[ compilerExecutableSize + 1 + commandLine.size() ] = 0;
 
             return createProcess( buffer );
         }
-        else if ( ( requestSize == 18 ) && strncmp( request, "EXECUTE_GET_OUTPUT", 18 ) == 0 )
+        else if ( request == "EXECUTE_GET_OUTPUT" )
         {
-            assert( receiver.parts() == 2 );
-            char const * commandLine;
-            std::size_t commandLineSize;
-            receiver.getPart( 1, &commandLine, &commandLineSize );
+            if ( receiver.parts() != 2 )
+            {
+                std::cerr << "ERROR: Invalid message length\n";
+                return fallback.complete();
+            }
 
+            llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
             std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
 
-            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLineSize + 1 ) );
-            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize + 1 );
+            char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLine.size() + 1 ) );
+            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize );
             buffer[ compilerExecutableSize ] = ' ';
-            std::memcpy( buffer + compilerExecutableSize + 1, commandLine, commandLineSize );
-            buffer[ compilerExecutableSize + 1 + commandLineSize ] = 0;
+            std::memcpy( buffer + compilerExecutableSize + 1, commandLine.data(), commandLine.size() );
+            buffer[ compilerExecutableSize + 1 + commandLine.size() ] = 0;
 
             SECURITY_ATTRIBUTES saAttr;
             saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -567,25 +576,34 @@ int main( int argc, char * argv[] )
 
             if ( apiResult )
             {
+                char retcodeBuffer[ 16 ];
                 ::WaitForSingleObject( processInfo.hProcess, INFINITE );
                 {
                     int result;
                     GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-                    char * buffer = static_cast<char *>( _alloca( 16 ) );
-                    char * buf = buffer;
+                    char * buf = retcodeBuffer;
                     bool const genResult = generate( buf, boost::spirit::karma::int_, result );
                     assert( genResult );
-                    assert( buffer < buf );
-                    assert( buf - buffer <= 16 );
-                    msgSender.addPart( buffer, buf - buffer );
+                    assert( retcodeBuffer < buf );
+                    assert( buf - retcodeBuffer <= sizeof(retcodeBuffer) );
+                    assert( buf - retcodeBuffer > 0 );
+                    msgSender.addPart( retcodeBuffer, buf - retcodeBuffer );
                 }
                 DWORD stdOutSize;
                 std::unique_ptr<char []> stdOut( getPipeData( stdOutRead, stdOutSize ) );
+                std::cout << std::string( stdOut.get(), stdOutSize ) << '\n';
                 msgSender.addPart( stdOut.get(), stdOutSize );
                 DWORD stdErrSize;
                 std::unique_ptr<char []> stdErr( getPipeData( stdErrRead, stdErrSize ) );
                 msgSender.addPart( stdErr.get(), stdErrSize );
-                msgSender.send( sock );
+                std::cout << std::string( stdErr.get(), stdErrSize ) << '\n';
+                boost::system::error_code writeError;
+                msgSender.send( sock, writeError );
+                if ( writeError )
+                {
+                    std::cerr << "Failed to send message (" << writeError.message() << ").\n";
+                    return fallback.complete();
+                }
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );
                 CloseHandle( stdOutRead );
@@ -599,16 +617,18 @@ int main( int argc, char * argv[] )
                 return fallback.complete();
             }
         }
-        else if ( ( requestSize == 4 ) && strncmp( request, "EXIT", 4 ) == 0 )
+        else if ( request == "EXIT" )
         {
-            assert( receiver.parts() == 4 );
-            char const * retcode;
-            std::size_t retcodeSize;
-            receiver.getPart( 1, &retcode, &retcodeSize );
+            if ( receiver.parts() != 4 )
+            {
+                std::cerr << "ERROR: Invalid message length\n";
+                return fallback.complete();
+            }
+            llvm::StringRef retcode = receiver.getPart( 1 );
 
-            char * buffer = static_cast<char *>( _alloca( retcodeSize + 1 ) );
-            std::memcpy( buffer, retcode, retcodeSize );
-            buffer[ retcodeSize ] = 0;
+            char * buffer = static_cast<char *>( _alloca( retcode.size() + 1 ) );
+            std::memcpy( buffer, retcode.data(), retcode.size() );
+            buffer[ retcode.size() ] = 0;
             int result;
             if ( !parse( buffer, boost::spirit::int_, result ) )
             {
@@ -616,22 +636,20 @@ int main( int argc, char * argv[] )
                 return fallback.complete();
             }
 
-            char const * stdOut;
-            std::size_t stdOutSize;
-            receiver.getPart( 2, &stdOut, &stdOutSize );
-
-            char const * stdErr;
-            std::size_t stdErrSize;
-            receiver.getPart( 3, &stdErr, &stdErrSize );
-
-            std::cout << std::string( stdOut, stdOutSize );
-            if ( stdErrSize )
-                std::cerr << std::string( stdErr, stdErrSize );
+            llvm::StringRef const stdOut = receiver.getPart( 2 );
+            llvm::StringRef const stdErr = receiver.getPart( 3 );
+            std::cout << stdOut.str();
+            if ( stdErr.size() )
+                std::cerr << stdErr.str();
             return result;
         }
-        else if ( ( requestSize == 12 ) && strncmp( request, "LOCATE_FILES", 12 ) == 0 )
+        else if ( request == "LOCATE_FILES" )
         {
-            assert( receiver.parts() > 1 );
+            if ( receiver.parts() <= 1 )
+            {
+                std::cerr << "ERROR: Invalid message length\n";
+                return fallback.complete();
+            }
             std::vector<std::string> files;
             // First search relative to compiler dir, then path.
             PathList pathList;
@@ -641,19 +659,23 @@ int main( int argc, char * argv[] )
 
             for ( std::size_t part = 1; part < receiver.parts(); ++part )
             {
-                char const * file;
-                std::size_t fileSize;
-                receiver.getPart( part, &file, &fileSize );
+                llvm::StringRef file = receiver.getPart( part );
                 boost::filesystem::path result;
-                findOnPath( pathList, boost::filesystem::path( file, file + fileSize ), result );
+                findOnPath( pathList, boost::filesystem::path( file.data(), file.data() + file.size() ), result );
                 files.push_back( result.string() );
                 msgSender.addPart( files.back().c_str(), files.back().size() );
             }
-            msgSender.send( sock );
+            boost::system::error_code writeError;
+            msgSender.send( sock, writeError );
+            if ( writeError )
+            {
+                std::cerr << "Failed to send message (" << writeError.message() << ").\n";
+                return fallback.complete();
+            }
         }
         else
         {
-            std::cerr << "ERROR: GOT " << std::string( request, requestSize );
+            std::cerr << "ERROR: GOT " << request.str();
             return fallback.complete();
         }
     }

@@ -53,6 +53,10 @@ class MessageProtocol(asyncio.Protocol):
         self.msg_offset = 0
         self.transport = None
 
+    def close(self):
+        if self.transport:
+            self.transport.close()
+
     def connection_made(self, transport):
         self.transport = transport
 

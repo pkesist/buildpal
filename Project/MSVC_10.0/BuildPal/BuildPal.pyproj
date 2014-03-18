@@ -55,6 +55,7 @@
     <Compile Include="Source\Server\__init__.py" />
     <Compile Include="Source\setup_manager.py" />
     <Compile Include="Source\setup_server.py" />
+    <Compile Include="Source\Test\test_client.py" />
     <Compile Include="Source\Test\test_compile.py" />
     <Compile Include="Source\Test\test_database.py" />
     <Compile Include="Source\Test\test_message.py" />

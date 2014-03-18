@@ -59,7 +59,7 @@ def bp_cl():
     return os.path.normpath(os.path.join(os.path.dirname(
         os.path.realpath(__file__)), '..', 'bp_cl.exe'))
 
-@pytest.fixture(scope='module', params=['9.0', '10.0', '11.0'])
+@pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
 def vcvarsall(request):
     import winreg
     version = request.param
@@ -72,7 +72,7 @@ def vcvarsall(request):
     except:
         pass
     if not dir:
-        raise Exception("Failed to locate Visual Studio {} on system".format(version))
+        pytest.skip("Visual Studio {} not found.".format(version))
     return os.path.join(dir, 'vcvarsall.bat')
 
 

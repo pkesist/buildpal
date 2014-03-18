@@ -33,10 +33,6 @@ class ClientProcessor(MessageProtocol):
         self.command_processor = None
         self.database_inserter = database_inserter
 
-    def close(self):
-        if self.transport:
-            self.transport.close()
-
     def process_msg(self, msg):
         if self.command_processor is not None:
             self.command_processor.got_data_from_client(msg)

@@ -1,3 +1,5 @@
+from test_utils import vcvarsall, bp_cl
+
 import os
 import subprocess
 import asyncio
@@ -95,27 +97,6 @@ class LocateFiles(ProtocolTester):
             assert os.path.isfile(full.tobytes())
         self.send_msg([b'EXIT', b'3124', b'', b''])
         self.close()
-
-@pytest.fixture(scope='module')
-def bp_cl():
-    return os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', 'bp_cl.exe'))
-
-@pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
-def vcvarsall(request):
-    import winreg
-    version = request.param
-    dir = None
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-            r'SOFTWARE\Microsoft\VisualStudio\{}\Setup\VC'.
-            format(version)) as key:
-            dir = winreg.QueryValueEx(key, 'ProductDir')[0]
-    except:
-        pass
-    if not dir:
-        pytest.skip("Visual Studio {} not found.".format(version))
-    return os.path.join(dir, 'vcvarsall.bat')
 
 @pytest.fixture(scope='function')
 def client_popen_args(tmpdir, vcvarsall, bp_cl):

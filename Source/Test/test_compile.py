@@ -1,5 +1,3 @@
-from test_utils import vcvarsall, bp_cl
-
 import os
 import pytest
 import sys
@@ -65,7 +63,7 @@ def test_dummy(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
 
 def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
-    cpp_file = os.path.join(tmpdir, 'aaa', 'a.cpp')
+    cpp_file = os.path.join(tmpdir, 'aaa', 'a1.cpp')
     os.makedirs(os.path.dirname(cpp_file))
     with create_file(cpp_file) as cpp:
         cpp.write('#include "../rel.hpp"\n')
@@ -81,7 +79,7 @@ def test_relative(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
 
 def test_system_headers(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
-    cpp_file = 'a.cpp'
+    cpp_file = os.path.join(tmpdir, 'a2.cpp')
     with create_file(cpp_file) as cpp:
         cpp.write('#include <vector>\n')
     
@@ -93,7 +91,7 @@ def test_system_headers(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
 
 def test_cplusplus(tmpdir, run_server, run_manager, vcvarsall, bp_cl):
     tmpdir = str(tmpdir)
-    cpp_file = os.path.join(tmpdir, 'a.cpp')
+    cpp_file = os.path.join(tmpdir, 'a3.cpp')
     with create_file(cpp_file) as cpp:
         cpp.write('''\
 #ifdef __cplusplus

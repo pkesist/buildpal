@@ -1,5 +1,3 @@
-from test_utils import vcvarsall, bp_cl
-
 import os
 import subprocess
 import asyncio
@@ -10,6 +8,11 @@ sys.path.append('..')
 from Common import MessageProtocol
 
 class ProtocolTester(MessageProtocol):
+    @classmethod
+    def check_exit_code(cls, code):
+        if hasattr(cls, 'expected_exit_code'):
+            assert code == cls.expected_exit_code
+
     def __init__(self, loop):
         self.initial = True
         self.loop = loop
@@ -51,14 +54,14 @@ class RunLocallyTester(ProtocolTester):
 
     def send_request(self):
         self.send_msg([b'RUN_LOCALLY'])
-        self.close()
 
 class ExecuteAndExitTester(ProtocolTester):
-    expected_exit_code = 2
+    @classmethod
+    def check_exit_code(cls, code):
+        assert code != 0
 
     def send_request(self):
         self.send_msg([b'EXECUTE_AND_EXIT', b'/nologo'])
-        self.close()
 
 class ExecuteGetOutputTester(ProtocolTester):
     expected_exit_code = 6132
@@ -73,14 +76,12 @@ class ExecuteGetOutputTester(ProtocolTester):
         assert not stdout.memory()
         assert b'missing source filename' in stderr.tobytes()
         self.send_msg([b'EXIT', b'6132', b'', b''])
-        self.close()
 
 class ExitTester(ProtocolTester):
     expected_exit_code = 666
 
     def send_request(self):
         self.send_msg([b'EXIT', b'666', b'', b''])
-        self.close()
 
 class LocateFiles(ProtocolTester):
     expected_exit_code = 3124
@@ -96,15 +97,15 @@ class LocateFiles(ProtocolTester):
             assert os.path.basename(full.tobytes()) == file
             assert os.path.isfile(full.tobytes())
         self.send_msg([b'EXIT', b'3124', b'', b''])
-        self.close()
+
 
 @pytest.fixture(scope='function')
 def client_popen_args(tmpdir, vcvarsall, bp_cl):
     file = os.path.join(str(tmpdir), 'aaa.cpp')
     with open(file, 'wt'):
         pass
-    return dict(args=[vcvarsall, '&&', bp_cl, '/c', file], cwd=str(tmpdir),
-        stdout=sys.stdout, stderr=sys.stderr)
+    return dict(args=[vcvarsall, '&&', bp_cl, '/c', file],
+        stdout=sys.stdout, stderr=sys.stderr, cwd=str(tmpdir))
 
 @pytest.mark.parametrize("protocol_tester", [RunLocallyTester,
     ExecuteGetOutputTester, ExecuteAndExitTester, ExitTester, LocateFiles])
@@ -123,5 +124,5 @@ def test_protocol(client_popen_args, protocol_tester):
         def close_server():
             server.close()
         loop.run_until_complete(close_server())
-        assert proc.wait() == protocol_tester.expected_exit_code
+        protocol_tester.check_exit_code(proc.wait())
 

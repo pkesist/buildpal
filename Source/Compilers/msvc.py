@@ -167,9 +167,9 @@ class MSVCWrapper:
                 lines.append("#define STR_II(x) #x\n")
                 for symbol in macros:
                     lines.append('#ifndef {m}\n'.format(m=symbol))
-                    lines.append('#pragma message("{plh} /{m}/__NOT_DEFINED__/")\n'.format(plh=placeholder_string, m=symbol))
+                    lines.append('#pragma message("{plh}/{m}/__NOT_DEFINED__/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#else\n')
-                    lines.append('#pragma message("{plh} /{m}/" STR({m}) "/")\n'.format(plh=placeholder_string, m=symbol))
+                    lines.append('#pragma message("{plh}/{m}/" STR({m}) "/")\n'.format(plh=placeholder_string, m=symbol))
                     lines.append('#endif\n')
                 file.writelines(lines)
 
@@ -193,7 +193,7 @@ class MSVCWrapper:
         output = stdout.split(b'\r\n')
         macros = []
         for line in output:
-            m = re.match(('{plh} /(.*)/(.*)/'.format(plh=self.placeholder_string)).encode('ascii'), line)
+            m = re.match(('{plh}/(.*)/(.*)/'.format(plh=self.placeholder_string)).encode('ascii'), line)
             if m:
                 if m.group(2) == b'__NOT_DEFINED__':
                     continue

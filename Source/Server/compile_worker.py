@@ -22,7 +22,6 @@ import os
 import pickle
 import sched
 import shutil
-import signal
 import socket
 import struct
 import sys
@@ -591,9 +590,7 @@ class CompileWorker:
         asyncio.async(print_stats(), loop=self.loop)
         self.loop.run_forever()
 
-    def run(self):
-        signal.signal(signal.SIGBREAK, signal.default_int_handler)
-
+    def run(self, terminator=None):
         self.loop = asyncio.ProactorEventLoop()
         def protocol_factory():
             return ServerProtocol(self)
@@ -611,7 +608,7 @@ class CompileWorker:
         try:
             event_loop_thread = Thread(target=self.run_event_loop)
             event_loop_thread.start()
-            while True:
+            while not terminator or not terminator.should_stop():
                 sleep(1)
         finally:
             beacon.stop()

@@ -68,31 +68,26 @@ struct Header
     HeaderLocation::Enum loc;
 };
 
-struct HeaderHash
+inline bool operator==( Header const & first, Header const & second )
 {
-    std::size_t operator()( Header const & h )
-    {
-        HashString hs;
-        return llvm::hash_combine(
-            hs( h.dir.get() ),
-            hs( h.name.get() ) );
-    }
-};
-
-inline bool operator==( Header const & l, Header const & r )
-{
-    return l.dir == r.dir && l.name == r.name;
+    return ( first.dir == second.dir ) && ( first.name == second.name );
 }
 
-struct Headers : public std::unordered_set<Header, HeaderHash>
+inline bool operator<( Header const & first, Header const & second )
 {
-    Headers() : std::unordered_set<Header, HeaderHash>() {};
+    return ( first.dir < second.dir ) || ( first.dir == second.dir ) && ( first.name < second.name );
+}
+
+
+struct Headers : public std::set<Header>
+{
+    Headers() : std::set<Header>() {};
     Headers( Headers && h ) :
-        std::unordered_set<Header, HeaderHash>( std::move( h ) ) {};
+        std::set<Header>( std::move( h ) ) {};
 
     Headers & operator=( Headers && h )
     {
-        std::unordered_set<Header, HeaderHash> tmp( std::move( h ) );
+        std::set<Header> tmp( std::move( h ) );
         swap( tmp );
         return *this;
     }

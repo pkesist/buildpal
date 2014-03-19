@@ -98,7 +98,6 @@ class LocateFiles(ProtocolTester):
             assert os.path.isfile(full.tobytes())
         self.send_msg([b'EXIT', b'3124', b'', b''])
 
-
 @pytest.fixture(scope='function')
 def client_popen_args(tmpdir, vcvarsall, bp_cl):
     file = os.path.join(str(tmpdir), 'aaa.cpp')
@@ -118,7 +117,8 @@ def test_protocol(client_popen_args, protocol_tester):
 
     env = os.environ
     env['BP_MGR_PORT'] = port
-    with subprocess.Popen(env=env, **client_popen_args) as proc:
+    client_popen_args.update(env=env)
+    with subprocess.Popen(**client_popen_args) as proc:
         loop.run_forever()
         @asyncio.coroutine
         def close_server():

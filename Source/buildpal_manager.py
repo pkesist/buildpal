@@ -11,12 +11,12 @@ from time import sleep
 
 default_script = 'buildpal_manager.ini'
 
-def get_nodes_from_ini_file(config):
-    if not opts.profile in config:
-        raise Exception("ERROR: No '{}' section in '{}'.".format(opts.profile, opts.ini_file))
+def get_nodes_from_ini_file(config, profile):
+    if not profile in config:
+        raise Exception("ERROR: No '{}' section in '{}'.".format(profile, opts.ini_file))
 
     nodes = []
-    section = config[opts.profile]
+    section = config[profile]
     done = False
     while not done:
         option = "node[{}]".format(len(nodes))
@@ -100,14 +100,14 @@ def get_config(ini_file):
             "'{}'.".format(ini_file))
     return config
 
-if __name__ == "__main__":
+def main(argv, terminator=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
     parser.add_argument('--port', dest='port', type=str, default=None, help='Port on which manager should run.')
     parser.add_argument('--ini', dest='ini_file', type=str, default=None, help='Specify .ini file.')
     parser.add_argument('profile', nargs='?', type=str, default=None, help='Profile to use. Must be present in the .ini file.')
     
-    opts = parser.parse_args()
+    opts = parser.parse_args(argv)
 
     config = None
 
@@ -124,15 +124,12 @@ if __name__ == "__main__":
     else:
         if not opts.ini_file:
             print("ERROR: Profile specified, but .ini file is not.", file=sys.stderr)
-            sys.exit(-1)
-        nodes = get_nodes_from_ini_file(get_config(opts.ini_file))
+            return -1
+        nodes = get_nodes_from_ini_file(get_config(opts.ini_file), opts.profile)
 
     if not nodes:
         print("ERROR: No build nodes detected/configured.", file=sys.stderr)
-        sys.exit(-1)
-
-    import signal
-    signal.signal(signal.SIGBREAK, signal.default_int_handler)
+        return -1
 
     if opts.ui == 'gui':
         run_gui(nodes, port)
@@ -143,9 +140,17 @@ if __name__ == "__main__":
         thread = Thread(target=run)
         thread.start()
         try:
-            while True:
-                sleep(60)
-        except KeyboardInterrupt:
+            while not terminator or not terminator.should_stop():
+                sleep(1)
+        finally:
             print("Shutting down.")
             task_processor.stop()
             thread.join()
+
+if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
+
+    result = main(sys.argv[1:])
+    if result:
+        sys.exit(result)

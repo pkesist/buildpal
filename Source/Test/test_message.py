@@ -67,25 +67,23 @@ def test_protocol():
         def get_msg(self):
             return self.msgs.pop(0)
 
-    def test_transfer(protocol1, protocol2, msg):
+    protocol1 = Protocol()
+    protocol2 = Protocol()
+    msgs = [
+        [b'ASDF1', b'FSDA5'] * 1 ,
+        [b'ASDF2', b'FSDA4'] * 2 ,
+        [b'ASDF3', b'FSDA3'] * 4 ,
+        [b'ASDF4', b'FSDA2'] * 8 ,
+        [b'ASDF5', b'FSDA1'] * 16,
+
+        [b'ASDF1', b'FSDA5'] * 1 ,
+        [b'ASDF2', b'FSDA4'] * 2 ,
+        [b'ASDF3', b'FSDA3'] * 4 ,
+        [b'ASDF4', b'FSDA2'] * 8 ,
+        [b'ASDF5', b'FSDA1'] * 16,]
+
+    fake_connect(protocol1, protocol2)
+    for msg in msgs:
         protocol1.send_msg(msg)
         assert all(x==y for x, y in zip(protocol2.get_msg(),
             msg))
-
-    protocol1 = Protocol()
-    protocol2 = Protocol()
-
-    fake_connect(protocol1, protocol2)
-
-    test_transfer(protocol1, protocol2, [b'ASDF1', b'FSDA5'] * 1 )
-    test_transfer(protocol1, protocol2, [b'ASDF2', b'FSDA4'] * 2 )
-    test_transfer(protocol1, protocol2, [b'ASDF3', b'FSDA3'] * 4 )
-    test_transfer(protocol1, protocol2, [b'ASDF4', b'FSDA2'] * 8 )
-    test_transfer(protocol1, protocol2, [b'ASDF5', b'FSDA1'] * 16)
-
-    test_transfer(protocol2, protocol1, [b'ASDF1', b'FSDA5'] * 1 )
-    test_transfer(protocol2, protocol1, [b'ASDF2', b'FSDA4'] * 2 )
-    test_transfer(protocol2, protocol1, [b'ASDF3', b'FSDA3'] * 4 )
-    test_transfer(protocol2, protocol1, [b'ASDF4', b'FSDA2'] * 8 )
-    test_transfer(protocol2, protocol1, [b'ASDF5', b'FSDA1'] * 16)
-

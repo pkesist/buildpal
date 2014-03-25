@@ -25,7 +25,14 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="BuildDeps\build_boost.py" />
+    <Compile Include="BuildDeps\build_clang.py" />
+    <Compile Include="BuildDeps\build_cmake.py" />
+    <Compile Include="BuildDeps\build_ninja.py" />
+    <Compile Include="BuildDeps\utils.py" />
+    <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="setup.py" />
     <Compile Include="Source\Common\message.py" />
     <Compile Include="Source\Common\__init__.py" />
     <Compile Include="Source\Compilers\msvc.py" />
@@ -60,9 +67,11 @@
     <Compile Include="Source\Test\test_database.py" />
     <Compile Include="Source\Test\test_message.py" />
     <Compile Include="Source\Test\test_source_scanner.py" />
+    <Compile Include="Source\Test\conftest.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
+    <Folder Include="BuildDeps\" />
     <Folder Include="Source\" />
     <Folder Include="Source\HeaderScanner\" />
     <Folder Include="Source\Client\" />

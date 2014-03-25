@@ -1,0 +1,106 @@
+from .utils import get_from_github
+
+from distutils.cmd import Command
+
+import distutils.ccompiler
+import distutils.msvc9compiler
+
+# We need C++11 capable compiler
+distutils.msvc9compiler.VERSION = 11.0
+
+from multiprocessing import cpu_count
+
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+
+from io import BytesIO
+
+class build_clang(Command):
+    description = "build LLVM/Clang"
+
+    user_options = [
+        ('build-base='         , None, 'base directory for LLVM/Clang'),
+        ('clang-src-dir='      , None, 'checkout directory for LLVM/Clang'),
+        ('clang-build-dir='    , None, 'build directory for LLVM/Clang'),
+        ('llvm-github-user='   , None, 'Github LLVM username'),
+        ('llvm-github-repo='   , None, 'Github LLVM repository'),
+        ('llvm-github-branch=' , None, 'Github LLVM branch'),
+        ('clang-github-user='  , None, 'Github Clang username'),
+        ('clang-github-repo='  , None, 'Github Clang repository'),
+        ('clang-github-branch=', None, 'Github Clang branch'),
+    ]
+
+    __clang_libs = [
+        'LLVMMC',
+        'LLVMOption',
+        'LLVMSupport',
+        'clangBasic',
+        'clangLex',
+        'clangDriver',
+    ]
+
+    def initialize_options(self):
+        self.build_base = None
+        self.clang_src_dir = 'llvm_clang_src'
+        self.clang_build_dir = 'llvm_clang_build'
+        self.llvm_github_user = 'llvm-mirror'
+        self.llvm_github_repo = 'llvm'
+        self.llvm_github_branch = 'release_34'
+        self.clang_github_user = 'jivancic'
+        self.clang_github_repo = 'clang'
+        self.clang_github_branch = 'release_34_juraj'
+
+    def finalize_options(self):
+        self.set_undefined_options('build', ('build_base', 'build_base'))
+
+    def run(self):
+        llvm_info = dict(user=self.llvm_github_user, repo=self.llvm_github_repo, branch=self.llvm_github_branch)
+        clang_info = dict(user=self.clang_github_user, repo=self.clang_github_repo, branch=self.clang_github_branch)
+        clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
+        clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)
+        self.run_command('build_cmake')
+        cmake_command = self.get_finalized_command('build_cmake')
+        self.run_command('build_ninja')
+        ninja_command = self.get_finalized_command('build_ninja')
+        build_clang.__build_clang(cmake_command.cmake_exe,
+            os.path.abspath(ninja_command.ninja_exe), llvm_info, clang_info,
+            clang_src_dir, clang_build_dir, self.build_base)
+        build_ext = self.get_finalized_command('build_ext')
+        build_ext.include_dirs.extend([
+            os.path.join(clang_build_dir, 'include'),
+            os.path.join(clang_build_dir, 'tools', 'clang', 'include'),
+            os.path.join(clang_src_dir, 'include'),
+            os.path.join(clang_src_dir, 'tools', 'clang', 'include')])
+        build_ext.library_dirs.append(os.path.join(clang_build_dir, 'lib'))
+        build_ext.libraries.extend(self.__clang_libs)
+
+    @staticmethod
+    def __build_clang(cmake_exe, ninja_exe, llvm_info, clang_info,
+            clang_src_dir, clang_build_dir, cache_dir):
+        build_clang.__get_if_needed(llvm_info, clang_src_dir, cache_dir)
+        build_clang.__get_if_needed(clang_info, os.path.join(clang_src_dir, 'tools/clang'), cache_dir)
+
+        compiler = distutils.ccompiler.new_compiler('nt', 'msvc')
+        compiler.initialize('win32')
+
+        if not os.path.exists(os.path.join(clang_build_dir, 'build.ninja')):
+            os.makedirs(clang_build_dir, exist_ok=True)
+            subprocess.check_call([cmake_exe,
+            '-DCMAKE_MAKE_PROGRAM:PATH={}'.format(ninja_exe),
+            '-DCMAKE_C_COMPILER:PATH={}'.format(compiler.cc),
+            '-DCMAKE_CXX_COMPILER:PATH={}'.format(compiler.cc),
+            '-DPYTHON_EXECUTABLE:PATH={}'.format(sys.executable),
+            '-DCMAKE_BUILD_TYPE=Release', '-GNinja', os.path.abspath(clang_src_dir)],
+            cwd=clang_build_dir, env=os.environ)
+
+        subprocess.check_call([ninja_exe, '-j{}'.format(cpu_count())] + build_clang.__clang_libs, cwd=clang_build_dir)
+
+    @staticmethod
+    def __get_if_needed(project_info, target_dir, cache_dir):
+        if os.path.isdir(target_dir):
+            print("Found '{}', assuming it contains {}:{}".format(target_dir, project_info['repo'], project_info['branch']))
+            return
+        get_from_github(project_info, target_dir, cache_dir)

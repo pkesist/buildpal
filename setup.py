@@ -3,27 +3,26 @@ from distutils.command.build import build as distutils_build
 
 class custom_build(distutils_build):
     def run(self):
+        self.run_command('build_boost')
+        self.run_command('build_clang')
         distutils_build.run(self)
-
-    sub_commands = [('build_boost', None), ('build_clang', None)] \
-        + distutils_build.sub_commands
 
 preprocessing = Extension('preprocessing',
     sources = [
-        'Source/HeaderScanner/contentCache_.cpp',
-        'Source/HeaderScanner/headerCache_.cpp',
-        'Source/HeaderScanner/headerScanner_.cpp',
-        'Source/HeaderScanner/headerTracker_.cpp',
-        'Source/HeaderScanner/pythonBindings_.cpp',
-        'Source/HeaderScanner/utility_.cpp',
+        'Extensions/HeaderScanner/contentCache_.cpp',
+        'Extensions/HeaderScanner/headerCache_.cpp',
+        'Extensions/HeaderScanner/headerScanner_.cpp',
+        'Extensions/HeaderScanner/headerTracker_.cpp',
+        'Extensions/HeaderScanner/pythonBindings_.cpp',
+        'Extensions/HeaderScanner/utility_.cpp',
     ],
     extra_compile_args = ['/EHsc'],
 )
 
 parse_args = Extension('parse_args',
     sources = [
-        'Source/ArgParser/argList_.cpp',
-        'Source/ArgParser/clangOpts_.cpp',
+        'Extensions/ArgParser/argList_.cpp',
+        'Extensions/ArgParser/clangOpts_.cpp',
     ],
     extra_compile_args = ['/EHsc'],
 )

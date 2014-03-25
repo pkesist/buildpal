@@ -54,7 +54,7 @@ PyObject * PyPreprocessingContext_add_include_path( PyPreprocessingContext * sel
     if ( !self->ppContext )
         return NULL;
 
-    self->ppContext->addIncludePath( path, PyObject_IsTrue( sysInclude ) );
+    self->ppContext->addIncludePath( path, PyObject_IsTrue( sysInclude ) != 0 );
     Py_RETURN_NONE;
 }
 
@@ -419,7 +419,7 @@ PyObject * PyPreprocessor_setMicrosoftExt( PyPreprocessor * self, PyObject * arg
         return NULL;
     }
 
-    self->pp->setMicrosoftExt( PyObject_IsTrue( pVal ) );
+    self->pp->setMicrosoftExt( PyObject_IsTrue( pVal ) != 0 );
 
     Py_RETURN_NONE;
 }
@@ -436,7 +436,7 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
         return NULL;
     }
 
-    self->pp->setMicrosoftMode( PyObject_IsTrue( pVal ) );
+    self->pp->setMicrosoftMode( PyObject_IsTrue( pVal ) != 0 );
 
     Py_RETURN_NONE;
 }

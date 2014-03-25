@@ -252,7 +252,7 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     for ( auto const & path : ppc.systemSearchPath() )
     {
         clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
-        if ( entry );
+        if ( entry )
         {
             llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
             searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );

@@ -39,6 +39,8 @@ class build_ninja(Command):
         bootstrap_args = []
         if self.compiler == 'msvc':
             bootstrap_args = ['--platform=msvc']
+            compiler = distutils.ccompiler.new_compiler(compiler='msvc')
+            compiler.initialize('win32')
         elif self.compiler == 'mingw32':
             bootstrap_args = ['--platform=mingw']
 

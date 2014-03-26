@@ -145,12 +145,12 @@ private:
 
     ) :
         refCount_( 0 ),
-        searchPathId_( searchPathId ),
         fileId_( fileId ),
+        searchPathId_( searchPathId ),
         fileName_( uniqueVirtualFileName ),
         usedMacros_( std::move( usedMacros ) ),
-        definedMacros_( std::move( definedMacros ) ),
         undefinedMacros_( std::move( undefinedMacros ) ),
+        definedMacros_( std::move( definedMacros ) ),
         headers_( std::move( headers ) ),
         lastTimeHit_( currentTime )
     {

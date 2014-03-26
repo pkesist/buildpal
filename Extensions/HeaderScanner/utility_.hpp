@@ -107,22 +107,22 @@ public:
     {
         {
             boost::shared_lock<boost::shared_mutex> const sharedLock( mutex_ );
-            iterator result = find( s );
-            if ( result != end() )
+            typename Base::iterator const result = Base::find( s );
+            if ( result != Base::end() )
             {
                 result->refCount.addRef();
                 return &*result;
             }
         }
         boost::upgrade_lock<boost::shared_mutex> upgradeLock( mutex_ );
-        iterator result = find( s );
-        if ( result != end() )
+        typename Base::iterator const result = Base::find( s );
+        if ( result != Base::end() )
         {
             result->refCount.addRef();
             return &*result;
         }
         boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-        std::pair<iterator, bool> const res = Base::insert( Value<T>( s ) );
+        std::pair<typename Base::iterator, bool> const res = Base::insert( Value<T>( s ) );
         assert( res.second );
         res.first->refCount.addRef();
         return &*res.first;
@@ -134,7 +134,7 @@ public:
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
             if ( value->refCount.decDel() )
-                erase( iterator_to( *value ) );
+                Base::erase( Base::iterator_to( *value ) );
         }
     }
 
@@ -246,7 +246,7 @@ llvm::raw_ostream & operator<<( llvm::raw_ostream & ostream, Flyweight<T, Tag> c
 namespace std
 {
     template <typename T, typename Tag>
-    struct std::hash<Flyweight<T, Tag> >
+    struct hash<Flyweight<T, Tag> >
     {
         size_t operator()( Flyweight<T, Tag> const & f ) const
         {

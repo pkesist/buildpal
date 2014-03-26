@@ -361,12 +361,11 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         return NULL;
     }
     Py_BLOCK_THREADS
-
     
     // Group result by dir.
     struct HashDir
     {
-        std::size_t operator()( Dir const & dir )
+        std::size_t operator()( Dir const & dir ) const
         {
             HashString hs;
             return hs( dir.get() );

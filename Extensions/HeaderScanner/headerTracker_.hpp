@@ -35,6 +35,17 @@ private:
     HeaderCtx( HeaderCtx const & );
     HeaderCtx & operator=( HeaderCtx const & );
 
+private:
+    clang::Preprocessor const & preprocessor_;
+    clang::FileEntry const * replacement_;
+    HeaderCtx * parent_;
+    Header header_;
+    CacheEntryPtr cacheHit_;
+    MacroState definedHere_;
+    MacroState usedHere_;
+    MacroNames undefinedHere_;
+    Headers includedHeaders_;
+
 public:
     HeaderCtx( Header const & header,
         clang::FileEntry const * replacement,
@@ -42,11 +53,11 @@ public:
         clang::Preprocessor const & preprocessor
     )
         :
-        header_( header ),
-        cacheHit_( cacheHit ),
         preprocessor_( preprocessor ),
         replacement_( replacement ),
-        parent_( 0 )
+        parent_( 0 ),
+        header_( header ),
+        cacheHit_( cacheHit )
     {
     }
 
@@ -134,7 +145,7 @@ public:
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }
     Headers const & includedHeaders() const { return cacheHit_ ? cacheHit_->headers() : includedHeaders_; }
 
-    bool fromCache() const { return cacheHit_; }
+    bool fromCache() const { return cacheHit_.get() != 0; }
     clang::FileEntry const * replacement() const { return replacement_; }
 
 private:
@@ -146,28 +157,30 @@ private:
         if ( definedHere_.find( macroName ) == definedHere_.end() )
             usedHere_.insert( std::make_pair( macroName, macroValue ) );
     }
-
-private:
-    clang::Preprocessor const & preprocessor_;
-    clang::FileEntry const * replacement_;
-    HeaderCtx * parent_;
-    Header header_;
-    CacheEntryPtr cacheHit_;
-    MacroState definedHere_;
-    MacroState usedHere_;
-    MacroNames undefinedHere_;
-    Headers includedHeaders_;
 };
 
 class HeaderTracker
 {
+private:
+    typedef std::vector<HeaderWithFileEntry> IncludeStack;
+    typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
+
+    clang::Preprocessor & preprocessor_;
+    std::size_t searchPathId_;
+    HeaderCtx * pCurrentCtx_;
+    clang::FileEntry const * replacement_;
+    Cache * cache_;
+    CacheEntryPtr cacheHit_;
+    IncludeStack fileStack_;
+    UsedCacheEntries usedCacheEntries_;
+
 public:
     explicit HeaderTracker( clang::Preprocessor & preprocessor, std::size_t searchPathId, Cache * cache )
         :
         preprocessor_( preprocessor ),
         searchPathId_( searchPathId ),
-        replacement_( 0 ),
         pCurrentCtx_( 0 ),
+        replacement_( 0 ),
         cache_( cache )
     {
     }
@@ -223,20 +236,7 @@ public:
     clang::SourceManager & sourceManager() const;
 
 private:
-    typedef std::vector<HeaderWithFileEntry> IncludeStack;
-    typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
-
     MacroName macroForPragmaOnce( llvm::sys::fs::UniqueID const & );
-
-private:
-    clang::Preprocessor & preprocessor_;
-    std::size_t searchPathId_;
-    HeaderCtx * pCurrentCtx_;
-    Cache * cache_;
-    CacheEntryPtr cacheHit_;
-    clang::FileEntry const * replacement_;
-    IncludeStack fileStack_;
-    UsedCacheEntries usedCacheEntries_;
 };
 
 

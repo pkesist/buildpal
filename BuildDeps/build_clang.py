@@ -1,12 +1,7 @@
 from .utils import get_from_github
 
 from distutils.cmd import Command
-
 import distutils.ccompiler
-import distutils.msvc9compiler
-
-# We need C++11 capable compiler
-distutils.msvc9compiler.VERSION = 11.0
 
 from multiprocessing import cpu_count
 
@@ -31,19 +26,23 @@ class build_clang(Command):
         ('clang-github-user='  , None, 'Github Clang username'),
         ('clang-github-repo='  , None, 'Github Clang repository'),
         ('clang-github-branch=', None, 'Github Clang branch'),
+        ('compiler='           , None, 'Compiler'),
     ]
 
     __clang_libs = [
-        'LLVMMC',
+        # Order is important (MinGW linker).
+        'LLVMCore',
         'LLVMOption',
-        'LLVMSupport',
-        'clangBasic',
         'clangLex',
+        'clangBasic',
         'clangDriver',
+        'LLVMMC',
+        'LLVMSupport',
     ]
 
     def initialize_options(self):
         self.build_base = None
+        self.compiler = None
         self.clang_src_dir = 'llvm_clang_src'
         self.clang_build_dir = 'llvm_clang_build'
         self.llvm_github_user = 'llvm-mirror'
@@ -54,7 +53,9 @@ class build_clang(Command):
         self.clang_github_branch = 'release_34_juraj'
 
     def finalize_options(self):
-        self.set_undefined_options('build', ('build_base', 'build_base'))
+        self.set_undefined_options('build',
+            ('build_base', 'build_base'),
+            ('compiler', 'compiler'))
 
     def run(self):
         llvm_info = dict(user=self.llvm_github_user, repo=self.llvm_github_repo, branch=self.llvm_github_branch)
@@ -65,7 +66,11 @@ class build_clang(Command):
         cmake_command = self.get_finalized_command('build_cmake')
         self.run_command('build_ninja')
         ninja_command = self.get_finalized_command('build_ninja')
-        build_clang.__build_clang(cmake_command.cmake_exe,
+
+        assert self.compiler is not None
+        clang_build_dir += '_' + self.compiler
+
+        self.__build_clang(cmake_command.cmake_exe,
             os.path.abspath(ninja_command.ninja_exe), llvm_info, clang_info,
             clang_src_dir, clang_build_dir, self.build_base)
         build_ext = self.get_finalized_command('build_ext')
@@ -76,22 +81,29 @@ class build_clang(Command):
             os.path.join(clang_src_dir, 'tools', 'clang', 'include')])
         build_ext.library_dirs.append(os.path.join(clang_build_dir, 'lib'))
         build_ext.libraries.extend(self.__clang_libs)
+        build_ext.libraries.append('imagehlp')
 
-    @staticmethod
-    def __build_clang(cmake_exe, ninja_exe, llvm_info, clang_info,
+    def __build_clang(self, cmake_exe, ninja_exe, llvm_info, clang_info,
             clang_src_dir, clang_build_dir, cache_dir):
+        if self.compiler == 'msvc':
+            distutils.msvc9compiler.VERSION = 11.0
+            compiler = distutils.ccompiler.new_compiler(compiler='msvc')
+            compiler.initialize('win32')
+            compiler_exe = compiler.cc
+            compiler_cxx_exe = compiler.cc
+        if self.compiler == 'mingw32':
+            compiler = distutils.ccompiler.new_compiler(compiler='mingw32')
+            compiler_exe = 'gcc'
+            compiler_cxx_exe = 'g++'
         build_clang.__get_if_needed(llvm_info, clang_src_dir, cache_dir)
         build_clang.__get_if_needed(clang_info, os.path.join(clang_src_dir, 'tools/clang'), cache_dir)
-
-        compiler = distutils.ccompiler.new_compiler('nt', 'msvc')
-        compiler.initialize('win32')
 
         if not os.path.exists(os.path.join(clang_build_dir, 'build.ninja')):
             os.makedirs(clang_build_dir, exist_ok=True)
             subprocess.check_call([cmake_exe,
             '-DCMAKE_MAKE_PROGRAM:PATH={}'.format(ninja_exe),
-            '-DCMAKE_C_COMPILER:PATH={}'.format(compiler.cc),
-            '-DCMAKE_CXX_COMPILER:PATH={}'.format(compiler.cc),
+            '-DCMAKE_C_COMPILER:PATH={}'.format(compiler_exe),
+            '-DCMAKE_CXX_COMPILER:PATH={}'.format(compiler_cxx_exe),
             '-DPYTHON_EXECUTABLE:PATH={}'.format(sys.executable),
             '-DCMAKE_BUILD_TYPE=Release', '-GNinja', os.path.abspath(clang_src_dir)],
             cwd=clang_build_dir, env=os.environ)

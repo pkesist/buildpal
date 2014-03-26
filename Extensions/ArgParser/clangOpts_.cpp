@@ -1,3 +1,5 @@
+#include "clangOpts_.hpp"
+
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
 #include "clang/Driver/Options.h"

@@ -41,8 +41,6 @@ class HeaderTracker;
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \
     typedef Flyweight<base, name##Tag> name;
-    //struct name##Tag {}; \
-    //typedef boost::flyweights::flyweight<base, boost::flyweights::tag<name##Tag> > name;
 
 DEFINE_FLYWEIGHT(llvm::SmallString<256>, Dir);
 DEFINE_FLYWEIGHT(llvm::SmallString<64>, HeaderName);
@@ -75,7 +73,7 @@ inline bool operator==( Header const & first, Header const & second )
 
 inline bool operator<( Header const & first, Header const & second )
 {
-    return ( first.dir < second.dir ) || ( first.dir == second.dir ) && ( first.name < second.name );
+    return ( first.dir < second.dir ) || ( ( first.dir == second.dir ) && ( first.name < second.name ) );
 }
 
 

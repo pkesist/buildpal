@@ -43,7 +43,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 {
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
-    clang::FileEntry const * parentFile = fileStack_.back().file;
     HeaderLocation::Enum const parentLocation( parentHeader.loc );
 
     // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
@@ -98,8 +97,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 
 void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
 {
-    clang::HeaderSearch & hs( preprocessor().getHeaderSearchInfo() );
-    clang::HeaderSearch const & cHs( hs );
     // Here we handle the case where header with #pragma once is included
     // implicitly, via a cache entry. In this case Clang will not skip
     // this header in usual manner, so we must cheat it to include an

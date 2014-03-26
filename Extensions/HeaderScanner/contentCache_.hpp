@@ -17,7 +17,7 @@
 
 struct HashUniqueFileId
 {
-    std::size_t operator()( llvm::sys::fs::UniqueID const & val )
+    std::size_t operator()( llvm::sys::fs::UniqueID const & val ) const
     {
         return llvm::hash_combine
         (

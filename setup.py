@@ -25,15 +25,13 @@ class custom_build(distutils_build):
             if not self.force_mingw:
                 print("WARNING: Even though it is possible to build these \n"
                       "extensions with MinGW, the resulting DLL will crash \n"
-                      "on load. If you really want to build it add \n"
+                      "on load. If you *really* want to build it, add \n"
                       "--force-mingw option to build command")
-                sleep(2)
-                raise DistutilsOptionError("Mingw does not work")
+                raise DistutilsOptionError("Unsupported compiler: Builds, but crashes.")
             extra_compile_args.append('-std=c++11')
         else:
-            raise Exception('Unsupported compiler')
+            raise DistutilsOptionError('Unsupported compiler')
         self.build_temp += '_' + self.compiler
-        #self.build_lib += '_' + self.compiler
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
 

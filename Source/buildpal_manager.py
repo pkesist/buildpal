@@ -9,8 +9,6 @@ import sys
 from threading import Thread
 from time import sleep
 
-default_script = 'buildpal_manager.ini'
-
 def get_nodes_from_ini_file(config, profile):
     if not profile in config:
         raise Exception("ERROR: No '{}' section in '{}'.".format(profile, opts.ini_file))

@@ -4,10 +4,6 @@ import os
 import site
 from cx_Freeze import setup, Executable
 
-# Dependencies are automatically detected, but it might need
-# fine tuning.
-site_packages = site.getsitepackages()
-
 build_options = dict(packages = ['Compilers'],
     include_msvcr=True,
 )

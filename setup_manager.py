@@ -2,6 +2,7 @@ from distutils.core import setup, Extension
 from distutils.command.build import build as distutils_build
 from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
+from distutils.cmd import Command
 
 from time import sleep
 
@@ -16,8 +17,7 @@ class custom_build(distutils_build):
 
     def finalize_options(self):
         super().finalize_options()
-        if self.compiler is None:
-            self.compiler = get_default_compiler()
+        self.compiler = self.compiler or get_default_compiler()
         extra_compile_args = []
         if self.compiler == 'msvc':
             extra_compile_args.append('/EHsc')
@@ -36,6 +36,12 @@ class custom_build(distutils_build):
             ext_module.extra_compile_args.extend(extra_compile_args)
 
     def run(self):
+        build_boost = self.get_finalized_command('build_boost')
+        build_boost.boost_libs.append('chrono')
+        build_boost.boost_libs.append('date_time')
+        build_boost.boost_libs.append('filesystem')
+        build_boost.boost_libs.append('system')
+        build_boost.boost_libs.append('thread')
         self.run_command('build_boost')
         self.run_command('build_clang')
         distutils_build.run(self)

@@ -8,6 +8,7 @@
 
 #include <llvm/Support/CommandLine.h>
 
+#include <array>
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -26,6 +27,21 @@ char const compilerExeFilename[] = "cl.exe";
 std::size_t compilerExeFilenameSize = sizeof(compilerExeFilename) / sizeof(compilerExeFilename[0]) - 1;
 
 typedef std::vector<boost::filesystem::path> PathList;
+#ifdef __GNUC__
+#define alloca __builtin_alloca
+#endif
+
+template<typename T>
+std::array<unsigned char, sizeof(T)> to_byte_array( T val )
+{
+    std::array<unsigned char, sizeof(T)> result;
+    for ( unsigned int x(0); x < sizeof(T); ++x )
+    {
+        unsigned int const index = sizeof(T) - x - 1;
+        result[x] = static_cast<unsigned char>(((val) >> (index * 8)) && 0xFF);
+    }
+    return result;
+}
 
 namespace
 {
@@ -99,9 +115,9 @@ class MsgSender
 public:
     MsgSender() { initMessage(); }
 
-    void addPart( char const * ptr, std::size_t size )
+    void addPart( char const * ptr, uint32_t size )
     {
-        std::array<unsigned char, 4> const ar = {(size >> 24) & 0xFF, (size >> 16) & 0xFF, (size >> 8) & 0xFF, size & 0xFF};
+        std::array<unsigned char, 4> const ar = to_byte_array(size);
         lengths_.push_back( ar );
         buffers_.push_back( boost::asio::buffer( &lengths_.back()[0], sizeof( lengths_.back() ) ) );
         if ( size != 0 )
@@ -134,8 +150,8 @@ private:
     }
 
 private:
-    std::size_t totalLength_;
-    std::size_t partCount_;
+    uint32_t totalLength_;
+    uint16_t partCount_;
     std::array<unsigned char, 6> lengthBuffer_;
     std::list<std::array<unsigned char, 4> > lengths_;
     std::vector<boost::asio::const_buffer> buffers_;
@@ -265,6 +281,7 @@ int runLocally()
     bool foundNonSpace = false;
     bool escape = false;
 
+    // Find arguments.
     for ( ; ; ++argsPos )
     {
         bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
@@ -438,14 +455,14 @@ int main( int argc, char * argv[] )
         msgSender.addPart( "", 0 );
     else
     {
-        char * includeBuffer = static_cast<char *>( _alloca( includeSize ) );
+        char * includeBuffer = static_cast<char *>( alloca( includeSize ) );
         GetEnvironmentVariable( "INCLUDE", includeBuffer, includeSize );
         includeBuffer[ includeSize ] = '\0';
         msgSender.addPart( includeBuffer, includeSize - 1 );
     }
 
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
-    char * currentPathBuffer = static_cast<char *>( _alloca( currentPathSize ) );
+    char * currentPathBuffer = static_cast<char *>( alloca( currentPathSize ) );
     GetCurrentDirectory( currentPathSize, currentPathBuffer );
     msgSender.addPart( currentPathBuffer, currentPathSize - 1 );
 
@@ -626,7 +643,7 @@ int main( int argc, char * argv[] )
             }
             llvm::StringRef retcode = receiver.getPart( 1 );
 
-            char * buffer = static_cast<char *>( _alloca( retcode.size() + 1 ) );
+            char * buffer = static_cast<char *>( alloca( retcode.size() + 1 ) );
             std::memcpy( buffer, retcode.data(), retcode.size() );
             buffer[ retcode.size() ] = 0;
             int result;

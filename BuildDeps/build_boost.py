@@ -18,21 +18,15 @@ class build_boost(Command):
         ('build-base='     , None, 'base directory for Boost build'),
         ('boost-build-dir=', None, 'directory where to build Boost'),
         ('compiler='       , None, 'Compiler'),
+        ('boost-libs='     , None, 'Boost libraries to build')
     ]
-
-    __boost_libraries = [
-        'chrono',
-        'date_time',
-        'filesystem',
-        'locale',
-        'system',
-        'thread']
 
     def initialize_options(self):
         self.build_base = None
         self.compiler = None
         self.boost_version = None
         self.boost_build_dir = None
+        self.boost_libs = ""
 
     def finalize_options(self):
         self.set_undefined_options('build',
@@ -45,8 +39,10 @@ class build_boost(Command):
             self.boost_version = tuple(int(x) for x in
                 self.boost_version.split('.'))
 
+        self.boost_libs = self.boost_libs.split(';')
         if self.boost_build_dir is None:
             self.boost_build_dir = 'boost_{}_{}_{}'.format(*self.boost_version)
+        self.boost_build_dir = os.path.join(self.build_base, self.boost_build_dir)
 
     def run(self):
         assert self.compiler is not None
@@ -54,18 +50,16 @@ class build_boost(Command):
             toolset='msvc-11.0'
         elif self.compiler == 'mingw32':
             toolset='gcc'
-        final_build_dir = os.path.join(self.build_base, self.boost_build_dir)
-        self.__build_boost(self.boost_version, toolset, final_build_dir,
+        self.__build_boost(self.boost_version, toolset, self.boost_build_dir,
             self.build_base)
         build_ext = self.get_finalized_command('build_ext')
-        build_ext.include_dirs.append(os.path.join(final_build_dir))
-        build_ext.library_dirs.append(os.path.join(final_build_dir, 'lib'))
+        build_ext.include_dirs.append(os.path.join(self.boost_build_dir))
+        build_ext.library_dirs.append(os.path.join(self.boost_build_dir, 'lib'))
         if toolset == 'gcc':
             build_ext.libraries.extend(('boost_{}'.format(lib) for lib in
-                self.__boost_libraries))
+                self.boost_libs))
 
-    @classmethod
-    def __build_boost(cls, boost_version, toolset, build_dir, cache_dir):
+    def __build_boost(self, boost_version, toolset, build_dir, cache_dir):
         url = "http://downloads.sourceforge.net/project/boost/boost/{0}.{1}.{2}/boost_{0}_{1}_{2}.zip".format(*boost_version)
 
         if not os.path.isdir(build_dir):
@@ -83,7 +77,7 @@ class build_boost(Command):
             'release', 'link=static', 'runtime-link=shared',
             'threading=multi']
         build_call.extend(('--with-{}'.format(lib) for lib in
-            cls.__boost_libraries))
+            self.boost_libs))
         if toolset == 'gcc':
             # There is no auto-link on MinGW. We don't want to determine the
             # exact compiler version when linking, so keep the naming simple.

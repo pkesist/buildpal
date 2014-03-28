@@ -56,32 +56,34 @@ class build_clang(Command):
         self.set_undefined_options('build',
             ('build_base', 'build_base'),
             ('compiler', 'compiler'))
+        self.clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
+        self.clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)
+
 
     def run(self):
         llvm_info = dict(user=self.llvm_github_user, repo=self.llvm_github_repo, branch=self.llvm_github_branch)
         clang_info = dict(user=self.clang_github_user, repo=self.clang_github_repo, branch=self.clang_github_branch)
-        clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
-        clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)
         self.run_command('build_cmake')
         cmake_command = self.get_finalized_command('build_cmake')
         self.run_command('build_ninja')
         ninja_command = self.get_finalized_command('build_ninja')
 
         assert self.compiler is not None
-        clang_build_dir += '_' + self.compiler
+        self.clang_build_dir += '_' + self.compiler
 
         self.__build_clang(cmake_command.cmake_exe,
             os.path.abspath(ninja_command.ninja_exe), llvm_info, clang_info,
-            clang_src_dir, clang_build_dir, self.build_base)
+            self.clang_src_dir, self.clang_build_dir, self.build_base)
         build_ext = self.get_finalized_command('build_ext')
         build_ext.include_dirs.extend([
-            os.path.join(clang_build_dir, 'include'),
-            os.path.join(clang_build_dir, 'tools', 'clang', 'include'),
-            os.path.join(clang_src_dir, 'include'),
-            os.path.join(clang_src_dir, 'tools', 'clang', 'include')])
-        build_ext.library_dirs.append(os.path.join(clang_build_dir, 'lib'))
+            os.path.join(self.clang_build_dir, 'include'),
+            os.path.join(self.clang_build_dir, 'tools', 'clang', 'include'),
+            os.path.join(self.clang_src_dir, 'include'),
+            os.path.join(self.clang_src_dir, 'tools', 'clang', 'include')])
+        build_ext.library_dirs.append(os.path.join(self.clang_build_dir, 'lib'))
         build_ext.libraries.extend(self.__clang_libs)
-        build_ext.libraries.append('imagehlp')
+        if self.compiler == 'mingw32':
+            build_ext.libraries.append('imagehlp')
 
     def __build_clang(self, cmake_exe, ninja_exe, llvm_info, clang_info,
             clang_src_dir, clang_build_dir, cache_dir):

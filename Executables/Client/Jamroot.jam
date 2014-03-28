@@ -1,0 +1,78 @@
+import errors ;
+import project ;
+
+local rule get-jam-var ( variable-name )
+{
+    local result = [ modules.peek : $(variable-name) ] ;
+    if ! $(result)
+    {
+        import errors
+        errors.user-error $(variable-name) must be defined. ;
+        return ;
+    }
+    return $(result) ;
+}
+
+local BOOST_ROOT = [ get-jam-var BOOST_ROOT ] ;
+local BOOST_LIBS = [ get-jam-var BOOST_LIBS ] ;
+local CLANG_SRC_ROOT = [ get-jam-var CLANG_SRC_ROOT ] ;
+local CLANG_BUILD_ROOT = [ get-jam-var CLANG_BUILD_ROOT ] ;
+local TARGET_DIR = [ get-jam-var TARGET_DIR ] ;
+
+for lib in $(BOOST_LIBS)
+{
+    lib boost_$(lib) : : <search>$(BOOST_ROOT)/lib ;
+}
+
+alias boost-stuff
+:
+:
+:
+:
+    <define>BOOST_ASIO_DISABLE_BOOST_REGEX
+    <define>BOOST_ASIO_DISABLE_BOOST_DATE_TIME
+
+    <toolset>gcc:<library>boost_$(BOOST_LIBS)
+
+    <toolset>msvc:<library-path>$(BOOST_ROOT)/lib
+    <include>$(BOOST_ROOT)
+;
+
+local rel-paths = include tools/clang/include ;
+local dirs = $(CLANG_SRC_ROOT)/ $(CLANG_BUILD_ROOT)/ ;
+local include-dirs = $(dirs)$(rel-paths) ;
+
+lib LLVMSupport : : <search>$(CLANG_BUILD_ROOT)/lib ;
+alias clang-stuff : LLVMSupport : : : <include>$(include-dirs) ;
+
+local release-variants = release profile ;
+
+exe bp_cl
+:
+    bp_cl.cpp
+    boost-stuff
+    clang-stuff
+:
+    <link>static
+    <threading>multi
+    <variant>release
+
+    # Windows settings.
+    <target-os>windows:<define>_WIN32_WINNT=0x0501
+
+    # MSVC settings
+    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
+    <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
+
+    # General GCC settings
+    <toolset>gcc:<cxxflags>-std=c++11
+    <toolset>gcc:<linkflags>-Wl,--strip-all
+    <toolset>gcc:<warnings>off
+
+    # MinGW settings
+    <toolset>gcc,<target-os>windows:<find-shared-library>ws2_32
+    <toolset>gcc,<target-os>windows:<find-shared-library>imagehlp
+;
+explicit bp_cl ;
+
+install _ : bp_cl : <location>$(TARGET_DIR) ;

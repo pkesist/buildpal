@@ -3,7 +3,7 @@ import pytest
 
 sys.path.append('..')
 
-from Common.message import msg_from_bytes, msg_to_bytes, MessageProtocol
+from .Common.message import msg_from_bytes, msg_to_bytes, MessageProtocol
 
 def test_msg():
     data = list(b'asdf' * x for x in range(256))

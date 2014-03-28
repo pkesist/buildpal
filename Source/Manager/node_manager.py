@@ -1,7 +1,7 @@
 from .compile_session import CompileSession, SessionResult
 from .compressor import Compressor
 
-from Common import MessageProtocol
+from .Common import MessageProtocol
 
 import asyncio
 import struct

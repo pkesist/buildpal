@@ -1,6 +1,6 @@
 from .gui_event import GUIEvent
 
-from Common import SimpleTimer
+from .Common import SimpleTimer
 
 import preprocessing
 import os

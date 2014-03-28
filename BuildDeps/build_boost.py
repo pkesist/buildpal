@@ -30,7 +30,8 @@ class build_boost(Command):
 
     def finalize_options(self):
         self.set_undefined_options('build',
-            ('build_base', 'build_base'),
+            ('build_base', 'build_base'))
+        self.set_undefined_options('build_ext',
             ('compiler', 'compiler'))
 
         if self.boost_version is None:

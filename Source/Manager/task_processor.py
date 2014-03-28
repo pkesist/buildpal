@@ -1,5 +1,5 @@
-from Compilers import MSVCWrapper
-from Common import SimpleTimer, MessageProtocol
+from .Compilers import MSVCWrapper
+from .Common import SimpleTimer, MessageProtocol
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor

@@ -1,6 +1,6 @@
 import parse_args
 
-from Common import get_batch_file_environment_side_effects
+from .utils import get_batch_file_environment_side_effects
 
 import itertools
 import os

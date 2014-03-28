@@ -1,15 +1,16 @@
-from distutils.core import setup, Extension
-from distutils.command.build import build as distutils_build
 from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
 from distutils.cmd import Command
 
+from setuptools import setup, Extension
+from setuptools.command.build_ext import build_ext as setuptools_build_ext
+
 from time import sleep
 
-class custom_build(distutils_build):
-    distutils_build.user_options.append(('force-mingw', None,
+class build_ext(setuptools_build_ext):
+    setuptools_build_ext.user_options.append(('force-mingw', None,
         'force building with mingw'))
-    distutils_build.boolean_options.append(('force-mingw'))
+    setuptools_build_ext.boolean_options.append(('force-mingw'))
 
     def initialize_options(self):
         super().initialize_options()
@@ -31,7 +32,6 @@ class custom_build(distutils_build):
             extra_compile_args.append('-std=c++11')
         else:
             raise DistutilsOptionError('Unsupported compiler')
-        self.build_temp += '_' + self.compiler
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
 
@@ -44,30 +44,36 @@ class custom_build(distutils_build):
         build_boost.boost_libs.append('thread')
         self.run_command('build_boost')
         self.run_command('build_clang')
-        distutils_build.run(self)
+        super().run()
 
-preprocessing = Extension('preprocessing',
-    sources = [
-        'Extensions/HeaderScanner/contentCache_.cpp',
-        'Extensions/HeaderScanner/headerCache_.cpp',
-        'Extensions/HeaderScanner/headerScanner_.cpp',
-        'Extensions/HeaderScanner/headerTracker_.cpp',
-        'Extensions/HeaderScanner/pythonBindings_.cpp',
-        'Extensions/HeaderScanner/utility_.cpp',
-    ]
-)
-
-parse_args = Extension('parse_args',
-    sources = [
-        'Extensions/ArgParser/argList_.cpp',
-        'Extensions/ArgParser/clangOpts_.cpp',
-    ]
-)
 
 setup(name = 'buildpal_mgr',
     version = '0.1',
     description = 'BuildPal Manager package',
-    ext_modules = [preprocessing, parse_args],
-    cmdclass =  {'build': custom_build},
+    ext_modules = [
+        Extension('preprocessing',
+            sources = [
+                'Extensions/HeaderScanner/contentCache_.cpp',
+                'Extensions/HeaderScanner/headerCache_.cpp',
+                'Extensions/HeaderScanner/headerScanner_.cpp',
+                'Extensions/HeaderScanner/headerTracker_.cpp',
+                'Extensions/HeaderScanner/pythonBindings_.cpp',
+                'Extensions/HeaderScanner/utility_.cpp',
+            ]
+        ),
+        Extension('parse_args',
+            sources = [
+                'Extensions/ArgParser/argList_.cpp',
+                'Extensions/ArgParser/clangOpts_.cpp',
+            ]
+        )
+    ],
+    cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
+    package_dir = {
+        'buildpal_mgr': 'Source/Manager',
+        'buildpal_mgr.Compilers': 'Source/Manager/Compilers',
+        'buildpal_mgr.Common': 'Source/Common'
+    },
+    packages = ['buildpal_mgr', 'buildpal_mgr.Common', 'buildpal_mgr.Compilers']
 )

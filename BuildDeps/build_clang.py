@@ -54,7 +54,8 @@ class build_clang(Command):
 
     def finalize_options(self):
         self.set_undefined_options('build',
-            ('build_base', 'build_base'),
+            ('build_base', 'build_base'))
+        self.set_undefined_options('build_ext',
             ('compiler', 'compiler'))
         self.clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
         self.clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)

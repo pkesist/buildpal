@@ -2,9 +2,6 @@
 
 #include "DLLInject.hpp"
 
-#include <boost/locale/conversion.hpp>
-#include <boost/locale/generator.hpp>
-
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -25,7 +22,7 @@ HMODULE thisModule;
 
 namespace
 {
-    bool readMapping( HANDLE readHandle, std::string & f, std::string & s )
+    bool readMapping( HANDLE readHandle, std::wstring & f, std::wstring & s )
     {
         BOOL success;
         DWORD read;
@@ -37,22 +34,22 @@ namespace
         std::size_t const secondSize = ( sizes[3] << 8 ) + sizes[2];
         if ( firstSize == 0 || secondSize == 0 )
             return false;
-        std::string first;
+        std::wstring first;
         first.resize( firstSize );
-        success = ReadFile( readHandle, &first[0], firstSize, &read, 0 );
+        success = ReadFile( readHandle, &first[0], firstSize * sizeof(std::wstring::value_type), &read, 0 );
         assert( success );
-        assert( read == firstSize );
-        std::string second;
+        assert( read == firstSize * sizeof(std::wstring::value_type) );
+        std::wstring second;
         second.resize( secondSize );
-        success = ReadFile( readHandle, &second[0], secondSize, &read, 0 );
+        success = ReadFile( readHandle, &second[0], secondSize * sizeof(std::wstring::value_type), &read, 0 );
         assert( success );
-        assert( read == secondSize );
+        assert( read == secondSize * sizeof(std::wstring::value_type) );
         f.swap( first );
         s.swap( second );
         return true;
     }
 
-    void writeMapping( HANDLE writeHandle, std::string const & first, std::string const & second )
+    void writeMapping( HANDLE writeHandle, std::wstring const & first, std::wstring const & second )
     {
         assert( first.size() < 0xFFFF );
         assert( second.size() < 0xFFFF );
@@ -66,12 +63,12 @@ namespace
         result = WriteFile( writeHandle, sizes, 4, &written, 0 );
         assert( result );
         assert( written == 4 );
-        result = WriteFile( writeHandle, first.data(), first.size(), &written, 0 );
+        result = WriteFile( writeHandle, first.data(), first.size() * sizeof(std::wstring::value_type), &written, 0 );
         assert( result );
-        assert( written == first.size() );
-        result = WriteFile( writeHandle, second.data(), second.size(), &written, 0 );
+        assert( written == first.size() * sizeof(std::wstring::value_type) );
+        result = WriteFile( writeHandle, second.data(), second.size() * sizeof(std::wstring::value_type), &written, 0 );
         assert( result );
-        assert( written == second.size() );
+        assert( written == second.size() * sizeof(std::wstring::value_type) );
     };
 
     void writeEnd( HANDLE writeHandle )
@@ -110,25 +107,15 @@ namespace
         assert( hookResult == 0 );
     }
 
-    std::string normalizePath( std::string const & path )
+    std::wstring normalizePath( std::wstring path )
     {
-        std::string tmp( path );
-        for ( char & c : tmp )
-            if ( c == '/' )
-                c = '\\';
-        char buffer[4 * MAX_PATH];
-        BOOL result = PathCanonicalize( buffer, tmp.c_str() );
+        for ( wchar_t & c : path )
+            if ( c == L'/' )
+                c = L'\\';
+        wchar_t buffer[4 * MAX_PATH];
+        BOOL result = PathCanonicalizeW( buffer, path.c_str() );
         assert( result );
-        char const * ptr = buffer;
-        if ( *ptr == '\\' )
-            ++ptr;
-        boost::locale::generator gen;
-        std::locale locale = gen("en_US.UTF-8");
-        return boost::locale::normalize(
-            boost::locale::to_lower( ptr, locale ),
-            boost::locale::norm_default,
-            locale
-        );
+        return CharLowerW( buffer );
     }
 }
 
@@ -142,8 +129,10 @@ HANDLE WINAPI hookCreateFileA(
   _In_opt_  HANDLE hTemplateFile
 )
 {
-    FileMapping::const_iterator const iter = fileMapping.find( normalizePath( lpFileName ) );
-    return CreateFileA( iter == fileMapping.end() ? lpFileName : iter->second.c_str(),
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    FileMapping::const_iterator const iter = fileMapping.find( normalizePath(
+        convert.from_bytes( lpFileName ) ) );
+    return CreateFileA( iter == fileMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -163,12 +152,11 @@ HANDLE WINAPI hookCreateFileW(
   _In_opt_  HANDLE hTemplateFile
 )
 {
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     FileMapping::const_iterator const iter = fileMapping.find(
-        normalizePath( convert.to_bytes( lpFileName ) ) );
+        normalizePath( lpFileName ) );
     return CreateFileW
     ( 
-        iter == fileMapping.end() ? lpFileName : convert.from_bytes( iter->second ).c_str(),
+        iter == fileMapping.end() ? lpFileName : iter->second.c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -399,34 +387,11 @@ extern "C" DWORD WINAPI unhookWinAPIs( void * )
 
 extern "C" DWORD WINAPI overrideFiles__internal( HANDLE readHandle )
 {
-    std::string first;
-    std::string second;
+    std::wstring first;
+    std::wstring second;
     while ( readMapping( readHandle, first, second ) )
-    {
         fileMapping.insert( std::make_pair( normalizePath( first ), second ) );
-    }
     return 0;
-}
-
-extern "C" BOOL WINAPI addFileMapping( char const * virtualEntry, char const * realEntry )
-{
-    return fileMapping.insert( std::make_pair( normalizePath( virtualEntry ), realEntry ) ).second
-        ? TRUE : FALSE;
-}
-
-extern "C" BOOL WINAPI removeFileMapping( char const * virtualEntry )
-{
-    FileMapping::const_iterator const iter( fileMapping.find( normalizePath( virtualEntry ) ) );
-    if ( iter == fileMapping.end() )
-        return FALSE;
-    fileMapping.erase( iter );
-    return TRUE;
-}
-
-extern "C" BOOL WINAPI clearFileMappings()
-{
-    fileMapping.clear();
-    return TRUE;
 }
 
 BOOL WINAPI DllMain( HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )

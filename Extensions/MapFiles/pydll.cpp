@@ -191,7 +191,7 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
 
         while ( PyDict_Next( file_mapping, &pos, &key, &value ) )
         {
-            fileMapping.insert( std::make_pair( PyUnicode_AsUTF8( key ), PyUnicode_AsUTF8( value ) ) );
+            fileMapping.insert( std::make_pair( PyUnicode_AsUnicode( key ), PyUnicode_AsUnicode( value ) ) );
         }
     }
     Py_BEGIN_ALLOW_THREADS

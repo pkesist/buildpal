@@ -75,5 +75,8 @@ setup(name = 'buildpal_mgr',
         'buildpal_mgr.Compilers': 'Source/Manager/Compilers',
         'buildpal_mgr.Common': 'Source/Common'
     },
-    packages = ['buildpal_mgr', 'buildpal_mgr.Common', 'buildpal_mgr.Compilers']
+    packages = ['buildpal_mgr', 'buildpal_mgr.Common', 'buildpal_mgr.Compilers'],
+    entry_points = {
+        'console_scripts': ['buildpal_mgr = buildpal_mgr.__main__']
+    }
 )

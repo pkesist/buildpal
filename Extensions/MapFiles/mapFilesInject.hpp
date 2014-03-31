@@ -8,11 +8,7 @@
 #include <Windows.h>
 //------------------------------------------------------------------------------
 
-extern "C" BOOL WINAPI addFileMapping( char const * virtualEntry, char const * realEntry );
-extern "C" BOOL WINAPI removeFileMapping( char const * virtualEntry );
-extern "C" BOOL WINAPI clearFileMappings();
-
-typedef std::unordered_map<std::string, std::string> FileMapping;
+typedef std::unordered_map<std::wstring, std::wstring> FileMapping;
 
 extern "C" BOOL WINAPI createProcessWithOverridesA(
   _In_opt_     char const * lpApplicationName,

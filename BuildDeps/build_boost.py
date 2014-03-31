@@ -40,7 +40,10 @@ class build_boost(Command):
             self.boost_version = tuple(int(x) for x in
                 self.boost_version.split('.'))
 
-        self.boost_libs = self.boost_libs.split(';')
+        if self.boost_libs:
+            self.boost_libs = self.boost_libs.split(';')
+        else:
+            self.boost_libs = []
         if self.boost_build_dir is None:
             self.boost_build_dir = 'boost_{}_{}_{}'.format(*self.boost_version)
         self.boost_build_dir = os.path.join(self.build_base, self.boost_build_dir)
@@ -73,6 +76,9 @@ class build_boost(Command):
             subprocess.check_call(['bootstrap.bat'], cwd=build_dir, shell=True)
             b2_exe = find_executable('b2', build_dir)
         
+        if not self.boost_libs:
+            return
+
         build_call = [b2_exe, '-j{}'.format(cpu_count()), 'stage',
             '--stagedir=.', 'toolset={}'.format(toolset),
             'release', 'link=static', 'runtime-link=shared',

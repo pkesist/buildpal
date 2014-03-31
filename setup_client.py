@@ -49,6 +49,7 @@ class build_client(distutils_build):
         ]
         if self.force:
             call.append('-a')
+        call.append('debug' if self.debug else 'release')
         subprocess.check_call(call, env=env, cwd='Executables\Client')
 
 setup(name = 'buildpal_client',

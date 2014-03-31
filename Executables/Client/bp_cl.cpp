@@ -38,7 +38,7 @@ std::array<unsigned char, sizeof(T)> to_byte_array( T val )
     for ( unsigned int x(0); x < sizeof(T); ++x )
     {
         unsigned int const index = sizeof(T) - x - 1;
-        result[x] = static_cast<unsigned char>(((val) >> (index * 8)) && 0xFF);
+        result[x] = static_cast<unsigned char>(((val) >> (index * 8)) & 0xFF);
     }
     return result;
 }

@@ -1,8 +1,7 @@
 from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
-from distutils.cmd import Command
 
-from setuptools import setup, Extension
+from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext as setuptools_build_ext
 
 from time import sleep
@@ -47,7 +46,7 @@ class build_ext(setuptools_build_ext):
         super().run()
 
 
-setup(name = 'buildpal_mgr',
+setup(name = 'buildpal_manager',
     version = '0.1',
     description = 'BuildPal Manager package',
     ext_modules = [
@@ -71,12 +70,12 @@ setup(name = 'buildpal_mgr',
     cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
     package_dir = {
-        'buildpal_mgr': 'Source/Manager',
-        'buildpal_mgr.Compilers': 'Source/Manager/Compilers',
-        'buildpal_mgr.Common': 'Source/Common'
+        'buildpal_manager': 'Python/buildpal_manager',
+        'buildpal_manager.compilers': 'Python/buildpal_manager/compilers',
+        'buildpal_common': 'Python/buildpal_common'
     },
-    packages = ['buildpal_mgr', 'buildpal_mgr.Common', 'buildpal_mgr.Compilers'],
+    packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
     entry_points = {
-        'console_scripts': ['buildpal_mgr = buildpal_mgr.__main__']
+        'console_scripts': ['buildpal_manager = buildpal_manager.__main__']
     }
 )

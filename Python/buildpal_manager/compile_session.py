@@ -1,4 +1,4 @@
-from .Common import SimpleTimer, send_file, send_compressed_file
+from buildpal_common import SimpleTimer, send_file, send_compressed_file
 
 from enum import Enum
 from io import BytesIO

@@ -27,7 +27,10 @@ class build_clang(Command):
         ('clang-github-repo='  , None, 'Github Clang repository'),
         ('clang-github-branch=', None, 'Github Clang branch'),
         ('compiler='           , None, 'Compiler'),
+        ('debug'               , None, 'compile in debug mode')
     ]
+
+    boolean_options = ['debug']
 
     __clang_libs = [
         # Order is important (MinGW linker).
@@ -43,6 +46,7 @@ class build_clang(Command):
     def initialize_options(self):
         self.build_base = None
         self.compiler = None
+        self.debug = None
         self.clang_src_dir = 'llvm_clang_src'
         self.clang_build_dir = 'llvm_clang_build'
         self.llvm_github_user = 'llvm-mirror'
@@ -56,7 +60,8 @@ class build_clang(Command):
         self.set_undefined_options('build',
             ('build_base', 'build_base'))
         self.set_undefined_options('build_ext',
-            ('compiler', 'compiler'))
+            ('compiler', 'compiler'),
+            ('debug', 'debug'))
         self.clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
         self.clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)
 
@@ -71,6 +76,8 @@ class build_clang(Command):
 
         assert self.compiler is not None
         self.clang_build_dir += '_' + self.compiler
+        if self.debug:
+            self.clang_build_dir += '_d'
 
         self.__build_clang(cmake_command.cmake_exe,
             os.path.abspath(ninja_command.ninja_exe), llvm_info, clang_info,
@@ -108,7 +115,8 @@ class build_clang(Command):
             '-DCMAKE_C_COMPILER:PATH={}'.format(compiler_exe),
             '-DCMAKE_CXX_COMPILER:PATH={}'.format(compiler_cxx_exe),
             '-DPYTHON_EXECUTABLE:PATH={}'.format(sys.executable),
-            '-DCMAKE_BUILD_TYPE=Release', '-GNinja', os.path.abspath(clang_src_dir)],
+            '-DCMAKE_BUILD_TYPE={}'.format('Debug' if self.debug else 'Release'),
+            '-GNinja', os.path.abspath(clang_src_dir)],
             cwd=clang_build_dir, env=os.environ)
 
         subprocess.check_call([ninja_exe, '-j{}'.format(cpu_count())] + build_clang.__clang_libs, cwd=clang_build_dir)

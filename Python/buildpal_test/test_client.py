@@ -5,7 +5,7 @@ import sys
 import pytest
 
 sys.path.append('..')
-from .Common import MessageProtocol
+from buildpal_common import MessageProtocol
 
 class ProtocolTester(MessageProtocol):
     @classmethod

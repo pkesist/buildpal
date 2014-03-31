@@ -18,10 +18,14 @@ class build_boost(Command):
         ('build-base='     , None, 'base directory for Boost build'),
         ('boost-build-dir=', None, 'directory where to build Boost'),
         ('compiler='       , None, 'Compiler'),
-        ('boost-libs='     , None, 'Boost libraries to build')
+        ('boost-libs='     , None, 'Boost libraries to build'),
+        ('debug'           , None, 'compile in debug mode')
     ]
 
+    boolean_options = ['debug']
+
     def initialize_options(self):
+        self.debug = None
         self.build_base = None
         self.compiler = None
         self.boost_version = None
@@ -32,7 +36,8 @@ class build_boost(Command):
         self.set_undefined_options('build',
             ('build_base', 'build_base'))
         self.set_undefined_options('build_ext',
-            ('compiler', 'compiler'))
+            ('compiler', 'compiler'),
+            ('debug', 'debug'))
 
         if self.boost_version is None:
             self.boost_version = (1, 55, 0)
@@ -81,10 +86,10 @@ class build_boost(Command):
 
         build_call = [b2_exe, '-j{}'.format(cpu_count()), 'stage',
             '--stagedir=.', 'toolset={}'.format(toolset),
-            'release', 'link=static', 'runtime-link=shared',
-            'threading=multi']
+            'link=static', 'runtime-link=shared', 'threading=multi']
         build_call.extend(('--with-{}'.format(lib) for lib in
             self.boost_libs))
+        build_call.append('debug' if self.debug else 'release')
         if toolset == 'gcc':
             # There is no auto-link on MinGW. We don't want to determine the
             # exact compiler version when linking, so keep the naming simple.

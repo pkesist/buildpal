@@ -45,7 +45,7 @@ class build_ext(distutils_build_ext):
             ext_module.extra_compile_args.extend(extra_compile_args)
         super().run()
 
-setup(name = 'buildpal_srv',
+setup(name = 'buildpal_server',
     version = '0.1',
     description = 'BuildPal Server package',
     ext_modules = [
@@ -58,11 +58,11 @@ setup(name = 'buildpal_srv',
     cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
     package_dir = {
-        'buildpal_srv': 'Source/Server',
-        'buildpal_srv.Common': 'Source/Common'
+        'buildpal_server': 'Python/buildpal_server',
+        'buildpal_common': 'Python/buildpal_common'
     },
-    packages = ['buildpal_srv', 'buildpal_srv.Common'],
+    packages = ['buildpal_server', 'buildpal_common'],
     entry_points = {
-        'console_scripts': ['buildpal_srv = buildpal_srv.__main__']
+        'console_scripts': ['buildpal_server = buildpal_server.__main__']
     }
 )

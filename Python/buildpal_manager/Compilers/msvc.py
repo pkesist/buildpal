@@ -87,7 +87,7 @@ class CompileOptions:
     def link_options(self):
         return self.arg_dict.get(self.compiler.link_option())
 
-class MSVCWrapper:
+class MSVCCompiler:
     @classmethod
     def object_name_option(cls): return 'Fo'
 
@@ -187,7 +187,7 @@ class MSVCWrapper:
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
-        return MSVCWrapper.TestSource(macros, self.placeholder_string)
+        return MSVCCompiler.TestSource(macros, self.placeholder_string)
 
     def compiler_info(self, executable, stdout, stderr):
         output = stdout.split(b'\r\n')

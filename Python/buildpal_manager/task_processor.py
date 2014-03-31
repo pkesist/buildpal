@@ -1,5 +1,5 @@
-from .Compilers import MSVCWrapper
-from .Common import SimpleTimer, MessageProtocol
+from .compilers import MSVCCompiler
+from buildpal_common import SimpleTimer, MessageProtocol
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor
@@ -46,7 +46,7 @@ class ClientProcessor(MessageProtocol):
         cwd = msg[3].decode()
         command = [x.decode() for x in msg[4:]]
         assert compiler_name == 'msvc'
-        compiler = MSVCWrapper()
+        compiler = MSVCCompiler()
         self.command_processor = CommandProcessor(self, executable, cwd,
             sysincludes, compiler, command, self.database_inserter,
             self.global_timer, self.update_ui)

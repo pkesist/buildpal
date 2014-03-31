@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>Source\Manager\gui.py</StartupFile>
+    <StartupFile>Python\buildpal_manager\gui.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -32,43 +32,45 @@
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
+    <Compile Include="Python\buildpal_manager\compilers\utils.py" />
+    <Compile Include="Python\buildpal_manager\compilers\__init__.py" />
     <Compile Include="setup_manager.py" />
     <Compile Include="setup_client.py" />
-    <Compile Include="Source\Common\message.py" />
-    <Compile Include="Source\Common\__init__.py" />
-    <Compile Include="Source\Compilers\msvc.py" />
-    <Compile Include="Source\Compilers\__init__.py" />
-    <Compile Include="Source\buildpal_manager.py" />
-    <Compile Include="Source\buildpal_server.py" />
-    <Compile Include="Source\Manager\command_processor.py" />
-    <Compile Include="Source\Manager\compile_session.py" />
-    <Compile Include="Source\Manager\compressor.py" />
-    <Compile Include="Source\Manager\console.py" />
-    <Compile Include="Source\Manager\database.py" />
-    <Compile Include="Source\Manager\gui.py" />
-    <Compile Include="Source\Manager\gui_event.py" />
-    <Compile Include="Source\Manager\node_info.py" />
-    <Compile Include="Source\Manager\node_manager.py" />
-    <Compile Include="Source\Manager\task.py" />
-    <Compile Include="Source\Manager\timer.py" />
-    <Compile Include="Source\Manager\source_scanner.py" />
-    <Compile Include="Source\Manager\task_processor.py" />
-    <Compile Include="Source\Manager\__init__.py" />
-    <Compile Include="Source\Common\utils.py" />
-    <Compile Include="Source\Server\beacon.py" />
-    <Compile Include="Source\Server\compiler_repository.py" />
-    <Compile Include="Source\Server\compile_worker.py" />
-    <Compile Include="Source\Server\header_repository.py" />
-    <Compile Include="Source\Server\pch_repository.py" />
-    <Compile Include="Source\Server\__init__.py" />
-    <Compile Include="Source\setup_manager.py" />
-    <Compile Include="Source\setup_server.py" />
-    <Compile Include="Source\Test\test_client.py" />
-    <Compile Include="Source\Test\test_compile.py" />
-    <Compile Include="Source\Test\test_database.py" />
-    <Compile Include="Source\Test\test_message.py" />
-    <Compile Include="Source\Test\test_source_scanner.py" />
-    <Compile Include="Source\Test\conftest.py" />
+    <Compile Include="Python\buildpal_common\message.py" />
+    <Compile Include="Python\buildpal_common\__init__.py" />
+    <Compile Include="Python\buildpal_manager.py" />
+    <Compile Include="Python\buildpal_server.py" />
+    <Compile Include="Python\buildpal_manager\command_processor.py" />
+    <Compile Include="Python\buildpal_manager\compile_session.py" />
+    <Compile Include="Python\buildpal_manager\compressor.py" />
+    <Compile Include="Python\buildpal_manager\console.py" />
+    <Compile Include="Python\buildpal_manager\database.py" />
+    <Compile Include="Python\buildpal_manager\gui.py" />
+    <Compile Include="Python\buildpal_manager\gui_event.py" />
+    <Compile Include="Python\buildpal_manager\node_info.py" />
+    <Compile Include="Python\buildpal_manager\node_manager.py" />
+    <Compile Include="Python\buildpal_manager\task.py" />
+    <Compile Include="Python\buildpal_manager\timer.py" />
+    <Compile Include="Python\buildpal_manager\source_scanner.py" />
+    <Compile Include="Python\buildpal_manager\task_processor.py" />
+    <Compile Include="Python\buildpal_manager\__init__.py" />
+    <Compile Include="Python\buildpal_common\utils.py" />
+    <Compile Include="Python\buildpal_server\beacon.py" />
+    <Compile Include="Python\buildpal_server\compiler_repository.py" />
+    <Compile Include="Python\buildpal_server\compile_worker.py" />
+    <Compile Include="Python\buildpal_server\header_repository.py" />
+    <Compile Include="Python\buildpal_server\pch_repository.py" />
+    <Compile Include="Python\buildpal_server\__init__.py" />
+    <Compile Include="Python\setup_manager.py" />
+    <Compile Include="Python\setup_server.py" />
+    <Compile Include="Python\Test\test_client.py" />
+    <Compile Include="Python\Test\test_compile.py" />
+    <Compile Include="Python\Test\test_database.py" />
+    <Compile Include="Python\Test\test_message.py" />
+    <Compile Include="Python\Test\test_source_scanner.py" />
+    <Compile Include="Python\Test\conftest.py" />
+    <Compile Include="setup_server.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
@@ -79,13 +81,12 @@
     <Folder Include="Extensions\HeaderScanner\" />
     <Folder Include="Extensions\MapFiles\" />
     <Folder Include="Executables\" />
-    <Folder Include="Source\" />
-    <Folder Include="Source\Client\" />
-    <Folder Include="Source\Manager\" />
-    <Folder Include="Source\Common" />
-    <Folder Include="Source\Compilers\" />
-    <Folder Include="Source\Test" />
-    <Folder Include="Source\Server\" />
+    <Folder Include="Python\" />
+    <Folder Include="Python\buildpal_manager" />
+    <Folder Include="Python\buildpal_common" />
+    <Folder Include="Python\buildpal_manager\compilers" />
+    <Folder Include="Python\Test" />
+    <Folder Include="Python\buildpal_server" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\index.rst" />
@@ -103,7 +104,7 @@
     <Content Include="Extensions\HeaderScanner\headerScanner_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerTracker_.cpp" />
     <Content Include="Extensions\HeaderScanner\headerTracker_.hpp" />
-    <Content Include="Extensions\HeaderScanner\pythonBindings_.cpp" />
+    <Content Include="Extensions\HeaderScanner\PythonBindings_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
@@ -115,9 +116,6 @@
     <Content Include="Extensions\MapFiles\pydll.cpp" />
     <Content Include="Extensions\MapFiles\remoteOps.cpp" />
     <Content Include="Extensions\MapFiles\remoteOps.hpp" />
-    <Content Include="Source\Client\build-config.ini" />
-    <Content Include="Source\Client\bp_cl.cpp" />
-    <Content Include="Source\Client\Jamroot.jam" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

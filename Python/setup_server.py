@@ -30,4 +30,5 @@ setup(name='BuildPal Server',
       version = '0.1',
       description = 'BuildPal Server',
       options = dict(build_exe=build_options, bdist_msi=msi_opts),
-      executables = [Executable('buildpal_server.py', base='Console'])
+      executables = [Executable('buildpal_server.py', base='Console', shortcutName='BuildPal Server', shortcutDir='DesktopFolder')],
+)

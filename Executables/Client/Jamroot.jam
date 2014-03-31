@@ -19,6 +19,7 @@ local CLANG_SRC_ROOT = [ get-jam-var CLANG_SRC_ROOT ] ;
 local CLANG_BUILD_ROOT = [ get-jam-var CLANG_BUILD_ROOT ] ;
 local TARGET_DIR = [ get-jam-var TARGET_DIR ] ;
 
+ECHO CLANG_BUILD_ROOT: $(CLANG_BUILD_ROOT) ;
 for lib in $(BOOST_LIBS)
 {
     lib boost_$(lib) : : <search>$(BOOST_ROOT)/lib ;
@@ -55,7 +56,6 @@ exe bp_cl
 :
     <link>static
     <threading>multi
-    <variant>release
 
     # Windows settings.
     <target-os>windows:<define>_WIN32_WINNT=0x0501

@@ -1,4 +1,4 @@
-from .Common import SimpleTimer, MessageProtocol, compress_file
+from buildpal_common import SimpleTimer, MessageProtocol, compress_file
     
 import asyncio
 

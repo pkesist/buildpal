@@ -8,7 +8,7 @@ from time import sleep, time
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread, Lock, current_thread
-from subprocess import list2cmdline
+from subprocess import list2cmdline, Popen
 
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
@@ -40,103 +40,29 @@ class Counter:
     def dec(self): self.__count -= 1
     def get(self): return self.__count
 
-class Popen(subprocess.Popen):
-    def __init__(self, overrides, *args, **kwargs):
-        assert sys.platform == "win32"
+
+class OverrideCreateProcess:
+    lock = Lock()
+
+    def __init__(self, overrides):
         self.overrides = overrides
-        super(Popen, self).__init__(*args, **kwargs)
+        self.save = None
 
-    def _execute_child(self, args, executable, preexec_fn, close_fds,
-                        pass_fds, cwd, env,
-                        startupinfo, creationflags, shell,
-                        p2cread, p2cwrite,
-                        c2pread, c2pwrite,
-                        errread, errwrite,
-                        unused_restore_signals, unused_start_new_session):
-        """Execute program (MS Windows version)"""
+    def __enter__(self):
+        if self.overrides:
+            self.lock.acquire()
+            self.save = subprocess._winapi.CreateProcess
+            subprocess._winapi.CreateProcess = self.create_process
 
-        assert not pass_fds, "pass_fds not supported on Windows."
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.save:
+            subprocess._winapi.CreateProcess = self.save
+            self.save = None
+            self.lock.release()
 
-        if not isinstance(args, str):
-            args = subprocess.list2cmdline(args)
-
-        # Process startup details
-        if startupinfo is None:
-            startupinfo = subprocess.STARTUPINFO()
-        if -1 not in (p2cread, c2pwrite, errwrite):
-            startupinfo.dwFlags |= subprocess._winapi.STARTF_USESTDHANDLES
-            startupinfo.hStdInput = p2cread
-            startupinfo.hStdOutput = c2pwrite
-            startupinfo.hStdError = errwrite
-
-        if shell:
-            startupinfo.dwFlags |= subprocess._winapi.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess._winapi.SW_HIDE
-            comspec = os.environ.get("COMSPEC", "cmd.exe")
-            args = '{} /c "{}"'.format (comspec, args)
-            if (subprocess._winapi.GetVersion() >= 0x80000000 or
-                    os.path.basename(comspec).lower() == "command.com"):
-                # Win9x, or using command.com on NT. We need to
-                # use the w9xpopen intermediate program. For more
-                # information, see KB Q150956
-                # (http://web.archive.org/web/20011105084002/http://support.microsoft.com/support/kb/articles/Q150/9/56.asp)
-                w9xpopen = self._find_w9xpopen()
-                args = '"%s" %s' % (w9xpopen, args)
-                # Not passing CREATE_NEW_CONSOLE has been known to
-                # cause random failures on win9x.  Specifically a
-                # dialog: "Your program accessed mem currently in
-                # use at xxx" and a hopeful warning about the
-                # stability of your system.  Cost is Ctrl+C won't
-                # kill children.
-                creationflags |= subprocess._winapi.CREATE_NEW_CONSOLE
-
-        # Start the process
-        try:
-            if self.overrides:
-                hp, ht, pid, tid = map_files.createProcess(executable, args,
-                                            # no special security
-                                            None, None,
-                                            int(not close_fds),
-                                            creationflags,
-                                            env,
-                                            cwd,
-                                            startupinfo, self.overrides)
-            else:
-                hp, ht, pid, tid = subprocess._winapi.CreateProcess(executable, args,
-                                            # no special security
-                                            None, None,
-                                            int(not close_fds),
-                                            creationflags,
-                                            env,
-                                            cwd,
-                                            startupinfo)
-        except subprocess.pywintypes.error as e:
-            # Translate pywintypes.error to WindowsError, which is
-            # a subclass of OSError.  FIXME: We should really
-            # translate errno using _sys_errlist (or similar), but
-            # how can this be done from Python?
-            raise subprocess.WindowsError(*e.args)
-        finally:
-            # Child is launched. Close the parent's copy of those pipe
-            # handles that only the child should have open.  You need
-            # to make sure that no handles to the write end of the
-            # output pipe are maintained in this process or else the
-            # pipe will not close when the child process exits and the
-            # ReadFile will hang.
-            if p2cread != -1:
-                p2cread.Close()
-            if c2pwrite != -1:
-                c2pwrite.Close()
-            if errwrite != -1:
-                errwrite.Close()
-            if hasattr(self, '_devnull'):
-                os.close(self._devnull)
-
-        # Retain the process handle, but close the thread handle
-        self._child_created = True
-        self._handle = subprocess.Handle(hp)
-        self.pid = pid
-        subprocess._winapi.CloseHandle(ht)
+    def create_process(self, *args):
+        assert self.overrides
+        return map_files.createProcess(self.overrides, *args)
 
 class CompileSession:
     class SessionState:
@@ -366,23 +292,21 @@ class CompileSession:
         pch_switch = []
         overrides = {}
         if self.task['pch_file']:
+            assert self.pch_file is not None
             # TODO: MSVC specific, remove from here.
-            if '/GL' in self.task['call']:
-                # In case /GL command line option is present, PCH file will
-                # not be fully resolved during compilation. Instead,
-                # resulting .obj file will contain a reference to it, and
-                # consequently PCH file will be needed at link phase.
+            #if '/GL' in self.task['call']:
+            if True:
+                # Occasionally, PCH file is needed in link phase
+                # (e.g. when compiling with MSVC /GL compiler option).
                 # The problem we face is that PCH path on slave machine
-                # will not be the same as the client machine. This is why
-                # we mimic the client's PCH path on the slave.
-                # The filesystem hook used here is implemented using
-                # DLL injection/API hooking, so is entirely in userland.
-                # It affects compiler performance, so is used only when
-                # absolutely necessary.
+                # will not be the same as the client machine, and resulting
+                # .obj will contain a reference to non-existing file.
+                # To overcome this, we use map_files module which overrides
+                # CreateFile Windows API.
                 overrides[self.task['pch_file'][0]] = self.pch_file
                 self.pch_file = self.task['pch_file'][0]
-            assert self.pch_file is not None
-            assert os.path.exists(self.pch_file)
+            else:
+                assert os.path.exists(self.pch_file)
             pch_switch.append(compiler_info['set_pch_file'].format(
                 self.pch_file
             ))
@@ -394,8 +318,8 @@ class CompileSession:
             includes + [output, self.source_file])
 
         start = time()
-        with self.compiler_state_lock:
-            self.process = Popen(overrides, command, cwd=self.include_path,
+        with self.compiler_state_lock, OverrideCreateProcess(overrides):
+            self.process = Popen(command, cwd=self.include_path,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         (stdout, stderr), retcode, done = self.process.communicate(), \
             self.process.returncode, time()

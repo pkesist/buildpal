@@ -10,12 +10,10 @@
 
 #include <array>
 #include <cassert>
-#include <iostream>
 #include <memory>
 #include <list>
 #include <set>
 #include <string>
-#include <sstream>
 #include <windows.h>
 
 char const compiler[] = "msvc";
@@ -31,30 +29,57 @@ typedef std::vector<boost::filesystem::path> PathList;
 #define alloca __builtin_alloca
 #endif
 
-template<typename T>
-std::array<unsigned char, sizeof(T)> to_byte_array( T val )
-{
-    std::array<unsigned char, sizeof(T)> result;
-    for ( unsigned int x(0); x < sizeof(T); ++x )
-    {
-        unsigned int const index = sizeof(T) - x - 1;
-        result[x] = static_cast<unsigned char>(((val) >> (index * 8)) & 0xFF);
-    }
-    return result;
-}
-
 namespace
 {
-  class StringSaver : public llvm::cl::StringSaver
-  {
-  public:
-      virtual const char * SaveString( char const * str )
-      {
-          return storage_.insert( str ).first->c_str();
-      }
-  private:
-      std::set<std::string> storage_;
-  };
+    template<typename T>
+    void to_byte_array( T val, std::array<unsigned char, sizeof(T)> & result )
+    {
+        for ( unsigned int x(0); x < sizeof(T); ++x )
+        {
+            unsigned int const index = sizeof(T) - x - 1;
+            result[x] = static_cast<unsigned char>(((val) >> (index * 8)) & 0xFF);
+        }
+    }
+
+    template<typename T>
+    std::array<unsigned char, sizeof(T)> to_byte_array( T val )
+    {
+        std::array<unsigned char, sizeof(T)> result;
+        to_byte_array( val, result );
+        return result;
+    }
+
+    template <unsigned int len>
+    struct UnsignedType {};
+
+    template <> struct UnsignedType<2> { typedef std::uint16_t type; };
+    template <> struct UnsignedType<4> { typedef std::uint32_t type; };
+    template <> struct UnsignedType<8> { typedef std::uint64_t type; };
+
+    template <unsigned int len>
+    typename UnsignedType<len>::type from_byte_array( unsigned char const * value )
+    {
+        typename UnsignedType<len>::type result = value[0];
+        for ( unsigned x = 1; x < len; ++x )
+        {
+            result <<= 8;
+            result += value[x];
+        }
+        return result;
+    }
+
+    // Utility class which ensures the validity of the passed strings.
+    class StringSaver : public llvm::cl::StringSaver
+    {
+    public:
+        virtual const char * SaveString( char const * str )
+        {
+            return storage_.insert( str ).first->c_str();
+        }
+
+    private:
+        std::set<std::string> storage_;
+    };
 }
 
 PathList const & getPath()
@@ -119,22 +144,18 @@ public:
     {
         std::array<unsigned char, 4> const ar = to_byte_array(size);
         lengths_.push_back( ar );
-        buffers_.push_back( boost::asio::buffer( &lengths_.back()[0], sizeof( lengths_.back() ) ) );
+        buffers_.push_back( boost::asio::buffer( lengths_.back().data(), lengths_.back().size() ) );
         if ( size != 0 )
             buffers_.push_back( boost::asio::buffer( ptr, size ) );
-        totalLength_ += 4 + size;
+        totalLength_ += lengths_.back().size() + size;
         partCount_ += 1;
     }
 
     template <class Stream>
     void send( Stream & sock, boost::system::error_code & error )
     {
-        lengthBuffer_[0] = (totalLength_ >> 24) & 0xFF;
-        lengthBuffer_[1] = (totalLength_ >> 16) & 0xFF;
-        lengthBuffer_[2] = (totalLength_ >>  8) & 0xFF;
-        lengthBuffer_[3] = (totalLength_      ) & 0xFF;
-        lengthBuffer_[4] = (partCount_ >> 8 ) & 0xFF;
-        lengthBuffer_[5] = (partCount_      ) & 0xFF;
+        to_byte_array( totalLength_, totalLengthBuffer_ );
+        to_byte_array( partCount_  , partCountBuffer_ );
         boost::asio::write( sock, buffers_, error );
         initMessage();
     }
@@ -145,14 +166,16 @@ private:
         buffers_.clear();
         lengths_.clear();
         partCount_ = 0;
-        buffers_.push_back( boost::asio::buffer( &lengthBuffer_[0], sizeof( lengthBuffer_ ) ) );
-        totalLength_ = sizeof(lengthBuffer_) - 4;
+        buffers_.push_back( boost::asio::buffer( totalLengthBuffer_.data(), totalLengthBuffer_.size() ) );
+        buffers_.push_back( boost::asio::buffer( partCountBuffer_.data(), partCountBuffer_.size() ) );
+        totalLength_ = partCountBuffer_.size();
     }
 
 private:
     uint32_t totalLength_;
     uint16_t partCount_;
-    std::array<unsigned char, 6> lengthBuffer_;
+    std::array<unsigned char, 4> totalLengthBuffer_;
+    std::array<unsigned char, 2> partCountBuffer_;
     std::list<std::array<unsigned char, 4> > lengths_;
     std::vector<boost::asio::const_buffer> buffers_;
 };
@@ -168,21 +191,14 @@ public:
 
         std::array<unsigned char, 6> lengthBuffer;
         boost::system::error_code readError;
-        boost::asio::read( sock, boost::asio::buffer( &lengthBuffer[0], sizeof( lengthBuffer ) ), error );
+        boost::asio::read( sock, boost::asio::buffer( lengthBuffer.data(), lengthBuffer.size() ), error );
         if ( error )
             return;
-        std::size_t const totalSize =
-            (lengthBuffer[0] << 24) |
-            (lengthBuffer[1] << 16) |
-            (lengthBuffer[2] << 8 ) |
-            (lengthBuffer[3]      );
+        std::uint32_t const totalSize = from_byte_array<4>( &lengthBuffer[0] ) - 2;
+        std::uint16_t const partCount = from_byte_array<2>( &lengthBuffer[4] );
 
-        std::size_t const partCount =
-            (lengthBuffer[4] << 8) |
-            (lengthBuffer[5]     );
-
-        buf_.resize( totalSize - 2 );
-        boost::asio::read( sock, boost::asio::buffer( &buf_[0], totalSize - 2 ), error );
+        buf_.resize( totalSize );
+        boost::asio::read( sock, boost::asio::buffer( &buf_[0], totalSize ), error );
         if ( error )
             return;
 
@@ -190,19 +206,15 @@ public:
         unsigned char const * const ustart = reinterpret_cast<unsigned char const *>( start );
         std::size_t offset( 0 );
         std::size_t partsFound = 0;
-        while ( offset < totalSize - 2 )
+        while ( offset < totalSize )
         {
-            std::size_t const partLen = 
-                (ustart[offset + 0] << 24) |
-                (ustart[offset + 1] << 16) |
-                (ustart[offset + 2] << 8 ) |
-                (ustart[offset + 3]      );
+            std::uint32_t const partLen = from_byte_array<4>( ustart + offset );
             offset += 4;
             parts_.push_back( llvm::StringRef( start + offset, partLen ) );
             offset += partLen;
             ++partsFound;
         }
-        if ( ( offset != totalSize - 2 ) || ( partsFound != partCount ) )
+        if ( ( offset != totalSize ) || ( partsFound != partCount ) )
         {
             error = boost::system::errc::make_error_code( boost::system::errc::protocol_error );
             return;
@@ -281,7 +293,7 @@ int runLocally()
     bool foundNonSpace = false;
     bool escape = false;
 
-    // Find arguments.
+    // Find arguments position.
     for ( ; ; ++argsPos )
     {
         bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
@@ -608,12 +620,10 @@ int main( int argc, char * argv[] )
                 }
                 DWORD stdOutSize;
                 std::unique_ptr<char []> stdOut( getPipeData( stdOutRead, stdOutSize ) );
-                std::cout << std::string( stdOut.get(), stdOutSize ) << '\n';
                 msgSender.addPart( stdOut.get(), stdOutSize );
                 DWORD stdErrSize;
                 std::unique_ptr<char []> stdErr( getPipeData( stdErrRead, stdErrSize ) );
                 msgSender.addPart( stdErr.get(), stdErrSize );
-                std::cout << std::string( stdErr.get(), stdErrSize ) << '\n';
                 boost::system::error_code writeError;
                 msgSender.send( sock, writeError );
                 if ( writeError )

@@ -1,3 +1,4 @@
+import distutils.ccompiler
 from distutils.ccompiler import get_default_compiler
 from distutils.command.build_ext import build_ext as distutils_build_ext
 from distutils.spawn import find_executable
@@ -17,9 +18,11 @@ class build_ext(distutils_build_ext):
         # For Boost.Build system.
         self.run_command('build_boost')
         extra_compile_args = []
+        extra_link_args = []
         if self.compiler == 'mingw32':
             extra_compile_args.append('-std=c++11')
         elif self.compiler == 'msvc':
+            distutils.msvc9compiler.VERSION = 11.0
             extra_compile_args.append('/EHsc')
         else:
             raise DistutilsOptionError("Unsupported compiler '{}'.".format(self.compiler))
@@ -43,6 +46,7 @@ class build_ext(distutils_build_ext):
         self.libraries.append('map_files_inj32')
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
+            ext_module.extra_link_args.extend(extra_link_args)
         super().run()
 
 setup(name = 'buildpal_server',

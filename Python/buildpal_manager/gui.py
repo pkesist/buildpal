@@ -250,40 +250,10 @@ class SettingsFrame(LabelFrame):
         self.stop_but.grid(row=3, column=1, sticky=E+W)
         if False:
             # Debugging stuff
-            self.stop_but = Button(self, text="GC collect", command=self.gc_collect)
+            self.stop_but = Button(self, text="Run PDB", command=self.start_pdb)
             self.stop_but.grid(row=3, column=2, sticky=E+W)
-            self.stop_but = Button(self, text="Print GC", command=self.print_gc)
+            self.stop_but = Button(self, text="Run Interpreter", command=self.start_interpreter)
             self.stop_but.grid(row=3, column=3, sticky=E+W)
-            self.stop_but = Button(self, text="Print GC garbage", command=self.print_gc_garbage)
-            self.stop_but.grid(row=3, column=4, sticky=E+W)
-            self.stop_but = Button(self, text="PDB", command=self.start_pdb)
-            self.stop_but.grid(row=3, column=5, sticky=E+W)
-            self.stop_but = Button(self, text="Console", command=self.start_console)
-            self.stop_but.grid(row=3, column=6, sticky=E+W)
-
-    @staticmethod
-    def __print_objlist(objlist, desc):
-        from pprint import pprint
-        print(desc, len(objlist))
-        counts = {}
-        for obj in objlist:
-            counts[type(obj)] = counts.get(type(obj), 0) + 1
-        pprint(list(count for count in counts.items()))
-
-    @staticmethod
-    def gc_collect():
-        import gc
-        gc.collect()
-
-    @staticmethod
-    def print_gc():
-        import gc
-        SettingsFrame.__print_objlist(gc.get_objects(), "GC objects")
-
-    @staticmethod
-    def print_gc_garbage():
-        import gc
-        SettingsFrame.__print_objlist(gc.garbage, "GC garbage")
 
     @staticmethod
     def start_pdb():
@@ -293,9 +263,10 @@ class SettingsFrame(LabelFrame):
     globals = {}
 
     @classmethod
-    def start_console(cls):
+    def start_interpreter(cls):
         import code
         code.InteractiveConsole(cls.globals).interact()
+
 
 class CommandInfo(Frame):
     columns = ({'cid' : '#0'   , 'text': 'Info' , 'minwidth': 300, 'anchor' : W},

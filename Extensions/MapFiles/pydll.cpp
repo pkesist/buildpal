@@ -131,6 +131,7 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
     PyObject* environment;
     wchar_t *wenvironment;
 
+    PyObject* file_mapping;
     wchar_t* application_name;
     wchar_t* command_line;
     PyObject* process_attributes; /* ignored */
@@ -140,9 +141,9 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
     PyObject* env_mapping;
     wchar_t* current_directory;
     PyObject* startup_info;
-    PyObject* file_mapping;
 
-    if (! PyArg_ParseTuple(args, "ZZOOikOZOO:CreateProcess",
+    if (! PyArg_ParseTuple(args, "OZZOOikOZO:mapFiles_createProcess",
+                           &file_mapping,
                            &application_name,
                            &command_line,
                            &process_attributes,
@@ -151,8 +152,7 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
                            &creation_flags,
                            &env_mapping,
                            &current_directory,
-                           &startup_info,
-                           &file_mapping))
+                           &startup_info))
         return NULL;
 
     ZeroMemory(&si, sizeof(si));

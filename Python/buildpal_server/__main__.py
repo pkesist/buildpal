@@ -1,4 +1,3 @@
-#! python3.3
 from .compile_worker import CompileWorker
 
 from time import sleep

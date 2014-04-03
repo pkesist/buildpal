@@ -1,4 +1,3 @@
-# !python3.3
 from tkinter import *
 import tkinter.font as font
 import tkinter.messagebox as msgbox

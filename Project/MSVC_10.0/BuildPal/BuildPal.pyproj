@@ -32,6 +32,7 @@
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
     <Compile Include="Python\buildpal_manager\compilers\utils.py" />
     <Compile Include="Python\buildpal_manager\compilers\__init__.py" />
@@ -41,7 +42,7 @@
     <Compile Include="setup_client.py" />
     <Compile Include="Python\buildpal_common\message.py" />
     <Compile Include="Python\buildpal_common\__init__.py" />
-    <Compile Include="Python\buildpal_server.py" />
+    <Compile Include="Python\server_starter.py" />
     <Compile Include="Python\buildpal_manager\command_processor.py" />
     <Compile Include="Python\buildpal_manager\compile_session.py" />
     <Compile Include="Python\buildpal_manager\compressor.py" />
@@ -63,8 +64,8 @@
     <Compile Include="Python\buildpal_server\header_repository.py" />
     <Compile Include="Python\buildpal_server\pch_repository.py" />
     <Compile Include="Python\buildpal_server\__init__.py" />
-    <Compile Include="Python\setup_manager.py" />
-    <Compile Include="Python\setup_server.py" />
+    <Compile Include="Python\freeze_manager.py" />
+    <Compile Include="Python\freeze_server.py" />
     <Compile Include="Python\buildpal_test\test_client.py" />
     <Compile Include="Python\buildpal_test\test_compile.py" />
     <Compile Include="Python\buildpal_test\test_database.py" />

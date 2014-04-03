@@ -69,11 +69,7 @@ setup(name = 'buildpal_manager',
     ],
     cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
-    package_dir = {
-        'buildpal_manager': 'Python/buildpal_manager',
-        'buildpal_manager.compilers': 'Python/buildpal_manager/compilers',
-        'buildpal_common': 'Python/buildpal_common'
-    },
+    package_dir = { '': 'Python' },
     packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
     entry_points = {
         'console_scripts': ['buildpal_manager = buildpal_manager.__main__']

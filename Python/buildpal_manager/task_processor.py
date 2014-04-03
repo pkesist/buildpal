@@ -1,4 +1,3 @@
-from .compilers import MSVCCompiler
 from buildpal_common import SimpleTimer, MessageProtocol
 
 from .source_scanner import SourceScanner
@@ -45,7 +44,7 @@ class ClientProcessor(MessageProtocol):
         sysincludes = msg[2].decode()
         cwd = msg[3].decode()
         command = [x.decode() for x in msg[4:]]
-        assert compiler_name == 'msvc'
+        from .compilers import MSVCCompiler
         compiler = MSVCCompiler()
         self.command_processor = CommandProcessor(self, executable, cwd,
             sysincludes, compiler, command, self.database_inserter,
@@ -113,11 +112,10 @@ class TaskProcessor:
         handle, db_file = mkstemp(prefix='buildpal_cmd', suffix='.db')
         os.close(handle)
         self.database = Database(db_file)
+        with self.database.get_connection() as conn:
+            self.database.create_structure(conn)
 
         self.loop = asyncio.ProactorEventLoop()
-        self.node_manager = NodeManager(self.loop, self.node_info, self.update_ui)
-        self.source_scanner = SourceScanner(self.node_manager.task_preprocessed,
-            self.update_ui, self.n_pp_threads)
 
         if update_ui is None:
             class UIData: pass
@@ -125,7 +123,7 @@ class TaskProcessor:
             ui_data.timer = self.timer
             ui_data.node_info = self.node_info
             ui_data.command_db = self.database
-            ui_data.cache_stats = self.source_scanner.get_cache_stats
+            ui_data.cache_stats = lambda : source_scanner.get_cache_stats()
             observer = ConsolePrinter(self.node_info, ui_data)
             @asyncio.coroutine
             def observe():
@@ -134,26 +132,25 @@ class TaskProcessor:
                 asyncio.async(observe(), loop=self.loop)
             asyncio.async(observe(), loop=self.loop)
 
-        with self.database.get_connection() as conn:
-            self.database.create_structure(conn)
+        node_manager = NodeManager(self.loop, self.node_info, self.update_ui)
+        with DatabaseInserter(self.database, self.update_ui) as database_inserter, \
+            SourceScanner(node_manager.task_preprocessed, self.update_ui,
+                self.n_pp_threads) as source_scanner:
 
-        database_inserter = DatabaseInserter(self.database, self.update_ui)
-        def client_processor_factory():
-            return ClientProcessor(self.compiler_info, self.source_scanner.add_task,
-                database_inserter, self.timer, self.update_ui)
+            def client_processor_factory():
+                return ClientProcessor(self.compiler_info, source_scanner.add_task,
+                    database_inserter, self.timer, self.update_ui)
 
-        [self.client_server] = self.loop.run_until_complete(
-            self.loop.start_serving_pipe(
-            client_processor_factory,
-            "\\\\.\\pipe\\BuildPal_{}".format(self.port)))
+            [self.client_server] = self.loop.run_until_complete(
+                self.loop.start_serving_pipe(
+                client_processor_factory,
+                "\\\\.\\pipe\\BuildPal_{}".format(self.port)))
 
-        try:
-            self.loop.run_forever()
-        finally:
-            database_inserter.close()
-            self.source_scanner.close()
-            self.loop.close()
-            del self.loop
+            try:
+                self.loop.run_forever()
+            finally:
+                self.loop.close()
+                del self.loop
 
     def stop(self):
         def close_stuff():

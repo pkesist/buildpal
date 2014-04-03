@@ -33,9 +33,7 @@ def main(args, terminator=None):
         print("Done.")
         
 
-if __name__ == "__main__":
-    sys.path[0] = os.path.dirname(sys.path[0])
-
-import signal
-signal.signal(signal.SIGBREAK, signal.default_int_handler)
-main(sys.argv[1:])
+if __name__ == '__main__':
+    import signal
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
+    main(sys.argv[1:])

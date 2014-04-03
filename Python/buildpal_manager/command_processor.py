@@ -17,7 +17,7 @@ class CommandProcessor:
             command, database_inserter, global_timer, update_ui):
         self.client_conn = client_conn
         self.__executable = executable
-        self.__sysincludes = sysincludes.split(';')
+        self.__sysincludes = sysincludes.split(os.path.pathsep)
         self.__cwd = cwd
         self.__compiler = compiler
         self.__command = command

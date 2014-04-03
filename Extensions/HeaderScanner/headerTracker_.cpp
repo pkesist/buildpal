@@ -26,7 +26,6 @@ namespace
 
         T & t_;
     };
-
 }
 
 MacroName HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val )

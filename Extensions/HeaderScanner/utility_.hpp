@@ -4,11 +4,11 @@
 #ifndef utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 #define utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 //------------------------------------------------------------------------------
-#include <boost/thread/lock_algorithms.hpp>
-#include <boost/thread/shared_mutex.hpp>
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/mem_fun.hpp>
+#include <boost/thread/lock_algorithms.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
 #include <boost/functional/hash_fwd.hpp>
 #include <llvm/ADT/StringRef.h>

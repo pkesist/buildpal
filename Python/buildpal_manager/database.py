@@ -203,6 +203,11 @@ class DatabaseInserter:
                         conn.commit()
                         changed = False
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def async_insert(self, command_info, on_completion=None):
         self.queue.put((command_info, on_completion))

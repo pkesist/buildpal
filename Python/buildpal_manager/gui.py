@@ -386,6 +386,8 @@ class BPManagerApp(Tk):
     state_stopped = 0
     state_started = 1
 
+    gui_events = ((GUIEvent.exception_in_run, '_exception_in_run'),)
+
     def __init__(self, nodes, port):
         Tk.__init__(self, None)
         self.nodes = nodes
@@ -477,8 +479,17 @@ class BPManagerApp(Tk):
         self.thread.start()
         self.set_running(True)
 
+    def _exception_in_run(self, exception):
+        assert self.running
+        self.thread.join()
+        self.set_running(False)
+        msgbox.showerror("Startup failure", "{}".format(exception))
+
     def __run_task_processor(self):
-        self.task_processor.run(self.post_event)
+        try:
+            self.task_processor.run(self.post_event)
+        except Exception as e:
+            self.post_event(GUIEvent.exception_in_run, e)
 
     def __stop_running(self):
         if not self.running:

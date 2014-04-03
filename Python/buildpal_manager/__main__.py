@@ -1,9 +1,6 @@
 import os
 import sys
 
-if __name__ == '__main__':
-    sys.path[0] = os.path.dirname(sys.path[0])
-
 from .task_processor import TaskProcessor
 from .gui import BPManagerApp
 
@@ -154,9 +151,10 @@ def main(argv, terminator=None):
             task_processor.stop()
             thread.join()
 
-import signal
-signal.signal(signal.SIGBREAK, signal.default_int_handler)
+if __name__ == '__main__':
+    import signal
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
-result = main(sys.argv[1:])
-if result:
-    sys.exit(result)
+    result = main(sys.argv[1:])
+    if result:
+        sys.exit(result)

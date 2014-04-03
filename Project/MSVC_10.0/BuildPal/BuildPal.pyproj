@@ -35,11 +35,12 @@
     <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
     <Compile Include="Python\buildpal_manager\compilers\utils.py" />
     <Compile Include="Python\buildpal_manager\compilers\__init__.py" />
+    <Compile Include="Python\buildpal_manager\__main__.py" />
+    <Compile Include="Python\buildpal_server\__main__.py" />
     <Compile Include="setup_manager.py" />
     <Compile Include="setup_client.py" />
     <Compile Include="Python\buildpal_common\message.py" />
     <Compile Include="Python\buildpal_common\__init__.py" />
-    <Compile Include="Python\buildpal_manager.py" />
     <Compile Include="Python\buildpal_server.py" />
     <Compile Include="Python\buildpal_manager\command_processor.py" />
     <Compile Include="Python\buildpal_manager\compile_session.py" />
@@ -64,12 +65,12 @@
     <Compile Include="Python\buildpal_server\__init__.py" />
     <Compile Include="Python\setup_manager.py" />
     <Compile Include="Python\setup_server.py" />
-    <Compile Include="Python\Test\test_client.py" />
-    <Compile Include="Python\Test\test_compile.py" />
-    <Compile Include="Python\Test\test_database.py" />
-    <Compile Include="Python\Test\test_message.py" />
-    <Compile Include="Python\Test\test_source_scanner.py" />
-    <Compile Include="Python\Test\conftest.py" />
+    <Compile Include="Python\buildpal_test\test_client.py" />
+    <Compile Include="Python\buildpal_test\test_compile.py" />
+    <Compile Include="Python\buildpal_test\test_database.py" />
+    <Compile Include="Python\buildpal_test\test_message.py" />
+    <Compile Include="Python\buildpal_test\test_source_scanner.py" />
+    <Compile Include="Python\buildpal_test\conftest.py" />
     <Compile Include="setup_server.py" />
   </ItemGroup>
   <ItemGroup>
@@ -85,11 +86,20 @@
     <Folder Include="Python\buildpal_manager" />
     <Folder Include="Python\buildpal_common" />
     <Folder Include="Python\buildpal_manager\compilers" />
-    <Folder Include="Python\Test" />
+    <Folder Include="Python\buildpal_test" />
     <Folder Include="Python\buildpal_server" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Documentation\benchmarks.rst" />
+    <Content Include="Documentation\bugs.rst" />
+    <Content Include="Documentation\building.rst" />
+    <Content Include="Documentation\build_systems.rst" />
+    <Content Include="Documentation\dependencies.rst" />
+    <Content Include="Documentation\future.rst" />
     <Content Include="Documentation\index.rst" />
+    <Content Include="Documentation\internals.rst" />
+    <Content Include="Documentation\intro.rst" />
+    <Content Include="Documentation\quickstart.rst" />
     <Content Include="Executables\Client\bp_cl.cpp" />
     <Content Include="Executables\Client\Jamroot.jam" />
     <Content Include="Extensions\ArgParser\argList_.cpp" />
@@ -109,6 +119,7 @@
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
     <Content Include="Extensions\MapFiles\dllInject.hpp" />
+    <Content Include="Extensions\MapFiles\Jamroot.jam" />
     <Content Include="Extensions\MapFiles\mapFilesInject.cpp" />
     <Content Include="Extensions\MapFiles\mapFilesInject.hpp" />
     <Content Include="Extensions\MapFiles\mapFilesInject32.def" />

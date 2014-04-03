@@ -1,10 +1,10 @@
 import sys
-sys.path.append('..')
+#sys.path.append('..')
 
 from time import time
 
-from Manager.database import Database
-from Manager.compile_session import SessionResult
+from buildpal_manager.database import Database
+from buildpal_manager.compile_session import SessionResult
 
 def test_create_structure():
     db = Database()

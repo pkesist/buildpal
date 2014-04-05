@@ -1,10 +1,10 @@
 Building BuildPal
 =================
 
-In order to build BuidlPal you need Python 3.4 with
+In order to build BuildPal you need Python 3.4 with
 `setuptools <http://pypi.python.org/pypi/setuptools>`_. Other dependencies will
-be downloaded and built automatically. `setuptools`_ come bundled with
-Python 3.4. If they are missing for some reason you can easily install them by
+be downloaded and built automatically. `setuptools`_ comes bundled with
+Python 3.4. If it is missing for some reason you can easily install them by
 running::
 
     python -m ensurepip
@@ -21,7 +21,7 @@ Get the source from GitHub
 Building the Manager
 --------------------
 
-::
+In the top-level project directory run the following::
 
     python setup_manager.py install
 
@@ -35,7 +35,7 @@ Once installed, the Manager can be run with::
 Building the Server
 -------------------
 
-::
+In the top-level project directory run the following::
 
     python setup_server.py install
 
@@ -56,6 +56,7 @@ Building the Client
     python setup_client.py build
 
 The Client actually has nothing to with Python, so there is no point in
-installing it. The Client executable will be produced in the current directory.
-This executable should be put somewhere on PATH.
+installing it. The compiler executable :file:`bp_cl.exe` will be produced in the
+top-level project directory. To simplify its usage, consider moving the
+executable somewhere on **PATH**.
 

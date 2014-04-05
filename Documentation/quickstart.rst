@@ -1,7 +1,7 @@
 Quick-start
 ===========
 
-If the :ref:`requirements` are met, you can proceed to setting up the farm.
+If the :ref:`requirements <requirements>` are met, you can proceed to setting up the farm.
 
 Setting up the Server (slave) nodes
 -----------------------------------
@@ -14,8 +14,8 @@ On each slave on the network do the following:
 
 .. note:
 
-    There is no need to explicitly specify TCP port to use. Each server is
-    automatically discovered.
+    There is no need to explicitly specify TCP port. Each server is
+    automatically discovered using UDP multicast.
 
 .. note:
 
@@ -30,7 +30,8 @@ Setting up the Client
   directory.
 * Configure the build system.
     * As mentioned, to utilize the build farm, a build system capable of
-      concurrently running build tasks is required.
+      concurrently running build tasks is required. More about this can be found
+      :ref:`integrating-with-build-systems`
     * You must configure your build system to use :file:`bp_cl.exe` instead of
       MSVC-s :file:`cl.exe`.
 

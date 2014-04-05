@@ -22,10 +22,24 @@ Tested Boost library version: 1.53.
 
 Environment.
     * 100Mbit/s Ethernet network.
-    * Client machine: HP Pavillion g7 notebook with Intel i3 processor (4 cores).
-    * Slave #1. Dell notebook with i7 processor (8 cores).
-    * Slave #2. Speedtest (8 cores).
-    * Slave #3. Asus notebook, 4 cores.
+    * Client machine: 4 core i3-M39, 2.67GHz, 8GB RAM
+    * Slave #1: 8 core Intel i7-2670QM, 2.20GHz, 6GB RAM
+    * Slave #2: 8 core AMD FX-8120, 3.10GHz, 4GB RAM
+    * Slave #3: 4 core Intel i5-2430M 2.40GHz, 6GB RAM
+
+    Client machine is the weakest one
+    Slave #2 and #3 have similar compile times, even though #2 has twice as many cores.
+    Slave #1 is the fastest of the bunch, roughly twice as fast as others.
+
+
+Slave #1 | 8 jobs | 10:10.44
+Slave #2 | 8 jobs | 10:16.77
+
+
+
+
+
+
 
 +---------------+---------+-----------+-----------+-----------+
 |               |         |           |           |           |

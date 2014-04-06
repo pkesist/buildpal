@@ -1,7 +1,19 @@
 Quick-start
 ===========
 
-If the :ref:`requirements <requirements>` are met, you can proceed to setting up the farm.
+Requirements
+------------
+
+1. A C/C++ project (duh) using a build system capable of running parallel
+   tasks.
+
+2. A main build machine (client machine) connected to a Local-Area Network.
+
+3. As many as possible machines (slaves) on LAN capable of running the compiler
+   your C/C++ project uses.
+
+    * Given that the only compiler currently supported is MSVC, this means that
+      all slave machines need to run Windows.
 
 Setting up the Server (slave) nodes
 -----------------------------------
@@ -29,11 +41,10 @@ Setting up the Client
 * In addition, there will be a :file:`bp_cl.exe` file in the installation
   directory.
 * Configure the build system.
-    * As mentioned, to utilize the build farm, a build system capable of
-      concurrently running build tasks is required. More about this can be found
-      :ref:`integrating-with-build-systems`
     * You must configure your build system to use :file:`bp_cl.exe` instead of
-      MSVC-s :file:`cl.exe`.
+      MSVC :file:`cl.exe`.
+    * For information on how to integrate with some build systems see :ref:`here \
+      <integrating-with-build-systems>`.
 
 .. note::
 
@@ -41,7 +52,7 @@ Setting up the Client
     scripts (such as ``vcvarsall.bat``) is still required. :file:`bp_cl.exe`
     uses its environment to locate the real compiler :file:`cl.exe`.
 
-3. Run BuildPal Manager.
+3. Run Manager.
     * This will open Manager's GUI which can be used to view detected farm
       configuration. If this is satisfactory, run the Manager by pressing its
       `Start` button.

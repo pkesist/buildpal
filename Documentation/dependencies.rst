@@ -1,7 +1,7 @@
 Dependencies
 ============
 
-BuildPal depends on the following projects:
+``BuildPal`` depends on the following projects:
 
 `Python <http://www.python.org>`_
 ---------------------------------
@@ -9,13 +9,8 @@ BuildPal depends on the following projects:
 `LLVM <http://www.llvm.org>`_
 -----------------------------
 
-A bunch of utility classes which fit in nicely in this project.
-
 `Clang <http://clang.llvm.org>`_
 --------------------------------
-
-ClangLex is used by Manager to get a list of headers required by a source file.
-Clang argument parser is used by Manager to parse the command line.
 
 .. _boost-libs:
 
@@ -29,3 +24,5 @@ Used by all C++ parts of the project.
     * *Boost.Thread* for read-write mutexes.
     * ...
 
+`pytest <http://pytest.org>`_
+-----------------------------

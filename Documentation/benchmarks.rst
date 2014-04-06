@@ -7,12 +7,12 @@
 Benchmarks
 ==========
 
-Currently BuildPal is mainly tested by building :ref:`boost-libs`.
+Currently ``BuildPal`` is mainly tested by building :ref:`boost-libs`.
 Boost libraries make heavy use of preprocessor, and are thus ideal candidates
 for testing both speed and sanity.
 
 Building Boost was done with the following command, after modifying
-Boost.Build to use BuildPal's compiler instead of the native msvc
+Boost.Build to use ``BuildPal``'s compiler instead of the native msvc
 compiler executable::
 
     bjam stage --stagedir=. -a -j ##
@@ -34,12 +34,6 @@ Environment.
 
 Slave #1 | 8 jobs | 10:10.44
 Slave #2 | 8 jobs | 10:16.77
-
-
-
-
-
-
 
 +---------------+---------+-----------+-----------+-----------+
 |               |         |           |           |           |

@@ -1,5 +1,5 @@
-BuildPal Internals
-==================
+``BuildPal`` internals
+======================
 
 Client
 ------
@@ -41,7 +41,7 @@ Manager
 -------
 
 
-The manager is the workhorse of the BuildPal suite.
+The manager is the workhorse of the ``BuildPal`` suite.
 Contains all compiler-specific knowledge.
 It must be run locally, on the client machine.
 
@@ -52,7 +52,7 @@ It must be run locally, on the client machine.
 Server
 ------
 
-Server is the part of BuildPal which runs on slave machines.
+Server is the part of ``BuildPal`` which runs on slave machines.
 Capable of storing files which are shared between build processes.
 
 .. todo::

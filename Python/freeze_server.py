@@ -17,6 +17,11 @@ for f in files_to_locate:
     if not found:
         raise Exception("Could not locate '{}'.".format(os.path.join(*f)))
 
+def exe_file(name):
+    if os.name == 'nt':
+        return name + '.exe'
+    return name
+
 setup(name='BuildPal Server',
     version = '0.1',
     description = 'BuildPal Server',
@@ -25,8 +30,9 @@ setup(name='BuildPal Server',
         bdist_msi=dict(upgrade_code='{EC37317C-03E0-4348-8D70-E5D891EE9115}')
     ),
     executables = [
-    Executable('server_starter.py', targetName='buildpal_server',
-        base='Console', shortcutName='BuildPal Server',
-        shortcutDir='DesktopFolder')
+        Executable('server_starter.py', targetName=exe_file('buildpal_server'),
+            icon='../Documentation/static/buildpal.ico',
+            base='Console', shortcutName='BuildPal Server',
+            shortcutDir='DesktopFolder')
     ],
 )

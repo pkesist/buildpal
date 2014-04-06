@@ -1,7 +1,7 @@
-.. _integrating-with-build-systems
+.. _integrating-with-build-systems:
 
-Integrating BuildPal with some build systems
-============================================
+Integrating ``BuildPal`` with some build systems
+================================================
 
 `CMake <http://www.cmake.org>`_
 -------------------------------

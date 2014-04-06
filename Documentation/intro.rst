@@ -91,23 +91,6 @@ This includes:
     * Visual C++ 2010 (10.0)
     * Visual C++ 2012 (11.0)
 
-.. _requirements:
-
-Requirements
-============
-
-1. A C/C++ project (duh) using a build system capable of running parallel
-   tasks.
-
-2. A main build machine (client machine) connected to a Local-Area Network.
-
-3. As many as possible machines (slaves) on LAN capable of running the compiler
-   your C/C++ project uses.
-
-    * Given that the only compiler currently supported is MSVC, this means that
-      all slave machines need to run Windows.
-
-
 .. rubric:: footnotes
 
 .. [#f1] MS Visual C++ compiler does not really have a preprocessing step when

@@ -17,7 +17,7 @@ compiler executable::
 
     bjam stage --stagedir=. -a -j ##
 
-The host machine was not a farm node in distributed compilation.
+The host machine was not a part of farm.
 Tested Boost library version: 1.53.
 
 Environment.

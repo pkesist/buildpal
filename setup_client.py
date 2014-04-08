@@ -16,7 +16,7 @@ class build_client(distutils_build):
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
 
-    __boost_libs = ['chrono', 'filesystem', 'system', 'timer']
+    __boost_libs = ['chrono', 'system']
 
     def run(self):
         build_boost = self.get_finalized_command('build_boost')
@@ -45,7 +45,7 @@ class build_client(distutils_build):
             '-sCLANG_BUILD_ROOT={}'.format(os.path.abspath(clang_build_dir)),
             '-sCLANG_SRC_ROOT={}'.format(os.path.abspath(clang_src_dir)),
             '-sTARGET_DIR={}'.format(os.getcwd()),
-            '--build-dir={}'.format(os.path.join(os.path.abspath(self.build_base), 'client'))
+            '--build-dir={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
         if self.force:
             call.append('-a')

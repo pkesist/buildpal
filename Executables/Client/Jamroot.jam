@@ -42,6 +42,7 @@ local rel-paths = include tools/clang/include ;
 local dirs = $(CLANG_SRC_ROOT)/ $(CLANG_BUILD_ROOT)/ ;
 local include-dirs = $(dirs)$(rel-paths) ;
 
+lib shlwapi ;
 lib LLVMSupport : : <search>$(CLANG_BUILD_ROOT)/lib ;
 alias clang-stuff : LLVMSupport : : : <include>$(include-dirs) ;
 
@@ -62,6 +63,7 @@ exe bp_cl
     # MSVC settings
     <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
     <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
+    <toolset>msvc:<library>shlwapi
 
     # General GCC settings
     <toolset>gcc:<cxxflags>-std=c++11
@@ -70,6 +72,7 @@ exe bp_cl
 
     # MinGW settings
     <toolset>gcc,<target-os>windows:<find-shared-library>ws2_32
+    <toolset>gcc,<target-os>windows:<find-shared-library>shlwapi
     <toolset>gcc,<target-os>windows:<find-shared-library>imagehlp
 ;
 explicit bp_cl ;

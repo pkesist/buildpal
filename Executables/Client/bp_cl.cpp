@@ -1,19 +1,20 @@
 #include <boost/asio.hpp>
-#include <boost/filesystem/convenience.hpp>
-#include <boost/filesystem/path.hpp>
-#include <boost/spirit/include/qi.hpp>
-#include <boost/spirit/include/karma.hpp>
 #include <boost/system/error_code.hpp>
-#include <boost/timer/timer.hpp>
 
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
 
 #include <array>
 #include <cassert>
-#include <memory>
+#include <ctime>
+#include <deque>
+#include <iostream>
 #include <list>
-#include <set>
+#include <memory>
 #include <string>
+
+#include <shlwapi.h>
 #include <windows.h>
 
 char const compiler[] = "msvc";
@@ -24,7 +25,7 @@ unsigned int defaultPortNameSize = sizeof(defaultPortName) / sizeof(defaultPortN
 char const compilerExeFilename[] = "cl.exe";
 std::size_t compilerExeFilenameSize = sizeof(compilerExeFilename) / sizeof(compilerExeFilename[0]) - 1;
 
-typedef std::vector<boost::filesystem::path> PathList;
+typedef std::vector<std::string> PathList;
 #ifdef __GNUC__
 #define alloca __builtin_alloca
 #endif
@@ -68,17 +69,17 @@ namespace
         return result;
     }
 
-    // Utility class which ensures the validity of the passed strings.
     class StringSaver : public llvm::cl::StringSaver
     {
     public:
         virtual const char * SaveString( char const * str )
         {
-            return storage_.insert( str ).first->c_str();
+            storage_.push_back( str );
+            return storage_.back().c_str();
         }
 
     private:
-        std::set<std::string> storage_;
+        std::deque<std::string> storage_;
     };
 }
 
@@ -97,7 +98,7 @@ PathList const & getPath()
         {
             if ( ( pathBuffer[ iter ] == ';' ) && ( iter != last + 1 ) )
             {
-                result.push_back( boost::filesystem::path( pathBuffer + last, pathBuffer + iter ) );
+                result.push_back( std::string( pathBuffer + last, pathBuffer + iter ) );
                 last = iter + 1;
             }
         }
@@ -106,14 +107,15 @@ PathList const & getPath()
     return result;
 }
 
-bool findOnPath( PathList const & pathList, boost::filesystem::path const file, boost::filesystem::path & result )
+bool findOnPath( PathList const & pathList, std::string const & file, std::string & result )
 {
     for ( PathList::const_iterator iter( pathList.begin() ); iter != pathList.end(); ++iter )
     {
-        boost::filesystem::path tmpPath = (*iter) / file;
-        if ( boost::filesystem::exists( tmpPath ) )
+        char tmp[ MAX_PATH ];
+        PathCombine( tmp, iter->c_str(), file.c_str() );
+        if ( PathFileExists( tmp ) )
         {
-            result = tmpPath;
+            result = tmp;
             return true;
         }
     }
@@ -176,7 +178,7 @@ private:
     uint16_t partCount_;
     std::array<unsigned char, 4> totalLengthBuffer_;
     std::array<unsigned char, 2> partCountBuffer_;
-    std::list<std::array<unsigned char, 4> > lengths_;
+    std::deque<std::array<unsigned char, 4> > lengths_;
     std::vector<boost::asio::const_buffer> buffers_;
 };
 
@@ -235,19 +237,6 @@ private:
     std::vector<llvm::StringRef> parts_;
 };
 
-template <typename Parser, typename Attribute>
-bool parse( char const * buffer, Parser const & parser, Attribute & val )
-{
-    char const * end = buffer + strlen( buffer );
-    return boost::spirit::qi::parse( buffer, end, parser, val ) && ( buffer == end );
-}
-
-template <typename Generator, typename Attribute>
-bool generate( char * & buffer, Generator const & generator, Attribute const & attr )
-{
-    return boost::spirit::karma::generate( buffer, generator, attr );
-}
-
 int createProcess( char * commandLine )
 {
     STARTUPINFO startupInfo = { sizeof(startupInfo) };
@@ -297,16 +286,16 @@ int runLocally()
     for ( ; ; ++argsPos )
     {
         bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
-        if ( *argsPos == '\\' )
-        {
-            escape = !escape;
-        }
-
-        else if ( isSpace )
+        if ( isSpace )
         {
             if ( foundNonSpace && !inQuote )
                 break;
             escape = false;
+        }
+
+        else if ( *argsPos == '\\' )
+        {
+            escape = !escape;
         }
 
         else if ( *argsPos == '"' && !escape )
@@ -349,10 +338,24 @@ private:
 };
 
 
+struct Timer
+{
+    Timer() : start_( std::time( 0 ) ) {}
+    ~Timer()
+    {
+        std::time_t const end = std::time( 0 );
+        std::cout << "Command took " << std::difftime( end, start_ )
+            << "seconds.\n";
+    }
+
+    std::time_t start_;
+};
+
 int main( int argc, char * argv[] )
 {
-    boost::timer::auto_cpu_timer t( std::cout, "Command took %w seconds.\n" );
-    boost::filesystem::path compilerExecutable;
+
+    Timer t;
+    std::string compilerExecutable;
     if ( !findOnPath( getPath(), compilerExeFilename, compilerExecutable ) )
     {
         std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
@@ -366,7 +369,7 @@ int main( int argc, char * argv[] )
     }
     Fallback const fallback( disableFallback );
 
-    DWORD size = GetEnvironmentVariable("BP_MGR_PORT", NULL, 0 );
+    DWORD size = GetEnvironmentVariable("BP_MANAGER_PORT", NULL, 0 );
     char const * portName;
     if ( size == 0 )
     {
@@ -375,13 +378,13 @@ int main( int argc, char * argv[] )
     }
     else if ( size > 256 )
     {
-        std::cerr << "Invalid BP_MGR_PORT environment variable value (value too big).\n";
+        std::cerr << "Invalid BP_MANAGER_PORT environment variable value (value too big).\n";
         return fallback.complete();
     }
     else
     {
         char * tmp = static_cast<char *>( alloca( size ) );
-        GetEnvironmentVariable( "BP_MGR_PORT", tmp, size );
+        GetEnvironmentVariable( "BP_MANAGER_PORT", tmp, size );
         portName = tmp;
     }
 
@@ -425,9 +428,16 @@ int main( int argc, char * argv[] )
     StreamType sock( ioService, pipe );
 #else
     unsigned short port;
-    if ( !parse( portName, boost::spirit::qi::ushort_, port ) )
+    try
     {
-        std::cerr << "Failed to parse BP_MGR_PORT environment variable value.\n";
+        unsigned long const lport = std::strtoul( portName );
+        if ( lport > std::numeric_limits<unsigned short>::max() )
+            throw std::out_of_range();
+        port = static_cast<unsigned short>( lport );
+    }
+    catch ( std::exception const & e )
+    {
+        std::cerr << "Failed to parse BP_MANAGER_PORT environment variable value.\n";
         return fallback.complete();
     }
     
@@ -459,8 +469,7 @@ int main( int argc, char * argv[] )
     MsgSender msgSender;
 
     msgSender.addPart( compiler, compilerSize );
-    std::string const compilerExeStr( compilerExecutable.string() );
-    msgSender.addPart( compilerExeStr.c_str(), compilerExeStr.size() );
+    msgSender.addPart( compilerExecutable.c_str(), compilerExecutable.size() );
 
     DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
     if ( includeSize == 0 )
@@ -478,14 +487,15 @@ int main( int argc, char * argv[] )
     GetCurrentDirectory( currentPathSize, currentPathBuffer );
     msgSender.addPart( currentPathBuffer, currentPathSize - 1 );
 
-    llvm::SmallVector<char const *, 16> newArgv;
+    llvm::SmallVector<char const *, 32> newArgv;
     for ( int i( 1 ); i < argc; ++i )
         newArgv.push_back( argv[ i ] );
 
     StringSaver saver;
-    if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeGNUCommandLine, newArgv ) )
+    if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeWindowsCommandLine, newArgv ) )
     {
-        // Still not fixed in Clang 3.4.
+        // ExpandResponseFiles always returns false, even on success.
+        // Fixed in trunk, but did not make it to Clang 3.4.
         //std::cerr << "FATAL: Failed to expand response files.";
         //return fallback.complete();
     }
@@ -540,10 +550,10 @@ int main( int argc, char * argv[] )
             }
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
-            std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
+            std::size_t const compilerExecutableSize( compilerExecutable.size() );
 
             char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLine.size() + 1 ) );
-            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize );
+            std::memcpy( buffer, compilerExecutable.c_str(), compilerExecutableSize );
             buffer[ compilerExecutableSize ] = ' ';
             std::memcpy( buffer + compilerExecutableSize + 1, commandLine.data(), commandLine.size() );
             buffer[ compilerExecutableSize + 1 + commandLine.size() ] = 0;
@@ -560,10 +570,10 @@ int main( int argc, char * argv[] )
 
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
-            std::size_t const compilerExecutableSize( compilerExecutable.string().size() );
+            std::size_t const compilerExecutableSize( compilerExecutable.size() );
 
             char * const buffer = static_cast<char *>( alloca( compilerExecutableSize + 1 + commandLine.size() + 1 ) );
-            std::memcpy( buffer, compilerExecutable.string().c_str(), compilerExecutableSize );
+            std::memcpy( buffer, compilerExecutable.c_str(), compilerExecutableSize );
             buffer[ compilerExecutableSize ] = ' ';
             std::memcpy( buffer + compilerExecutableSize + 1, commandLine.data(), commandLine.size() );
             buffer[ compilerExecutableSize + 1 + commandLine.size() ] = 0;
@@ -605,18 +615,13 @@ int main( int argc, char * argv[] )
 
             if ( apiResult )
             {
-                char retcodeBuffer[ 16 ];
+                std::string retcodeStr;
                 ::WaitForSingleObject( processInfo.hProcess, INFINITE );
                 {
                     int result;
                     GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-                    char * buf = retcodeBuffer;
-                    bool const genResult = generate( buf, boost::spirit::karma::int_, result );
-                    assert( genResult );
-                    assert( retcodeBuffer < buf );
-                    assert( buf - retcodeBuffer <= sizeof(retcodeBuffer) );
-                    assert( buf - retcodeBuffer > 0 );
-                    msgSender.addPart( retcodeBuffer, buf - retcodeBuffer );
+                    retcodeStr = std::to_string( result );
+                    msgSender.addPart( retcodeStr.data(), retcodeStr.size() );
                 }
                 DWORD stdOutSize;
                 std::unique_ptr<char []> stdOut( getPipeData( stdOutRead, stdOutSize ) );
@@ -651,15 +656,14 @@ int main( int argc, char * argv[] )
                 std::cerr << "ERROR: Invalid message length\n";
                 return fallback.complete();
             }
-            llvm::StringRef retcode = receiver.getPart( 1 );
-
-            char * buffer = static_cast<char *>( alloca( retcode.size() + 1 ) );
-            std::memcpy( buffer, retcode.data(), retcode.size() );
-            buffer[ retcode.size() ] = 0;
             int result;
-            if ( !parse( buffer, boost::spirit::int_, result ) )
+            try
             {
-                std::cerr << "ERROR: Failed to parse exit code.\n" << buffer;
+                result = std::stoi( receiver.getPart( 1 ).str() );
+            }
+            catch ( std::exception const & )
+            {
+                std::cerr << "ERROR: Failed to parse exit code.\n";
                 return fallback.complete();
             }
 
@@ -680,16 +684,19 @@ int main( int argc, char * argv[] )
             std::vector<std::string> files;
             // First search relative to compiler dir, then path.
             PathList pathList;
-            pathList.push_back( compilerExecutable.parent_path() );
+            char const * const compilerExePath = compilerExecutable.c_str();
+            char const * const filename = PathFindFileName( compilerExePath );
+            assert( filename != compilerExePath );
+            pathList.push_back( std::string( compilerExePath, filename - compilerExePath ) );
             PathList const & path( getPath() );
             std::copy( path.begin(), path.end(), std::back_inserter( pathList ) );
 
             for ( std::size_t part = 1; part < receiver.parts(); ++part )
             {
                 llvm::StringRef file = receiver.getPart( part );
-                boost::filesystem::path result;
-                findOnPath( pathList, boost::filesystem::path( file.data(), file.data() + file.size() ), result );
-                files.push_back( result.string() );
+                std::string result;
+                findOnPath( pathList, std::string( file.data(), file.data() + file.size() ), result );
+                files.push_back( result );
                 msgSender.addPart( files.back().c_str(), files.back().size() );
             }
             boost::system::error_code writeError;

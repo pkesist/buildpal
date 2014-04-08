@@ -6,6 +6,7 @@ import distutils.ccompiler
 
 import os
 import subprocess
+import sys
 from multiprocessing import cpu_count
 
 import zipfile
@@ -89,6 +90,8 @@ class build_boost(Command):
             'link=static', 'runtime-link=shared', 'threading=multi']
         build_call.extend(('--with-{}'.format(lib) for lib in
             self.boost_libs))
+        if sys.maxsize > 2**32:
+            build_call.append('address-model=64')
         build_call.append('debug' if self.debug else 'release')
         if toolset == 'gcc':
             # There is no auto-link on MinGW. We don't want to determine the

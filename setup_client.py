@@ -7,6 +7,7 @@ from distutils.command.build import build as distutils_build
 
 import os
 import subprocess
+import sys
 
 class build_client(distutils_build):
     def initialize_options(self):
@@ -47,6 +48,8 @@ class build_client(distutils_build):
             '-sTARGET_DIR={}'.format(os.getcwd()),
             '--build-dir={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
+        if sys.maxsize > 2**32:
+            call.append('address-model=64')
         if self.force:
             call.append('-a')
         call.append('debug' if self.debug else 'release')

@@ -37,8 +37,6 @@ class build_ext(setuptools_build_ext):
     def run(self):
         build_boost = self.get_finalized_command('build_boost')
         build_boost.boost_libs.append('chrono')
-        build_boost.boost_libs.append('date_time')
-        build_boost.boost_libs.append('filesystem')
         build_boost.boost_libs.append('system')
         build_boost.boost_libs.append('thread')
         self.run_command('build_boost')

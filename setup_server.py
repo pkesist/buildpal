@@ -4,6 +4,7 @@ from distutils.command.build_ext import build_ext as distutils_build_ext
 from distutils.spawn import find_executable
 from setuptools import setup, Extension
 import subprocess
+import sys
 import os
 
 class build_ext(distutils_build_ext):
@@ -19,6 +20,7 @@ class build_ext(distutils_build_ext):
         self.run_command('build_boost')
         extra_compile_args = []
         extra_link_args = []
+        win64 = sys.maxsize > 2**32
         if self.compiler == 'mingw32':
             extra_compile_args.append('-std=c++11')
         elif self.compiler == 'msvc':
@@ -39,11 +41,14 @@ class build_ext(distutils_build_ext):
             '-sTARGET_DIR={}'.format(os.path.abspath(self.build_lib)),
             '--build-dir={}'.format(os.path.join(os.path.abspath(self.build_temp), 'client'))
         ]
+        if win64:
+            call.append('address-model=64')
         if self.force:
             call.append('-a')
+
         subprocess.check_call(call, env=env, cwd='Extensions\MapFiles')
         self.library_dirs.append(self.build_lib)
-        self.libraries.append('map_files_inj32')
+        self.libraries.append('map_files_inj64' if win64 else 'map_files_inj32')
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
             ext_module.extra_link_args.extend(extra_link_args)

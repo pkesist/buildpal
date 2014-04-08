@@ -76,6 +76,11 @@ class build_clang(Command):
 
         assert self.compiler is not None
         self.clang_build_dir += '_' + self.compiler
+
+        self.win64 = sys.maxsize > 2**32
+        if self.win64:
+            self.clang_build_dir += '_x64'
+
         if self.debug:
             self.clang_build_dir += '_d'
 
@@ -98,7 +103,7 @@ class build_clang(Command):
         if self.compiler == 'msvc':
             distutils.msvc9compiler.VERSION = 11.0
             compiler = distutils.ccompiler.new_compiler(compiler='msvc')
-            compiler.initialize('win32')
+            compiler.initialize('win-amd64' if self.win64 else 'win32')
             compiler_exe = compiler.cc
             compiler_cxx_exe = compiler.cc
         if self.compiler == 'mingw32':

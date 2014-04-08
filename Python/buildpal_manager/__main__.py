@@ -116,7 +116,7 @@ def main(argv, terminator=None):
     config = None
 
     if opts.port is None:
-        port = os.environ.get('BP_MGR_PORT')
+        port = os.environ.get('BP_MANAGER_PORT')
         if port is None:
             print("Port name not specified, using default port ('default').", file=sys.stdout)
             port = 'default'

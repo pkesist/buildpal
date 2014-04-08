@@ -75,7 +75,7 @@ node[0]=localhost:{}:4
 @pytest.fixture(scope='function')
 def client_popen_args(tmpdir):
     env = os.environ
-    env.update({'BP_MGR_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
+    env.update({'BP_MANAGER_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
     return dict(env=env, stderr=sys.stderr, stdout=sys.stdout, cwd=str(tmpdir))
 
 @pytest.fixture(scope='module')

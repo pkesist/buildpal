@@ -5,7 +5,7 @@ import winreg
 @pytest.fixture(scope='module')
 def bp_cl():
     return os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', 'bp_cl.exe'))
+        os.path.realpath(__file__)), '..', '..', 'bp_cl.exe'))
 
 @pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
 def vcvarsall(request):

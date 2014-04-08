@@ -116,7 +116,7 @@ def test_protocol(client_popen_args, protocol_tester):
         lambda : protocol_tester(loop), "\\\\.\\pipe\\BuildPal_{}".format(port)))
 
     env = os.environ
-    env['BP_MGR_PORT'] = port
+    env['BP_MANAGER_PORT'] = port
     client_popen_args.update(env=env)
     with subprocess.Popen(**client_popen_args) as proc:
         loop.run_forever()

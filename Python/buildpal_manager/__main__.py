@@ -1,7 +1,7 @@
 import os
 import sys
 
-from .task_processor import TaskProcessor
+from .manager_runner import ManagerRunner
 from .gui import BPManagerApp
 
 def run_gui(nodes, port):
@@ -138,9 +138,9 @@ def main(argv, terminator=None):
     if opts.ui == 'gui':
         run_gui(nodes, port)
     else:
-        task_processor = TaskProcessor(nodes, port, 0)
+        manager_runner = ManagerRunner(nodes, port, 0)
         def run():
-            task_processor.run()
+            manager_runner.run()
         thread = Thread(target=run)
         thread.start()
         try:
@@ -148,7 +148,7 @@ def main(argv, terminator=None):
                 sleep(1)
         finally:
             print("Shutting down.")
-            task_processor.stop()
+            manager_runner.stop()
             thread.join()
 
 if __name__ == '__main__':

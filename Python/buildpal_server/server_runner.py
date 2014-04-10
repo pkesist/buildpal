@@ -462,7 +462,7 @@ class ServerProtocol(MessageProtocol):
             session.process_msg(msg)
 
 
-class CompileWorker:
+class ServerRunner:
     def __init__(self, port, compile_slots):
         self.__port = port
         self.__compile_slots = compile_slots

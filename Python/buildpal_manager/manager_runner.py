@@ -78,7 +78,7 @@ class ClientProcessor(MessageProtocol):
             task.pp_timer = SimpleTimer()
             self.task_created_func(task)
 
-class TaskProcessor:
+class ManagerRunner:
     def __init__(self, nodes, port, n_pp_threads):
         class CacheStats:
             def __init__(self):

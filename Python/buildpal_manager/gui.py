@@ -10,7 +10,7 @@ from threading import Thread, Lock
 from time import time
 from multiprocessing import cpu_count
 
-from .task_processor import TaskProcessor
+from .manager_runner import ManagerRunner
 from .gui_event import GUIEvent
 
 class MyTreeView(Treeview):
@@ -473,7 +473,7 @@ class BPManagerApp(Tk):
                 self.pp_threads_sb.get(), 4 * cpu_count()))
             return
         
-        self.task_processor = TaskProcessor(self.nodes, self.port, threads)
+        self.manager_runner = ManagerRunner(self.nodes, self.port, threads)
         self.thread = Thread(target=self.__run_task_processor)
         self.thread.start()
         self.set_running(True)
@@ -486,13 +486,13 @@ class BPManagerApp(Tk):
 
     def __run_task_processor(self):
         try:
-            self.task_processor.run(self.post_event)
+            self.manager_runner.run(self.post_event)
         except Exception as e:
             self.post_event(GUIEvent.exception_in_run, e)
 
     def __stop_running(self):
         if not self.running:
             return
-        self.task_processor.stop()
+        self.manager_runner.stop()
         self.thread.join()
         self.set_running(False)

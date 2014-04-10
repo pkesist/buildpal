@@ -1,4 +1,4 @@
-from .compile_worker import CompileWorker
+from .server_runner import ServerRunner
 
 from time import sleep
 from multiprocessing import cpu_count
@@ -23,12 +23,12 @@ def main(args, terminator=None):
         raise RuntimeError("Max jobs  mark should be in "
             "{{1, 2, ..., {}}}.".format(4 * cpu_count()))
 
-    compile_worker = CompileWorker(opts.port, opts.compile_slots)
+    server_runner = ServerRunner(opts.port, opts.compile_slots)
     try:
-        compile_worker.run(terminator)
+        server_runner.run(terminator)
     except KeyboardInterrupt:
         print("\nShutting down...")
-        compile_worker.shutdown()
+        server_runner.shutdown()
         print("Done.")
         
 

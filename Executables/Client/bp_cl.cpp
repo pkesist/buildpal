@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <ctime>
 #include <deque>
 #include <iostream>
@@ -340,15 +341,15 @@ private:
 
 struct Timer
 {
-    Timer() : start_( std::time( 0 ) ) {}
+    Timer() : start_( std::chrono::high_resolution_clock::now() ) {}
     ~Timer()
     {
-        std::time_t const end = std::time( 0 );
-        std::cout << "Command took " << std::difftime( end, start_ )
-            << "seconds.\n";
+        typedef std::chrono::duration<float, std::chrono::seconds::period> Duration;
+        Duration ds( std::chrono::high_resolution_clock::now() - start_ );
+        std::cout << "Command took " << ds.count() << " seconds.\n";
     }
 
-    std::time_t start_;
+    std::chrono::high_resolution_clock::time_point start_;
 };
 
 int main( int argc, char * argv[] )

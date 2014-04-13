@@ -1,13 +1,15 @@
 import distutils.ccompiler
 from distutils.ccompiler import get_default_compiler
-from distutils.command.build_ext import build_ext as distutils_build_ext
 from distutils.spawn import find_executable
 from setuptools import setup, Extension
+
+from setuptools.command.build_ext import build_ext as setuptools_build_ext
+
 import subprocess
 import sys
 import os
 
-class build_ext(distutils_build_ext):
+class build_ext(setuptools_build_ext):
     def initialize_options(self):
         super().initialize_options()
 
@@ -66,10 +68,7 @@ setup(name = 'buildpal_server',
     ],
     cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
-    package_dir = {
-        'buildpal_server': 'Python/buildpal_server',
-        'buildpal_common': 'Python/buildpal_common'
-    },
+    package_dir = {'': 'Python'},
     packages = ['buildpal_server', 'buildpal_common'],
     entry_points = {
         'console_scripts': ['buildpal_server = buildpal_server.__main__']

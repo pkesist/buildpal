@@ -37,6 +37,7 @@ class build_ext(setuptools_build_ext):
     def run(self):
         build_boost = self.get_finalized_command('build_boost')
         build_boost.boost_libs.append('chrono')
+        build_boost.boost_libs.append('date_time')
         build_boost.boost_libs.append('system')
         build_boost.boost_libs.append('thread')
         self.run_command('build_boost')
@@ -67,7 +68,7 @@ setup(name = 'buildpal_manager',
     ],
     cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
-    package_dir = { '': 'Python' },
+    package_dir = {'': 'Python'},
     packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
     entry_points = {
         'console_scripts': ['buildpal_manager = buildpal_manager.__main__']

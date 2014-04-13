@@ -3,7 +3,6 @@ from .task import Task
 from .gui_event import GUIEvent
 
 from subprocess import list2cmdline
-from threading import Lock, current_thread
 
 import os
 from time import time
@@ -16,24 +15,25 @@ class CommandProcessor:
     def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
             command, database_inserter, global_timer, update_ui):
         self.client_conn = client_conn
-        self.__executable = executable
+        self.compiler = compiler
+        self.executable = executable
+        self.compiler_info = None
+        self.compiler_files = None
         self.__sysincludes = sysincludes.split(os.path.pathsep)
         self.__cwd = cwd
-        self.__compiler = compiler
         self.__command = command
         self.__options = compiler.parse_options(command)
         self.__global_timer = global_timer
         self.__update_ui = update_ui
         self.__database_inserter = database_inserter
 
-    def set_compiler_info(self, compiler_info, compiler_files):
+    def set_compiler_info(self, compiler_info):
         self.compiler_info = compiler_info
-        self.compiler_files = compiler_files
         self.state = self.STATE_HAS_COMPILER_INFO
 
     def request_compiler_info(self, on_completion):
         self.got_compiler_info = on_completion
-        self.test_source = self.__compiler.prepare_test_source()
+        self.test_source = self.compiler.prepare_test_source()
         self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',
             list2cmdline(self.test_source.command()).encode()])
         self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
@@ -45,30 +45,22 @@ class CommandProcessor:
             retcode = int(msg[0].tobytes())
             stdout = msg[1].tobytes()
             stderr = msg[2].tobytes()
-            info, self.compiler_files = self.__compiler.compiler_info(
-                self.__executable, stdout, stderr)
-            self.compiler_info = info
-            self.client_conn.send_msg([b'LOCATE_FILES'] + self.compiler_files)
+            self.compiler_info = self.compiler.get_compiler_info(
+                self.executable, stdout, stderr)
+            self.client_conn.send_msg([b'LOCATE_FILES'] + self.compiler_info['files'])
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
-        elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
-            assert len(msg) == len(self.compiler_files)
+        else:
+            assert self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST
+            assert len(msg) == len(self.compiler_info['files'])
             self.compiler_files = list(zip([m.tobytes() for m in msg],
-                self.compiler_files))
+                self.compiler_info['files']))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
-        else:
-            assert not "Invalid state"
 
     def update_task_ui(self, task):
         for duration_name, duration in task.durations.items():
             self.__global_timer.add_time(duration_name, duration)
         self.__update_ui(GUIEvent.update_global_timers, self.__global_timer.as_dict())
-
-    def executable(self):
-        return self.__executable
-
-    def compiler(self):
-        return self.__compiler
 
     def build_local(self):
         return self.__options.should_build_locally()

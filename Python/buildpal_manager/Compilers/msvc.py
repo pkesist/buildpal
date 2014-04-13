@@ -189,7 +189,7 @@ class MSVCCompiler:
             '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
         return MSVCCompiler.TestSource(macros, self.placeholder_string)
 
-    def compiler_info(self, executable, stdout, stderr):
+    def get_compiler_info(self, executable, stdout, stderr):
         output = stdout.split(b'\r\n')
         macros = []
         for line in output:
@@ -202,14 +202,15 @@ class MSVCCompiler:
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
-        return {
-            'executable' : os.path.basename(executable),
-            'id' : version,
-            'macros' : macros,
-            'set_object_name' : self.set_object_name_option(),
-            'set_pch_file' : self.set_pch_file_option(),
-            'set_include_option' : self.set_include_option(),
-        }, self.compiler_files[version[0][:5]]
+        return dict(
+            executable = os.path.basename(executable),
+            id = version,
+            macros = macros,
+            set_object_name = self.set_object_name_option(),
+            set_pch_file = self.set_pch_file_option(),
+            set_include_option = self.set_include_option(),
+            files = self.compiler_files[version[0][:5]]
+        ) 
 
     compiler_files = {
         b'15.00' : 

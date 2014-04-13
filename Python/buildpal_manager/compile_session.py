@@ -37,7 +37,6 @@ class CompileSession:
         self.task = task
         self.node = node
         self.task.register_session(self)
-        self.compiler = task.compiler()
         self.cancelled = False
         self.executor = executor
         self.compressor = compressor

@@ -1,4 +1,4 @@
-from buildpal_common import SimpleTimer, MessageProtocol, compress_file
+from buildpal_common import SimpleTimer, MessageProtocol, compress_file, Profiler
     
 import asyncio
 
@@ -7,7 +7,7 @@ from multiprocessing import cpu_count
 from time import sleep, time
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
-from threading import Thread, Lock, current_thread
+from threading import Thread
 from subprocess import list2cmdline, Popen
 
 from .header_repository import HeaderRepository
@@ -42,15 +42,12 @@ class Counter:
 
 
 class OverrideCreateProcess:
-    lock = Lock()
-
     def __init__(self, overrides):
         self.overrides = overrides
         self.save = None
 
     def __enter__(self):
         if self.overrides:
-            self.lock.acquire()
             self.save = subprocess._winapi.CreateProcess
             subprocess._winapi.CreateProcess = self.create_process
 
@@ -58,7 +55,6 @@ class OverrideCreateProcess:
         if self.save:
             subprocess._winapi.CreateProcess = self.save
             self.save = None
-            self.lock.release()
 
     def create_process(self, *args):
         assert self.overrides
@@ -185,9 +181,11 @@ class CompileSession:
 
         @classmethod
         def cancel(cls, session):
-            with session.compiler_state_lock:
-                if hasattr(session, 'process'):
+            if session.process is not None:
+                try:
                     session.process.terminate()
+                except ProcessLookupError:
+                    pass
 
     class StateWaitForConfirmation(SessionState):
         can_be_cancelled = True
@@ -218,9 +216,9 @@ class CompileSession:
         self.runner = runner
         self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
         self.times = {}
-        self.compiler_state_lock = Lock()
         self.completed = False
         self.cancel_pending = False
+        self.process = None
         self.__state = None
         self.change_state(self.StateGetTask)
 
@@ -270,25 +268,19 @@ class CompileSession:
             self.compiler_id(), self.__run_compiler)
 
     def __run_compiler(self):
-        # Before we actually run the expensive compile operation, make sure that
-        # we have not been cancelled yet.
         if self.cancel_pending:
             self.cancel_session()
             return
         self.cancel_selfdestruct()
-        self.runner.async_compile(self.__async_run_compiler, time()
-            ).add_done_callback(self.__compile_completed)
 
-    def __async_run_compiler(self, start_time):
-        self.times['waiting for job slot'] = time() - start_time
-        obj_handle, obj_name= tempfile.mkstemp(
+        obj_handle, self.object_file = tempfile.mkstemp(
             dir=self.runner.scratch_dir, suffix='.obj')
         os.close(obj_handle)
 
         self.source_file = os.path.join(self.include_path, self.src_loc)
 
         compiler_info = self.task['compiler_info']
-        output = compiler_info['set_object_name'].format(obj_name)
+        output = compiler_info['set_object_name'].format(self.object_file)
         pch_switch = []
         overrides = {}
         if self.task['pch_file']:
@@ -317,20 +309,12 @@ class CompileSession:
         command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
             includes + [output, self.source_file])
 
-        start = time()
-        with self.compiler_state_lock, OverrideCreateProcess(overrides):
-            self.process = Popen(command, cwd=self.include_path,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (stdout, stderr), retcode, done = self.process.communicate(), \
-            self.process.returncode, time()
-        with self.compiler_state_lock:
-            del self.process
-        self.times['compiler time'] = done - start
-        return obj_name, stdout, stderr, retcode
+        self.runner.run_compiler(self, command, self.include_path, overrides,
+            self.__compile_completed)
 
     def __compile_completed(self, future):
         try:
-            obj_name, stdout, stderr, retcode = future.result()
+            stdout, stderr, retcode = future.result()
         except Exception as e:
             if self.state == self.StateRunningCompiler:
                 self.change_state(self.StateFailed)
@@ -350,7 +334,6 @@ class CompileSession:
             if self.state == self.StateRunningCompiler:
                 if retcode == 0:
                     self.change_state(self.StateWaitForConfirmation)
-                    self.object_file = obj_name
                 self.sender.send_msg([b'SERVER_DONE', pickle.dumps(
                     (retcode, stdout, stderr, self.times))])
                 if retcode == 0:
@@ -442,7 +425,6 @@ class CompileSession:
         result = self.runner.header_repository().prepare_dir(fqdn, new_files,
             self.repo_transaction_id, self.include_path)
         self.times['prepare include directory'] = shared_prepare_dir_timer.get()
-        del shared_prepare_dir_timer
         return result
 
 class ServerProtocol(MessageProtocol):
@@ -462,10 +444,44 @@ class ServerProtocol(MessageProtocol):
             session.process_msg(msg)
 
 
-class ServerRunner:
+class ProcessRunner:
+    def __init__(self, limit, loop):
+        self.limit = limit
+        self.current = 0
+        self.waiters = []
+        self.ready = asyncio.Event(loop=loop)
+        self.loop = loop
+
+    @asyncio.coroutine
+    def subprocess_exec(self, session, args, cwd, overrides):
+        start = time()
+        while self.current == self.limit:
+            yield from self.ready.wait()
+        self.ready.clear()
+        assert self.current < self.limit
+        compile_start = time()
+        session.times['waiting for job slot'] = compile_start - start
+        self.current += 1
+        try:
+            with OverrideCreateProcess(overrides):
+                session.process = yield from asyncio.create_subprocess_exec(*args,
+                    cwd=cwd, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, loop=self.loop)
+            stdout, stderr = yield from session.process.communicate()
+            retcode = yield from session.process.wait()
+            session.times['compiler time'] = time() - compile_start
+        finally:
+            session.process = None
+            self.current -= 1
+            self.ready.set()
+        return stdout, stderr, retcode
+
+class ServerRunner(ProcessRunner):
     def __init__(self, port, compile_slots):
-        self.__port = port
+        self.loop = asyncio.ProactorEventLoop()
+        self.process_runner = ProcessRunner(compile_slots, self.loop)
         self.__compile_slots = compile_slots
+        self.__port = port
         self.sessions = {}
 
         dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
@@ -474,7 +490,6 @@ class ServerRunner:
         self.counter = 0
 
         # Data shared between sessions.
-        self.__compile_thread_pool = ThreadPoolExecutor(self.__compile_slots)
         self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
         self.__header_repository = HeaderRepository(self.scratch_dir)
         self.__pch_repository = PCHRepository(self.scratch_dir)
@@ -482,7 +497,6 @@ class ServerRunner:
         self.__scheduler = sched.scheduler()
 
     def scheduler(self): return self.__scheduler
-    def compile_thread_pool(self): return self.__compile_thread_pool
     def misc_thread_pool(self): return self.__misc_thread_pool
     def header_repository(self): return self.__header_repository
     def pch_repository(self): return self.__pch_repository
@@ -499,9 +513,9 @@ class ServerRunner:
         return asyncio.async(self.loop.run_in_executor(self.misc_thread_pool(),
             callable, *args), loop=self.loop)
 
-    def async_compile(self, callable, *args):
-        return asyncio.async(self.loop.run_in_executor(
-            self.compile_thread_pool(), callable, *args), loop=self.loop)
+    def run_compiler(self, session, args, cwd, overrides, done_callback):
+        asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, overrides),
+            loop=self.loop).add_done_callback(done_callback)
 
     def run_event_loop(self):
         @asyncio.coroutine
@@ -512,10 +526,14 @@ class ServerRunner:
             asyncio.async(print_stats(), loop=self.loop)
 
         asyncio.async(print_stats(), loop=self.loop)
-        self.loop.run_forever()
+        profiler = Profiler()
+        try:
+            with profiler:
+                self.loop.run_forever()
+        finally:
+            profiler.print()
 
     def run(self, terminator=None):
-        self.loop = asyncio.ProactorEventLoop()
         def protocol_factory():
             return ServerProtocol(self)
         self.server = self.loop.run_until_complete(self.loop.create_server(
@@ -542,5 +560,4 @@ class ServerRunner:
             self.loop.close()
 
     def shutdown(self):
-        self.__compile_thread_pool.shutdown()
         self.__misc_thread_pool.shutdown()

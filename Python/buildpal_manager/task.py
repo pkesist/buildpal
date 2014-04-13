@@ -20,14 +20,17 @@ class Task:
         if interval_name:
             self.durations[interval_name], self.last_time = curr_time - self.last_time, curr_time
 
+    @property
     def compiler_info(self):
         return self.command_processor.compiler_info
 
+    @property
     def compiler(self):
-        return self.command_processor.compiler()
+        return self.command_processor.compiler
 
+    @property
     def executable(self):
-        return self.command_processor.executable()
+        return self.command_processor.executable
 
     def is_completed(self):
         return bool(self.completed_by_session)

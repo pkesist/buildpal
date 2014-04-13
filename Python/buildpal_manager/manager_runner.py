@@ -56,8 +56,8 @@ class ClientProcessor(MessageProtocol):
             return True
 
         if executable in self.compiler_info:
-            info, files = self.compiler_info[executable]
-            self.command_processor.set_compiler_info(info, files)
+            self.command_processor.set_compiler_info(
+                self.compiler_info[executable])
             self.__create_tasks()
         else:
             self.command_processor.request_compiler_info(
@@ -67,14 +67,13 @@ class ClientProcessor(MessageProtocol):
         # No more data will be read from the client.
         assert self.command_processor.state == \
             self.command_processor.STATE_HAS_COMPILER_INFO
-        if not self.command_processor.executable() in self.compiler_info:
-            self.compiler_info[self.command_processor.executable()] = \
-                self.command_processor.compiler_info, \
-                self.command_processor.compiler_files
+        if not self.command_processor.executable in self.compiler_info:
+            self.compiler_info[self.command_processor.executable] = \
+                self.command_processor.compiler_info
         for task in self.command_processor.create_tasks():
-            task.server_task_info['compiler_info'] = task.compiler_info()
+            task.server_task_info['compiler_info'] = task.compiler_info
             task.preprocess_task_info['macros'].extend(
-                task.compiler_info()['macros'])
+                task.compiler_info['macros'])
             task.pp_timer = SimpleTimer()
             self.task_created_func(task)
 

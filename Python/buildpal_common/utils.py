@@ -1,6 +1,8 @@
 import os
 import tempfile
 import zlib
+import pstats
+import cProfile
 
 from time import time
 
@@ -30,3 +32,19 @@ class SimpleTimer:
 
     def get(self):
         return time() - self.__start
+
+class Profiler:
+    def __init__(self):
+        self.stats = pstats.Stats()
+
+    def __enter__(self):
+        self.profile = cProfile.Profile()
+        self.profile.enable()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.profile.disable()
+        self.stats.add(self.profile)
+
+    def print(self):
+        self.stats.sort_stats('cumtime')
+        self.stats.print_stats()

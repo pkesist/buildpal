@@ -2,11 +2,16 @@
 Introduction
 ************
 
+.. epigraph::
+
+    *"Alone we can do so little; together we can do so much"*
+
+    -- Helen Keller
+
 What is it?
 ===========
 
-*BuildPal* is a tool for speeding up large C/C++ project builds. Inspired by
-the `distcc <https://code.google.com/p/distcc/>`_ project, it works by
+``BuildPal`` is a tool for speeding up large C/C++ project build by
 distributing parts of build process to other machines on the network.
 
 Why another distributed compiler?
@@ -15,24 +20,29 @@ Why another distributed compiler?
 The existing open-source distributed compilers have some, if not all, of the
 following limitations.
 
-* No Windows support.
+* **No Windows support.**
     
     Pretty much all open-source distributed compilers are designed for \*NIX
-    systems, usually targetting GCC compiler.
+    systems, usually targetting GCC.
 
-* No precompiled header support.
+* **No precompiled header support.**
 
-* Sub-optimal task scheduling algorithms.
+    It is difficult to speed up project build time if you have to forfeit the
+    best single-machine optimization.
 
-    Task scheduling is usually round-robin, which does not work well with farms
-    containing slaves with heterogeneous performance characteristics.
+* **Sub-optimal task scheduling algorithms.**
 
-* Slow task propeller.
+    Task scheduling is usually round-robin, possibly weighted by number of
+    paralell jobs a machine can perform. This does not necessarily work well
+    with a farm containing slaves with heterogeneous performance
+    characteristics.
+
+* **Slow task propeller.**
 
     Pushing tasks from the client machine to the farm must be as fast as
-    possible.
+    possible. The speed of the leader is the speed of the gang.
 
-BuildPal tries to overcome all of the mentioned limitations.
+``BuildPal`` tries to overcome all of the mentioned limitations.
 
 Features
 ========
@@ -54,20 +64,20 @@ Features
 
 **Remote preprocessing**
 
-    BuildPal does not preprocess headers on the local machine.
+    ``BuildPal`` does not preprocess headers on the local machine.
     Headers used by a source file are collected and transfered to the slave.
     These headers will be reused by the slave machines for subsequent
     compilations.
 
 **PCH support**
 
-    BuildPal supports precompiled headers. Precompiled headers are
+    ``BuildPal`` supports precompiled headers. Precompiled headers are
     created locally, on the client machine and are transferred to slave machines
     as needed.
 
 **Self-balancing**
 
-    BuildPal tries to balance the work between the nodes appropriately by
+    ``BuildPal`` tries to balance the work between the nodes appropriately by
     keeping track of their statistics, giving more work to faster machines.
     Additionally, if a node runs out of work, it may decide to help out a
     slower node.

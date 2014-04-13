@@ -1,7 +1,7 @@
-.. _future-dev-plans:
+.. _future-wish-list:
 
-Future development plans
-========================
+Future development wish-list
+============================
 
 * Support more platforms.
     * GCC compiler support (Windows).
@@ -9,7 +9,9 @@ Future development plans
     * Linux platform support (GCC/Clang).
     * ...
 
-* Support adding/removing farm nodes during build.
+* IPV6 support.
+
+* Support adding/removing farm nodes on-the-fly.
 
 * Move task delegation logic from Manager to build farm.
     * This would make the farm 'client aware', providing better performance
@@ -21,3 +23,5 @@ Future development plans
 
 * Reporting.
     * Generate detailed report about build process.
+    * Report information is already being collected and stored in the database,
+      but is not yet user-friendly.

@@ -20,7 +20,6 @@ Distributed compilation of your C/C++ project
     build_systems
     building
     benchmarks
-    internals
     dependencies
     bugs
     future

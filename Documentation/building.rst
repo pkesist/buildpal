@@ -1,11 +1,16 @@
 Building ``BuildPal``
 =====================
 
-In order to build ``BuildPal`` you need Python 3.4 with
-`setuptools <http://pypi.python.org/pypi/setuptools>`_. Other dependencies will
-be downloaded and built automatically. `setuptools`_ comes bundled with
-Python 3.4. If it is missing for some reason you can easily install them by
-running::
+.. _setuptools: http://pypi.python.org/pypi/setuptools
+
+In order to build ``BuildPal`` you need:
+
+    * ``Python 3.4`` (with setuptools_)
+    * ``Visual C++ 2012 (11.0)``
+    
+Other dependencies will be downloaded and built automatically. setuptools_
+comes bundled with Python 3.4. If it is missing for some reason you can easily
+install it by running::
 
     python -m ensurepip
 
@@ -46,6 +51,7 @@ It can be run with::
 
 Usually, you want to avoid installing Python on every machine on the build farm.
 For this you can create an stand-alone distribution package with
+:ref:`cx_Freeze <cx-freeze>`.
 
 
 Building the Client
@@ -60,12 +66,23 @@ installing it. The compiler executable :file:`bp_cl.exe` will be produced in the
 top-level project directory. To simplify its usage, consider moving the
 executable somewhere on ``PATH``.
 
+.. _cx-freeze::
+
 Creating standalone packages with ``cx_Freeze``
 -----------------------------------------------
 
-* Install `cx_Freeze <http://cx-freeze.sourceforge.net/>`_.
+.. _cx_Freeze: http://cx-freeze.sourceforge.net/
 
-* In the ``Python`` subdirectory there are cx_Freeze scripts which to create
+* Install cx_Freeze_.
+
+.. note::
+
+    Latest official cx_Freeze_ release (4.3.2) does not support Python 3.4 very
+    well. Currently, creating a standalone package requires using a
+    development version of cx_Freeze_ with several patches which have not yet
+    been merged.
+
+* In the ``Python`` subdirectory there are cx_Freeze_ scripts which to create
   standalone packages.
 
     * :file:`server_installer.py`

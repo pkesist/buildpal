@@ -1,7 +1,12 @@
 Dependencies
 ============
 
-``BuildPal`` depends on the following projects:
+.. epigraph::
+
+    *"Theft from a single author is plagiarism. Theft from two is comparative study.
+    Theft from three or more is research."*
+
+    -- Anonymous
 
 `Python <http://www.python.org>`_
 ---------------------------------

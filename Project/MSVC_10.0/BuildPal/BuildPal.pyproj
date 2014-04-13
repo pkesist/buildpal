@@ -100,7 +100,6 @@
     <Content Include="Documentation\dependencies.rst" />
     <Content Include="Documentation\future.rst" />
     <Content Include="Documentation\index.rst" />
-    <Content Include="Documentation\internals.rst" />
     <Content Include="Documentation\intro.rst" />
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />

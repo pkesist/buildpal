@@ -36,7 +36,7 @@ class CompilerRepository:
         self.__partial_compilers.add(id)
         return True
 
-    def when_compiler_is_available(self, compiler_id, handler):
+    def when_compiler_is_ready(self, compiler_id, handler):
         id = self.__unique_id(compiler_id)
         assert id in self.__compilers or id in self.__partial_compilers
         if id in self.__compilers:

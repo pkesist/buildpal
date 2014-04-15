@@ -264,7 +264,7 @@ class CompileSession:
             self.__check_compiler_files()
 
     def __check_compiler_files(self):
-        self.runner.compiler_repository().when_compiler_is_available(
+        self.runner.compiler_repository().when_compiler_is_ready(
             self.compiler_id(), self.__run_compiler)
 
     def __run_compiler(self):
@@ -365,27 +365,24 @@ class CompileSession:
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
-    def send_threadsafe(self, msg):
-        self.runner.loop.call_soon_threadsafe(
-            self.sender.send_msg, msg)
-
     def send_object_file(self, obj_file):
-        def send_compressed_file():
+        def compress_disk_file():
             fh = os.open(obj_file, os.O_RDONLY | os.O_BINARY |
                 os.O_NOINHERIT)
             try:
                 with os.fdopen(fh, 'rb') as file:
-                    for buffer in compress_file(file):
-                        self.send_threadsafe([b'\x01', buffer])
-                    self.send_threadsafe([b'\x00', b''])
+                    return list(compress_file(file))
             finally:
                 os.remove(obj_file)
 
-        def complete_session(future):
+        def send_compressed(future):
+            for buffer in future.result():
+                self.sender.send_msg([b'\x01', buffer])
+            self.sender.send_msg([b'\x00', b''])
             self.session_done()
 
-        self.runner.async_run(send_compressed_file).add_done_callback(
-            complete_session)
+        self.runner.async_run(compress_disk_file).add_done_callback(
+            send_compressed)
 
     def cancel_session(self):
         assert self.state != self.StateCancelled
@@ -526,12 +523,7 @@ class ServerRunner(ProcessRunner):
             asyncio.async(print_stats(), loop=self.loop)
 
         asyncio.async(print_stats(), loop=self.loop)
-        profiler = Profiler()
-        try:
-            with profiler:
-                self.loop.run_forever()
-        finally:
-            profiler.print()
+        self.loop.run_forever()
 
     def run(self, terminator=None):
         def protocol_factory():

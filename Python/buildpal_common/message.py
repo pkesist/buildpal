@@ -96,5 +96,3 @@ class MessageProtocol(asyncio.Protocol):
 
     def process_msg(self, msg):
         raise NotImplementedError()
-
-

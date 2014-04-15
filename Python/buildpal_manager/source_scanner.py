@@ -4,8 +4,6 @@ from buildpal_common import SimpleTimer
 
 import preprocessing
 import os
-import cProfile
-import pstats
 
 from collections import defaultdict
 from multiprocessing import cpu_count
@@ -62,9 +60,8 @@ class SourceScanner:
         self.out_queue = Queue()
         self.closing = False
         self.threads = set()
-        self.stats = pstats.Stats()
         for i in range(thread_count):
-            thread = Thread(target=self.__process_task_worker, args=(notify, update_ui, self.stats))
+            thread = Thread(target=self.__process_task_worker, args=(notify, update_ui))
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
@@ -88,10 +85,7 @@ class SourceScanner:
         except Empty:
             return None
 
-    def __process_task_worker(self, notify, update_ui, stats):
-        #profile = cProfile.Profile()
-        #profile.enable()
-
+    def __process_task_worker(self, notify, update_ui):
         preprocessor = preprocessing.Preprocessor(self.cache)
         while True:
             try:
@@ -108,8 +102,6 @@ class SourceScanner:
                     notify(task)
             except Empty:
                 if self.closing:
-                    #profile.disable()
-                    #stats.add(profile)
                     return
 
     def __enter__(self):
@@ -122,5 +114,3 @@ class SourceScanner:
         self.closing = True
         for thread in self.threads:
             thread.join()
-        #self.stats.sort_stats('cumtime')
-        #self.stats.print_stats()

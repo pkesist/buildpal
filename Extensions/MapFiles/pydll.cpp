@@ -183,7 +183,7 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
         wenvironment = NULL;
     }
 
-    FileMapping fileMapping;
+    DWORD fileMap = createFileMap();
     {
         PyObject * key;
         PyObject * value;
@@ -191,11 +191,11 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
 
         while ( PyDict_Next( file_mapping, &pos, &key, &value ) )
         {
-            fileMapping.insert( std::make_pair( PyUnicode_AsUnicode( key ), PyUnicode_AsUnicode( value ) ) );
+            mapFileW( fileMap, PyUnicode_AsUnicode( key ), PyUnicode_AsUnicode( value ) );
         }
     }
     Py_BEGIN_ALLOW_THREADS
-    result = createProcessWithOverridesW(application_name,
+    result = createProcessWithMappingW(application_name,
                            command_line,
                            NULL,
                            NULL,
@@ -205,7 +205,7 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
                            current_directory,
                            &si,
                            &pi,
-                           fileMapping);
+                           fileMap);
     Py_END_ALLOW_THREADS
 
     Py_XDECREF(environment);
@@ -220,8 +220,55 @@ PyObject * mapFiles_createProcess( PyObject* self, PyObject* args )
                          pi.dwThreadId);
 }
 
+
+PyObject * mapFiles_mapFile( PyObject* self, PyObject* args )
+{
+    PyObject * virtualFile;
+    PyObject * file;
+
+    if ( !PyArg_ParseTuple( args, "OO:mapFiles_mapFile", &virtualFile, &file ) )
+        return NULL;
+    if ( !PyUnicode_Check( virtualFile ) )
+        return NULL;
+    if ( !PyUnicode_Check( file ) )
+        return NULL;
+    if ( mapFileGlobalW( PyUnicode_AsUnicode( virtualFile ), PyUnicode_AsUnicode( file ) ) )
+        Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+PyObject * mapFiles_unmapFile( PyObject* self, PyObject* args )
+{
+    PyObject * virtualFile;
+
+    if ( !PyArg_ParseTuple( args, "O:mapFiles_unmapFile", &virtualFile ) )
+        return NULL;
+    if ( !PyUnicode_Check( virtualFile ) )
+        return NULL;
+    if ( unmapFileGlobalW( PyUnicode_AsUnicode( virtualFile ) ) )
+        Py_RETURN_TRUE;
+    Py_RETURN_FALSE;
+}
+
+PyObject * mapFiles_enable( PyObject * self )
+{
+    hookWinAPIs();
+    Py_RETURN_NONE;
+}
+
+PyObject * mapFiles_disable( PyObject * self )
+{
+    unhookWinAPIs();
+    Py_RETURN_NONE;
+}
+
+
 static PyMethodDef mapFilesMethods[] = {
     { "createProcess", mapFiles_createProcess, METH_VARARGS, "Add a file mapping for processes." },
+    { "mapFile"      , mapFiles_mapFile      , METH_VARARGS, "Map a file to another one." },
+    { "unmapFile"    , mapFiles_unmapFile    , METH_VARARGS, "Unmap a file." },
+    { "enable"       , (PyCFunction)mapFiles_enable       , METH_NOARGS , "Enable hooks." },
+    { "disable"      , (PyCFunction)mapFiles_disable      , METH_NOARGS , "Disable hooks." },
     { NULL, NULL, 0, NULL }
 };
 

@@ -21,14 +21,22 @@ alias map_files_sources
 : 
     mapFilesInject.cpp
     dllInject.cpp
-    remoteOps.cpp
     shlwapi
     user32
 ;
 
-lib map_files_inj32 : map_files_sources : <def-file>mapFilesInject32.def <link>shared <address-model>32 ;
+lib map_files_inj32 : map_files_sources :
+    <def-file>mapFilesInject32.def
+    <link>shared
+    <address-model>32
+;
 explicit map_files_inj32 ;
-lib map_files_inj64 : map_files_sources : <def-file>mapFilesInject64.def <link>shared <address-model>64 ;
+
+lib map_files_inj64 : map_files_sources :
+    <def-file>mapFilesInject64.def
+    <link>shared
+    <address-model>64
+;
 explicit map_files_inj64 ;
 
 alias select_inject_module : map_files_inj32 ;
@@ -41,6 +49,5 @@ install _
     map_files_inj32
     map_files_inj64
 :
-    <variant>release
     <location>$(TARGET_DIR)
 ;

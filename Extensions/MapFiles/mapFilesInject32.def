@@ -1,7 +1,14 @@
 LIBRARY map_files_inj32.dll
 EXPORTS
-    hookWinAPIs @1
-    unhookWinAPIs @2
-    overrideFiles__internal @3
-    createProcessWithOverridesA @4
-    createProcessWithOverridesW @5
+    hookWinAPIs
+    unhookWinAPIs
+    mapFileGlobalA
+    mapFileGlobalW
+    unmapFileGlobalA
+    unmapFileGlobalW
+    createFileMap
+    mapFileA
+    mapFileW
+    createProcessWithMappingA
+    createProcessWithMappingW
+    Initialize

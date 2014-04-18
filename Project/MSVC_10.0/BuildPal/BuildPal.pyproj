@@ -32,6 +32,7 @@
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Extensions\MapFiles\Loader\loader.py" />
     <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
     <Compile Include="Python\buildpal_manager\compilers\utils.py" />
@@ -85,6 +86,7 @@
     <Folder Include="Extensions\HeaderScanner\" />
     <Folder Include="Extensions\MapFiles\" />
     <Folder Include="Executables\" />
+    <Folder Include="Extensions\MapFiles\Loader\" />
     <Folder Include="Python\" />
     <Folder Include="Python\buildpal_manager" />
     <Folder Include="Python\buildpal_common" />
@@ -123,13 +125,15 @@
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
     <Content Include="Extensions\MapFiles\dllInject.hpp" />
     <Content Include="Extensions\MapFiles\Jamroot.jam" />
+    <Content Include="Extensions\MapFiles\Loader\loader.awk" />
+    <Content Include="Extensions\MapFiles\Loader\loader.cpp" />
+    <Content Include="Extensions\MapFiles\Loader\loader32.inc" />
+    <Content Include="Extensions\MapFiles\Loader\loader64.inc" />
     <Content Include="Extensions\MapFiles\mapFilesInject.cpp" />
     <Content Include="Extensions\MapFiles\mapFilesInject.hpp" />
     <Content Include="Extensions\MapFiles\mapFilesInject32.def" />
     <Content Include="Extensions\MapFiles\mapFilesInject64.def" />
     <Content Include="Extensions\MapFiles\pydll.cpp" />
-    <Content Include="Extensions\MapFiles\remoteOps.cpp" />
-    <Content Include="Extensions\MapFiles\remoteOps.hpp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

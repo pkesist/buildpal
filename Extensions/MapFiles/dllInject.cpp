@@ -1,119 +1,145 @@
 //----------------------------------------------------------------------------
 #include "DLLInject.hpp"
-#include "remoteOps.hpp"
 
 #include <cassert>
 #include <Windows.h>
 
-bool const isCurrentProcess64Bit = sizeof(void *) == 8;
+unsigned char const load32[] = {
+    #include "Loader/loader32.inc"
+};
 
-DLLInjector::DLLInjector( DWORD const processId )
-	:
-	processHandle_( ::OpenProcess( PROCESS_ALL_ACCESS, false, processId ) )
+unsigned char const load64[] = {
+    #include "Loader/loader64.inc"
+};
+
+bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
 {
-    assert( processHandle_ );
-    bool const result = injectLibrary();
-    assert( result );
-    assert( moduleHandle_ );
-}
+    char const currentInjectDLL[] =
+#if _WIN64
+    "map_files_inj64.dll"
+#else
+    "map_files_inj32.dll"
+#endif
+;
 
-
-DWORD DLLInjector::callRemoteProc( char const * const func, void * arg )
-{
-    LPTHREAD_START_ROUTINE const remote =
-        (LPTHREAD_START_ROUTINE)GetRemoteProcAddress(
-        processHandle_, moduleHandle_, func );
-    assert( remote );
-	HANDLE callRemoteProcThread = CreateRemoteThread( processHandle_, NULL,
-        16 * 1024, remote, arg, 0, NULL );
-	::WaitForSingleObject( callRemoteProcThread, INFINITE );
-	DWORD remoteThreadExitCode;
-	::GetExitCodeThread( callRemoteProcThread, &remoteThreadExitCode );
-	::CloseHandle( callRemoteProcThread );
-    return remoteThreadExitCode;
-}
-
-
-DLLInjector::~DLLInjector()
-{
-    CloseHandle( processHandle_ );
-}
-
-
-bool DLLInjector::injectLibrary()
-{
-    char const inject32bit[] = "map_files_inj32.dll";
-    char const inject64bit[] = "map_files_inj64.dll";
-
-    // We use the fact that one of these modules is loaded in the current
-    // process.
     HMODULE currentLoaded;
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        isCurrentProcess64Bit ? inject64bit : inject32bit,
+        currentInjectDLL,
         &currentLoaded );
     assert( result );
     char moduleToLoad[ MAX_PATH ];
     DWORD const moduleNameSize = GetModuleFileName( currentLoaded, moduleToLoad, MAX_PATH );
 
-    bool on64BitOS;
-    if ( isCurrentProcess64Bit )
-        on64BitOS = true;
+    typedef BOOL (WINAPI * ISWOW64)(HANDLE, PBOOL);
+    ISWOW64 fnIsWow64 = (ISWOW64)GetProcAddress(
+        GetModuleHandle("Kernel32"), "IsWow64Process" );
+
+    bool targetProcessIs64Bit = false;
+    if ( fnIsWow64 )
+    {
+        BOOL tempBool;
+#ifdef _WIN64
+        bool const osIs64Bit = true;
+#else
+        bool const osIs64Bit = fnIsWow64( GetCurrentProcess(), &tempBool ) && tempBool;
+#endif
+        if ( osIs64Bit )
+        {
+            targetProcessIs64Bit = !(fnIsWow64( processHandle, &tempBool ) && tempBool);
+        }
+    }
     else
     {
-        BOOL isThis64bitOs;
-        BOOL result = IsWow64Process( GetCurrentProcess(), &isThis64bitOs );
-        assert( result );
-        on64BitOS = isThis64bitOs != 0;
+        // No WOW64 - we must be on 32-bit
     }
 
-    bool targetProcessIs64bit = false;
-    if ( on64BitOS )
+#ifdef _WIN64
+    if ( !targetProcessIs64Bit )
     {
-        BOOL isWow64Process;
-        BOOL result = IsWow64Process( processHandle_, &isWow64Process );
-        assert( result );
-        targetProcessIs64bit = !isWow64Process;
+        moduleToLoad[ moduleNameSize - 6 ] = '3';
+        moduleToLoad[ moduleNameSize - 5 ] = '2';
     }
-
-    if ( targetProcessIs64bit != isCurrentProcess64Bit )
+#else
+    if ( targetProcessIs64Bit )
     {
-        assert( moduleNameSize >= sizeof(inject32bit) );
-        if ( targetProcessIs64bit )
-        {
-            moduleToLoad[ moduleNameSize - 6 ] = '6';
-            moduleToLoad[ moduleNameSize - 5 ] = '4';
-        }
-        else
-        {
-            moduleToLoad[ moduleNameSize - 6 ] = '3';
-            moduleToLoad[ moduleNameSize - 5 ] = '2';
-        }
+        // Does not work - eventually CreateRemoteThread() will fail with
+        // ERROR_ACCESS_DENIED.
+        return false;
+    }
+#endif
+
+    SIZE_T written;
+    void * dllName = ::VirtualAllocEx( processHandle, NULL, moduleNameSize, MEM_COMMIT, PAGE_READWRITE );
+    ::WriteProcessMemory( processHandle, dllName, moduleToLoad, moduleNameSize, &written );
+    assert( written == moduleNameSize );
+
+    char const initFunc[] = "Initialize";
+    void * dllInit = ::VirtualAllocEx( processHandle, NULL, sizeof(initFunc), MEM_COMMIT, PAGE_READWRITE );
+    ::WriteProcessMemory( processHandle, dllInit, initFunc, sizeof(initFunc), &written );
+    assert( written == sizeof(initFunc) );
+
+    unsigned char const * loaderCode;
+    unsigned int loaderCodeLength;
+    if ( targetProcessIs64Bit )
+    {
+        loaderCode = load64;
+        loaderCodeLength = sizeof(load64);
+    }
+    else
+    {
+        loaderCode = load32;
+        loaderCodeLength = sizeof(load32);
     }
 
-	void * remoteDllName = ::VirtualAllocEx( processHandle_, NULL, moduleNameSize, MEM_COMMIT, PAGE_READWRITE );
-	if ( remoteDllName == NULL )
-		return false;
-	SIZE_T count;
-	::WriteProcessMemory( processHandle_, remoteDllName, moduleToLoad, moduleNameSize, &count );
-	if ( count != moduleNameSize )
-		return false;
-	loadLibrary( remoteDllName );
-	::VirtualFreeEx( processHandle_, remoteDllName, moduleNameSize, MEM_DECOMMIT );
-    return true;
-}
+    DWORD remoteThreadExitCode;
+    // Prepare the function
+    void * funcData = VirtualAllocEx( processHandle, NULL, loaderCodeLength, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
+    WriteProcessMemory( processHandle, funcData, loaderCode, loaderCodeLength, &written );
+    assert( written == loaderCodeLength );
 
+    // Prepare the parameters
+    PBYTE params = (PBYTE)VirtualAllocEx( processHandle, NULL, targetProcessIs64Bit ? 24 : 12, MEM_COMMIT, PAGE_READWRITE );
 
-void DLLInjector::loadLibrary( void * dllName )
-{
-	DWORD remoteThreadExitCode;
-	assert( dllName != 0 );
-	PTHREAD_START_ROUTINE pLoadLibraryA = (PTHREAD_START_ROUTINE) GetProcAddress( GetModuleHandle( "Kernel32" ), "LoadLibraryA" );
-	HANDLE loadLibraryThread = CreateRemoteThread( processHandle_, NULL, 0, pLoadLibraryA, dllName, 0, NULL );
-	::WaitForSingleObject( loadLibraryThread, INFINITE );
-	::GetExitCodeThread( loadLibraryThread, &remoteThreadExitCode );
-	::CloseHandle( loadLibraryThread );
-    assert( remoteThreadExitCode != 0 );
-	moduleHandle_ = (HMODULE)remoteThreadExitCode;
+#ifdef _WIN64
+    if ( targetProcessIs64Bit )
+    {
+        WriteProcessMemory( processHandle, params + 0 * 8, &dllName   , 8, &written );
+        assert( written == 8 );
+        WriteProcessMemory( processHandle, params + 1 * 8, &dllInit   , 8, &written );
+        assert( written == 8 );
+        WriteProcessMemory( processHandle, params + 2 * 8, &pipeHandle, 8, &written );
+        assert( written == 8 );
+    }
+    else
+    {
+        assert( !((UINT_PTR)dllName    & 0xFFFFFFFF00000000) );
+        assert( !((UINT_PTR)dllInit    & 0xFFFFFFFF00000000) );
+        assert( !((UINT_PTR)pipeHandle & 0xFFFFFFFF00000000) );
+        WriteProcessMemory( processHandle, params + 0 * 4, &dllName, 4, &written );
+        assert( written == 4 );
+        WriteProcessMemory( processHandle, params + 1 * 4, &dllInit, 4, &written );
+        assert( written == 4 );
+        WriteProcessMemory( processHandle, params + 2 * 4, &pipeHandle, 4, &written );
+        assert( written == 4 );
+    }
+#else
+    assert( !targetProcessIs64Bit );
+    WriteProcessMemory( processHandle, params + 0 * 4, &dllName   , 4, &written );
+    assert( written == 8 );
+    WriteProcessMemory( processHandle, params + 1 * 4, &dllInit   , 4, &written );
+    assert( written == 8 );
+    WriteProcessMemory( processHandle, params + 2 * 4, &pipeHandle, 4, &written );
+    assert( written == 8 );
+#endif
+
+    // Call the function.
+    HANDLE loadLibraryThread = CreateRemoteThread( processHandle, NULL, 0, (LPTHREAD_START_ROUTINE)funcData, params, 0, NULL );
+    ::WaitForSingleObject( loadLibraryThread, INFINITE );
+    ::GetExitCodeThread( loadLibraryThread, &remoteThreadExitCode );
+    ::VirtualFreeEx( processHandle, dllName, moduleNameSize, MEM_DECOMMIT );
+    ::VirtualFreeEx( processHandle, dllInit, sizeof(initFunc), MEM_DECOMMIT );
+    ::VirtualFreeEx( processHandle, funcData, targetProcessIs64Bit ? 24 : 12, MEM_DECOMMIT );
+    return remoteThreadExitCode == 0;
 }
 
 

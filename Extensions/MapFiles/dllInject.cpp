@@ -2,6 +2,7 @@
 #include "DLLInject.hpp"
 
 #include <cassert>
+#include <stdexcept>
 #include <Windows.h>
 
 unsigned char const load32[] = {
@@ -12,9 +13,53 @@ unsigned char const load64[] = {
     #include "Loader/loader64.inc"
 };
 
+struct AllocProcessMemory
+{
+    AllocProcessMemory( HANDLE p, DWORD len, DWORD flags = PAGE_READWRITE )
+        : p_( p ), offset_( 0 )
+    {
+        mem_ = (PBYTE)::VirtualAllocEx( p_, NULL, len, MEM_COMMIT | MEM_RESERVE, flags );
+        if ( !mem_ )
+            throw std::bad_alloc();
+    }
+
+    ~AllocProcessMemory()
+    {
+        ::VirtualFreeEx( p_, mem_, len_, MEM_DECOMMIT );
+    }
+
+    void * get() const { return mem_; }
+
+    bool write( void const * data, DWORD len )
+    {
+        if ( offset_ + len > len )
+            return false;
+        SIZE_T written;
+        if ( WriteProcessMemory( p_, mem_ + offset_, data, len, &written ) && ( written == len ) )
+        {
+            offset_ += len;
+            return true;
+        }
+        return false;
+    }
+
+    bool skip( DWORD len )
+    {
+        if ( offset_ + len > len )
+            return false;
+        offset_ += len;
+        return true;
+    }
+
+    DWORD offset_;
+    HANDLE p_;
+    PBYTE mem_;
+    DWORD len_;
+};
+
 bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
 {
-    char const currentInjectDLL[] =
+    char const currentProcessDLL[] =
 #if _WIN64
     "map_files_inj64.dll"
 #else
@@ -24,7 +69,7 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
 
     HMODULE currentLoaded;
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        currentInjectDLL,
+        currentProcessDLL,
         &currentLoaded );
     if ( !result )
         return false;
@@ -51,7 +96,7 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
     }
     else
     {
-        // No WOW64 - we must be on 32-bit
+        // No WOW64 - we must be on 32-bit arch
     }
 
 #ifdef _WIN64
@@ -63,84 +108,88 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
 #else
     if ( targetProcessIs64Bit )
     {
-        // Does not work - eventually CreateRemoteThread() will fail with
+        // Injecting code from 32-bit to 64-bit process does not work -
+        // eventually CreateRemoteThread() will fail with
         // ERROR_ACCESS_DENIED.
         return false;
     }
 #endif
 
-    SIZE_T written;
-    void * dllName = ::VirtualAllocEx( processHandle, NULL, moduleNameSize, MEM_COMMIT, PAGE_READWRITE );
-    ::WriteProcessMemory( processHandle, dllName, moduleToLoad, moduleNameSize, &written );
-    assert( written == moduleNameSize );
+#define FAIL_IF_NOT(expr) if ( !(expr) ) return false
+#define FAIL_IF(expr) if ( (expr) ) return false
 
-    char const initFunc[] = "Initialize";
-    void * dllInit = ::VirtualAllocEx( processHandle, NULL, sizeof(initFunc), MEM_COMMIT, PAGE_READWRITE );
-    ::WriteProcessMemory( processHandle, dllInit, initFunc, sizeof(initFunc), &written );
-    assert( written == sizeof(initFunc) );
-
-    unsigned char const * loaderCode;
-    unsigned int loaderCodeLength;
-    if ( targetProcessIs64Bit )
+    try
     {
-        loaderCode = load64;
-        loaderCodeLength = sizeof(load64);
-    }
-    else
-    {
-        loaderCode = load32;
-        loaderCodeLength = sizeof(load32);
-    }
+        AllocProcessMemory dllName( processHandle, moduleNameSize );
+        FAIL_IF_NOT( dllName.write( moduleToLoad, moduleNameSize ) );
 
-    DWORD remoteThreadExitCode;
-    // Prepare the function
-    void * funcData = VirtualAllocEx( processHandle, NULL, loaderCodeLength, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
-    WriteProcessMemory( processHandle, funcData, loaderCode, loaderCodeLength, &written );
-    assert( written == loaderCodeLength );
+        char const initFunc[] = "Initialize";
+        AllocProcessMemory dllInit( processHandle, sizeof(initFunc) );
+        FAIL_IF_NOT( dllInit.write( initFunc, sizeof(initFunc) ) );
 
-    // Prepare the parameters
-    PBYTE params = (PBYTE)VirtualAllocEx( processHandle, NULL, targetProcessIs64Bit ? 24 : 12, MEM_COMMIT, PAGE_READWRITE );
+        unsigned char const * loaderCode;
+        unsigned int loaderCodeLength;
+        if ( targetProcessIs64Bit )
+        {
+            loaderCode = load64;
+            loaderCodeLength = sizeof(load64);
+        }
+        else
+        {
+            loaderCode = load32;
+            loaderCodeLength = sizeof(load32);
+        }
 
-#ifdef _WIN64
-    if ( targetProcessIs64Bit )
-    {
-        WriteProcessMemory( processHandle, params + 0 * 8, &dllName   , 8, &written );
-        assert( written == 8 );
-        WriteProcessMemory( processHandle, params + 1 * 8, &dllInit   , 8, &written );
-        assert( written == 8 );
-        WriteProcessMemory( processHandle, params + 2 * 8, &pipeHandle, 8, &written );
-        assert( written == 8 );
+        DWORD remoteThreadExitCode;
+        // Prepare the function
+        AllocProcessMemory funcData( processHandle, loaderCodeLength, PAGE_EXECUTE_READWRITE );
+        FAIL_IF_NOT( funcData.write( loaderCode, loaderCodeLength ) );
+
+        // Prepare the parameters
+        AllocProcessMemory params( processHandle, targetProcessIs64Bit ? 24 : 12 );
+
+    #ifdef _WIN64
+        if ( targetProcessIs64Bit )
+        {
+            FAIL_IF_NOT( params.write( &dllName   , 8 ) );
+            FAIL_IF_NOT( params.write( &dllInit   , 8 ) );
+            FAIL_IF_NOT( params.write( &pipeHandle, 8 ) );
+        }
+        else
+        {
+            // --------------------
+            // Should never happen.
+            // --------------------
+            FAIL_IF( ((UINT_PTR)dllName.get()    & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)dllInit.get()    & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)pipeHandle & 0xFFFFFFFF00000000) );
+            // --------------------
+            FAIL_IF_NOT( params.write( &dllName   , 4 ) );
+            FAIL_IF_NOT( params.skip( 4 ) );
+            FAIL_IF_NOT( params.write( &dllInit   , 4 ) );
+            FAIL_IF_NOT( params.skip( 4 ) );
+            FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
+            FAIL_IF_NOT( params.skip( 4 ) );
+        }
+    #else
+        FAIL_IF( targetProcessIs64Bit );
+        FAIL_IF_NOT( params.write( &dllName   , 4 ) );
+        FAIL_IF_NOT( params.write( &dllInit   , 4 ) );
+        FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
+    #endif
+
+    #undef FAIL_IF
+    #undef FAIL_IF_NOT
+
+        // Call the function.
+        HANDLE loadLibraryThread = CreateRemoteThread( processHandle, NULL, 0, (LPTHREAD_START_ROUTINE)funcData.get(), params.get(), 0, NULL );
+        ::WaitForSingleObject( loadLibraryThread, INFINITE );
+        ::GetExitCodeThread( loadLibraryThread, &remoteThreadExitCode );
+        return remoteThreadExitCode == 0;
     }
-    else
-    {
-        assert( !((UINT_PTR)dllName    & 0xFFFFFFFF00000000) );
-        assert( !((UINT_PTR)dllInit    & 0xFFFFFFFF00000000) );
-        assert( !((UINT_PTR)pipeHandle & 0xFFFFFFFF00000000) );
-        WriteProcessMemory( processHandle, params + 0 * 4, &dllName, 4, &written );
-        assert( written == 4 );
-        WriteProcessMemory( processHandle, params + 1 * 4, &dllInit, 4, &written );
-        assert( written == 4 );
-        WriteProcessMemory( processHandle, params + 2 * 4, &pipeHandle, 4, &written );
-        assert( written == 4 );
-    }
-#else
-    assert( !targetProcessIs64Bit );
-    WriteProcessMemory( processHandle, params + 0 * 4, &dllName   , 4, &written );
-    assert( written == 8 );
-    WriteProcessMemory( processHandle, params + 1 * 4, &dllInit   , 4, &written );
-    assert( written == 8 );
-    WriteProcessMemory( processHandle, params + 2 * 4, &pipeHandle, 4, &written );
-    assert( written == 8 );
-#endif
-
-    // Call the function.
-    HANDLE loadLibraryThread = CreateRemoteThread( processHandle, NULL, 0, (LPTHREAD_START_ROUTINE)funcData, params, 0, NULL );
-    ::WaitForSingleObject( loadLibraryThread, INFINITE );
-    ::GetExitCodeThread( loadLibraryThread, &remoteThreadExitCode );
-    ::VirtualFreeEx( processHandle, dllName, moduleNameSize, MEM_DECOMMIT );
-    ::VirtualFreeEx( processHandle, dllInit, sizeof(initFunc), MEM_DECOMMIT );
-    ::VirtualFreeEx( processHandle, funcData, targetProcessIs64Bit ? 24 : 12, MEM_DECOMMIT );
-    return remoteThreadExitCode == 0;
+    catch ( std::bad_alloc const & ) { return false; }
+    catch ( std::exception const & ) { return false; }
+    catch ( ...                    ) { return false; }
 }
 
 

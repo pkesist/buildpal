@@ -13,18 +13,19 @@ __forceinline char lower( char x )
     return ( x >= 'A' ) && ( x <= 'Z' ) ? x - 'A' + 'a' : x;
 }
 
-__forceinline bool isKernel32( wchar_t * str )
+__forceinline bool isKernel32( wchar_t * str, USHORT length )
 {
     return
+        length == 24 &&
         wlower(str[0 ]) == L'k' &&
         wlower(str[1 ]) == L'e' &&
         wlower(str[2 ]) == L'r' &&
         wlower(str[3 ]) == L'n' &&
         wlower(str[4 ]) == L'e' &&
         wlower(str[5 ]) == L'l' &&
-        wlower(str[6 ]) == L'3' &&
-        wlower(str[7 ]) == L'2' &&
-        wlower(str[8 ]) == L'.' &&
+               str[6 ]  == L'3' &&
+               str[7 ]  == L'2' &&
+               str[8 ]  == L'.' &&
         wlower(str[9 ]) == L'd' &&
         wlower(str[10]) == L'l' &&
         wlower(str[11]) == L'l'
@@ -77,6 +78,7 @@ struct RunDllParams
 
 typedef HMODULE (WINAPI * LOADLIBRARYA)( char const * );
 typedef FARPROC (WINAPI * GETPROCADDRESS)( HMODULE, char const * );
+typedef DWORD   (WINAPI * INITFUNC)( void * );
 
 DWORD runDLL( void * vpparams )
 {
@@ -95,7 +97,7 @@ DWORD runDLL( void * vpparams )
     while ( tableEntry )
     {
         UNICODE_STRING const baseDLLName = *(UNICODE_STRING *)(tableEntry->Reserved4);
-        if ( isKernel32( baseDLLName.Buffer ) )
+        if ( isKernel32( baseDLLName.Buffer, baseDLLName.Length ) )
         {
             PBYTE dllBase = (PBYTE)tableEntry->DllBase;
             PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)dllBase;
@@ -109,9 +111,9 @@ DWORD runDLL( void * vpparams )
                 ( !loadLibrary || ( needGetProcAddress && !getProcAddress ) ) )
             {
                 char const * name = (char const *)(dllBase + *nameArray);
-                bool const gpa = isGetProcAddress( name );
+                bool const gpa = needGetProcAddress && isGetProcAddress( name );
                 bool const ll = isLoadLibrary( name );
-                if ( ( needGetProcAddress && gpa ) || ll )
+                if ( gpa || ll )
                 {
                     DWORD * address = (DWORD *)(dllBase + export_dir->AddressOfFunctions);
                     address += *ordArray;
@@ -139,8 +141,7 @@ DWORD runDLL( void * vpparams )
         return -4;
     if ( params->initFunc )
     {
-        typedef DWORD (WINAPI *InitFunc)( void * );
-        InitFunc initFunc = (InitFunc)getProcAddress( mydll, params->initFunc );
+        INITFUNC initFunc = (INITFUNC)getProcAddress( mydll, params->initFunc );
         if ( !initFunc )
             return -5;
         return initFunc( params->initArgs );

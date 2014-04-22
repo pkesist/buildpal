@@ -97,8 +97,9 @@ namespace
             DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
         assert( result );
         
-        for ( FileMapping::value_type const & filePair : fileMapping )
-            writeMapping( pipeWrite, filePair.first, filePair.second );
+        FileMapping::const_iterator end = fileMapping.end();
+        for ( FileMapping::const_iterator iter = fileMapping.begin(); iter != end; ++iter )
+            writeMapping( pipeWrite, iter->first, iter->second );
         writeEnd( pipeWrite );
 
         return injectLibrary( processHandle, targetRead );
@@ -106,9 +107,10 @@ namespace
 
     std::wstring normalizePath( std::wstring path )
     {
-        for ( wchar_t & c : path )
-            if ( c == L'/' )
-                c = L'\\';
+        std::wstring::iterator const end = path.end();
+        for ( std::wstring::iterator iter = path.begin(); iter != end; ++iter )
+            if ( *iter == L'/' )
+                *iter = L'\\';
         wchar_t buffer[4 * MAX_PATH];
         BOOL result = PathCanonicalizeW( buffer, path.c_str() );
         assert( result );

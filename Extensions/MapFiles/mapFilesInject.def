@@ -1,4 +1,3 @@
-LIBRARY map_files_inj32.dll
 EXPORTS
     hookWinAPIs
     unhookWinAPIs

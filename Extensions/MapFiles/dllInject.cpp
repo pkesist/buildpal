@@ -16,9 +16,9 @@ unsigned char const load64[] = {
 struct AllocProcessMemory
 {
     AllocProcessMemory( HANDLE p, DWORD len, DWORD flags = PAGE_READWRITE )
-        : p_( p ), offset_( 0 )
+        : p_( p ), len_( len ), offset_( 0 )
     {
-        mem_ = (PBYTE)::VirtualAllocEx( p_, NULL, len, MEM_COMMIT | MEM_RESERVE, flags );
+        mem_ = (PBYTE)::VirtualAllocEx( p_, NULL, len_, MEM_COMMIT | MEM_RESERVE, flags );
         if ( !mem_ )
             throw std::bad_alloc();
     }
@@ -30,9 +30,11 @@ struct AllocProcessMemory
 
     void * get() const { return mem_; }
 
+    void const * get_ptr() const { return &mem_; }
+
     bool write( void const * data, DWORD len )
     {
-        if ( offset_ + len > len )
+        if ( offset_ + len > len_ )
             return false;
         SIZE_T written;
         if ( WriteProcessMemory( p_, mem_ + offset_, data, len, &written ) && ( written == len ) )
@@ -45,7 +47,7 @@ struct AllocProcessMemory
 
     bool skip( DWORD len )
     {
-        if ( offset_ + len > len )
+        if ( offset_ + len > len_ )
             return false;
         offset_ += len;
         return true;
@@ -151,9 +153,9 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
     #ifdef _WIN64
         if ( targetProcessIs64Bit )
         {
-            FAIL_IF_NOT( params.write( &dllName   , 8 ) );
-            FAIL_IF_NOT( params.write( &dllInit   , 8 ) );
-            FAIL_IF_NOT( params.write( &pipeHandle, 8 ) );
+            FAIL_IF_NOT( params.write( dllName.get_ptr(), 8 ) );
+            FAIL_IF_NOT( params.write( dllInit.get_ptr(), 8 ) );
+            FAIL_IF_NOT( params.write( &pipeHandle      , 8 ) );
         }
         else
         {
@@ -164,18 +166,18 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
             FAIL_IF( ((UINT_PTR)dllInit.get()    & 0xFFFFFFFF00000000) );
             FAIL_IF( ((UINT_PTR)pipeHandle & 0xFFFFFFFF00000000) );
             // --------------------
-            FAIL_IF_NOT( params.write( &dllName   , 4 ) );
+            FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
             FAIL_IF_NOT( params.skip( 4 ) );
-            FAIL_IF_NOT( params.write( &dllInit   , 4 ) );
+            FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
             FAIL_IF_NOT( params.skip( 4 ) );
             FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
             FAIL_IF_NOT( params.skip( 4 ) );
         }
     #else
         FAIL_IF( targetProcessIs64Bit );
-        FAIL_IF_NOT( params.write( &dllName   , 4 ) );
-        FAIL_IF_NOT( params.write( &dllInit   , 4 ) );
-        FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
+        FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
+        FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
+        FAIL_IF_NOT( params.write( &pipeHandle      , 4 ) );
     #endif
 
     #undef FAIL_IF

@@ -94,7 +94,7 @@ DWORD runDLL( void * vpparams )
     GETPROCADDRESS getProcAddress = 0;
     bool const needGetProcAddress = ( params->initFunc != 0 );
     PLDR_DATA_TABLE_ENTRY tableEntry  = (PLDR_DATA_TABLE_ENTRY)(baseAddress->InMemoryOrderModuleList.Flink - 1); // Leap of faith cast.
-    while ( tableEntry )
+    for ( ; ; )
     {
         UNICODE_STRING const baseDLLName = *(UNICODE_STRING *)(tableEntry->Reserved4);
         if ( isKernel32( baseDLLName.Buffer, baseDLLName.Length ) )

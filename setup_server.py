@@ -92,14 +92,16 @@ class build_ext(setuptools_build_ext):
             cwd='Extensions/MapFiles/Loader')
         build_inject_dll.libraries = [
             ('map_files_inj32', dict(
-                    sources=['Extensions/MapFiles/dllInject.cpp', 'Extensions/MapFiles/mapFilesInject.cpp'],
+                    sources=['Extensions/MapFiles/dllInject.cpp',
+                        'Extensions/MapFiles/mapFilesInject.cpp'],
                     def_file='Extensions/MapFiles/mapFilesInject.def',
                     include_dirs=[os.path.dirname(asm_inc_dir)],
                     plat='win32'
                 )
             ),
             ('map_files_inj64', dict(
-                    sources=['Extensions/MapFiles/dllInject.cpp', 'Extensions/MapFiles/mapFilesInject.cpp'],
+                    sources=['Extensions/MapFiles/dllInject.cpp',
+                        'Extensions/MapFiles/mapFilesInject.cpp'],
                     def_file='Extensions/MapFiles/mapFilesInject.def',
                     include_dirs=[os.path.dirname(asm_inc_dir)],
                     plat='win-amd64'

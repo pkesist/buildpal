@@ -26,7 +26,8 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         currentInjectDLL,
         &currentLoaded );
-    assert( result );
+    if ( !result )
+        return false;
     char moduleToLoad[ MAX_PATH ];
     DWORD const moduleNameSize = GetModuleFileName( currentLoaded, moduleToLoad, MAX_PATH );
 

@@ -6,7 +6,6 @@ from setuptools import setup, Extension
 
 from setuptools.command.build_ext import build_ext as setuptools_build_ext
 
-import subprocess
 import sys
 import os
 
@@ -81,15 +80,15 @@ class build_ext(setuptools_build_ext):
 
     def run(self):
         if self.compiler == 'msvc':
-            #distutils.msvc9compiler.VERSION = 11.0
+            distutils.msvc9compiler.VERSION = 11.0
             pass
         else:
             raise DistutilsOptionError("Unsupported compiler '{}'.".format(self.compiler))
 
         build_inject_dll = self.get_finalized_command('build_inject_dll')
         asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
-        subprocess.check_call([sys.executable, 'generate_loader_asm.py', asm_inc_dir],
-            cwd='Extensions/MapFiles/Loader')
+        from BuildDeps.generate_loader_asm import main as generate_loader_asm
+        generate_loader_asm('Extensions/MapFiles/Loader/loader.cpp', asm_inc_dir, self.build_temp)
         build_inject_dll.libraries = [
             ('map_files_inj32', dict(
                     sources=['Extensions/MapFiles/dllInject.cpp',

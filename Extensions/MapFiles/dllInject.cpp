@@ -162,16 +162,13 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
             // --------------------
             // Should never happen.
             // --------------------
-            FAIL_IF( ((UINT_PTR)dllName.get()    & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)dllInit.get()    & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)pipeHandle & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)dllName.get_ptr() & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)dllInit.get_ptr() & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)pipeHandle        & 0xFFFFFFFF00000000) );
             // --------------------
             FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
-            FAIL_IF_NOT( params.skip( 4 ) );
             FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
-            FAIL_IF_NOT( params.skip( 4 ) );
             FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
-            FAIL_IF_NOT( params.skip( 4 ) );
         }
     #else
         FAIL_IF( targetProcessIs64Bit );

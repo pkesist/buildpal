@@ -40,6 +40,7 @@ class build_ninja(Command):
         win64 = sys.maxsize > 2**32
         if self.compiler == 'msvc':
             bootstrap_args = ['--platform=msvc']
+            distutils.msvc9compiler.VERSION = 11.0
             compiler = distutils.ccompiler.new_compiler(compiler='msvc')
             compiler.initialize('win-amd64' if win64 else 'win32')
         elif self.compiler == 'mingw32':

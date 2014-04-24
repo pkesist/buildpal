@@ -696,7 +696,7 @@ int main( int argc, char * argv[] )
             {
                 llvm::StringRef file = receiver.getPart( part );
                 std::string result;
-                findOnPath( pathList, std::string( file.data(), file.data() + file.size() ), result );
+                findOnPath( pathList, file.str(), result );
                 files.push_back( result );
                 msgSender.addPart( files.back().c_str(), files.back().size() );
             }

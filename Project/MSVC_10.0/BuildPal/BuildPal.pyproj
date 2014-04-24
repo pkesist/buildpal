@@ -25,14 +25,15 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="BuildDeps\asm_to_inc.py" />
     <Compile Include="BuildDeps\build_boost.py" />
     <Compile Include="BuildDeps\build_clang.py" />
     <Compile Include="BuildDeps\build_cmake.py" />
     <Compile Include="BuildDeps\build_ninja.py" />
+    <Compile Include="BuildDeps\generate_loader_asm.py" />
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
-    <Compile Include="Extensions\MapFiles\Loader\loader.py" />
     <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
     <Compile Include="Python\buildpal_manager\compilers\utils.py" />
@@ -124,15 +125,10 @@
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
     <Content Include="Extensions\MapFiles\dllInject.hpp" />
-    <Content Include="Extensions\MapFiles\Jamroot.jam" />
-    <Content Include="Extensions\MapFiles\Loader\loader.awk" />
     <Content Include="Extensions\MapFiles\Loader\loader.cpp" />
-    <Content Include="Extensions\MapFiles\Loader\loader32.inc" />
-    <Content Include="Extensions\MapFiles\Loader\loader64.inc" />
     <Content Include="Extensions\MapFiles\mapFilesInject.cpp" />
+    <Content Include="Extensions\MapFiles\mapFilesInject.def" />
     <Content Include="Extensions\MapFiles\mapFilesInject.hpp" />
-    <Content Include="Extensions\MapFiles\mapFilesInject32.def" />
-    <Content Include="Extensions\MapFiles\mapFilesInject64.def" />
     <Content Include="Extensions\MapFiles\pydll.cpp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />

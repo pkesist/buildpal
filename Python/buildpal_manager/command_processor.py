@@ -18,7 +18,6 @@ class CommandProcessor:
         self.compiler = compiler
         self.executable = executable
         self.compiler_info = None
-        self.compiler_files = None
         self.__sysincludes = sysincludes.split(os.path.pathsep)
         self.__cwd = cwd
         self.__command = command
@@ -45,15 +44,15 @@ class CommandProcessor:
             retcode = int(msg[0].tobytes())
             stdout = msg[1].tobytes()
             stderr = msg[2].tobytes()
-            self.compiler_info = self.compiler.get_compiler_info(
+            self.compiler_info, self.tmp_compiler_files = self.compiler.get_compiler_info(
                 self.executable, stdout, stderr)
-            self.client_conn.send_msg([b'LOCATE_FILES'] + self.compiler_info['files'])
+            self.client_conn.send_msg([b'LOCATE_FILES'] + self.tmp_compiler_files)
             self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         else:
             assert self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST
-            assert len(msg) == len(self.compiler_info['files'])
-            self.compiler_files = list(zip([m.tobytes() for m in msg],
-                self.compiler_info['files']))
+            assert len(msg) == len(self.tmp_compiler_files)
+            self.compiler_info['files'] = list(zip([m.tobytes() for m in msg],
+                self.tmp_compiler_files))
             self.state = self.STATE_HAS_COMPILER_INFO
             self.got_compiler_info()
 
@@ -103,7 +102,6 @@ class CommandProcessor:
                     sysincludes=self.__sysincludes,
                     pch_header=pch_header
                 ),
-                compiler_files=self.compiler_files,
                 command_processor=self,
                 client_conn=self.client_conn,
                 output=os.path.join(self.__cwd, output or

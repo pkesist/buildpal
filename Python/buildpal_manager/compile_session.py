@@ -95,8 +95,9 @@ class CompileSession:
             if need_compiler:
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
-                    for path, file in self.task.compiler_files:
-                        zip_file.write(path.decode(), file.decode())
+                    for path, file in self.task.compiler_info['files']:
+                        if path:
+                            zip_file.write(path.decode(), file.decode())
                 send_file(self.sender.send_msg, BytesIO(zip_data.getbuffer()))
                 del zip_data
             if need_pch:

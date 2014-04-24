@@ -203,7 +203,7 @@ bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEn
     return headerCtx.replacement() == 0;
 }
 
-void HeaderTracker::leaveHeader( IgnoredHeaders const & ignoredHeaders )
+void HeaderTracker::leaveHeader( HeaderList const & ignoredHeaders )
 {
     assert( currentHeaderCtx().parent() );
 

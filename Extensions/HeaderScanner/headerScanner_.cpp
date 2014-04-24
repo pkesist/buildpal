@@ -33,14 +33,16 @@ namespace
             HeaderTracker & headerTracker,
             llvm::StringRef filename,
             clang::Preprocessor & preprocessor,
-            IgnoredHeaders const & ignoredHeaders,
-            Headers & includedHeaders
+            HeaderList const & ignoredHeaders,
+            Headers & includedHeaders,
+            HeaderList & missingHeaders
         )
             :
             headerTracker_ ( headerTracker   ),
             preprocessor_  ( preprocessor    ),
             headers_       ( includedHeaders ),
             ignoredHeaders_( ignoredHeaders  ),
+            missingHeaders_( missingHeaders  ),
             filename_      ( filename        )
         {
         }
@@ -60,7 +62,7 @@ namespace
         {
             if ( !file )
             {
-                std::cerr << "ERROR: Could not find header <" << fileName.str() << ">.\n";
+                missingHeaders_.insert( fileName.str() );
                 return;
             }
             headerTracker_.inclusionDirective( SearchPath, RelativePath, isAngled, file );
@@ -153,8 +155,9 @@ namespace
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
         llvm::StringRef filename_;
+        HeaderList const & ignoredHeaders_;
         Headers & headers_;
-        IgnoredHeaders const & ignoredHeaders_;
+        HeaderList & missingHeaders_;
     };
 
     class DiagnosticConsumer : public clang::DiagnosticConsumer
@@ -287,7 +290,7 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     return searchPathId;
 }
 
-void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers )
+void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
     std::size_t const searchPathId = setupPreprocessor( ppc, fileName );
     struct DiagnosticsSetup
@@ -314,7 +317,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
 
     HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, fileName,
-        preprocessor(), ppc.ignoredHeaders(), headers ) );
+        preprocessor(), ppc.ignoredHeaders(), headers, missingHeaders ) );
 
     preprocessor().EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )

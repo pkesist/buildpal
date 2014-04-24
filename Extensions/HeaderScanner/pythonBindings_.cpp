@@ -336,11 +336,13 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
 
     Headers headers;
+    HeaderList missing;
     PyThreadState * _save;
     try
     {
         Py_UNBLOCK_THREADS
-        self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers );
+        self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers, missing );
+        // TODO: short-circuit compilation if there are missing headers.
     }
     catch ( std::runtime_error const & error )
     {

@@ -95,7 +95,7 @@ private:
     Headers & operator=( Headers const & headers );
 };
 
-typedef std::set<std::string> IgnoredHeaders;
+typedef std::set<std::string> HeaderList;
 
 struct DummyModuleLoader : public clang::ModuleLoader 
 {
@@ -137,16 +137,16 @@ public:
     typedef std::vector<std::string> SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
 
-    SearchPath     const & userSearchPath  () const { return userSearchPath_; }
-    SearchPath     const & systemSearchPath() const { return systemSearchPath_; }
-    Defines        const & defines         () const { return defines_; }
-    IgnoredHeaders const & ignoredHeaders  () const { return ignoredHeaders_; }
+    SearchPath const & userSearchPath  () const { return userSearchPath_; }
+    SearchPath const & systemSearchPath() const { return systemSearchPath_; }
+    Defines    const & defines         () const { return defines_; }
+    HeaderList const & ignoredHeaders  () const { return ignoredHeaders_; }
 
 private:
     SearchPath userSearchPath_;
     SearchPath systemSearchPath_;
     Defines defines_;
-    IgnoredHeaders ignoredHeaders_;
+    HeaderList ignoredHeaders_;
 };
 
 class Preprocessor
@@ -154,7 +154,7 @@ class Preprocessor
 public:
     explicit Preprocessor( Cache * cache );
 
-    void scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers & );
+    void scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
     void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 

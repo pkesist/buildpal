@@ -108,7 +108,7 @@ public:
         includedHeaders_.insert( header );
     }
 
-    void propagateToParent( IgnoredHeaders const & ignoredHeaders ) const
+    void propagateToParent( HeaderList const & ignoredHeaders ) const
     {
         assert( parent_ );
         assert( !parent_->fromCache() );
@@ -194,7 +194,7 @@ public:
     void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();
     void enterHeader();
-    void leaveHeader( IgnoredHeaders const & );
+    void leaveHeader( HeaderList const & );
     void pragmaOnce();
 
     void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );

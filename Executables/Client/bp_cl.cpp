@@ -272,45 +272,43 @@ int createProcess( char * commandLine )
     }
 }
 
-int runLocally()
+char const * findArgs( char const * cmdLine )
 {
-    std::cout << "Running command locally...\n";
-    char const * commandLine = GetCommandLine();
-    std::size_t len = strlen( commandLine );
-    char const * argsPos = commandLine;
-
     bool inQuote = false;
     bool foundNonSpace = false;
     bool escape = false;
 
-    // Find arguments position.
-    for ( ; ; ++argsPos )
+    for ( ; ; ++cmdLine )
     {
-        bool const isSpace = *argsPos == ' ' || *argsPos == '\t' || *argsPos == '\0';
-        if ( isSpace )
+        switch ( *cmdLine )
         {
+        case ' ':
+        case '\t':
+        case '\0': // In case there are no arguments.
             if ( foundNonSpace && !inQuote )
-                break;
+                return cmdLine;
             escape = false;
-        }
-
-        else if ( *argsPos == '\\' )
-        {
+            break;
+        case '\\':
             escape = !escape;
-        }
-
-        else if ( *argsPos == '"' && !escape )
-        {
-            inQuote = !inQuote;
-        }
-        else
-        {
+            break;
+        case '"':
+            if ( inQuote && !escape )
+                inQuote = false;
+            break;
+        default:
             foundNonSpace = true;
             escape = false;
         }
     }
+}
 
-    std::size_t const argsLen = len - ( argsPos - commandLine );
+int runLocally()
+{
+    std::cout << "Running command locally...\n";
+    char const * commandLine = GetCommandLine();
+    char const * argsPos = findArgs( commandLine );
+    std::size_t const argsLen = strlen( argsPos );
     std::size_t const commandLineSize = sizeof(compilerExeFilename) - 1 + argsLen;
 
     // Create a copy on the stack as required by CreateProcess.

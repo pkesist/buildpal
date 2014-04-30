@@ -59,19 +59,15 @@ struct AllocProcessMemory
     DWORD len_;
 };
 
-bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
+bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char const * initFunc, void * initArgs )
 {
-    char const currentProcessDLL[] =
-#if _WIN64
-    "map_files_inj64.dll"
-#else
-    "map_files_inj32.dll"
-#endif
-;
-
     HMODULE currentLoaded;
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        currentProcessDLL,
+#if _WIN64
+        dllNames[1],
+#else
+        dllNames[0],
+#endif
         &currentLoaded );
     if ( !result )
         return false;
@@ -104,8 +100,9 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
 #ifdef _WIN64
     if ( !targetProcessIs64Bit )
     {
-        moduleToLoad[ moduleNameSize - 6 ] = '3';
-        moduleToLoad[ moduleNameSize - 5 ] = '2';
+        // We have to inject 32-bit version. We assume it is in the same dir as
+        // currently loaded 64-bit version.
+        std::strcpy( moduleToLoad + moduleNameSize - strlen(dllNames[1]), dllNames[0] );
     }
 #else
     if ( targetProcessIs64Bit )
@@ -113,6 +110,7 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
         // Injecting code from 32-bit to 64-bit process does not work -
         // eventually CreateRemoteThread() will fail with
         // ERROR_ACCESS_DENIED.
+        // Note that it is possible to do this, but YAGNI.
         return false;
     }
 #endif
@@ -125,9 +123,9 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
         AllocProcessMemory dllName( processHandle, moduleNameSize );
         FAIL_IF_NOT( dllName.write( moduleToLoad, moduleNameSize ) );
 
-        char const initFunc[] = "Initialize";
-        AllocProcessMemory dllInit( processHandle, sizeof(initFunc) );
-        FAIL_IF_NOT( dllInit.write( initFunc, sizeof(initFunc) ) );
+        std::size_t const initFuncLen = strlen(initFunc);
+        AllocProcessMemory dllInit( processHandle, initFuncLen );
+        FAIL_IF_NOT( dllInit.write( initFunc, initFuncLen ) );
 
         unsigned char const * loaderCode;
         unsigned int loaderCodeLength;
@@ -155,7 +153,7 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
         {
             FAIL_IF_NOT( params.write( dllName.get_ptr(), 8 ) );
             FAIL_IF_NOT( params.write( dllInit.get_ptr(), 8 ) );
-            FAIL_IF_NOT( params.write( &pipeHandle      , 8 ) );
+            FAIL_IF_NOT( params.write( &initArgs        , 8 ) );
         }
         else
         {
@@ -164,17 +162,17 @@ bool injectLibrary( HANDLE const processHandle, HANDLE pipeHandle )
             // --------------------
             FAIL_IF( ((UINT_PTR)dllName.get_ptr() & 0xFFFFFFFF00000000) );
             FAIL_IF( ((UINT_PTR)dllInit.get_ptr() & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)pipeHandle        & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)initArgs          & 0xFFFFFFFF00000000) );
             // --------------------
             FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
             FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
-            FAIL_IF_NOT( params.write( &pipeHandle, 4 ) );
+            FAIL_IF_NOT( params.write( &initArgs        , 4 ) );
         }
     #else
         FAIL_IF( targetProcessIs64Bit );
         FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
         FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
-        FAIL_IF_NOT( params.write( &pipeHandle      , 4 ) );
+        FAIL_IF_NOT( params.write( &initArgs        , 4 ) );
     #endif
 
     #undef FAIL_IF

@@ -88,7 +88,6 @@ namespace
         HANDLE pipeRead;
         HANDLE pipeWrite;
         BOOL result;
-        // Shared memory would be better.
         result = CreatePipe( &pipeRead, &pipeWrite, 0, 0 );
         assert( result );
         HANDLE targetRead;
@@ -102,7 +101,12 @@ namespace
             writeMapping( pipeWrite, iter->first, iter->second );
         writeEnd( pipeWrite );
 
-        return injectLibrary( processHandle, targetRead );
+        char const * dllNames[] = {
+            "map_files_inj32.dll",
+            "map_files_inj64.dll"
+        };
+        char const initFunc[] = "Initialize";
+        return injectLibrary( processHandle, dllNames, initFunc, targetRead );
     }
 
     std::wstring normalizePath( std::wstring path )
@@ -111,7 +115,7 @@ namespace
         for ( std::wstring::iterator iter = path.begin(); iter != end; ++iter )
             if ( *iter == L'/' )
                 *iter = L'\\';
-        wchar_t buffer[4 * MAX_PATH];
+        wchar_t buffer[MAX_PATH];
         BOOL result = PathCanonicalizeW( buffer, path.c_str() );
         assert( result );
         return CharLowerW( buffer );

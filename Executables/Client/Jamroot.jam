@@ -51,6 +51,7 @@ local release-variants = release profile ;
 exe bp_cl
 :
     bp_cl.cpp
+    client.cpp
     boost-stuff
     clang-stuff
 :

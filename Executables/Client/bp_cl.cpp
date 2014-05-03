@@ -1,6 +1,7 @@
 #include "client.hpp"
 
 #include <chrono>
+#include <codecvt>
 #include <iostream>
 #include <windows.h>
 
@@ -16,50 +17,19 @@ std::size_t compilerExeFilenameSize = sizeof(compilerExeFilename) / sizeof(compi
 #define alloca __builtin_alloca
 #endif
 
-char const * findArgs( char const * cmdLine )
-{
-    bool inQuote = false;
-    bool foundNonSpace = false;
-    bool escape = false;
-
-    for ( ; ; ++cmdLine )
-    {
-        switch ( *cmdLine )
-        {
-        case ' ':
-        case '\t':
-        case '\0': // In case there are no arguments.
-            if ( foundNonSpace && !inQuote )
-                return cmdLine;
-            escape = false;
-            break;
-        case '\\':
-            escape = !escape;
-            break;
-        case '"':
-            if ( inQuote && !escape )
-                inQuote = false;
-            break;
-        default:
-            foundNonSpace = true;
-            escape = false;
-        }
-    }
-}
-
 int runLocallyFallback()
 {
     std::cout << "Running command locally...\n";
-    char const * commandLine = GetCommandLine();
-    char const * argsPos = findArgs( commandLine );
-    std::size_t const argsLen = strlen( argsPos );
+    wchar_t const * commandLine = GetCommandLineW();
+    wchar_t const * argsPos = findArgs( commandLine );
+    std::size_t const argsLen = wcslen( argsPos );
     std::size_t const commandLineSize = sizeof(compilerExeFilename) - 1 + argsLen;
 
     // Create a copy on the stack as required by CreateProcess.
     std::size_t pos( 0 );
-    char * const buffer = static_cast<char *>( alloca( commandLineSize + 1 ) );
-    std::memcpy( buffer, compilerExeFilename, sizeof(compilerExeFilename) - 1 );
-    pos += sizeof(compilerExeFilename) - 1;
+    wchar_t * const buffer = static_cast<wchar_t *>( alloca( ( commandLineSize + 1 ) * sizeof(wchar_t) ) );
+    std::memcpy( buffer, compilerExeFilename, ( sizeof(compilerExeFilename) - 1 ) * sizeof(wchar_t) );
+    pos += compilerExeFilenameSize;
     std::memcpy( buffer + pos, argsPos, argsLen );
     buffer[ commandLineSize ] = 0;
 
@@ -79,7 +49,7 @@ struct Timer
     std::chrono::high_resolution_clock::time_point start_;
 };
 
-int main( int argc, char * argv[] )
+int main()
 {
     Timer t;
     std::string compilerExecutable;
@@ -114,10 +84,11 @@ int main( int argc, char * argv[] )
         portName = tmp;
     }
 
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     return distributedCompile(
-        llvm::StringRef( compilerToolset, compilerToolsetSize ),
+        "msvc",
         compilerExecutable,
-        argc, argv,
+        GetCommandLineW(),
         llvm::StringRef( portName, size ),
         disableFallback ? NULL : runLocallyFallback
     );

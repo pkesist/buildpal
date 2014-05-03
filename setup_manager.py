@@ -6,6 +6,9 @@ from setuptools.command.build_ext import build_ext as setuptools_build_ext
 
 from time import sleep
 
+import os
+import sys
+
 class build_ext(setuptools_build_ext):
     setuptools_build_ext.user_options.append(('force-mingw', None,
         'force building with mingw'))
@@ -14,6 +17,7 @@ class build_ext(setuptools_build_ext):
     def initialize_options(self):
         super().initialize_options()
         self.force_mingw = False
+        self.x64 =  sys.maxsize > 2**32
 
     def finalize_options(self):
         super().finalize_options()
@@ -41,7 +45,29 @@ class build_ext(setuptools_build_ext):
         build_boost.boost_libs.append('system')
         build_boost.boost_libs.append('thread')
         self.run_command('build_boost')
+        self.include_dirs.append(os.path.abspath(build_boost.boost_build_dir))
+        if self.x64:
+            self.library_dirs.append(os.path.abspath(build_boost.library_dir_x64()))
+        else:
+            self.library_dirs.append(os.path.abspath(build_boost.library_dir_x86()))
+        if self.compiler == 'mingw32':
+            self.libraries.extend(build_boost.libraries)
+
+        build_clang = self.get_finalized_command('build_clang')
         self.run_command('build_clang')
+        if self.x64:
+            build_dir = build_clang.get_build_dir_x64()
+        else:
+            build_dir = build_clang.get_build_dir_x86()
+        self.include_dirs.extend([
+            os.path.join(build_dir, 'include'),
+            os.path.join(build_dir, 'tools', 'clang', 'include'),
+            os.path.join(build_clang.clang_src_dir, 'include'),
+            os.path.join(build_clang.clang_src_dir, 'tools', 'clang', 'include')])
+        self.library_dirs.append(os.path.join(build_dir, 'lib'))
+        self.libraries.extend(build_clang.get_libs())
+        if self.compiler == 'mingw32':
+            self.libraries.append('imagehlp')
         super().run()
 
 

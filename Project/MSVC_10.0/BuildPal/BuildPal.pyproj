@@ -29,6 +29,7 @@
     <Compile Include="BuildDeps\build_boost.py" />
     <Compile Include="BuildDeps\build_clang.py" />
     <Compile Include="BuildDeps\build_cmake.py" />
+    <Compile Include="BuildDeps\build_dll.py" />
     <Compile Include="BuildDeps\build_ninja.py" />
     <Compile Include="BuildDeps\generate_loader_asm.py" />
     <Compile Include="BuildDeps\utils.py" />
@@ -107,6 +108,8 @@
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />
     <Content Include="Executables\Client\bp_cl.cpp" />
+    <Content Include="Executables\Client\client.cpp" />
+    <Content Include="Executables\Client\client.hpp" />
     <Content Include="Executables\Client\Jamroot.jam" />
     <Content Include="Extensions\ArgParser\argList_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />

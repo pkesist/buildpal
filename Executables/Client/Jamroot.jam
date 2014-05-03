@@ -1,6 +1,8 @@
 import errors ;
 import project ;
 
+path-constant MAP_FILES : ../../Extensions/MapFiles ;
+
 local rule get-jam-var ( variable-name )
 {
     local result = [ modules.peek : $(variable-name) ] ;
@@ -16,16 +18,25 @@ local rule get-jam-var ( variable-name )
 local BOOST_ROOT = [ get-jam-var BOOST_ROOT ] ;
 local BOOST_LIBS = [ get-jam-var BOOST_LIBS ] ;
 local CLANG_SRC_ROOT = [ get-jam-var CLANG_SRC_ROOT ] ;
-local CLANG_BUILD_ROOT = [ get-jam-var CLANG_BUILD_ROOT ] ;
+local CLANG_BUILD_ROOT_X86 = [ get-jam-var CLANG_BUILD_ROOT_X86 ] ;
+local CLANG_BUILD_ROOT_X64 = [ get-jam-var CLANG_BUILD_ROOT_X64 ] ;
 local TARGET_DIR = [ get-jam-var TARGET_DIR ] ;
+local TMP_INCLUDE_DIR = [ get-jam-var TMP_INCLUDE_DIR ] ;
 
 for lib in $(BOOST_LIBS)
 {
     lib boost_$(lib) : : <search>$(BOOST_ROOT)/lib ;
+    lib boost_$(lib) : : <search>$(BOOST_ROOT)/lib <address-model>32 ;
+    lib boost_$(lib) : : <search>$(BOOST_ROOT)/x64/lib <address-model>64 ;
 }
+
+alias library-path : :                   <toolset>msvc : : <library-path>$(BOOST_ROOT)/lib ;
+alias library-path : : <address-model>32 <toolset>msvc : : <library-path>$(BOOST_ROOT)/lib ;
+alias library-path : : <address-model>64 <toolset>msvc : : <library-path>$(BOOST_ROOT)/x64/lib ;
 
 alias boost-stuff
 :
+    library-path
 :
 :
 :
@@ -34,17 +45,22 @@ alias boost-stuff
 
     <toolset>gcc:<library>boost_$(BOOST_LIBS)
 
-    <toolset>msvc:<library-path>$(BOOST_ROOT)/lib
     <include>$(BOOST_ROOT)
 ;
 
 local rel-paths = include tools/clang/include ;
-local dirs = $(CLANG_SRC_ROOT)/ $(CLANG_BUILD_ROOT)/ ;
-local include-dirs = $(dirs)$(rel-paths) ;
+local dirs32 = $(CLANG_SRC_ROOT)/ $(CLANG_BUILD_ROOT_X86)/ ;
+local dirs64 = $(CLANG_SRC_ROOT)/ $(CLANG_BUILD_ROOT_X64)/ ;
+local include-dirs-32 = $(dirs32)$(rel-paths) ;
+local include-dirs-64 = $(dirs64)$(rel-paths) ;
 
 lib shlwapi ;
-lib LLVMSupport : : <search>$(CLANG_BUILD_ROOT)/lib ;
-alias clang-stuff : LLVMSupport : : : <include>$(include-dirs) ;
+lib LLVMSupport : :                   <search>$(CLANG_BUILD_ROOT_X86)/lib ;
+lib LLVMSupport : : <address-model>32 <search>$(CLANG_BUILD_ROOT_X86)/lib ;
+lib LLVMSupport : : <address-model>64 <search>$(CLANG_BUILD_ROOT_X64)/lib ;
+alias clang-stuff : LLVMSupport :                    : : <include>$(include-dirs-32) ;
+alias clang-stuff : LLVMSupport :  <address-model>32 : : <include>$(include-dirs-32) ;
+alias clang-stuff : LLVMSupport :  <address-model>64 : : <include>$(include-dirs-64) ;
 
 local release-variants = release profile ;
 

@@ -95,7 +95,7 @@ namespace
             processHandle, &targetRead, 0, FALSE,
             DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
         assert( result );
-        
+
         FileMapping::const_iterator end = fileMapping.end();
         for ( FileMapping::const_iterator iter = fileMapping.begin(); iter != end; ++iter )
             writeMapping( pipeWrite, iter->first, iter->second );

@@ -8,12 +8,14 @@
 
 #include <array>
 #include <ctime>
+#include <codecvt>
 #include <deque>
 #include <iostream>
 #include <list>
 #include <memory>
 #include <string>
 
+#include <shellapi.h>
 #include <shlwapi.h>
 #include <windows.h>
 
@@ -225,12 +227,12 @@ PathList const & getPath()
     return result;
 }
 
-int createProcess( char * commandLine )
+int createProcess( wchar_t * commandLine )
 {
-    STARTUPINFO startupInfo = { sizeof(startupInfo) };
+    STARTUPINFOW startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION processInfo;
 
-    BOOL const apiResult = CreateProcess(
+    BOOL const apiResult = CreateProcessW(
         NULL,
         commandLine,
         NULL,
@@ -259,6 +261,71 @@ int createProcess( char * commandLine )
     }
 }
 
+int createProcess( char * commandLine )
+{
+    STARTUPINFO startupInfo = { sizeof(startupInfo) };
+    PROCESS_INFORMATION processInfo;
+
+    BOOL const apiResult = CreateProcessA(
+        NULL,
+        commandLine,
+        NULL,
+        NULL,
+        FALSE,
+        CREATE_NEW_PROCESS_GROUP,
+        NULL,
+        NULL,
+        &startupInfo,
+        &processInfo
+    );
+
+    if ( apiResult )
+    {
+        ::WaitForSingleObject( processInfo.hProcess, INFINITE );
+        int result;
+        GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
+        CloseHandle( processInfo.hProcess );
+        CloseHandle( processInfo.hThread );
+        return result;
+    }
+    else
+    {
+        std::cerr << "ERROR: CreateProcess()\n";
+        return -1;
+    }
+}
+
+wchar_t const * findArgs( wchar_t const * cmdLine )
+{
+    bool inQuote = false;
+    bool foundNonSpace = false;
+    bool escape = false;
+
+    for ( ; ; ++cmdLine )
+    {
+        switch ( *cmdLine )
+        {
+        case L' ':
+        case L'\t':
+        case L'\0': // In case there are no arguments.
+            if ( foundNonSpace && !inQuote )
+                return cmdLine;
+            escape = false;
+            break;
+        case L'\\':
+            escape = !escape;
+            break;
+        case '"':
+            if ( inQuote && !escape )
+                inQuote = false;
+            break;
+        default:
+            foundNonSpace = true;
+            escape = false;
+        }
+    }
+}
+
 bool findOnPath( PathList const & pathList, std::string const & file, std::string & result )
 {
     for ( PathList::const_iterator iter( pathList.begin() ); iter != pathList.end(); ++iter )
@@ -277,8 +344,7 @@ bool findOnPath( PathList const & pathList, std::string const & file, std::strin
 int distributedCompile(
     llvm::StringRef compilerToolset,
     llvm::StringRef compilerExecutable,
-    int argc,
-    char const * const argv[],
+    wchar_t * commandLine,
     llvm::StringRef portName,
     FallbackFunction fallbackFunc
 )
@@ -378,11 +444,15 @@ int distributedCompile(
     GetCurrentDirectory( currentPathSize, currentPathBuffer );
     msgSender.addPart( currentPathBuffer, currentPathSize - 1 );
 
-    llvm::SmallVector<char const *, 32> newArgv;
-    for ( int i( 0 ); i < argc; ++i )
-        newArgv.push_back( argv[ i ] );
-
+    int argc;
+    wchar_t * * argv = ::CommandLineToArgvW( commandLine, &argc );
     StringSaver saver;
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+
+    llvm::SmallVector<char const *, 32> newArgv;
+    for ( int i( 1 ); i < argc; ++i )
+        newArgv.push_back( saver.SaveString( convert.to_bytes( argv[ i ] ).c_str() ) );
+
     if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeWindowsCommandLine, newArgv ) )
     {
         // ExpandResponseFiles always returns false, even on success.

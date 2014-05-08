@@ -189,7 +189,9 @@ public:
     void exitSourceFile( Headers & );
 
     void inclusionDirective( llvm::StringRef searchPath,
-        llvm::StringRef relativePath, bool isAngled,
+        llvm::StringRef relativePath,
+        llvm::StringRef fileName,
+        bool isAngled,
         clang::FileEntry const * );
     void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();

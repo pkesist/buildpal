@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <memory>
+#include <fstream>
 #include <iostream>
 #include <sstream>
+#include <windows.h>
 
 namespace
 {
@@ -38,7 +40,7 @@ MacroName HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val
     return MacroName( result );
 }
 
-void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, bool isAngled, clang::FileEntry const * entry )
+void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, llvm::StringRef fileName, bool isAngled, clang::FileEntry const * entry )
 {
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
@@ -80,11 +82,59 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // If parent is system, this must be system.
     assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
+    Dir dir = Dir( searchPath );
+    HeaderName headerName = HeaderName( relativePath );
+
+    // Are we relative to includers location?
+    llvm::StringRef const parentSearchPath( fileStack_.back().header.dir.get() );
+    if ( !isAngled && !parentSearchPath.empty() )
+    {
+        // Given directory structure:
+        //
+        // -AAA/foo.h
+        //  AAA/BBB/bar.h
+        //  AAA/BBB/baz.h
+        //
+        // In case foo.h contains
+        //    #include "BBB/bar.h"
+        // And bar.h contains
+        //    #include "baz.h"
+        //
+        // We never want BBB to be added to search path -
+        // We want to get baz.h relative to AAA, i.e. we want
+        // dir to be AAA and file "BBB/baz.h"
+        llvm::StringRef const parentHeaderName( fileStack_.back().header.name.get() ); // BBB/bar.h
+        llvm::SmallString<512> relativeIncludeDir( parentHeaderName ); // BBB/bar.h
+        llvm::sys::path::remove_filename( relativeIncludeDir ); // BBB
+        if ( !relativeIncludeDir.empty() )
+        {
+            llvm::SmallString<512> path( searchPath ); // AAA/BBB
+            llvm::sys::path::append( path, relativePath ); // AAA/BBB/baz.h
+
+            llvm::SmallString<512> parent( parentSearchPath ); // AAA
+            llvm::sys::path::append( parent, relativeIncludeDir.str(), fileName ); // AAA/BBB/baz.h
+
+            // In case AAA/BBB/baz.h == 
+            llvm::sys::fs::file_status first;
+            llvm::sys::fs::file_status second;
+            if
+            (
+                !llvm::sys::fs::status( path.str(), first ) &&
+                !llvm::sys::fs::status( parent.str(), second ) &&
+                llvm::sys::fs::equivalent( first, second )
+            )
+            {
+                dir = fileStack_.back().header.dir;
+                headerName = HeaderName( relativePath.str() );
+            }
+        }
+    }
+
     HeaderWithFileEntry const headerWithFileEntry =
     {
         {
-            Dir( searchPath ),
-            HeaderName( relativePath ),
+            dir,
+            headerName,
             contentEntry.buffer.get(),
             contentEntry.checksum,
             headerLocation

@@ -56,8 +56,8 @@ namespace
             bool isAngled,
             clang::CharSourceRange filenameRange,
             clang::FileEntry const * file,
-            llvm::StringRef SearchPath,
-            llvm::StringRef RelativePath,
+            llvm::StringRef searchPath,
+            llvm::StringRef relativePath,
             clang::Module const * imported) LLVM_OVERRIDE
         {
             if ( !file )
@@ -65,7 +65,12 @@ namespace
                 missingHeaders_.insert( fileName.str() );
                 return;
             }
-            headerTracker_.inclusionDirective( SearchPath, RelativePath, isAngled, file );
+
+            // Normalize search path.
+            llvm::SmallString<512> nativeSearchPath;
+            llvm::sys::path::native( searchPath, nativeSearchPath );
+            searchPath = nativeSearchPath;
+            headerTracker_.inclusionDirective( searchPath, relativePath, fileName, isAngled, file );
         }
 
         virtual void ReplaceFile( clang::FileEntry const * & file ) LLVM_OVERRIDE

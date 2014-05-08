@@ -75,7 +75,7 @@ class CompileOptions:
         return result
 
     def input_files(self):
-        return list(x for x in itertools.chain(*self.value_dict.get('<input>')))
+        return list(x for x in itertools.chain(*self.value_dict.get('<input>')) if x != '/FD')
 
     def output_file(self):
         result = self.value_dict.get(self.compiler.object_name_option())
@@ -83,6 +83,22 @@ class CompileOptions:
             return None
         assert len(result[-1]) == 1
         return result[-1][0]
+
+    def files(self):
+        sources = self.input_files()
+        output = self.output_file()
+        if output:
+            if output[-1] == os.path.sep or output[-1] == os.path.altsep:
+                outputs = [os.path.join(output, os.path.splitext(
+                    os.path.basename(src))[0] + '.obj') for src in sources]
+                return zip(sources, outputs)
+            else:
+                if len(sources) > 1:
+                    raise RuntimeError("Cannot specify output file " \
+                        "with multiple sources.")
+                return [(sources[0], output)]
+        return [(src, os.path.splitext(os.path.basename(src))[0] + '.obj')
+            for src in sources]
 
     def link_options(self):
         return self.arg_dict.get(self.compiler.link_option())

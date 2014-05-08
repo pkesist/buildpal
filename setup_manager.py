@@ -23,6 +23,7 @@ class build_ext(setuptools_build_ext):
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
         extra_compile_args = []
+        extra_link_args = []
         if self.compiler == 'msvc':
             extra_compile_args.append('/EHsc')
         elif self.compiler == 'mingw32':
@@ -37,6 +38,7 @@ class build_ext(setuptools_build_ext):
             raise DistutilsOptionError('Unsupported compiler')
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
+            ext_module.extra_link_args.extend(extra_link_args)
 
     def run(self):
         build_boost = self.get_finalized_command('build_boost')

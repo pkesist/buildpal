@@ -17,7 +17,7 @@ class build_client(distutils_build):
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
 
-    __boost_libs = ['chrono', 'system']
+    __boost_libs = ['chrono', 'system', 'thread', 'date_time']
 
     def run(self):
         build_boost = self.get_finalized_command('build_boost')

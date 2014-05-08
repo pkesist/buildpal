@@ -44,10 +44,16 @@ class CommandProcessor:
             retcode = int(msg[0].tobytes())
             stdout = msg[1].tobytes()
             stderr = msg[2].tobytes()
-            self.compiler_info, self.tmp_compiler_files = self.compiler.get_compiler_info(
-                self.executable, stdout, stderr)
-            self.client_conn.send_msg([b'LOCATE_FILES'] + self.tmp_compiler_files)
-            self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
+            try:
+                self.compiler_info, self.tmp_compiler_files = \
+                    self.compiler.get_compiler_info(self.executable, stdout,
+                    stderr)
+            except Exception:
+                # Failed to identify compiler.
+                self.client_conn.send_msg([b'RUN_LOCALLY'])
+            else:
+                self.client_conn.send_msg([b'LOCATE_FILES'] + self.tmp_compiler_files)
+                self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         else:
             assert self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST
             assert len(msg) == len(self.tmp_compiler_files)
@@ -65,12 +71,6 @@ class CommandProcessor:
         return self.__options.should_build_locally()
 
     def create_tasks(self):
-        output = self.__options.output_file()
-        sources = self.__options.input_files()
-        if output and len(sources) > 1:
-            raise RuntimeError("Cannot specify output file " \
-                "with multiple sources.")
-
         pch_file = None
         pch_header = self.__options.pch_header()
         if pch_header:
@@ -85,7 +85,7 @@ class CommandProcessor:
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
-        def create_task(source):
+        def create_task(source, target):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
             return Task(dict(
@@ -104,12 +104,12 @@ class CommandProcessor:
                 ),
                 command_processor=self,
                 client_conn=self.client_conn,
-                output=os.path.join(self.__cwd, output or
-                    os.path.splitext(source)[0] + '.obj'),
+                output=os.path.join(self.__cwd, target),
                 pch_file=pch_file,
                 source=source,
             ))
-        self.tasks = set(create_task(source) for source in sources)
+        self.tasks = set(create_task(source, target) for source, target in
+            self.__options.files())
         self.completed_tasks = set()
         return self.tasks
 

@@ -5,12 +5,14 @@
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Process.h>
 
 #include <array>
 #include <ctime>
 #include <codecvt>
 #include <deque>
 #include <iostream>
+#include <fstream>
 #include <list>
 #include <memory>
 #include <string>
@@ -189,36 +191,118 @@ namespace
     class Fallback
     {
     public:
-        explicit Fallback( FallbackFunction const fallbackFunction )
-            : fallbackFunction_( fallbackFunction ) {}
+        explicit Fallback( FallbackFunction const fallbackFunction, void * fallbackParam )
+            : fallbackFunction_( fallbackFunction ),
+              fallbackParam_( fallbackParam )
+        {}
 
         int complete() const
         {
-            return fallbackFunction_ ? -1 : fallbackFunction_();
+            return fallbackFunction_ ? fallbackFunction_( fallbackParam_ ) : -1;
         }
+
     private:
         FallbackFunction fallbackFunction_;
+        void * fallbackParam_;
     };
 }
 
-PathList const & getPath()
+Environment::Environment( void * vpEnv, bool unicode )
+{
+    if ( !vpEnv )
+        return;
+
+    if ( unicode )
+    {
+        wchar_t const * start = static_cast<wchar_t const *>( vpEnv );
+        while ( *start )
+        {
+            wchar_t const * equalPos( 0 );
+            wchar_t const * iter = start;
+            for ( ; *iter; ++iter )
+            {
+                if ( ( *iter == '=' ) && !equalPos )
+                    equalPos = iter;
+            }
+            // Ignore cmd.exe bookkeeping variables (=::, =C:, =ExitCode)
+            if ( equalPos != start )
+            {
+                std::wstring const key( start, equalPos - start );
+                std::wstring const value( equalPos + 1, iter );
+                std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+                envMap_.insert( std::make_pair(
+                    convert.to_bytes( key ),
+                    convert.to_bytes( value ) ) );
+            }
+            start = iter + 1;
+        }
+    }
+    else
+    {
+        char const * start = static_cast<char const *>( vpEnv );
+        while ( *start )
+        {
+            char const * equalPos( 0 );
+            char const * iter = start;
+            for ( ; *iter; ++iter )
+            {
+                if ( ( *iter == '=' ) && !equalPos )
+                    equalPos = iter;
+            }
+            if ( equalPos != start )
+            {
+                std::string const key( start, equalPos - start );
+                std::string const value( equalPos + 1, iter );
+                envMap_.insert( std::make_pair( key, value ) );
+            }
+            start = iter + 1;
+        }
+    }
+}
+
+llvm::Optional<std::string> Environment::get( llvm::StringRef str ) const
+{
+    EnvMap::const_iterator const iter = envMap_.find( str );
+    if ( iter != envMap_.end() )
+        return iter->second;
+    return llvm::sys::Process::GetEnv( str );
+}
+
+void Environment::remove( llvm::StringRef str )
+{
+    envMap_.erase( str );
+}
+
+std::string Environment::createEnvBlock() const
+{
+    std::string result;
+    for ( EnvMap::const_iterator iter = envMap_.begin(); iter != envMap_.end(); ++iter )
+    {
+        result.append( iter->first );
+        result.push_back( '=' );
+        result.append( iter->second );
+        result.push_back( '\0' );
+    }
+    result.push_back( '\0' );
+    return result;
+}
+
+PathList const & getPath( Environment const & env )
 {
     static PathList result;
     static bool initialized = false;
     if ( !initialized )
     {
         initialized = true;
-        DWORD const size = GetEnvironmentVariable( "PATH", NULL, 0 );
-        if ( !size )
+        llvm::Optional<std::string> path = env.get( "PATH" );
+        if ( !path )
             return result;
-        char * const pathBuffer( static_cast<char *>( alloca( size ) ) );
-        GetEnvironmentVariable( "PATH", pathBuffer, size );
-        std::size_t last( 0 );
-        for ( std::size_t iter( 0 ); iter != size; ++iter )
+        std::size_t last = 0;
+        for ( std::size_t iter( 0 ); iter != path->size(); ++iter )
         {
-            if ( ( pathBuffer[ iter ] == ';' ) && ( iter != last + 1 ) )
+            if ( ( (*path)[ iter ] == ';' ) && ( iter != last + 1 ) )
             {
-                result.push_back( std::string( pathBuffer + last, pathBuffer + iter ) );
+                result.push_back( std::string( path->c_str() + last, path->c_str() + iter ) );
                 last = iter + 1;
             }
         }
@@ -227,13 +311,13 @@ PathList const & getPath()
     return result;
 }
 
-int createProcess( wchar_t * commandLine )
+int createProcess( wchar_t const * appName, wchar_t * commandLine )
 {
     STARTUPINFOW startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION processInfo;
 
     BOOL const apiResult = CreateProcessW(
-        NULL,
+        appName,
         commandLine,
         NULL,
         NULL,
@@ -261,13 +345,13 @@ int createProcess( wchar_t * commandLine )
     }
 }
 
-int createProcess( char * commandLine )
+int createProcess( char const * appName, char * commandLine )
 {
     STARTUPINFO startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION processInfo;
 
     BOOL const apiResult = CreateProcessA(
-        NULL,
+        appName,
         commandLine,
         NULL,
         NULL,
@@ -292,37 +376,6 @@ int createProcess( char * commandLine )
     {
         std::cerr << "ERROR: CreateProcess()\n";
         return -1;
-    }
-}
-
-wchar_t const * findArgs( wchar_t const * cmdLine )
-{
-    bool inQuote = false;
-    bool foundNonSpace = false;
-    bool escape = false;
-
-    for ( ; ; ++cmdLine )
-    {
-        switch ( *cmdLine )
-        {
-        case L' ':
-        case L'\t':
-        case L'\0': // In case there are no arguments.
-            if ( foundNonSpace && !inQuote )
-                return cmdLine;
-            escape = false;
-            break;
-        case L'\\':
-            escape = !escape;
-            break;
-        case '"':
-            if ( inQuote && !escape )
-                inQuote = false;
-            break;
-        default:
-            foundNonSpace = true;
-            escape = false;
-        }
     }
 }
 
@@ -344,21 +397,24 @@ bool findOnPath( PathList const & pathList, std::string const & file, std::strin
 int distributedCompile(
     llvm::StringRef compilerToolset,
     llvm::StringRef compilerExecutable,
-    wchar_t * commandLine,
+    Environment const & env,
+    wchar_t const * commandLine,
     llvm::StringRef portName,
-    FallbackFunction fallbackFunc
+    FallbackFunction fallbackFunc,
+    void * fallbackParam
 )
 {
-    Fallback const fallback( fallbackFunc );
+    Fallback const fallback( fallbackFunc, fallbackParam );
 
 #ifdef BOOST_WINDOWS
     HANDLE pipe;
     char const pipeStreamPrefix[] = "\\\\.\\pipe\\BuildPal_";
     std::size_t const pipeStreamPrefixSize = sizeof(pipeStreamPrefix) / sizeof(pipeStreamPrefix[0]) - 1;
 
-    char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + portName.size() ) );
+    char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + portName.size() + 1 ) );
     std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
     std::memcpy( pipeName + pipeStreamPrefixSize, portName.data(), portName.size() );
+    pipeName[ pipeStreamPrefixSize + portName.size() ] = 0;
 
     for ( ; ;  )
     {
@@ -428,16 +484,11 @@ int distributedCompile(
     msgSender.addPart( compilerToolset.data(), compilerToolset.size() );
     msgSender.addPart( compilerExecutable.data(), compilerExecutable.size() );
 
-    DWORD includeSize = GetEnvironmentVariable( "INCLUDE", NULL, 0 );
-    if ( includeSize == 0 )
-        msgSender.addPart( "", 0 );
+    llvm::Optional<std::string> const include = env.get( "INCLUDE" );
+    if ( include )
+        msgSender.addPart( include->c_str(), include->size() );
     else
-    {
-        char * includeBuffer = static_cast<char *>( alloca( includeSize ) );
-        GetEnvironmentVariable( "INCLUDE", includeBuffer, includeSize );
-        includeBuffer[ includeSize ] = '\0';
-        msgSender.addPart( includeBuffer, includeSize - 1 );
-    }
+        msgSender.addPart( "", 0 );
 
     DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
     char * currentPathBuffer = static_cast<char *>( alloca( currentPathSize ) );
@@ -510,13 +561,14 @@ int distributedCompile(
             }
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
-            char * const buffer = static_cast<char *>( alloca( compilerExecutable.size() + 1 + commandLine.size() + 1 ) );
-            std::memcpy( buffer, compilerExecutable.data(), compilerExecutable.size() );
-            buffer[ compilerExecutable.size() ] = ' ';
-            std::memcpy( buffer + compilerExecutable.size() + 1, commandLine.data(), commandLine.size() );
-            buffer[ compilerExecutable.size() + 1 + commandLine.size() ] = 0;
+            char const compiler[] = "compiler";
+            char * const buffer = static_cast<char *>( alloca( sizeof(compiler) + commandLine.size() + 1 ) );
+            std::memcpy( buffer, compiler, sizeof(compiler) - 1 );
+            buffer[ sizeof(compiler) - 1 ] = ' ';
+            std::memcpy( buffer + sizeof(compiler), commandLine.data(), commandLine.size() );
+            buffer[ sizeof(compiler) + commandLine.size() ] = 0;
 
-            return createProcess( buffer );
+            return createProcess( compilerExecutable.data(), buffer );
         }
         else if ( request == "EXECUTE_GET_OUTPUT" )
         {
@@ -528,11 +580,12 @@ int distributedCompile(
 
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
-            char * const buffer = static_cast<char *>( alloca( compilerExecutable.size() + 1 + commandLine.size() + 1 ) );
-            std::memcpy( buffer, compilerExecutable.data(), compilerExecutable.size() );
-            buffer[ compilerExecutable.size() ] = ' ';
-            std::memcpy( buffer + compilerExecutable.size() + 1, commandLine.data(), commandLine.size() );
-            buffer[ compilerExecutable.size() + 1 + commandLine.size() ] = 0;
+            char const compiler[] = "compiler";
+            char * const buffer = static_cast<char *>( alloca( sizeof(compiler) + commandLine.size() + 1 ) );
+            std::memcpy( buffer, compiler, sizeof(compiler) - 1 );
+            buffer[ sizeof(compiler) - 1 ] = ' ';
+            std::memcpy( buffer + sizeof(compiler), commandLine.data(), commandLine.size() );
+            buffer[ sizeof(compiler) + commandLine.size() ] = 0;
 
             SECURITY_ATTRIBUTES saAttr;
             saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -556,14 +609,17 @@ int distributedCompile(
 
             PROCESS_INFORMATION processInfo;
 
+            Environment env( GetEnvironmentStringsA(), false );
+            env.remove( "VS_UNICODE_OUTPUT" );
+
             BOOL const apiResult = CreateProcess(
-                NULL,
+                compilerExecutable.data(),
                 buffer,
                 NULL,
                 NULL,
                 TRUE,
                 CREATE_NEW_PROCESS_GROUP,
-                NULL,
+                const_cast<char *>( env.createEnvBlock().c_str() ),
                 NULL,
                 &startupInfo,
                 &processInfo
@@ -644,7 +700,7 @@ int distributedCompile(
             char const * const filename = PathFindFileName( compilerExePath );
             assert( filename != compilerExePath );
             pathList.push_back( std::string( compilerExePath, filename - compilerExePath ) );
-            PathList const & path( getPath() );
+            PathList const & path( getPath( env ) );
             std::copy( path.begin(), path.end(), std::back_inserter( pathList ) );
 
             for ( std::size_t part = 1; part < receiver.parts(); ++part )

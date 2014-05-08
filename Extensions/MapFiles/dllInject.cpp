@@ -3,7 +3,10 @@
 
 #include <cassert>
 #include <stdexcept>
+
 #include <Windows.h>
+#include <psapi.h>
+#include <shlwapi.h>
 
 unsigned char const load32[] = {
     #include "Loader/loader32.inc"
@@ -187,6 +190,85 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
     catch ( std::bad_alloc const & ) { return false; }
     catch ( std::exception const & ) { return false; }
     catch ( ...                    ) { return false; }
+}
+
+static bool replaceEntry( char const * const pszCalleeModName, char const * const funcName, PROC pfnNew, HMODULE hmodCaller )
+{
+    IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)hmodCaller; 
+    IMAGE_OPTIONAL_HEADER * pOptionHeader = (IMAGE_OPTIONAL_HEADER*)((BYTE*)hmodCaller + pDOSHeader->e_lfanew + 24);
+    if ( pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].Size == 0 )
+        return false;
+    IMAGE_IMPORT_DESCRIPTOR * pImportDesc = (IMAGE_IMPORT_DESCRIPTOR*)((BYTE*)hmodCaller + 
+        pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].VirtualAddress );
+    // Find the import descriptor containing references 
+    // to callee's functions.
+    for (; pImportDesc->Name; pImportDesc++)
+    {
+        PSTR pszModName = (PSTR)((PBYTE) hmodCaller + pImportDesc->Name);
+        if ( lstrcmpiA(pszModName, pszCalleeModName) == 0 ) 
+            break;
+    }
+
+    if ( pImportDesc->Name == 0 )
+        // This module doesn't import any functions from this callee.
+        return false; 
+
+    // Get caller's import address table (IAT) 
+    // for the callee's functions.
+    PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA) 
+        ((PBYTE) hmodCaller + pImportDesc->FirstThunk);
+
+    PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA) 
+        ((PBYTE) hmodCaller + pImportDesc->OriginalFirstThunk);
+
+     // Replace current function address with new function address.
+     for ( ; pOriginalThunk->u1.Function; pThunk++, pOriginalThunk++ )
+     {
+         char const * pName = (char *)((PBYTE)hmodCaller + pOriginalThunk->u1.AddressOfData + 2);
+         if ( _stricmp( funcName, pName ) == 0 )
+         {
+             PROC * ppfn = (PROC *) &pThunk->u1.Function;
+             DWORD dwOld;
+             BOOL result;
+             result = VirtualProtect(ppfn, 4, PAGE_READWRITE, &dwOld);
+             assert( result );
+             *ppfn = pfnNew;
+             result = VirtualProtect(ppfn, 4, PAGE_EXECUTE, &dwOld);
+             assert( result );
+             return true;  // We did it; get out.
+          }
+      }
+    // If we get to here, the function
+    // is not in the caller's import section.
+    return false;
+}
+
+int dummyInt;
+
+DWORD hookWinAPI( char const * calleeName, char const * funcName, PROC newProc )
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    VirtualQuery( &dummyInt, &mbi, sizeof(mbi) );
+    HMODULE thisModule = (HMODULE)mbi.AllocationBase;
+
+    HMODULE modules[ 1024 ];
+    DWORD size;
+    HMODULE exe = ::GetModuleHandle( NULL );
+    DWORD replaced = 0;
+    if ( replaceEntry( calleeName, funcName, newProc, exe ) )
+        replaced++;
+    if ( EnumProcessModules( GetCurrentProcess(), modules, sizeof( modules ), &size ) )
+    {
+        unsigned int len = size / sizeof( HMODULE );
+        for ( unsigned int index( 0 ); index < len; ++index )
+        {
+            if ( modules[ index ] == thisModule )
+                continue;
+            if ( replaceEntry( calleeName, funcName, newProc, modules[ index ] ) )
+                replaced++;
+        }
+    }
+    return replaced;
 }
 
 

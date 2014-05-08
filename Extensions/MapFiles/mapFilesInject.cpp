@@ -10,9 +10,6 @@
 #include <map>
 #include <unordered_map>
 
-#include <psapi.h>
-#include <shlwapi.h>
-
 typedef std::unordered_map<std::wstring, std::wstring> FileMapping;
 typedef std::map<DWORD, FileMapping> FileMappings;
 
@@ -294,79 +291,6 @@ HMODULE WINAPI hookLoadLibraryW( wchar_t * lpFileName )
     return result;
 }
 
-static bool replaceEntry( char const * const pszCalleeModName, char const * const funcName, PROC pfnNew, HMODULE hmodCaller )
-{
-    IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)hmodCaller; 
-    IMAGE_OPTIONAL_HEADER * pOptionHeader = (IMAGE_OPTIONAL_HEADER*)((BYTE*)hmodCaller + pDOSHeader->e_lfanew + 24);
-    if ( pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].Size == 0 )
-        return false;
-    IMAGE_IMPORT_DESCRIPTOR * pImportDesc = (IMAGE_IMPORT_DESCRIPTOR*)((BYTE*)hmodCaller + 
-        pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].VirtualAddress );
-    // Find the import descriptor containing references 
-    // to callee's functions.
-    for (; pImportDesc->Name; pImportDesc++)
-    {
-        PSTR pszModName = (PSTR)((PBYTE) hmodCaller + pImportDesc->Name);
-        if ( lstrcmpiA(pszModName, pszCalleeModName) == 0 ) 
-            break;
-    }
-
-    if ( pImportDesc->Name == 0 )
-        // This module doesn't import any functions from this callee.
-        return false; 
-
-    // Get caller's import address table (IAT) 
-    // for the callee's functions.
-    PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA) 
-        ((PBYTE) hmodCaller + pImportDesc->FirstThunk);
-
-    PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA) 
-        ((PBYTE) hmodCaller + pImportDesc->OriginalFirstThunk);
-
-     // Replace current function address with new function address.
-     for ( ; pOriginalThunk->u1.Function; pThunk++, pOriginalThunk++ )
-     {
-         char const * pName = (char *)((PBYTE)hmodCaller + pOriginalThunk->u1.AddressOfData + 2);
-         if ( _stricmp( funcName, pName ) == 0 )
-         {
-             PROC * ppfn = (PROC *) &pThunk->u1.Function;
-             DWORD dwOld;
-             BOOL result;
-             result = VirtualProtect(ppfn, 4, PAGE_READWRITE, &dwOld);
-             assert( result );
-             *ppfn = pfnNew;
-             result = VirtualProtect(ppfn, 4, PAGE_EXECUTE, &dwOld);
-             assert( result );
-             return true;  // We did it; get out.
-          }
-      }
-    // If we get to here, the function
-    // is not in the caller's import section.
-    return false;
-}
-
-DWORD hookWinAPI( char const * calleeName, char const * funcName, PROC newProc )
-{
-    HMODULE modules[ 1024 ];
-    DWORD size;
-    HMODULE exe = ::GetModuleHandle( NULL );
-    DWORD replaced = 0;
-    if ( replaceEntry( calleeName, funcName, newProc, exe ) )
-        replaced++;
-    if ( EnumProcessModules( GetCurrentProcess(), modules, sizeof( modules ), &size ) )
-    {
-        unsigned int len = size / sizeof( HMODULE );
-        for ( unsigned int index( 0 ); index < len; ++index )
-        {
-            if ( modules[ index ] == thisModule )
-                continue;
-            if ( replaceEntry( calleeName, funcName, newProc, modules[ index ] ) )
-                replaced++;
-        }
-    }
-    return replaced;
-}
-
 extern "C" DWORD WINAPI hookWinAPIs()
 {
     hookWinAPI( "Kernel32.dll", "CreateFileA", (PROC)hookCreateFileA );
@@ -380,8 +304,8 @@ extern "C" DWORD WINAPI hookWinAPIs()
 
 extern "C" DWORD WINAPI unhookWinAPIs()
 {
-	HMODULE kernelModule( ::GetModuleHandle( "Kernel32.dll" ) );
-	hookWinAPI( "Kernel32.dll", "CreateFileA", ::GetProcAddress( kernelModule, "CreateFileA" ) );
+    HMODULE kernelModule( ::GetModuleHandle( "Kernel32.dll" ) );
+    hookWinAPI( "Kernel32.dll", "CreateFileA", ::GetProcAddress( kernelModule, "CreateFileA" ) );
     hookWinAPI( "Kernel32.dll", "CreateFileW", ::GetProcAddress( kernelModule, "CreateFileW" ) );
     hookWinAPI( "Kernel32.dll", "LoadLibraryA", ::GetProcAddress( kernelModule, "LoadLibraryA" ) );
     hookWinAPI( "Kernel32.dll", "LoadLibraryW", ::GetProcAddress( kernelModule, "LoadLibraryW" ) );

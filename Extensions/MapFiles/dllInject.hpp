@@ -4,6 +4,9 @@
 #ifndef dllInject_HPP__1955D571_E264_4806_8F8A_046574F683C7
 #define dllInject_HPP__1955D571_E264_4806_8F8A_046574F683C7
 //----------------------------------------------------------------------------
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
 
 bool injectLibrary(
     // process handle where to inject library
@@ -24,6 +27,8 @@ bool injectLibrary(
     //     via VirtualAllocEx().
     void * initArgs
 );
+
+DWORD hookWinAPI( char const * dllName, char const * funcName, PROC newProc );
 
 
 //----------------------------------------------------------------------------

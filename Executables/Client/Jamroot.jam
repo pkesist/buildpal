@@ -97,4 +97,30 @@ exe bp_cl
 ;
 explicit bp_cl ;
 
+alias bp_cli_inj
+:
+    $(MAP_FILES)/dllInject.cpp
+    hookProcess.cpp
+    client.cpp
+    boost-stuff
+    clang-stuff
+:
+:
+:
+    <target-os>windows:<define>_WIN32_WINNT=0x0501
+    <toolset>msvc:<library>shlwapi
+    <include>$(MAP_FILES)
+    <include>$(TMP_INCLUDE_DIR)
+;
+
+lib bp_cli_inj32 : bp_cli_inj : <address-model>32 <def-file>hookProcess.def ;
+lib bp_cli_inj64 : bp_cli_inj : <address-model>64 <def-file>hookProcess.def ;
+
+alias select_inject_module : bp_cli_inj32 ;
+alias select_inject_module : bp_cli_inj32 : <address-model>32 ;
+alias select_inject_module : bp_cli_inj64 : <address-model>64 ;
+
+exe hookMeister : hookMeister.cpp select_inject_module ;
+
 install _ : bp_cl : <location>$(TARGET_DIR) ;
+install __ : hookMeister bp_cli_inj32 bp_cli_inj64 : <location>D:\\Sandboxes\\PKE\\Libraries\\Boost\\boost_1_53_0 <install-type>EXE <install-type>SHARED_LIB ;

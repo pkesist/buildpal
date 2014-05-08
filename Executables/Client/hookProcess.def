@@ -1,0 +1,4 @@
+EXPORTS
+    createProcessA
+    createProcessW
+    Initialize

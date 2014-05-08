@@ -110,6 +110,10 @@
     <Content Include="Executables\Client\bp_cl.cpp" />
     <Content Include="Executables\Client\client.cpp" />
     <Content Include="Executables\Client\client.hpp" />
+    <Content Include="Executables\Client\hookMeister.cpp" />
+    <Content Include="Executables\Client\hookProcess.cpp" />
+    <Content Include="Executables\Client\hookProcess.def" />
+    <Content Include="Executables\Client\hookProcess.hpp" />
     <Content Include="Executables\Client\Jamroot.jam" />
     <Content Include="Extensions\ArgParser\argList_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />

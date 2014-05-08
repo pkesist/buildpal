@@ -32,6 +32,12 @@ class NodeManager:
                 task.task_completed(-1, b'', 'ERROR: {}\n'.format(exception).encode())
             self.loop.call_soon_threadsafe(task_error)
             return
+        if task.missing_headers:
+            error = "BuildPal Error:\n" \
+                "Cannot compile '{}' - the following headers could not be found:\n"
+            error.append('\n'.join(task.missing_headers))
+            task.task_completed('-1', b'', error.encode())
+            return
         def schedule_task(task):
             task.note_time('collected from preprocessor', 'preprocessed notification time')
             self.schedule_task(task)

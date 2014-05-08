@@ -22,6 +22,31 @@
 #include <llvm/ADT/SmallString.h>
 
 #include <iostream>
+#include <windows.h>
+#undef ReplaceFile
+
+void normalize( llvm::SmallString<512> & path )
+{
+    llvm::SmallString<512> result;
+
+    llvm::sys::path::const_iterator const end = llvm::sys::path::end( path.str() );
+    for ( llvm::sys::path::const_iterator iter = llvm::sys::path::begin( path.str() ); iter != end; ++iter )
+    {
+        if ( *iter == "." )
+            continue;
+        else if ( *iter == ".." )
+        {
+            assert( !result.empty() );
+            llvm::sys::path::remove_filename( result );
+        }
+        else
+        {
+            llvm::sys::path::append( result, *iter );
+        }
+    }
+    llvm::sys::path::native( result );
+    path.swap( result );
+}
 
 namespace
 {
@@ -66,10 +91,6 @@ namespace
                 return;
             }
 
-            // Normalize search path.
-            llvm::SmallString<512> nativeSearchPath;
-            llvm::sys::path::native( searchPath, nativeSearchPath );
-            searchPath = nativeSearchPath;
             headerTracker_.inclusionDirective( searchPath, relativePath, fileName, isAngled, file );
         }
 
@@ -230,18 +251,9 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     // Initialize file manager.
     fileManager_.reset( new clang::FileManager( fsOpts_ ) );
     fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
-    clang::FileEntry const * mainFileEntry = fileManager().getFile( fileName );
-    if ( !mainFileEntry )
-    {
-        std::string error( "Could not find source file '" );
-        error.append( fileName.str() );
-        error.append( "'." );
-        throw std::runtime_error( error );
-    }
 
     // Initialize source manager.
     sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );
-    sourceManager().createMainFileID( mainFileEntry );
 
     // Setup search path.
     headerSearch_.reset( new clang::HeaderSearch( hsOpts_, sourceManager(), *diagEng_, *langOpts_, &*targetInfo_ ) );
@@ -269,11 +281,16 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
 
     headerSearch_->SetSearchPaths( searchPath, 0, ppc.userSearchPath().size(), false );
 
-    std::string predefines;
-    llvm::raw_string_ostream predefinesStream( predefines );
-    clang::MacroBuilder macroBuilder( predefinesStream );
-    for ( PreprocessingContext::Defines::const_iterator iter( ppc.defines().begin() ); iter != ppc.defines().end(); ++iter )
-        macroBuilder.defineMacro( iter->first, iter->second );
+    // Create main file.
+    clang::FileEntry const * mainFileEntry = fileManager().getFile( fileName );
+    if ( !mainFileEntry )
+    {
+        std::string error( "Could not find source file '" );
+        error.append( fileName.str() );
+        error.append( "'." );
+        throw std::runtime_error( error );
+    }
+    sourceManager().createMainFileID( mainFileEntry );
 
     // Setup new preprocessor instance.
     preprocessor_.reset
@@ -290,7 +307,13 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
         )
     );
 
+    std::string predefines;
+    llvm::raw_string_ostream predefinesStream( predefines );
+    clang::MacroBuilder macroBuilder( predefinesStream );
+    for ( PreprocessingContext::Defines::value_type const & macro : ppc.defines() )
+        macroBuilder.defineMacro( macro.first, macro.second );
     preprocessor().setPredefines( predefinesStream.str() );
+
     preprocessor().SetSuppressIncludeNotFoundError( true );
     return searchPathId;
 }

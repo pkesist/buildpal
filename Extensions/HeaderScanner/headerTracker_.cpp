@@ -82,52 +82,58 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // If parent is system, this must be system.
     assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
-    Dir dir = Dir( searchPath );
-    HeaderName headerName = HeaderName( relativePath );
+    Dir dir;
+    HeaderName headerName;
 
-    // Are we relative to includers location?
-    llvm::StringRef const parentSearchPath( fileStack_.back().header.dir.get() );
-    if ( !isAngled && !parentSearchPath.empty() )
+    if ( searchPath.empty() )
     {
-        // Given directory structure:
-        //
-        // -AAA/foo.h
-        //  AAA/BBB/bar.h
-        //  AAA/BBB/baz.h
-        //
-        // In case foo.h contains
-        //    #include "BBB/bar.h"
-        // And bar.h contains
-        //    #include "baz.h"
-        //
-        // We never want BBB to be added to search path -
-        // We want to get baz.h relative to AAA, i.e. we want
-        // dir to be AAA and file "BBB/baz.h"
-        llvm::StringRef const parentHeaderName( fileStack_.back().header.name.get() ); // BBB/bar.h
-        llvm::SmallString<512> relativeIncludeDir( parentHeaderName ); // BBB/bar.h
-        llvm::sys::path::remove_filename( relativeIncludeDir ); // BBB
-        if ( !relativeIncludeDir.empty() )
+        dir =  Dir( searchPath );
+        headerName = HeaderName( relativePath );
+    }
+    else
+    {
+        // Remove '.' and '..' from searchPath
+        llvm::SmallString<512> vec( searchPath );
+        normalize( vec );
+        searchPath = vec.str();
+
+        // Find the include directory searchPath is relative to.
+        typedef std::vector<clang::DirectoryLookup> DirLookups;
+        DirLookups::const_iterator const end = preprocessor().getHeaderSearchInfo().search_dir_end();
+        DirLookups::const_iterator iter = preprocessor().getHeaderSearchInfo().search_dir_begin();
+        bool found = false;
+        for ( ; iter != end; ++iter )
         {
-            llvm::SmallString<512> path( searchPath ); // AAA/BBB
-            llvm::sys::path::append( path, relativePath ); // AAA/BBB/baz.h
-
-            llvm::SmallString<512> parent( parentSearchPath ); // AAA
-            llvm::sys::path::append( parent, relativeIncludeDir.str(), fileName ); // AAA/BBB/baz.h
-
-            // In case AAA/BBB/baz.h == 
-            llvm::sys::fs::file_status first;
-            llvm::sys::fs::file_status second;
-            if
-            (
-                !llvm::sys::fs::status( path.str(), first ) &&
-                !llvm::sys::fs::status( parent.str(), second ) &&
-                llvm::sys::fs::equivalent( first, second )
-            )
+            clang::DirectoryLookup const & dirLookup( *iter );
+            llvm::StringRef const dirName( dirLookup.getName() );
+            if ( searchPath.startswith_lower( dirName ) )
             {
-                dir = fileStack_.back().header.dir;
-                headerName = HeaderName( relativePath.str() );
+                dir = Dir( dirName );
+                if ( searchPath == dirName )
+                {
+                    headerName = HeaderName( relativePath );
+                }
+                else
+                {
+                    llvm::StringRef const remainder( searchPath.data() + dirName.size(), searchPath.size() - dirName.size() );
+                    assert( llvm::sys::path::is_separator( remainder[0] ) );
+                    if ( remainder.size() == 1 )
+                    {
+                        headerName = HeaderName( relativePath );
+                    }
+                    else
+                    {
+                        llvm::SmallString<512> tmp( remainder.data() + 1, remainder.data() + remainder.size() );
+                        llvm::sys::path::append( tmp, relativePath );
+                        headerName = HeaderName( tmp.str() );
+                    }
+                }
+                found = true;
+                break;
             }
         }
+        if ( !found )
+            DebugBreak();
     }
 
     HeaderWithFileEntry const headerWithFileEntry =

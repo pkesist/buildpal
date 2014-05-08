@@ -36,7 +36,7 @@ def dump_cache():
     cache.dump('cacheDump.txt')
 
 def header_info(preprocessor, task):
-    header_info = collect_headers(preprocessor, task['source'], task['includes'],
+    header_info, missing_headers = collect_headers(preprocessor, task['source'], task['includes'],
         task['sysincludes'], task['macros'],
         ignored_headers=[task['pch_header']] if task['pch_header'] else [])
     shared_file_list = []
@@ -49,7 +49,7 @@ def header_info(preprocessor, task):
             if not relative:
                 shared_files_in_dir.append((file, checksum))
         shared_file_list.append((dir, shared_files_in_dir))
-    return header_info, tuple(shared_file_list)
+    return header_info, tuple(shared_file_list), missing_headers
 
 
 class SourceScanner:
@@ -92,7 +92,7 @@ class SourceScanner:
                 task = self.in_queue.get(timeout=1)
                 task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
                 try:
-                    task.header_info, task.server_task_info['filelist'] = \
+                    task.header_info, task.server_task_info['filelist'], task.missing_headers = \
                         header_info(preprocessor, task.preprocess_task_info)
                     task.note_time('preprocessed', 'preprocessing time')
                 except Exception as e:

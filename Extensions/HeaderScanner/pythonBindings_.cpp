@@ -342,7 +342,6 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     {
         Py_UNBLOCK_THREADS
         self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers, missing );
-        // TODO: short-circuit compilation if there are missing headers.
     }
     catch ( std::runtime_error const & error )
     {
@@ -395,16 +394,28 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         Py_DECREF( headerEntry );
     }
 
-    PyObject * resultTuple = PyTuple_New( dirsAndHeaders.size() );
-    std::size_t index( 0 );
+    PyObject * headersTuple = PyTuple_New( dirsAndHeaders.size() );
+    std::size_t headerIndex( 0 );
     for ( DirsAndHeaders::value_type const & dirAndHeaders : dirsAndHeaders )
     {
         PyObject * dirTuple = PyTuple_New( 2 );
         PyObject * dir = PyUnicode_FromStringAndSize( dirAndHeaders.first.get().data(), dirAndHeaders.first.get().size() );
         PyTuple_SET_ITEM( dirTuple, 0, dir );
         PyTuple_SET_ITEM( dirTuple, 1, dirAndHeaders.second );
-        PyTuple_SET_ITEM( resultTuple, index++, dirTuple );
+        PyTuple_SET_ITEM( headersTuple, headerIndex++, dirTuple );
     }
+
+    PyObject * missingHeadersTuple = PyTuple_New( missing.size() );
+    std::size_t missingIndex( 0 );
+    for ( HeaderList::value_type const & missingHeader : missing )
+    {
+        PyObject * val = PyUnicode_FromStringAndSize( missingHeader.data(), missingHeader.size() );
+        PyTuple_SET_ITEM( missingHeadersTuple, missingIndex++, val );
+    }
+    
+    PyObject * resultTuple = PyTuple_New( 2 );
+    PyTuple_SET_ITEM( resultTuple, 0, headersTuple );
+    PyTuple_SET_ITEM( resultTuple, 1, missingHeadersTuple );
     return resultTuple;
 }
 

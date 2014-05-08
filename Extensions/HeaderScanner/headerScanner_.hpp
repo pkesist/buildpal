@@ -18,6 +18,7 @@
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/OwningPtr.h>
+#include <llvm/Support/Path.h>
 
 #include <set>
 #include <string>
@@ -77,6 +78,8 @@ inline bool operator<( Header const & first, Header const & second )
 }
 
 
+void normalize( llvm::SmallString<512> & path );
+
 struct Headers : public std::set<Header>
 {
     Headers() : std::set<Header>() {};
@@ -114,27 +117,35 @@ struct DummyModuleLoader : public clang::ModuleLoader
 class PreprocessingContext
 {
 public:
-    void addIncludePath( std::string const & path, bool sysinclude )
+    void addIncludePath( llvm::StringRef path, bool sysinclude )
     {
         if ( path.empty() )
             return;
         if ( sysinclude )
-            systemSearchPath_.push_back( path );
+        {
+            llvm::SmallString<512> tmp( path );
+            normalize( tmp );
+            systemSearchPath_.push_back( tmp );
+        }
         else
-            userSearchPath_.push_back( path );
+        {
+            llvm::SmallString<512> tmp( path );
+            normalize( tmp );
+            userSearchPath_.push_back( tmp );
+        }
     }
 
-    void addMacro( std::string const & name, std::string const & value )
+    void addMacro( llvm::StringRef name, llvm::StringRef value )
     {
         defines_.push_back( std::make_pair( name, value ) );
     }
 
-    void addIgnoredHeader( std::string const & name )
+    void addIgnoredHeader( llvm::StringRef name )
     {
         ignoredHeaders_.insert( name );
     }
 
-    typedef std::vector<std::string> SearchPath;
+    typedef std::vector<llvm::SmallString<512> > SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
 
     SearchPath const & userSearchPath  () const { return userSearchPath_; }

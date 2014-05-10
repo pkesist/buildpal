@@ -10,14 +10,98 @@
 #include <map>
 #include <unordered_map>
 
+#include <shlwapi.h>
+
 typedef std::unordered_map<std::wstring, std::wstring> FileMapping;
 typedef std::map<DWORD, FileMapping> FileMappings;
 
-FileMapping fileMapping;
-HMODULE thisModule;
+// Global mapping - used for current process.
+FileMapping globalMapping;
 
-FileMappings fileMappings;
+// Custom mappings - used for spawning other processes.
+FileMappings customMappings;
+
 DWORD counter = 0;
+
+HANDLE WINAPI createFileA(
+  _In_      char const * lpFileName,
+  _In_      DWORD dwDesiredAccess,
+  _In_      DWORD dwShareMode,
+  _In_opt_  LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+  _In_      DWORD dwCreationDisposition,
+  _In_      DWORD dwFlagsAndAttributes,
+  _In_opt_  HANDLE hTemplateFile
+);
+
+HANDLE WINAPI createFileW(
+  _In_      wchar_t const * lpFileName,
+  _In_      DWORD dwDesiredAccess,
+  _In_      DWORD dwShareMode,
+  _In_opt_  LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+  _In_      DWORD dwCreationDisposition,
+  _In_      DWORD dwFlagsAndAttributes,
+  _In_opt_  HANDLE hTemplateFile
+);
+HMODULE WINAPI loadLibraryA( char * lpFileName );
+HMODULE WINAPI loadLibraryW( wchar_t * lpFileName );
+BOOL WINAPI createProcessA(
+    _In_opt_     char const * lpApplicationName,
+    _Inout_opt_  char * lpCommandLine,
+    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    _In_         BOOL bInheritHandles,
+    _In_         DWORD dwCreationFlags,
+    _In_opt_     LPVOID lpEnvironment,
+    _In_opt_     char const * lpCurrentDirectory,
+    _In_         LPSTARTUPINFOA lpStartupInfo,
+    _Out_        LPPROCESS_INFORMATION lpProcessInformation
+);
+BOOL WINAPI createProcessW(
+    _In_opt_     wchar_t const * lpApplicationName,
+    _Inout_opt_  wchar_t * lpCommandLine,
+    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    _In_         BOOL bInheritHandles,
+    _In_         DWORD dwCreationFlags,
+    _In_opt_     LPVOID lpEnvironment,
+    _In_opt_     wchar_t const * lpCurrentDirectory,
+    _In_         LPSTARTUPINFOW lpStartupInfo,
+    _Out_        LPPROCESS_INFORMATION lpProcessInformation
+);
+HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags );
+HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags );
+PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName );
+
+
+PROC replacements[] = 
+{
+    (PROC)createFileA,
+    (PROC)createFileW,
+    (PROC)createProcessA,
+    (PROC)createProcessW,
+    (PROC)getProcAddress,
+    (PROC)loadLibraryA,
+    (PROC)loadLibraryW,
+    (PROC)loadLibraryExA,
+    (PROC)loadLibraryExW
+};
+
+unsigned int const procCount = sizeof(replacements) / sizeof(PROC);
+
+char const * procNames[procCount] =
+{
+    "CreateFileA"   , 
+    "CreateFileW"   , 
+    "CreateProcessA", 
+    "CreateProcessW",
+    "GetProcAddress",
+    "LoadLibraryA"  , 
+    "LoadLibraryW"  ,
+    "LoadLibraryExA",
+    "LoadLibraryExW"
+};
+
+PROC originals[procCount];
 
 namespace
 {
@@ -119,7 +203,7 @@ namespace
     }
 }
 
-HANDLE WINAPI hookCreateFileA(
+HANDLE WINAPI createFileA(
   _In_      char const * lpFileName,
   _In_      DWORD dwDesiredAccess,
   _In_      DWORD dwShareMode,
@@ -130,9 +214,9 @@ HANDLE WINAPI hookCreateFileA(
 )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    FileMapping::const_iterator const iter = fileMapping.find( normalizePath(
+    FileMapping::const_iterator const iter = globalMapping.find( normalizePath(
         convert.from_bytes( lpFileName ) ) );
-    return CreateFileA( iter == fileMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
+    return CreateFileA( iter == globalMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -142,7 +226,7 @@ HANDLE WINAPI hookCreateFileA(
     );
 }
 
-HANDLE WINAPI hookCreateFileW(
+HANDLE WINAPI createFileW(
   _In_      wchar_t const * lpFileName,
   _In_      DWORD dwDesiredAccess,
   _In_      DWORD dwShareMode,
@@ -152,11 +236,11 @@ HANDLE WINAPI hookCreateFileW(
   _In_opt_  HANDLE hTemplateFile
 )
 {
-    FileMapping::const_iterator const iter = fileMapping.find(
+    FileMapping::const_iterator const iter = globalMapping.find(
         normalizePath( lpFileName ) );
     return CreateFileW
     ( 
-        iter == fileMapping.end() ? lpFileName : iter->second.c_str(),
+        iter == globalMapping.end() ? lpFileName : iter->second.c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -239,7 +323,7 @@ namespace
     }
 }
 
-BOOL createProcessWithGlobalMappingA(
+BOOL WINAPI createProcessA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -255,10 +339,10 @@ BOOL createProcessWithGlobalMappingA(
     return createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, fileMapping );
+        lpProcessInformation, globalMapping );
 }
 
-BOOL createProcessWithGlobalMappingW(
+BOOL WINAPI createProcessW(
     _In_opt_     wchar_t const * lpApplicationName,
     _Inout_opt_  wchar_t * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -274,44 +358,55 @@ BOOL createProcessWithGlobalMappingW(
     return createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, fileMapping );
+        lpProcessInformation, globalMapping );
 }
 
-HMODULE WINAPI hookLoadLibraryA( char * lpFileName )
+HMODULE WINAPI loadLibraryA( char * lpFileName )
 {
     HMODULE result = ::LoadLibraryA( lpFileName );
     hookWinAPIs();
     return result;
 }
 
-HMODULE WINAPI hookLoadLibraryW( wchar_t * lpFileName )
+HMODULE WINAPI loadLibraryW( wchar_t * lpFileName )
 {
     HMODULE result = ::LoadLibraryW( lpFileName );
     hookWinAPIs();
     return result;
 }
 
+HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
+{
+    HMODULE result = ::LoadLibraryExA( lpFileName, hFile, dwFlags );
+    hookWinAPI( originals, replacements, procCount );
+    return result;
+}
+
+HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
+{
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    HMODULE result = ::LoadLibraryExW( lpFileName, hFile, dwFlags );
+    hookWinAPI( originals, replacements, procCount );
+    return result;
+}
+
+PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName )
+{
+    PROC result = GetProcAddress( hModule, lpProcName );
+    for ( unsigned int index( 0 ); index < procCount; ++index )
+        if ( result == originals[ index ] )
+            return replacements[ index ];
+    return result;
+}
+
 extern "C" DWORD WINAPI hookWinAPIs()
 {
-    hookWinAPI( "Kernel32.dll", "CreateFileA", (PROC)hookCreateFileA );
-    hookWinAPI( "Kernel32.dll", "CreateFileW", (PROC)hookCreateFileW );
-    hookWinAPI( "Kernel32.dll", "LoadLibraryA", (PROC)hookLoadLibraryA );
-    hookWinAPI( "Kernel32.dll", "LoadLibraryW", (PROC)hookLoadLibraryW );
-    hookWinAPI( "Kernel32.dll", "CreateProcessA", (PROC)createProcessWithGlobalMappingA );
-    hookWinAPI( "Kernel32.dll", "CreateProcessW", (PROC)createProcessWithGlobalMappingW );
-    return 0;
+    return hookWinAPI( originals, replacements, procCount );
 }
 
 extern "C" DWORD WINAPI unhookWinAPIs()
 {
-    HMODULE kernelModule( ::GetModuleHandle( "Kernel32.dll" ) );
-    hookWinAPI( "Kernel32.dll", "CreateFileA", ::GetProcAddress( kernelModule, "CreateFileA" ) );
-    hookWinAPI( "Kernel32.dll", "CreateFileW", ::GetProcAddress( kernelModule, "CreateFileW" ) );
-    hookWinAPI( "Kernel32.dll", "LoadLibraryA", ::GetProcAddress( kernelModule, "LoadLibraryA" ) );
-    hookWinAPI( "Kernel32.dll", "LoadLibraryW", ::GetProcAddress( kernelModule, "LoadLibraryW" ) );
-    hookWinAPI( "Kernel32.dll", "CreateProcessA", ::GetProcAddress( kernelModule, "CreateProcessA" ) );
-    hookWinAPI( "Kernel32.dll", "CreateProcessW", ::GetProcAddress( kernelModule, "CreateProcessW" ) );
-    return 0;
+    return hookWinAPI( replacements, originals, procCount );
 }
 
 extern "C" DWORD WINAPI Initialize( HANDLE readHandle )
@@ -319,7 +414,7 @@ extern "C" DWORD WINAPI Initialize( HANDLE readHandle )
     std::wstring first;
     std::wstring second;
     while ( readMapping( readHandle, first, second ) )
-        fileMapping.insert( std::make_pair( normalizePath( first ), second ) );
+        globalMapping.insert( std::make_pair( normalizePath( first ), second ) );
     hookWinAPIs();
     return 0;
 }
@@ -341,37 +436,37 @@ namespace
 extern "C" BOOL mapFileGlobalA( char const * virtualFile, char const * file )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    return addMapping( fileMapping, convert.from_bytes( virtualFile ),
+    return addMapping( globalMapping, convert.from_bytes( virtualFile ),
         convert.from_bytes( file ) ) ? TRUE : FALSE;
 }
 
 extern "C" BOOL mapFileGlobalW( wchar_t const * virtualFile, wchar_t const * file )
 {
-    return addMapping( fileMapping, virtualFile, file ) ? TRUE : FALSE;
+    return addMapping( globalMapping, virtualFile, file ) ? TRUE : FALSE;
 }
 
 extern "C" BOOL unmapFileGlobalA( char const * virtualFile )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    return removeMapping( fileMapping, convert.from_bytes( virtualFile ) ) ? TRUE : FALSE;
+    return removeMapping( globalMapping, convert.from_bytes( virtualFile ) ) ? TRUE : FALSE;
 }
 
 extern "C" BOOL unmapFileGlobalW( wchar_t const * virtualFile )
 {
-    return removeMapping( fileMapping, virtualFile ) ? TRUE : FALSE;
+    return removeMapping( globalMapping, virtualFile ) ? TRUE : FALSE;
 }
 
 extern "C" DWORD createFileMap()
 {
     counter += 1;
-    fileMappings[ counter ];
+    customMappings[ counter ];
     return counter;
 }
 
 extern "C" BOOL mapFileA( DWORD map, char const * virtualFile, char const * file )
 {
-    FileMappings::iterator const iter = fileMappings.find( map );
-    if ( iter == fileMappings.end() )
+    FileMappings::iterator const iter = customMappings.find( map );
+    if ( iter == customMappings.end() )
         return FALSE;
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     return addMapping( iter->second, convert.from_bytes( virtualFile ),
@@ -380,8 +475,8 @@ extern "C" BOOL mapFileA( DWORD map, char const * virtualFile, char const * file
 
 extern "C" BOOL mapFileW( DWORD map, wchar_t * virtualFile, wchar_t * file )
 {
-    FileMappings::iterator const iter = fileMappings.find( map );
-    if ( iter == fileMappings.end() )
+    FileMappings::iterator const iter = customMappings.find( map );
+    if ( iter == customMappings.end() )
         return FALSE;
     return addMapping( iter->second, virtualFile, file ) ? TRUE : FALSE;
 }
@@ -400,14 +495,14 @@ extern "C" BOOL WINAPI createProcessWithMappingA(
     _In_         DWORD mapping
 )
 {
-    FileMappings::iterator const iter = fileMappings.find( mapping );
-    if ( iter == fileMappings.end() )
+    FileMappings::iterator const iter = customMappings.find( mapping );
+    if ( iter == customMappings.end() )
         return FALSE;
     BOOL const result = createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
         lpProcessInformation, iter->second );
-    fileMappings.erase( iter );
+    customMappings.erase( iter );
     return result;
 }
 
@@ -425,22 +520,31 @@ extern "C" BOOL WINAPI createProcessWithMappingW(
     _In_         DWORD mapping
 )
 {
-    FileMappings::iterator const iter = fileMappings.find( mapping );
-    if ( iter == fileMappings.end() )
+    FileMappings::iterator const iter = customMappings.find( mapping );
+    if ( iter == customMappings.end() )
         return FALSE;
     BOOL const result = createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
         lpProcessInformation, iter->second );
-    fileMappings.erase( iter );
+    customMappings.erase( iter );
     return result;
 }
 
-BOOL WINAPI DllMain( HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )
+BOOL WINAPI DllMain(
+  _In_  HINSTANCE hinstDLL,
+  _In_  DWORD fdwReason,
+  _In_  LPVOID lpvReserved
+)
 {
     if ( fdwReason == DLL_PROCESS_ATTACH )
     {
-        thisModule = hinstDLL;
+        HMODULE kernel32Handle = ::GetModuleHandle( "Kernel32.dll" );
+        for ( unsigned int index( 0 ); index < procCount; ++index )
+            originals[ index ] = GetProcAddress( kernel32Handle, procNames[ index ] );
+    }
+    else if ( fdwReason == DLL_PROCESS_DETACH )
+    {
     }
     return TRUE;
 }

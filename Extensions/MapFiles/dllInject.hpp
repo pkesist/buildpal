@@ -28,7 +28,7 @@ bool injectLibrary(
     void * initArgs
 );
 
-DWORD hookWinAPI( char const * dllName, char const * funcName, PROC newProc );
+DWORD hookWinAPI( PROC const * original, PROC const * replacement, DWORD procCount );
 
 
 //----------------------------------------------------------------------------

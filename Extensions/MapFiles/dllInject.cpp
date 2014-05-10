@@ -192,60 +192,79 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
     catch ( ...                    ) { return false; }
 }
 
-static bool replaceEntry( char const * const pszCalleeModName, char const * const funcName, PROC pfnNew, HMODULE hmodCaller )
+DWORD replaceIATEntries( HMODULE module, PROC const * original, PROC const * replacement, DWORD procCount )
 {
-    IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)hmodCaller; 
-    IMAGE_OPTIONAL_HEADER * pOptionHeader = (IMAGE_OPTIONAL_HEADER*)((BYTE*)hmodCaller + pDOSHeader->e_lfanew + 24);
-    if ( pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].Size == 0 )
+    BYTE * baseAddress = (BYTE *)module;
+    IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)module;
+    IMAGE_NT_HEADERS * pNTHeader = (IMAGE_NT_HEADERS *)(baseAddress + pDOSHeader->e_lfanew);
+    IMAGE_OPTIONAL_HEADER * pOptionalHeader = &pNTHeader->OptionalHeader;
+    if ( pOptionalHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].Size == 0 )
         return false;
-    IMAGE_IMPORT_DESCRIPTOR * pImportDesc = (IMAGE_IMPORT_DESCRIPTOR*)((BYTE*)hmodCaller + 
-        pOptionHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].VirtualAddress );
+
+    // Needed for .NET applications.
+    if ( pOptionalHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR ].VirtualAddress != 0 )
+    {
+        IMAGE_COR20_HEADER * pCor20Header = (IMAGE_COR20_HEADER *)(baseAddress + \
+            pOptionalHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR ].VirtualAddress);
+        if ( pCor20Header->Flags & COMIMAGE_FLAGS_ILONLY )
+        {
+            DWORD oldProtect;
+            VirtualProtect( &pCor20Header->Flags, sizeof(DWORD), PAGE_READWRITE, &oldProtect );
+            pCor20Header->Flags &= ~COMIMAGE_FLAGS_ILONLY;
+            VirtualProtect( &pCor20Header->Flags, sizeof(DWORD), oldProtect, &oldProtect );
+        }
+    }
+    IMAGE_IMPORT_DESCRIPTOR * pImportDesc = (IMAGE_IMPORT_DESCRIPTOR*)(baseAddress + 
+        pOptionalHeader->DataDirectory[ IMAGE_DIRECTORY_ENTRY_IMPORT ].VirtualAddress );
+
+    DWORD installedHooks = 0;
     // Find the import descriptor containing references 
     // to callee's functions.
-    for (; pImportDesc->Name; pImportDesc++)
+    for ( ; ; pImportDesc++ )
     {
-        PSTR pszModName = (PSTR)((PBYTE) hmodCaller + pImportDesc->Name);
-        if ( lstrcmpiA(pszModName, pszCalleeModName) == 0 ) 
-            break;
+        if
+        (
+            ( pImportDesc->OriginalFirstThunk == 0 ) &&
+            ( pImportDesc->TimeDateStamp == 0 ) &&
+            ( pImportDesc->ForwarderChain == 0 ) &&
+            ( pImportDesc->Name == 0 ) &&
+            ( pImportDesc->FirstThunk == 0 )
+        )
+        {
+            // End of the line.
+            return installedHooks;
+        }
+
+        // Get caller's import address table (IAT) 
+        // for the callee's functions.
+        PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA) 
+            (baseAddress + pImportDesc->FirstThunk);
+
+        PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA) 
+            (baseAddress + pImportDesc->OriginalFirstThunk);
+
+        // Replace current function address with new function address.
+        for ( ; pOriginalThunk->u1.Function ; ++pOriginalThunk, ++pThunk )
+        {
+            for ( DWORD procIndex( 0 ); procIndex < procCount; ++procIndex )
+            {
+                PROC * ppfn = (PROC *) &pThunk->u1.Function;
+                if ( *ppfn != original[ procIndex ] )
+                    continue;
+
+                DWORD dwOld;
+                VirtualProtect(ppfn, sizeof(PROC *), PAGE_READWRITE, &dwOld);
+                *ppfn = replacement[ procIndex ];
+                VirtualProtect(ppfn, sizeof(PROC *), dwOld, &dwOld);
+                ++installedHooks;
+            }
+        }
     }
-
-    if ( pImportDesc->Name == 0 )
-        // This module doesn't import any functions from this callee.
-        return false; 
-
-    // Get caller's import address table (IAT) 
-    // for the callee's functions.
-    PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA) 
-        ((PBYTE) hmodCaller + pImportDesc->FirstThunk);
-
-    PIMAGE_THUNK_DATA pOriginalThunk = (PIMAGE_THUNK_DATA) 
-        ((PBYTE) hmodCaller + pImportDesc->OriginalFirstThunk);
-
-     // Replace current function address with new function address.
-     for ( ; pOriginalThunk->u1.Function; pThunk++, pOriginalThunk++ )
-     {
-         char const * pName = (char *)((PBYTE)hmodCaller + pOriginalThunk->u1.AddressOfData + 2);
-         if ( _stricmp( funcName, pName ) == 0 )
-         {
-             PROC * ppfn = (PROC *) &pThunk->u1.Function;
-             DWORD dwOld;
-             BOOL result;
-             result = VirtualProtect(ppfn, 4, PAGE_READWRITE, &dwOld);
-             assert( result );
-             *ppfn = pfnNew;
-             result = VirtualProtect(ppfn, 4, PAGE_EXECUTE, &dwOld);
-             assert( result );
-             return true;  // We did it; get out.
-          }
-      }
-    // If we get to here, the function
-    // is not in the caller's import section.
-    return false;
 }
 
 int dummyInt;
 
-DWORD hookWinAPI( char const * calleeName, char const * funcName, PROC newProc )
+DWORD hookWinAPI( PROC const * original, PROC const * replacement, DWORD procCount )
 {
     MEMORY_BASIC_INFORMATION mbi;
     VirtualQuery( &dummyInt, &mbi, sizeof(mbi) );
@@ -254,18 +273,17 @@ DWORD hookWinAPI( char const * calleeName, char const * funcName, PROC newProc )
     HMODULE modules[ 1024 ];
     DWORD size;
     HMODULE exe = ::GetModuleHandle( NULL );
-    DWORD replaced = 0;
-    if ( replaceEntry( calleeName, funcName, newProc, exe ) )
-        replaced++;
+    DWORD replaced = replaceIATEntries( exe, original, replacement, procCount );
     if ( EnumProcessModules( GetCurrentProcess(), modules, sizeof( modules ), &size ) )
     {
         unsigned int len = size / sizeof( HMODULE );
         for ( unsigned int index( 0 ); index < len; ++index )
         {
+            // Do not mess with our import table.
+            // We want our hooks to access the original API.
             if ( modules[ index ] == thisModule )
                 continue;
-            if ( replaceEntry( calleeName, funcName, newProc, modules[ index ] ) )
-                replaced++;
+            replaced += replaceIATEntries( modules[ index ], original, replacement, procCount );
         }
     }
     return replaced;

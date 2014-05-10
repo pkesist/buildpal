@@ -62,4 +62,8 @@ Visual Studio Build
     We will probably need to rename the executable to :file:`cl.exe` and tinker
     with ``PATH``.
 
+.. note::
+
+    There is a `msbuild` command line option: ``msbuild /p:CLToolExe=bp_cl.exe LLVM.sln``
+
 

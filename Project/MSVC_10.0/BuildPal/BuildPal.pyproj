@@ -126,6 +126,7 @@
     <Content Include="Extensions\HeaderScanner\PythonBindings_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />
+    <Content Include="Extensions\MapFiles\apiHooks.hpp" />
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
     <Content Include="Extensions\MapFiles\dllInject.hpp" />
     <Content Include="Extensions\MapFiles\Loader\loader.cpp" />

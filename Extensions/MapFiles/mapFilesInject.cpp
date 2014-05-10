@@ -1,6 +1,6 @@
 #include "mapFilesInject.hpp"
 
-#include "dllInject.hpp"
+#include "apiHooks.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -42,8 +42,6 @@ HANDLE WINAPI createFileW(
   _In_      DWORD dwFlagsAndAttributes,
   _In_opt_  HANDLE hTemplateFile
 );
-HMODULE WINAPI loadLibraryA( char * lpFileName );
-HMODULE WINAPI loadLibraryW( wchar_t * lpFileName );
 BOOL WINAPI createProcessA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
@@ -68,40 +66,23 @@ BOOL WINAPI createProcessW(
     _In_         LPSTARTUPINFOW lpStartupInfo,
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 );
-HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags );
-HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags );
-PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName );
 
-
-PROC replacements[] = 
+struct MapFilesAPIHookTraits
 {
-    (PROC)createFileA,
-    (PROC)createFileW,
-    (PROC)createProcessA,
-    (PROC)createProcessW,
-    (PROC)getProcAddress,
-    (PROC)loadLibraryA,
-    (PROC)loadLibraryW,
-    (PROC)loadLibraryExA,
-    (PROC)loadLibraryExW
+    static char const moduleName[];
+    static APIHookDesc const apiHookDesc[]; 
+    static unsigned int const apiHookDescLen = 4;
 };
 
-unsigned int const procCount = sizeof(replacements) / sizeof(PROC);
+char const MapFilesAPIHookTraits::moduleName[] = "kernel32.dll";
 
-char const * procNames[procCount] =
+APIHookDesc const MapFilesAPIHookTraits::apiHookDesc[] = 
 {
-    "CreateFileA"   , 
-    "CreateFileW"   , 
-    "CreateProcessA", 
-    "CreateProcessW",
-    "GetProcAddress",
-    "LoadLibraryA"  , 
-    "LoadLibraryW"  ,
-    "LoadLibraryExA",
-    "LoadLibraryExW"
+    { "CreateFileA"   , (PROC)createFileA    },
+    { "CreateFileW"   , (PROC)createFileW    },
+    { "CreateProcessA", (PROC)createProcessA },
+    { "CreateProcessW", (PROC)createProcessW }
 };
-
-PROC originals[procCount];
 
 namespace
 {
@@ -361,52 +342,14 @@ BOOL WINAPI createProcessW(
         lpProcessInformation, globalMapping );
 }
 
-HMODULE WINAPI loadLibraryA( char * lpFileName )
-{
-    HMODULE result = ::LoadLibraryA( lpFileName );
-    hookWinAPIs();
-    return result;
-}
-
-HMODULE WINAPI loadLibraryW( wchar_t * lpFileName )
-{
-    HMODULE result = ::LoadLibraryW( lpFileName );
-    hookWinAPIs();
-    return result;
-}
-
-HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
-{
-    HMODULE result = ::LoadLibraryExA( lpFileName, hFile, dwFlags );
-    hookWinAPI( originals, replacements, procCount );
-    return result;
-}
-
-HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
-{
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    HMODULE result = ::LoadLibraryExW( lpFileName, hFile, dwFlags );
-    hookWinAPI( originals, replacements, procCount );
-    return result;
-}
-
-PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName )
-{
-    PROC result = GetProcAddress( hModule, lpProcName );
-    for ( unsigned int index( 0 ); index < procCount; ++index )
-        if ( result == originals[ index ] )
-            return replacements[ index ];
-    return result;
-}
-
 extern "C" DWORD WINAPI hookWinAPIs()
 {
-    return hookWinAPI( originals, replacements, procCount );
+    return APIHooks<MapFilesAPIHookTraits>::enable();
 }
 
 extern "C" DWORD WINAPI unhookWinAPIs()
 {
-    return hookWinAPI( replacements, originals, procCount );
+    return APIHooks<MapFilesAPIHookTraits>::disable();
 }
 
 extern "C" DWORD WINAPI Initialize( HANDLE readHandle )
@@ -529,22 +472,4 @@ extern "C" BOOL WINAPI createProcessWithMappingW(
         lpProcessInformation, iter->second );
     customMappings.erase( iter );
     return result;
-}
-
-BOOL WINAPI DllMain(
-  _In_  HINSTANCE hinstDLL,
-  _In_  DWORD fdwReason,
-  _In_  LPVOID lpvReserved
-)
-{
-    if ( fdwReason == DLL_PROCESS_ATTACH )
-    {
-        HMODULE kernel32Handle = ::GetModuleHandle( "Kernel32.dll" );
-        for ( unsigned int index( 0 ); index < procCount; ++index )
-            originals[ index ] = GetProcAddress( kernel32Handle, procNames[ index ] );
-    }
-    else if ( fdwReason == DLL_PROCESS_DETACH )
-    {
-    }
-    return TRUE;
 }

@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <stdexcept>
+#include <vector>
 
 #include <Windows.h>
 #include <psapi.h>
@@ -126,7 +127,7 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
         AllocProcessMemory dllName( processHandle, moduleNameSize );
         FAIL_IF_NOT( dllName.write( moduleToLoad, moduleNameSize ) );
 
-        std::size_t const initFuncLen = strlen(initFunc);
+        DWORD const initFuncLen = strlen(initFunc);
         AllocProcessMemory dllInit( processHandle, initFuncLen );
         FAIL_IF_NOT( dllInit.write( initFunc, initFuncLen ) );
 
@@ -192,7 +193,7 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
     catch ( ...                    ) { return false; }
 }
 
-DWORD replaceIATEntries( HMODULE module, PROC const * original, PROC const * replacement, DWORD procCount )
+DWORD replaceIATEntries( HMODULE module, PROC const * original, PROC const * replacement, unsigned int procCount )
 {
     BYTE * baseAddress = (BYTE *)module;
     IMAGE_DOS_HEADER * pDOSHeader = (IMAGE_DOS_HEADER *)module;
@@ -264,27 +265,35 @@ DWORD replaceIATEntries( HMODULE module, PROC const * original, PROC const * rep
 
 int dummyInt;
 
-DWORD hookWinAPI( PROC const * original, PROC const * replacement, DWORD procCount )
+DWORD hookWinAPI( PROC const * original, PROC const * replacement, unsigned int procCount )
 {
     MEMORY_BASIC_INFORMATION mbi;
     VirtualQuery( &dummyInt, &mbi, sizeof(mbi) );
     HMODULE thisModule = (HMODULE)mbi.AllocationBase;
 
-    HMODULE modules[ 1024 ];
+    typedef std::vector<HMODULE> ModuleVec;
+    ModuleVec modules( 1024 );
     DWORD size;
     HMODULE exe = ::GetModuleHandle( NULL );
     DWORD replaced = replaceIATEntries( exe, original, replacement, procCount );
-    if ( EnumProcessModules( GetCurrentProcess(), modules, sizeof( modules ), &size ) )
+    EnumProcessModules( GetCurrentProcess(), modules.data(), modules.size() * sizeof(HMODULE), &size );
+    if ( size > modules.size() * sizeof(HMODULE) )
     {
-        unsigned int len = size / sizeof( HMODULE );
-        for ( unsigned int index( 0 ); index < len; ++index )
-        {
-            // Do not mess with our import table.
-            // We want our hooks to access the original API.
-            if ( modules[ index ] == thisModule )
-                continue;
-            replaced += replaceIATEntries( modules[ index ], original, replacement, procCount );
-        }
+        modules.resize( size / sizeof(HMODULE) );
+        EnumProcessModules( GetCurrentProcess(), modules.data(), modules.size() * sizeof(HMODULE), &size );
+    }
+    else
+    {
+        modules.resize( size / sizeof(HMODULE) );
+    }
+
+    for ( ModuleVec::const_iterator iter( modules.begin() ); iter != modules.end(); ++iter )
+    {
+        // Do not mess with our import table.
+        // We want our hooks to access the original API.
+        if ( *iter == thisModule )
+            continue;
+        replaced += replaceIATEntries( *iter, original, replacement, procCount );
     }
     return replaced;
 }

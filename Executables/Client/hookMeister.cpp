@@ -28,8 +28,11 @@ wchar_t * findArgs( wchar_t * cmdLine )
             escape = !escape;
             break;
         case '"':
+            foundNonSpace = true;
             if ( inQuote && !escape )
                 inQuote = false;
+            else if ( !inQuote )
+                inQuote = true;
             break;
         default:
             foundNonSpace = true;

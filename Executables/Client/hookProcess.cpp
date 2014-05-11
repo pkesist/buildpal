@@ -2,7 +2,7 @@
 
 #include "client.hpp"
 
-#include <dllInject.hpp>
+#include <apiHooks.hpp>
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
@@ -21,50 +21,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <psapi.h>
-
-namespace
-{
-    BOOL WINAPI closeHandle( HANDLE handle );
-    HMODULE WINAPI loadLibraryA( char * lpFileName );
-    HMODULE WINAPI loadLibraryW( wchar_t * lpFileName );
-    HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags );
-    HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags );
-    BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode );
-    PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName );
-    BOOL WINAPI terminateProcess( HANDLE handle, UINT uExitCode );
-}
-
-PROC replacements[] = 
-{
-    (PROC)loadLibraryA      ,
-    (PROC)loadLibraryW      ,
-    (PROC)loadLibraryExA    ,
-    (PROC)loadLibraryExW    ,
-    (PROC)createProcessA    ,
-    (PROC)createProcessW    ,
-    (PROC)getExitCodeProcess,
-    (PROC)getProcAddress    ,
-    (PROC)closeHandle       ,
-    (PROC)terminateProcess
-};
-
-unsigned int const procCount = sizeof(replacements) / sizeof(PROC);
-
-char const * procNames[procCount] =
-{
-    "LoadLibraryA",
-    "LoadLibraryW",
-    "LoadLibraryExA",
-    "LoadLibraryExW",
-    "CreateProcessA",
-    "CreateProcessW",
-    "GetExitCodeProcess",
-    "GetProcAddress",
-    "CloseHandle",
-    "TerminateProcess"
-};
-
-PROC originals[procCount];
 
 struct CreateProcessParams
 {
@@ -96,16 +52,46 @@ struct DistributedCompileParams
 };
 
 typedef std::map<HANDLE, DistributedCompileParams> DistributedCompileParamsInfo;
-DistributedCompileParamsInfo distributedCompileParamsInfo;
 
-std::recursive_mutex globalMutex;
+class HookProcessAPIHookTraits
+{
+private:
+    static BOOL WINAPI closeHandle( HANDLE );
+    static BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode );
+    static BOOL WINAPI terminateProcess( HANDLE hProcess, UINT uExitCode );
 
+public:
+    static char const moduleName[];
+    static APIHookItem const items[]; 
+    static unsigned int const itemsCount;
+
+    struct Data
+    {
+        DistributedCompileParamsInfo distributedCompileParamsInfo;
+        std::recursive_mutex mutex;
+    };
+};
+
+char const HookProcessAPIHookTraits::moduleName[] = "kernel32.dll";
+
+APIHookItem const HookProcessAPIHookTraits::items[] = 
+{
+    { "CreateProcessA"    , (PROC)createProcessA     },
+    { "CreateProcessW"    , (PROC)createProcessW     },
+    { "GetExitCodeProcess", (PROC)getExitCodeProcess },
+    { "CloseHandle"       , (PROC)closeHandle        },
+    { "TerminateProcess"  , (PROC)terminateProcess   }
+};
+
+unsigned int const HookProcessAPIHookTraits::itemsCount = sizeof(items) / sizeof(items[0]);
+
+typedef APIHooks<HookProcessAPIHookTraits> HookProcessAPIHooks;
 
 typedef llvm::sys::fs::file_status FileStatus;
 
 bool getFileStatus( llvm::StringRef path, FileStatus & result )
 {
-    return !llvm::sys::fs::status( llvm::Twine( path ), result );
+    return !llvm::sys::fs::status( path, result );
 }
 
 char const * compilerFiles[] = {
@@ -232,12 +218,13 @@ DWORD WINAPI distributedCompileWorker( void * params )
     );
     HANDLE eventHandle = pdcp->eventHandle;
     {
-        std::unique_lock<std::recursive_mutex> lock( globalMutex );
-        DistributedCompileParams & dcp( distributedCompileParamsInfo[ eventHandle ] );
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        DistributedCompileParams & dcp( hookData.distributedCompileParamsInfo[ eventHandle ] );
         if ( dcp.terminated )
             return 0;
-        distributedCompileParamsInfo[ eventHandle ].completed = TRUE;
-        distributedCompileParamsInfo[ eventHandle ].exitCode = (DWORD)result;
+        hookData.distributedCompileParamsInfo[ eventHandle ].completed = TRUE;
+        hookData.distributedCompileParamsInfo[ eventHandle ].exitCode = (DWORD)result;
     }
     SetEvent( eventHandle );
     return 0;
@@ -314,8 +301,9 @@ bool shortCircuit
         dcp.terminated = FALSE;
         dcp.exitCode = 0;
 
-        std::unique_lock<std::recursive_mutex> lock( globalMutex );
-        DistributedCompileParams & _dcp = distributedCompileParamsInfo[eventHandle];
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        DistributedCompileParams & _dcp = hookData.distributedCompileParamsInfo[eventHandle];
         _dcp = dcp;
         pDcp = &_dcp;
     }
@@ -514,91 +502,52 @@ BOOL WINAPI createProcessW(
     return result;
 }
 
-namespace
+BOOL WINAPI HookProcessAPIHookTraits::getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
 {
-    HMODULE WINAPI loadLibraryA( char * lpFileName )
     {
-        HMODULE result = ::LoadLibraryA( lpFileName );
-        hookWinAPI( originals, replacements, procCount );
-        return result;
-    }
-
-    HMODULE WINAPI loadLibraryW( wchar_t * lpFileName )
-    {
-        std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-        HMODULE result = ::LoadLibraryW( lpFileName );
-        hookWinAPI( originals, replacements, procCount );
-        return result;
-    }
-
-    HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
-    {
-        HMODULE result = ::LoadLibraryExA( lpFileName, hFile, dwFlags );
-        hookWinAPI( originals, replacements, procCount );
-        return result;
-    }
-
-    HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
-    {
-        std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-        HMODULE result = ::LoadLibraryExW( lpFileName, hFile, dwFlags );
-        hookWinAPI( originals, replacements, procCount );
-        return result;
-    }
-
-    BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
-    {
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        DistributedCompileParamsInfo::const_iterator const dcpIter = hookData.distributedCompileParamsInfo.find( hProcess );
+        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
         {
-            std::unique_lock<std::recursive_mutex> lock( globalMutex );
-            DistributedCompileParamsInfo::const_iterator const dcpIter = distributedCompileParamsInfo.find( hProcess );
-            if ( dcpIter != distributedCompileParamsInfo.end() )
-            {
-                if ( !dcpIter->second.completed )
-                    return STILL_ACTIVE;
-                *lpExitCode = dcpIter->second.exitCode;
-                return TRUE;
-            }
+            if ( !dcpIter->second.completed )
+                return STILL_ACTIVE;
+            *lpExitCode = dcpIter->second.exitCode;
+            return TRUE;
         }
-        return GetExitCodeProcess( hProcess, lpExitCode );
     }
+    return GetExitCodeProcess( hProcess, lpExitCode );
+}
 
-    PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName )
+BOOL WINAPI HookProcessAPIHookTraits::closeHandle( HANDLE handle )
+{
     {
-        PROC result = GetProcAddress( hModule, lpProcName );
-        for ( unsigned int index( 0 ); index < procCount; ++index )
-            if ( result == originals[ index ] )
-                return replacements[ index ];
-        return result;
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        DistributedCompileParamsInfo::const_iterator const dcpIter = hookData.distributedCompileParamsInfo.find( handle );
+        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
+            hookData.distributedCompileParamsInfo.erase( dcpIter );
     }
+    return CloseHandle( handle );
+}
 
-    BOOL WINAPI closeHandle( HANDLE handle )
+BOOL WINAPI HookProcessAPIHookTraits::terminateProcess( HANDLE handle, UINT uExitCode )
+{
     {
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        DistributedCompileParamsInfo::iterator const dcpIter = hookData.distributedCompileParamsInfo.find( handle );
+        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
         {
-            std::unique_lock<std::recursive_mutex> lock( globalMutex );
-            DistributedCompileParamsInfo::const_iterator const dcpIter = distributedCompileParamsInfo.find( handle );
-            if ( dcpIter != distributedCompileParamsInfo.end() )
-                distributedCompileParamsInfo.erase( dcpIter );
+            dcpIter->second.terminated = TRUE;
+            dcpIter->second.exitCode = uExitCode;
+            lock.unlock();
+            SetEvent( handle );
+            return TRUE;
         }
-        return CloseHandle( handle );
     }
-
-    BOOL WINAPI terminateProcess( HANDLE handle, UINT uExitCode )
-    {
-        {
-            std::unique_lock<std::recursive_mutex> lock( globalMutex );
-            DistributedCompileParamsInfo::iterator const dcpIter = distributedCompileParamsInfo.find( handle );
-            if ( dcpIter != distributedCompileParamsInfo.end() )
-            {
-                dcpIter->second.terminated = TRUE;
-                dcpIter->second.exitCode = uExitCode;
-                lock.unlock();
-                SetEvent( handle );
-                return TRUE;
-            }
-        }
-        return TerminateProcess( handle, uExitCode );
-    }
-}  // anonymous namespace
+    return TerminateProcess( handle, uExitCode );
+}
 
 
 BOOL WINAPI DllMain(
@@ -609,14 +558,11 @@ BOOL WINAPI DllMain(
 {
     if ( fdwReason == DLL_PROCESS_ATTACH )
     {
-        HMODULE kernel32Handle = ::GetModuleHandle( "Kernel32.dll" );
-        for ( unsigned int index( 0 ); index < procCount; ++index )
-            originals[ index ] = GetProcAddress( kernel32Handle, procNames[ index ] );
-        hookWinAPI( originals, replacements, procCount );
+        HookProcessAPIHooks::enable();
     }
     else if ( fdwReason == DLL_PROCESS_DETACH )
     {
-        hookWinAPI( replacements, originals, procCount );
+        HookProcessAPIHooks::disable();
     }
     return TRUE;
 }

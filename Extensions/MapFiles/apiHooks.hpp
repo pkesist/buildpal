@@ -12,12 +12,26 @@ struct APIHookDesc
     PROC replacement;
 };
 
+template <bool, typename T, typename F = void>
+struct If { typedef T type; };
+
+template<typename T, typename F>
+struct If<false, T, F> { typedef F type; };
+
+template <typename T, typename _ = void>
+struct GetDataType { struct type {}; };
+
+template <typename T>
+struct GetDataType<T, typename If<false, typename T::Data>::type> { typedef typename T::Data type; };
+
 // struct APIHookTraits
 // {
 //     static char const * const moduleName;
 // 
 //     static APIHookDesc const * const apiHookDesc;
 //     static unsigned int const apiHookDescLen;
+//
+//     typedef ... Data;
 // };
 
 template<typename APIHookTraits>
@@ -88,11 +102,16 @@ APIHookDesc const ImplicitHookTraits<APIHookTraits>::apiHookDesc[] =
 template <typename APIHookTraits>
 class APIHooks : APIHookHelper<APIHookTraits>, APIHookHelper<ImplicitHookTraits<APIHookTraits> >
 {
+public:
+    typedef typename GetDataType<APIHookTraits>::type Data;
+
+private:
     typedef APIHookHelper<APIHookTraits> Base;
     typedef APIHookHelper<ImplicitHookTraits<APIHookTraits> > ImplicitBase;
 
     APIHooks() {}
 
+    Data data;
     static APIHooks singleton;
 
     DWORD installHooks() const
@@ -102,7 +121,7 @@ class APIHooks : APIHookHelper<APIHookTraits>, APIHookHelper<ImplicitHookTraits<
 
     DWORD removeHooks() const
     {
-        return Base::installHooks() + ImplicitBase::installHooks();
+        return Base::removeHooks() + ImplicitBase::removeHooks();
     }
 
     PROC translateProc( PROC proc ) const
@@ -114,6 +133,7 @@ public:
     static DWORD enable() { return singleton.installHooks(); }
     static DWORD disable() { return singleton.removeHooks(); }
     static PROC translate( PROC proc ) { return singleton.translateProc( proc ); }
+    static Data & getData() { return singleton.data; }
 };
 
 template <typename APIHookTraits>

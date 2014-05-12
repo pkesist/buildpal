@@ -70,19 +70,22 @@ BOOL WINAPI createProcessW(
 struct MapFilesAPIHookTraits
 {
     static char const moduleName[];
-    static APIHookDesc const apiHookDesc[]; 
-    static unsigned int const apiHookDescLen = 4;
+    static APIHookItem const items[]; 
+    static unsigned int const itemsCount;
 };
 
 char const MapFilesAPIHookTraits::moduleName[] = "kernel32.dll";
 
-APIHookDesc const MapFilesAPIHookTraits::apiHookDesc[] = 
+APIHookItem const MapFilesAPIHookTraits::items[] = 
 {
     { "CreateFileA"   , (PROC)createFileA    },
     { "CreateFileW"   , (PROC)createFileW    },
     { "CreateProcessA", (PROC)createProcessA },
     { "CreateProcessW", (PROC)createProcessW }
 };
+
+unsigned int const MapFilesAPIHookTraits::itemsCount = sizeof(items) / sizeof(items[0]);
+
 
 namespace
 {

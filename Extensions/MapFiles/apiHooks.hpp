@@ -103,10 +103,12 @@ private:
     Data data;
     static APIHooks singleton;
 
+private:
+    static PROC translate( PROC proc ) { return singleton.translateProc( proc ); }
+
 public:
     static DWORD enable() { return singleton.installHooks(); }
     static DWORD disable() { return singleton.removeHooks(); }
-    static PROC translate( PROC proc ) { return singleton.translateProc( proc ); }
     static Data & getData() { return singleton.data; }
 };
 

@@ -8,7 +8,7 @@
 
 #include <vector>
 
-struct APIHookDesc
+struct APIHookItem
 {
     char const * const name;
     PROC replacement;
@@ -24,12 +24,12 @@ template <typename T>
 struct GetDataType<T, typename Helper<typename T::Data>::type>
 { typedef typename T::Data type; };
 
-// struct APIHookTraits
+// struct APIHookDescription
 // {
 //     static char const * const moduleName;
 // 
-//     static APIHookDesc const * const apiHookDesc;
-//     static unsigned int const apiHookDescLen;
+//     static APIHookItem const * const items;
+//     static unsigned int const itemsCount;
 //
 //     typedef ... Data;
 // };
@@ -40,14 +40,14 @@ struct APIHookHelper
     ProcVector originals_;
     ProcVector replacements_;
 
-    template <typename APIHookTraits>
+    template <typename APIHookDescription>
     void addAPIHook()
     {
-        HMODULE const module = GetModuleHandle( APIHookTraits::moduleName );
-        for ( unsigned int index( 0 ); index < APIHookTraits::apiHookDescLen; ++index )
+        HMODULE const module = GetModuleHandle( APIHookDescription::moduleName );
+        for ( unsigned int index( 0 ); index < APIHookDescription::itemsCount; ++index )
         {
-            originals_.push_back( GetProcAddress( module, APIHookTraits::apiHookDesc[ index ].name ) );
-            replacements_.push_back( APIHookTraits::apiHookDesc[ index ].replacement );
+            originals_.push_back( GetProcAddress( module, APIHookDescription::items[ index ].name ) );
+            replacements_.push_back( APIHookDescription::items[ index ].replacement );
         }
     }
 
@@ -73,31 +73,31 @@ struct APIHookHelper
 };
 
 
-template <typename APIHookTraits>
+template <typename APIHookDescription>
 class APIHooks : APIHookHelper
 {
 private:
-    struct ImplicitHookTraits
+    struct LoadLibraryHooks
     {
         static HMODULE WINAPI loadLibraryA( char * lpFileName );
         static HMODULE WINAPI loadLibraryW( wchar_t * lpFileName );
         static HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags );
         static HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags );
-        static PROC WINAPI getProcAddress( HMODULE hModule, LPCSTR lpProcName );
+        static PROC WINAPI getProcAddress( HMODULE, LPCSTR lpProcName );
 
         static char const moduleName[];
-        static APIHookDesc const apiHookDesc[]; 
-        static unsigned int const apiHookDescLen;
+        static APIHookItem const items[]; 
+        static unsigned int const itemsCount;
     };
 
 public:
-    typedef typename GetDataType<APIHookTraits>::type Data;
+    typedef typename GetDataType<APIHookDescription>::type Data;
 
 private:
     APIHooks()
     {
-        addAPIHook<ImplicitHookTraits>();
-        addAPIHook<APIHookTraits>();
+        addAPIHook<LoadLibraryHooks>();
+        addAPIHook<APIHookDescription>();
     }
 
     Data data;
@@ -112,11 +112,11 @@ public:
     static Data & getData() { return singleton.data; }
 };
 
-template <typename APIHookTraits>
-char const APIHooks<APIHookTraits>::ImplicitHookTraits::moduleName[] = "kernel32.dll";
+template <typename APIHookDescription>
+char const APIHooks<APIHookDescription>::LoadLibraryHooks::moduleName[] = "kernel32.dll";
 
-template <typename APIHookTraits>
-APIHookDesc const APIHooks<APIHookTraits>::ImplicitHookTraits::apiHookDesc[] = 
+template <typename APIHookDescription>
+APIHookItem const APIHooks<APIHookDescription>::LoadLibraryHooks::items[] = 
 {
     { "LoadLibraryA"  , (PROC)loadLibraryA   },
     { "LoadLibraryW"  , (PROC)loadLibraryW   },
@@ -125,48 +125,48 @@ APIHookDesc const APIHooks<APIHookTraits>::ImplicitHookTraits::apiHookDesc[] =
     { "GetProcAddress", (PROC)getProcAddress }
 };
 
-template <typename APIHookTraits>
-APIHooks<APIHookTraits> APIHooks<APIHookTraits>::singleton;
+template <typename APIHookDescription>
+APIHooks<APIHookDescription> APIHooks<APIHookDescription>::singleton;
 
-template <typename APIHookTraits>
-unsigned int const APIHooks<APIHookTraits>::ImplicitHookTraits::apiHookDescLen = sizeof(apiHookDesc) / sizeof(apiHookDesc[0]);
+template <typename APIHookDescription>
+unsigned int const APIHooks<APIHookDescription>::LoadLibraryHooks::itemsCount = sizeof(items) / sizeof(items[0]);
 
-template <typename APIHookTraits>
-HMODULE WINAPI APIHooks<APIHookTraits>::ImplicitHookTraits::loadLibraryA( char * lpFileName )
+template <typename APIHookDescription>
+HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryA( char * lpFileName )
 {
     HMODULE result = LoadLibraryA( lpFileName );
-    APIHooks<APIHookTraits>::enable();
+    APIHooks<APIHookDescription>::enable();
     return result;
 }
 
-template <typename APIHookTraits>
-HMODULE WINAPI APIHooks<APIHookTraits>::ImplicitHookTraits::loadLibraryW( wchar_t * lpFileName )
+template <typename APIHookDescription>
+HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryW( wchar_t * lpFileName )
 {
     HMODULE result = LoadLibraryW( lpFileName );
-    APIHooks<APIHookTraits>::enable();
+    APIHooks<APIHookDescription>::enable();
     return result;
 }
 
-template <typename APIHookTraits>
-HMODULE WINAPI APIHooks<APIHookTraits>::ImplicitHookTraits::loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
+template <typename APIHookDescription>
+HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
 {
     HMODULE result = LoadLibraryExA( lpFileName, hFile, dwFlags );
-    APIHooks<APIHookTraits>::enable();
+    APIHooks<APIHookDescription>::enable();
     return result;
 }
 
-template <typename APIHookTraits>
-HMODULE WINAPI APIHooks<APIHookTraits>::ImplicitHookTraits::loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
+template <typename APIHookDescription>
+HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
 {
     HMODULE result = LoadLibraryExW( lpFileName, hFile, dwFlags );
-    APIHooks<APIHookTraits>::enable();
+    APIHooks<APIHookDescription>::enable();
     return result;
 }
 
-template <typename APIHookTraits>
-PROC WINAPI APIHooks<APIHookTraits>::ImplicitHookTraits::getProcAddress( HMODULE hModule, LPCSTR lpProcName )
+template <typename APIHookDescription>
+PROC WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::getProcAddress( HMODULE hModule, LPCSTR lpProcName )
 {
-    return APIHooks<APIHookTraits>::translate( GetProcAddress( hModule, lpProcName ) ); 
+    return APIHooks<APIHookDescription>::translate( GetProcAddress( hModule, lpProcName ) ); 
 }
 
 

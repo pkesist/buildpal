@@ -57,7 +57,7 @@ class build_client(distutils_build):
             '-sCLANG_SRC_ROOT={}'.format(os.path.abspath(clang_src_dir)),
             '-sTARGET_DIR={}'.format(os.getcwd()),
             '-sTMP_INCLUDE_DIR={}'.format(os.path.abspath(self.build_temp)),
-            '--build-dir={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
+            '-sBUILD_DIR={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
         if sys.maxsize > 2**32:
             call.append('address-model=64')

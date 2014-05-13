@@ -41,8 +41,8 @@ class NodeManager:
             for file, relative, content, checksum in data:
                 logging.debug("    %s %s", file, "relative to source" if relative else "")
                 if file[:2] == '..' and not relative:
-                    logging.debug("Compile failure: Used a header outside include directory: '%s'\n", file)
-                    task.task_completed('-1', b'', "Used a header outside include directory: {}".format(file).encode())
+                    logging.debug("Cannot distribute task: Uses a header outside include directory: '%s'\n", file)
+                    task.cannot_distribute()
                     return
 
         if task.missing_headers:

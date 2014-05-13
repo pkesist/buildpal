@@ -7,10 +7,53 @@ from subprocess import list2cmdline
 import os
 from time import time
 
+class ClientTaskCompiler:
+    def __init__(self, client_conn):
+        self.client_conn = client_conn
+        self.tasks_waiting = []
+        self._client_ready = False
+        self.current_task = None
+
+    def client_ready(self):
+        if self.tasks_waiting:
+            self.current_task = self.tasks_waiting.pop(0)
+            self.send_to_client(*current_task)
+        else:
+            self._client_ready = True
+
+    def append_task(self, compiler, options, task):
+        if self._client_ready:
+            self._client_ready = False
+            self.send_to_client(compiler, options, task)
+        else:
+            self.tasks_waiting.append((compiler. options, taks))
+
+    def send_to_client(self, compiler, options, task):
+        self.current_task = task
+        call = options.create_server_call()
+        for include in options.includes():
+            call.append(compiler.set_include_option().format(include))
+        for define in options.defines():
+            call.append(compiler.set_define_option().format(define))
+        if options.pch_file:
+            call.append(compiler.set_pch_file_option().format(options.pch_file))
+        call.append(compiler.set_object_name_option().format(task.output))
+        call.append(task.source)
+        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',
+            list2cmdline(call).encode()])
+
+    def task_done(self, msg):
+        assert self.current_task
+        retcode = int(msg[0].tobytes())
+        stdout = msg[1].tobytes()
+        stderr = msg[2].tobytes()
+        self.current_task.task_completed(retcode, stdout, stderr)
+        self.client_ready()
+
 class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 0
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
-    STATE_HAS_COMPILER_INFO = 2
+    STATE_READY = 2
 
     def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
             command, database_inserter, global_timer, update_ui):
@@ -25,10 +68,12 @@ class CommandProcessor:
         self.__global_timer = global_timer
         self.__update_ui = update_ui
         self.__database_inserter = database_inserter
+        self.__client_task_compiler = ClientTaskCompiler(client_conn)
 
     def set_compiler_info(self, compiler_info):
         self.compiler_info = compiler_info
-        self.state = self.STATE_HAS_COMPILER_INFO
+        self.state = self.STATE_READY
+        self.__client_task_compiler.client_ready()
 
     def request_compiler_info(self, on_completion):
         self.got_compiler_info = on_completion
@@ -54,13 +99,16 @@ class CommandProcessor:
             else:
                 self.client_conn.send_msg([b'LOCATE_FILES'] + self.tmp_compiler_files)
                 self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
-        else:
-            assert self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST
+        elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
             assert len(msg) == len(self.tmp_compiler_files)
             self.compiler_info['files'] = list(zip([m.tobytes() for m in msg],
                 self.tmp_compiler_files))
-            self.state = self.STATE_HAS_COMPILER_INFO
+            self.state = self.STATE_READY
             self.got_compiler_info()
+            self.__client_task_compiler.client_ready()
+        else:
+            assert self.state == self.STATE_READY
+            self.__client_task_compiler.task_done(msg)
 
     def update_task_ui(self, task):
         for duration_name, duration in task.durations.items():
@@ -70,6 +118,9 @@ class CommandProcessor:
     def build_local(self):
         return self.__options.should_build_locally()
 
+    def compile_on_client(self, task):
+        self.__client_task_compiler.append_task(self.compiler, self.__options, task)
+    
     def create_tasks(self):
         pch_file = None
         pch_header = self.__options.pch_header()
@@ -135,7 +186,8 @@ class CommandProcessor:
             if retcode != 0:
                 error_code = str(retcode).encode()
             else:
-                task.disk_future.result()
+                if hasattr(task, 'disk_future'):
+                    task.disk_future.result()
             stdout += tmp_stdout
             stderr += tmp_stderr
 

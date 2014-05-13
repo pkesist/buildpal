@@ -158,4 +158,4 @@ def test_error_on_include_out_of_include_path(file_creator, run_server, run_mana
     file_creator.create_file('inc/1/2/3/4/5/asdf.h', '#include "../../../../../dodo.h"')
     with Popen([vcvarsall, '&&', bp_cl, '/c', '/Iinc/1/2/3/4/5', file],
         **client_popen_args) as proc:
-        assert proc.wait(3) != 0
+        assert proc.wait(3) == 0

@@ -123,6 +123,9 @@ class MSVCCompiler:
     def define_option(cls): return 'D'
 
     @classmethod
+    def set_define_option(cls): return '/D{}'
+
+    @classmethod
     def use_pch_option(cls): return 'Yu'
 
     @classmethod

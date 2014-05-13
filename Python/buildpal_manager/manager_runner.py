@@ -66,7 +66,7 @@ class ClientProcessor(MessageProtocol):
     def __create_tasks(self):
         # No more data will be read from the client.
         assert self.command_processor.state == \
-            self.command_processor.STATE_HAS_COMPILER_INFO
+            self.command_processor.STATE_READY
         if not self.command_processor.executable in self.compiler_info:
             self.compiler_info[self.command_processor.executable] = \
                 self.command_processor.compiler_info

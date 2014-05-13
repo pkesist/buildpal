@@ -55,6 +55,12 @@ class Task:
             other_session.cancel()
         return True
 
+    def cannot_distribute(self):
+        # For some reason or other, this task cannot be distributed.
+        # Make the client compile it. After that the processing will
+        # continue as if the server node did it.
+        self.command_processor.compile_on_client(self)
+
     def session_completed(self, session, *args):
         assert session.result is not None
         assert session in self.sessions_running

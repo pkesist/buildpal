@@ -196,36 +196,29 @@ class CompileSession:
             if not relative and not (dir, file) in in_filelist:
                 # Not needed.
                 continue
-            depth = 0
-            path_elements = file.split('/')
-            # Handle '.' in include directive.
-            path_elements = [p for p in path_elements if p != '.']
+            path_elements = os.path.normpath(file).split(os.path.sep)
             # Handle '..' in include directive.
             header = self.header_beginning(os.path.join(dir, file))
             if relative:
-                while '..' in path_elements:
-                    index = path_elements.index('..')
-                    if index == 0:
-                        depth += 1
-                        if depth > max_depth:
-                            max_depth += 1
-                        del path_elements[index]
-                    else:
-                        del path_element[index - 1:index + 1]
+                depth = 0
+                while path_elements[0] == '..':
+                    depth += 1
+                    if depth > max_depth:
+                        max_depth += 1
+                    del path_elements[0]
                 if depth:
                     relative_includes.setdefault(depth - 1, []).append((dir,
                         '/'.join(path_elements), content, header))
                 else:
-                    files['/'.join(path_elements)] = header + content
+                    files[('', '/'.join(path_elements))] = header + content
             else:
                 files[(dir, file)] = header + content
 
         curr_dir = ''
         for depth in range(max_depth):
-            assert relative
-            curr_dir += 'dummy_rel/'
             for dir, file, content, header in relative_includes[depth]:
                 files[('', curr_dir + file)] = header + content
+            curr_dir += 'dummy_rel/'
         rel_file = curr_dir + os.path.basename(source_file)
         with open(source_file, 'rb') as src:
             files[('', rel_file)] = self.header_beginning(source_file) + src.read()

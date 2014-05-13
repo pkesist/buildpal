@@ -67,7 +67,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         assert( sourceManager().getMemoryBufferForFile( entry, 0 ) == contentEntry.buffer.get() );
     }
 
-    HeaderLocation::Enum const headerLocation = ( fileStack_.back().header.dir.get() == searchPath ) && !isAngled
+    HeaderLocation::Enum const headerLocation = !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath )
         // This depends on the fact that source file location is 'relative'.
         ? parentLocation 
         : preprocessor().getHeaderSearchInfo().getFileDirFlavor( entry ) == clang::SrcMgr::C_System
@@ -85,9 +85,9 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     Dir dir;
     HeaderName headerName;
 
-    if ( searchPath.empty() )
+    if ( headerLocation == HeaderLocation::relative )
     {
-        dir =  Dir( searchPath );
+        dir =  Dir( "" );
         headerName = HeaderName( relativePath );
     }
     else

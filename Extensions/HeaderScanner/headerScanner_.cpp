@@ -239,7 +239,6 @@ Preprocessor::Preprocessor( Cache * cache )
 {
     diagEng_->setClient( new DiagnosticConsumer() );
    
-    // Configure the include paths.
     hsOpts_->UseBuiltinIncludes = false;
     hsOpts_->UseStandardSystemIncludes = false;
     hsOpts_->UseStandardCXXIncludes = false;

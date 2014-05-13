@@ -95,7 +95,7 @@ def run_server(request):
 def test_dummy(run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
     with Popen([vcvarsall, '&&', bp_cl, 'silly_option'], 
         **client_popen_args) as proc:
-        assert proc.wait() != 0
+        assert proc.wait(3) != 0
 
 def test_relative(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
     file = file_creator.create_file('aaa/a1.cpp', '#include "../rel.hpp"\n')
@@ -103,13 +103,13 @@ def test_relative(file_creator, run_server, run_manager, vcvarsall, bp_cl, clien
     
     with Popen([vcvarsall, '&&', bp_cl, '/c', file],
         **client_popen_args) as proc:
-        assert proc.wait() == 0
+        assert proc.wait(3) == 0
 
 def test_system_headers(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
     file = file_creator.create_file('a2.cpp', '#include <vector>\n')
     with Popen([vcvarsall, '&&', bp_cl, '/c', file],
         **client_popen_args) as proc:
-        assert proc.wait() == 0
+        assert proc.wait(3) == 0
 
 def test_cplusplus(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
     file = file_creator.create_file('a3.cpp', '''\
@@ -120,7 +120,7 @@ def test_cplusplus(file_creator, run_server, run_manager, vcvarsall, bp_cl, clie
 
     with Popen([vcvarsall, '&&', bp_cl, '/c', file],
         **client_popen_args) as proc:
-        assert proc.wait() != 0
+        assert proc.wait(3) != 0
 
 def test_link(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
     file = file_creator.create_file('linkme.cpp', "int main() {}\n")
@@ -128,14 +128,14 @@ def test_link(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_po
     assert not os.path.exists(first_exe)
     with Popen([vcvarsall, '&&', bp_cl, '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(first_exe)],
         **client_popen_args) as proc:
-        assert proc.wait() == 0
+        assert proc.wait(3) == 0
     assert os.path.exists(first_exe)
 
     second_exe = file_creator.full_path('a_local.exe')
     assert not os.path.exists(second_exe)
     with Popen([vcvarsall, '&&', 'cl', '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
         **client_popen_args) as proc:
-        assert proc.wait() == 0
+        assert proc.wait(3) == 0
     assert os.path.exists(second_exe)
 
     assert os.stat(first_exe).st_size == os.stat(second_exe).st_size

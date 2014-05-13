@@ -35,10 +35,11 @@ class Environment:
             file.write(content)
 
     def run_worker(self, filename, includes=[], defines=[], use_cache=False):
-        return set(x[0] for dir, headers in collect_headers(
+        header_data, missing_headers = collect_headers(
             os.path.join(self.dir, filename),
             includes=[os.path.join(self.dir, i) for i in includes],
-            defines=defines, use_cache=use_cache) for x in headers)
+            defines=defines, use_cache=use_cache)
+        return set(x[0] for dir, headers in header_data for x in headers)
 
     def run_nocache(self, filename, includes=[], defines=[]):
         return self.run_worker(filename, includes, defines, use_cache=False)

@@ -1,6 +1,7 @@
 import os
 import pytest
 import winreg
+import sys
 
 @pytest.fixture(scope='module')
 def bp_cl():
@@ -12,9 +13,10 @@ def vcvarsall(request):
     version = request.param
     dir = None
     try:
+        win32subkey = "WOW6432Node\\" if sys.maxsize > 2**32 else ""
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-            r'SOFTWARE\Microsoft\VisualStudio\{}\Setup\VC'.
-            format(version)) as key:
+            r'SOFTWARE\{}Microsoft\VisualStudio\{}\Setup\VC'.
+            format(win32subkey, version)) as key:
             dir = winreg.QueryValueEx(key, 'ProductDir')[0]
     except:
         pass

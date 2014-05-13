@@ -43,7 +43,6 @@ struct DistributedCompileParams
     std::string compilerToolset;
     std::string compilerExecutable;
     std::wstring commandLine;
-    std::string portName;
     FallbackFunction fallback;
     CreateProcessParams fallbackParams;
     BOOL completed;
@@ -51,11 +50,55 @@ struct DistributedCompileParams
     DWORD exitCode;
 };
 
+typedef llvm::sys::fs::file_status FileStatus;
+bool getFileStatus( llvm::StringRef path, FileStatus & result )
+{
+    return !llvm::sys::fs::status( path, result );
+}
+
+struct CompilerExecutables
+{
+    typedef std::vector<std::pair<FileStatus, std::string> > FileMap;
+    FileMap files;
+
+    void registerFile( llvm::StringRef compilerPath )
+    {
+        FileStatus fileStatus;
+        if ( getFileStatus( compilerPath, fileStatus ) )
+            files.push_back( std::make_pair( fileStatus, compilerPath ) );
+    }
+};
+
 typedef std::map<HANDLE, DistributedCompileParams> DistributedCompileParamsInfo;
 
 class HookProcessAPIHookTraits
 {
 private:
+    static BOOL WINAPI createProcessA(
+        char const * lpApplicationName,
+        char * lpCommandLine,
+        LPSECURITY_ATTRIBUTES lpProcessAttributes,
+        LPSECURITY_ATTRIBUTES lpThreadAttributes,
+        BOOL bInheritHandles,
+        DWORD dwCreationFlags,
+        LPVOID lpEnvironment,
+        char const * lpCurrentDirectory,
+        LPSTARTUPINFOA lpStartupInfo,
+        LPPROCESS_INFORMATION lpProcessInformation
+    );
+    static BOOL WINAPI createProcessW(
+        wchar_t const * lpApplicationName,
+        wchar_t * lpCommandLine,
+        LPSECURITY_ATTRIBUTES lpProcessAttributes,
+        LPSECURITY_ATTRIBUTES lpThreadAttributes,
+        BOOL bInheritHandles,
+        DWORD dwCreationFlags,
+        LPVOID lpEnvironment,
+        wchar_t const * lpCurrentDirectory,
+        LPSTARTUPINFOW lpStartupInfo,
+        LPPROCESS_INFORMATION lpProcessInformation
+    );
+
     static BOOL WINAPI closeHandle( HANDLE );
     static BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode );
     static BOOL WINAPI terminateProcess( HANDLE hProcess, UINT uExitCode );
@@ -67,6 +110,10 @@ public:
 
     struct Data
     {
+        Data() : portName( "default" ) {}
+
+        CompilerExecutables compilers;
+        std::string portName;
         DistributedCompileParamsInfo distributedCompileParamsInfo;
         std::recursive_mutex mutex;
     };
@@ -87,52 +134,7 @@ unsigned int const HookProcessAPIHookTraits::itemsCount = sizeof(items) / sizeof
 
 typedef APIHooks<HookProcessAPIHookTraits> HookProcessAPIHooks;
 
-typedef llvm::sys::fs::file_status FileStatus;
-
-bool getFileStatus( llvm::StringRef path, FileStatus & result )
-{
-    return !llvm::sys::fs::status( path, result );
-}
-
-char const * compilerFiles[] = {
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 10.0\\VC\\bin\\cl.exe"             ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 10.0\\VC\\bin\\amd64\\cl.exe"      ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 10.0\\VC\\bin\\x86_amd64\\cl.exe"  ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 11.0\\VC\\bin\\cl.exe"             ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 11.0\\VC\\bin\\amd64\\cl.exe"      ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 11.0\\VC\\bin\\x86_amd64\\cl.exe"  ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 11.0\\VC\\bin\\x86_arm\\cl.exe"    ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\bin\\cl.exe"              ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\bin\\amd64\\cl.exe"       ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\bin\\x86_amd64\\cl.exe"   ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\bin\\x86_ia64\\cl.exe"    ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\ce\\bin\\x86_arm\\cl.exe" ,
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\ce\\bin\\x86_mips\\cl.exe",
-    "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\ce\\bin\\x86_sh\\cl.exe"
-};
-
-std::size_t const compilerFilesCount = sizeof(compilerFiles) / sizeof(compilerFiles[0]);
-
-char const portName[] = "default";
-
-struct CompilerExecutables
-{
-    typedef std::vector<std::pair<FileStatus, char const *> > FileMap;
-    FileMap files;
-
-    CompilerExecutables()
-    {
-        for ( std::size_t index( 0 ); index < compilerFilesCount; ++index )
-        {
-            FileStatus fileStatus;
-            if ( getFileStatus( compilerFiles[ index ], fileStatus ) )
-                files.push_back( std::make_pair( fileStatus, compilerFiles[ index ] ) );
-        }
-    }
-} compilerExecutables;
-
-
-bool hookProcess( HANDLE processHandle, char const * * compilerFiles, std::size_t compilerFilesCount, char const * portName )
+bool hookProcess( HANDLE processHandle )
 {
     HANDLE pipeRead;
     HANDLE pipeWrite;
@@ -145,20 +147,27 @@ bool hookProcess( HANDLE processHandle, char const * * compilerFiles, std::size_
         DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
     assert( result );
 
-    for ( std::size_t index( 0 ); index < compilerFilesCount; ++index )
+    
+    HookProcessAPIHookTraits::Data const & hookData( HookProcessAPIHooks::getData() );
+    CompilerExecutables::FileMap const & compilerFiles( hookData.compilers.files );
+
+    for
+    (
+        CompilerExecutables::FileMap::const_iterator iter( compilerFiles.begin() );
+        iter != compilerFiles.end();
+        ++iter
+    )
     {
-        DWORD const bytesToWrite = strlen(compilerFiles[index]) + 1;
         DWORD bytesWritten;
-        WriteFile( pipeWrite, compilerFiles[index], bytesToWrite, &bytesWritten, NULL );
-        assert( bytesToWrite == bytesWritten );
+        WriteFile( pipeWrite, iter->second.c_str(), iter->second.size() + 1, &bytesWritten, NULL );
+        assert( iter->second.size() + 1 == bytesWritten );
     }
     char zero[ 1 ] = { 0 };
     DWORD bytesWritten;
     WriteFile( pipeWrite, zero, 1, &bytesWritten, 0 );
     assert( bytesWritten == 1 );
-    DWORD const bytesToWrite = strlen(portName) + 1;
-    WriteFile( pipeWrite, portName, strlen(portName) + 1, &bytesWritten, 0 );
-    assert( bytesToWrite == bytesWritten );
+    WriteFile( pipeWrite, hookData.portName.c_str(), hookData.portName.size() + 1, &bytesWritten, 0 );
+    assert( hookData.portName.size() + 1 == bytesWritten );
 
     char const * dllNames[] = {
         "bp_cli_inj32.dll",
@@ -173,6 +182,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
 {
     bool readingPortName = false;
     bool done = false;
+    HookProcessAPIHookTraits::Data & hookData( HookProcessAPIHooks::getData() );
     while ( !done )
     {
         char buffer[ 1024 ];
@@ -186,14 +196,24 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
             {
                 if ( last == index )
                 {
-                    last++;
-                    readingPortName = true;
-                    continue;
+                    if ( !readingPortName )
+                    {
+                        last++;
+                        readingPortName = true;
+                        continue;
+                    }
                 }
-                std::string file = remainder + std::string( buffer + last, index - last );
+                std::string const file = remainder + std::string( buffer + last, index - last );
                 remainder.clear();
                 if ( readingPortName )
+                {
                     done = true;
+                    hookData.portName = file;
+                }
+                else
+                {
+                    hookData.compilers.registerFile( file );
+                }
                 last = index + 1;
             }
         }
@@ -207,26 +227,25 @@ DWORD WINAPI distributedCompileWorker( void * params )
     DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
     Environment env( pdcp->fallbackParams.lpEnvironment, ( pdcp->fallbackParams.dwCreationFlags | CREATE_UNICODE_ENVIRONMENT ) != 0 );
 
+    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
     int result = distributedCompile(
         pdcp->compilerToolset,
         pdcp->compilerExecutable,
         env,
         pdcp->commandLine.c_str(),
-        pdcp->portName,
+        hookData.portName,
         pdcp->fallback,
         &pdcp->fallbackParams
     );
-    HANDLE eventHandle = pdcp->eventHandle;
     {
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
         DistributedCompileParams & dcp( hookData.distributedCompileParamsInfo[ eventHandle ] );
         if ( dcp.terminated )
             return 0;
-        hookData.distributedCompileParamsInfo[ eventHandle ].completed = TRUE;
-        hookData.distributedCompileParamsInfo[ eventHandle ].exitCode = (DWORD)result;
+        hookData.distributedCompileParamsInfo[ pdcp->eventHandle ].completed = TRUE;
+        hookData.distributedCompileParamsInfo[ pdcp->eventHandle ].exitCode = (DWORD)result;
     }
-    SetEvent( eventHandle );
+    SetEvent( pdcp->eventHandle );
     return 0;
 }
 
@@ -264,17 +283,18 @@ bool shortCircuit
         return false;
 
     char const * compiler = NULL;
-    CompilerExecutables::FileMap::const_iterator const end = compilerExecutables.files.end();
+    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    CompilerExecutables::FileMap::const_iterator const end = hookData.compilers.files.end();
     for
     (
-        CompilerExecutables::FileMap::const_iterator iter = compilerExecutables.files.begin();
+        CompilerExecutables::FileMap::const_iterator iter = hookData.compilers.files.begin();
         iter != end;
         ++iter
     )
     {
         if ( llvm::sys::fs::equivalent( iter->first, fileStatus ) )
         {
-            compiler = iter->second;
+            compiler = iter->second.c_str();
             break;
         }
     }
@@ -292,7 +312,6 @@ bool shortCircuit
         dcp.compilerToolset = "msvc";
         dcp.compilerExecutable = compiler;
         dcp.commandLine = commandLine;
-        dcp.portName = portName;
         dcp.fallback = fallback;
         dcp.fallbackParams = createProcessParams;
         dcp.fallbackParams.eventHandle = eventHandle;
@@ -394,7 +413,20 @@ int createProcessFallbackW( void * params )
     return result;
 }
 
-BOOL WINAPI createProcessA(
+void registerCompiler( char const * compilerPath )
+{
+    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    hookData.compilers.registerFile( compilerPath );
+}
+
+void setPortName( char const * portName )
+{
+    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    hookData.portName = portName;
+}
+
+
+BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -443,14 +475,14 @@ BOOL WINAPI createProcessA(
     );
     if ( result )
     {
-        hookProcess( lpProcessInformation->hProcess, compilerFiles, compilerFilesCount, portName );
+        hookProcess( lpProcessInformation->hProcess );
         if ( shouldResume )
             ResumeThread( lpProcessInformation->hThread );
     }
     return result;
 }
 
-BOOL WINAPI createProcessW(
+BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
     _In_opt_     wchar_t const * lpApplicationName,
     _Inout_opt_  wchar_t * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -495,7 +527,7 @@ BOOL WINAPI createProcessW(
     );
     if ( result )
     {
-        hookProcess( lpProcessInformation->hProcess, compilerFiles, compilerFilesCount, portName );
+        hookProcess( lpProcessInformation->hProcess );
         if ( shouldResume )
             ResumeThread( lpProcessInformation->hThread );
     }

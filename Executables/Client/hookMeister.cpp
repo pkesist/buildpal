@@ -5,6 +5,62 @@
 
 #include <windows.h>
 
+#ifdef _WIN64
+char const vsRegKey[] = "Software\\Wow6432Node\\Microsoft\\VisualStudio\\";
+#else
+char const vsRegKey[] = "Software\\Microsoft\\VisualStudio\\";
+#endif
+
+char const * vsVersions[] = {
+    "8.0\\Setup\\VC",
+    "9.0\\Setup\\VC",
+    "10.0\\Setup\\VC",
+    "11.0\\Setup\\VC"
+};
+
+char const * compilerDirs[] = {
+    "bin",
+    "bin\\amd64",
+    "bin\\x86_amd64",
+    "bin\\x86_ia64",
+};
+
+
+
+typedef std::vector<std::string> CompilerList;
+
+CompilerList detectCompilers()
+{
+    CompilerList result;
+    for ( unsigned int index( 0 ); index < sizeof(vsVersions) / sizeof(vsVersions[0]); ++index)
+    {
+        std::string key = vsRegKey;
+        key.append( vsVersions[ index ] );
+        char vcPath[ MAX_PATH ];
+        DWORD vcPathLen = MAX_PATH;
+        HKEY vsKey;
+        if
+        (
+            ( RegOpenKeyEx( HKEY_LOCAL_MACHINE, key.data(), 0, KEY_QUERY_VALUE, &vsKey ) == ERROR_SUCCESS ) &&
+            ( RegQueryValueExA( vsKey, "ProductDir", 0, 0, (BYTE *)vcPath, &vcPathLen ) == ERROR_SUCCESS )
+        )
+        {
+            
+            for ( unsigned compilerDirIndex( 0 ); compilerDirIndex < sizeof(compilerDirs) / sizeof(compilerDirs[0]); ++compilerDirIndex)
+            {
+                std::string compilerPath( vcPath, vcPathLen - 1 );
+                compilerPath.append( compilerDirs[ compilerDirIndex ] );
+                compilerPath.append( "\\cl.exe" );
+                DWORD const attributes = GetFileAttributes( compilerPath.c_str() );
+                if ( attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY) )
+                    result.push_back( compilerPath );
+            }
+        }
+    }
+    return result;
+}
+
+
 wchar_t * findArgs( wchar_t * cmdLine )
 {
     bool inQuote = false;
@@ -43,9 +99,14 @@ wchar_t * findArgs( wchar_t * cmdLine )
 
 int main()
 {
+    CompilerList const compilers( detectCompilers() );
+    for ( std::string const & compiler : compilers )
+        registerCompiler( compiler.c_str() );
+    setPortName( "default" );
+
     STARTUPINFOW startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION procInfo = {};
-    BOOL createSuccess = createProcessW
+    BOOL createSuccess = CreateProcessW
     (
         NULL,
         findArgs( GetCommandLineW() ),

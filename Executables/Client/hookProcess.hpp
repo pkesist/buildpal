@@ -6,30 +6,8 @@
 #define NOMINMAX
 #include <windows.h>
 
-BOOL WINAPI createProcessA(
-    char const * lpApplicationName,
-    char * lpCommandLine,
-    LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    BOOL bInheritHandles,
-    DWORD dwCreationFlags,
-    LPVOID lpEnvironment,
-    char const * lpCurrentDirectory,
-    LPSTARTUPINFOA lpStartupInfo,
-    LPPROCESS_INFORMATION lpProcessInformation
-);
-BOOL WINAPI createProcessW(
-    wchar_t const * lpApplicationName,
-    wchar_t * lpCommandLine,
-    LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    BOOL bInheritHandles,
-    DWORD dwCreationFlags,
-    LPVOID lpEnvironment,
-    wchar_t const * lpCurrentDirectory,
-    LPSTARTUPINFOW lpStartupInfo,
-    LPPROCESS_INFORMATION lpProcessInformation
-);
+void registerCompiler( char const * compilerPath );
+void setPortName( char const * portName );
 
 
 //------------------------------------------------------------------------------

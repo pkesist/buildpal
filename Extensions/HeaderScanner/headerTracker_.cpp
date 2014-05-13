@@ -87,8 +87,17 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 
     if ( headerLocation == HeaderLocation::relative )
     {
-        dir =  Dir( "" );
-        headerName = HeaderName( relativePath );
+        dir =  Dir( fileStack_.back().header.dir );
+        llvm::StringRef const parentFilename = fileStack_.back().header.name.get();
+        std::size_t const slashPos = parentFilename.find_last_of('/');
+        if ( slashPos == llvm::StringRef::npos )
+            headerName = HeaderName( relativePath );
+        else
+        {
+            llvm::SmallString<512> fileName( parentFilename.data(), parentFilename.data() + slashPos + 1 );
+            fileName.append( relativePath );
+            headerName = HeaderName( fileName.str() );
+        }
     }
     else
     {
@@ -228,8 +237,8 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     HeaderWithFileEntry const hwf =
     {
         {
-            Dir( "" ),
-            HeaderName( fileName ),
+            Dir( mainFileEntry->getDir()->getName() ),
+            HeaderName( llvm::sys::path::filename( fileName ) ),
             0,
             0,
             HeaderLocation::relative

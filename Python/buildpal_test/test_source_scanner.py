@@ -209,3 +209,8 @@ def test_leakage(env):
     memviews2 = len(list(None for x in gc.get_objects() if type(x) == memoryview))
     assert memviews == memviews2
 
+def test_rel_include(env):
+    env.make_file('xxx\\dodo.h')
+    env.make_file('xxx\\bbb.h', '''#include "dodo.h"''')
+    env.make_file('testme.cpp', '''#include "xxx/bbb.h"''')
+    assert env.run('testme.cpp') == {'xxx/dodo.h', 'xxx/bbb.h'}

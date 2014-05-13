@@ -4,6 +4,7 @@ from .compressor import Compressor
 from buildpal_common import MessageProtocol
 
 import asyncio
+import logging
 import struct
 
 from concurrent.futures import ThreadPoolExecutor
@@ -28,16 +29,30 @@ class NodeManager:
 
     def task_preprocessed(self, task, exception=None):
         if exception:
+            logging.error("Preprocessing failure: %s", exception)
             def task_error():
                 task.task_completed(-1, b'', 'BUILDPAL ERROR: {}\n'.format(exception).encode())
             self.loop.call_soon_threadsafe(task_error)
             return
+
+        logging.debug("Headers for file '%s':", task.source)
+        for dir, data in task.header_info:
+            logging.debug(dir)
+            for file, relative, content, checksum in data:
+                logging.debug("    %s %s", file, "relative to source" if relative else "")
+                if file[:2] == '..' and not relative:
+                    logging.debug("Compile failure: Used a header outside include directory: '%s'\n", file)
+                    task.task_completed('-1', b'', "Used a header outside include directory: {}".format(file).encode())
+                    return
+
         if task.missing_headers:
             error = "BUILDPAL ERROR: Cannot compile '{}' due to missing headers:\n".format(
                 task.source)
+            missing_headers = str()
             for h in task.missing_headers:
-                error += "    {}\n".format(h)
-            task.task_completed('-1', b'', error.encode())
+                missing_headers += "    {}\n".format(h)
+            logging.debug("Compile failure: Missing headers\n%s", missing_headers)
+            task.task_completed('-1', b'', (error + missing_headers).encode())
             return
         def schedule_task(task):
             task.note_time('collected from preprocessor', 'preprocessed notification time')

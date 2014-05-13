@@ -105,6 +105,8 @@ def get_config(ini_file):
     return config
 
 def main(argv, terminator=None):
+    #import logging
+    #logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)
     parser = argparse.ArgumentParser()
     parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
     parser.add_argument('--port', dest='port', type=str, default=None, help='Port on which manager should run.')

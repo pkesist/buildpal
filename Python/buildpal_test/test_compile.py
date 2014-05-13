@@ -19,7 +19,7 @@ class FileCreator:
     def __init__(self, tmpdir):
         self._tmpdir = tmpdir
 
-    def create_file(self, filename, content):
+    def create_file(self, filename, content=''):
         filename = os.path.join(self._tmpdir, filename)
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'wt') as file:
@@ -140,3 +140,22 @@ def test_link(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_po
 
     assert os.stat(first_exe).st_size == os.stat(second_exe).st_size
 
+def test_rel_include(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+    file = file_creator.create_file('imacppfile.cpp', '''
+#include "xxx/bbb.h"
+int main() {}
+''')
+    decoy = file_creator.create_file('imaheaderfile.hpp', '#error "I should not be included!"\n')
+    realmccoy = file_creator.create_file('xxx/imaheaderfile.hpp', '\n')
+    bbb = file_creator.create_file('xxx/bbb.h', '#include "imaheaderfile.hpp"')
+    with Popen([vcvarsall, '&&', bp_cl, '/c', file],
+        **client_popen_args) as proc:
+        assert proc.wait(3) == 0
+
+def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+    file = file_creator.create_file('test.cpp', '#include <asdf.h>')
+    file_creator.create_file('inc/dodo.h')
+    file_creator.create_file('inc/1/2/3/4/5/asdf.h', '#include "../../../../../dodo.h"')
+    with Popen([vcvarsall, '&&', bp_cl, '/c', '/Iinc/1/2/3/4/5', file],
+        **client_popen_args) as proc:
+        assert proc.wait(3) != 0

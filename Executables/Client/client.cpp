@@ -78,6 +78,11 @@ namespace
     public:
         MsgSender() { initMessage(); }
 
+        void addPart( char const * ptr )
+        {
+            addPart( ptr, strlen( ptr ) );
+        }
+
         void addPart( char const * ptr, uint32_t size )
         {
             std::array<unsigned char, 4> const ar = to_byte_array(size);
@@ -273,6 +278,11 @@ void Environment::remove( llvm::StringRef str )
     envMap_.erase( str );
 }
 
+void Environment::add( llvm::StringRef key, llvm::StringRef val )
+{
+    envMap_.insert( std::pair<std::string, std::string>( key, val ) ); 
+}
+
 std::string Environment::createEnvBlock() const
 {
     std::string result;
@@ -311,7 +321,7 @@ PathList const & getPath( Environment const & env )
     return result;
 }
 
-int createProcess( wchar_t const * appName, wchar_t * commandLine )
+int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment const * env, wchar_t const * currentDirectory )
 {
     STARTUPINFOW startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION processInfo;
@@ -322,9 +332,9 @@ int createProcess( wchar_t const * appName, wchar_t * commandLine )
         NULL,
         NULL,
         FALSE,
-        CREATE_NEW_PROCESS_GROUP,
-        NULL,
-        NULL,
+        0,
+        env ? const_cast<char *>( env->createEnvBlock().c_str() ) : NULL,
+        currentDirectory,
         &startupInfo,
         &processInfo
     );
@@ -345,7 +355,7 @@ int createProcess( wchar_t const * appName, wchar_t * commandLine )
     }
 }
 
-int createProcess( char const * appName, char * commandLine )
+int createProcess( char const * appName, char * commandLine, Environment const * env, char const * currentDirectory )
 {
     STARTUPINFO startupInfo = { sizeof(startupInfo) };
     PROCESS_INFORMATION processInfo;
@@ -356,9 +366,9 @@ int createProcess( char const * appName, char * commandLine )
         NULL,
         NULL,
         FALSE,
-        CREATE_NEW_PROCESS_GROUP,
-        NULL,
-        NULL,
+        0,
+        env ? const_cast<char *>( env->createEnvBlock().c_str() ) : NULL,
+        currentDirectory,
         &startupInfo,
         &processInfo
     );
@@ -395,11 +405,12 @@ bool findOnPath( PathList const & pathList, std::string const & file, std::strin
 }
 
 int distributedCompile(
-    llvm::StringRef compilerToolset,
-    llvm::StringRef compilerExecutable,
+    char const * compilerToolset,
+    char const * compilerExecutable,
     Environment const & env,
-    wchar_t const * commandLine,
-    llvm::StringRef portName,
+    char const * commandLine,
+    char const * currentPath,
+    char const * portName,
     FallbackFunction fallbackFunc,
     void * fallbackParam
 )
@@ -411,15 +422,12 @@ int distributedCompile(
     char const pipeStreamPrefix[] = "\\\\.\\pipe\\BuildPal_";
     std::size_t const pipeStreamPrefixSize = sizeof(pipeStreamPrefix) / sizeof(pipeStreamPrefix[0]) - 1;
 
-    char * pipeName = static_cast<char *>( alloca( pipeStreamPrefixSize + portName.size() + 1 ) );
-    std::memcpy( pipeName, pipeStreamPrefix, pipeStreamPrefixSize );
-    std::memcpy( pipeName + pipeStreamPrefixSize, portName.data(), portName.size() );
-    pipeName[ pipeStreamPrefixSize + portName.size() ] = 0;
-
+    std::string pipeName( pipeStreamPrefix );
+    pipeName.append( portName );
     for ( ; ;  )
     {
         pipe = ::CreateFile(
-            pipeName,                                     // LPCTSTR lpFileName,
+            pipeName.c_str(),                             // LPCTSTR lpFileName,
             GENERIC_READ | GENERIC_WRITE,                 // DWORD dwDesiredAccess,
             0,                                            // DWORD dwShareMode,
             NULL,                                         // LPSECURITY_ATTRIBUTES lpSecurityAttributes,
@@ -433,7 +441,7 @@ int distributedCompile(
 
         if ( GetLastError() == ERROR_PIPE_BUSY )
         {
-            WaitNamedPipe( pipeName, NMPWAIT_USE_DEFAULT_WAIT );
+            WaitNamedPipe( pipeName.c_str(), NMPWAIT_USE_DEFAULT_WAIT );
             continue;
         }
             
@@ -481,24 +489,33 @@ int distributedCompile(
 
     MsgSender msgSender;
 
-    msgSender.addPart( compilerToolset.data(), compilerToolset.size() );
-    msgSender.addPart( compilerExecutable.data(), compilerExecutable.size() );
+    msgSender.addPart( compilerToolset );
+    msgSender.addPart( compilerExecutable );
 
     llvm::Optional<std::string> const include = env.get( "INCLUDE" );
     if ( include )
         msgSender.addPart( include->c_str(), include->size() );
     else
-        msgSender.addPart( "", 0 );
+        msgSender.addPart( "" );
 
-    DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
-    char * currentPathBuffer = static_cast<char *>( alloca( currentPathSize ) );
-    GetCurrentDirectory( currentPathSize, currentPathBuffer );
-    msgSender.addPart( currentPathBuffer, currentPathSize - 1 );
+    if ( currentPath )
+    {
+        msgSender.addPart( currentPath );
+    }
+    else
+    {
+        DWORD const currentPathSize( GetCurrentDirectory( 0, NULL ) );
+        char * tmpCurrentPath = static_cast<char *>( alloca( currentPathSize ) );
+        GetCurrentDirectory( currentPathSize, tmpCurrentPath );
+        msgSender.addPart( tmpCurrentPath );
+    }
+
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    std::wstring const commandLineW( convert.from_bytes( commandLine ) );
 
     int argc;
-    wchar_t * * argv = ::CommandLineToArgvW( commandLine, &argc );
+    wchar_t * * argv = ::CommandLineToArgvW( commandLineW.c_str(), &argc );
     StringSaver saver;
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
 
     llvm::SmallVector<char const *, 32> newArgv;
     for ( int i( 1 ); i < argc; ++i )
@@ -514,7 +531,7 @@ int distributedCompile(
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
     {
-        msgSender.addPart( newArgv[ arg ], strlen( newArgv[arg] ) );
+        msgSender.addPart( newArgv[ arg ] );
     }
 
     boost::system::error_code writeError;
@@ -550,7 +567,7 @@ int distributedCompile(
             {
                 std::cerr << "ERROR: Invalid message length\n";
             }
-            return fallback.complete();
+            return createProcess( compilerExecutable, const_cast<char *>( commandLine ), &env, currentPath );
         }
         else if ( request == "EXECUTE_AND_EXIT" )
         {
@@ -568,7 +585,7 @@ int distributedCompile(
             std::memcpy( buffer + sizeof(compiler), commandLine.data(), commandLine.size() );
             buffer[ sizeof(compiler) + commandLine.size() ] = 0;
 
-            return createProcess( compilerExecutable.data(), buffer );
+            return createProcess( compilerExecutable, buffer, &env, currentPath );
         }
         else if ( request == "EXECUTE_GET_OUTPUT" )
         {
@@ -609,18 +626,15 @@ int distributedCompile(
 
             PROCESS_INFORMATION processInfo;
 
-            Environment env( GetEnvironmentStringsA(), false );
-            env.remove( "VS_UNICODE_OUTPUT" );
-
-            BOOL const apiResult = CreateProcess(
-                compilerExecutable.data(),
+            BOOL const apiResult = CreateProcessA(
+                compilerExecutable,
                 buffer,
                 NULL,
                 NULL,
                 TRUE,
-                CREATE_NEW_PROCESS_GROUP,
+                0,
                 const_cast<char *>( env.createEnvBlock().c_str() ),
-                NULL,
+                currentPath,
                 &startupInfo,
                 &processInfo
             );
@@ -696,10 +710,9 @@ int distributedCompile(
             std::vector<std::string> files;
             // First search relative to compiler dir, then path.
             PathList pathList;
-            char const * const compilerExePath = compilerExecutable.data();
-            char const * const filename = PathFindFileName( compilerExePath );
-            assert( filename != compilerExePath );
-            pathList.push_back( std::string( compilerExePath, filename - compilerExePath ) );
+            char const * const filename = PathFindFileName( compilerExecutable );
+            assert( filename != compilerExecutable );
+            pathList.push_back( std::string( compilerExecutable, filename - compilerExecutable ) );
             PathList const & path( getPath( env ) );
             std::copy( path.begin(), path.end(), std::back_inserter( pathList ) );
 

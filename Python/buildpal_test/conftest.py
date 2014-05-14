@@ -24,7 +24,7 @@ def vcvarsall(version):
     return os.path.join(dir, 'vcvarsall.bat')
 
 @pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
-def vcenv(request):
+def vcenv_and_cl(request):
     vcvars = vcvarsall(request.param)
     with subprocess.Popen('{} >NUL && set'.format(vcvars),
             stdout=subprocess.PIPE) as proc:
@@ -37,7 +37,16 @@ def vcenv(request):
     for var in vars:
         eq_pos = var.index('=')
         res[var[:eq_pos].upper()] = var[eq_pos + 1:]
-    return res
+
+    cl = None
+    for dir in res['PATH'].split(os.path.pathsep):
+        tmp = os.path.join(dir, 'cl.exe')
+        if os.path.exists(tmp):
+            cl = tmp
+            break
+    assert cl
+
+    return res, cl
 
 
 

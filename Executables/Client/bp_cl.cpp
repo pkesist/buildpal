@@ -37,7 +37,8 @@ struct Timer
 int main()
 {
     Timer t;
-    Environment env;
+    Environment env( GetEnvironmentStringsA(), false );
+
     std::string compilerExecutable;
     if ( !findOnPath( getPath( env ), compilerExeFilename, compilerExecutable ) )
     {
@@ -50,21 +51,21 @@ int main()
     llvm::StringRef portName;
     if ( !portNameVar )
     {
-        portName = llvm::StringRef( defaultPortName );
+        portName = defaultPortName;
     }
     else
     {
-        portName = llvm::StringRef( portNameVar->data(), portNameVar->size() );
+        portName = portNameVar;
     }
 
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-
     return distributedCompile(
         "msvc",
-        compilerExecutable,
+        compilerExecutable.c_str(),
         env,
-        GetCommandLineW(),
-        portName,
+        GetCommandLineA(),
+        NULL,
+        portName.data(),
         disableFallback ? NULL : runLocallyFallback,
         const_cast<char *>( compilerExecutable.c_str() )
     );

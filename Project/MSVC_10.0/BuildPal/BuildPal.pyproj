@@ -89,6 +89,7 @@
     <Folder Include="Extensions\MapFiles\" />
     <Folder Include="Executables\" />
     <Folder Include="Extensions\MapFiles\Loader\" />
+    <Folder Include="Extensions\Client\" />
     <Folder Include="Python\" />
     <Folder Include="Python\buildpal_manager" />
     <Folder Include="Python\buildpal_common" />
@@ -119,6 +120,7 @@
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.hpp" />
     <Content Include="Extensions\ArgParser\test.cpp" />
+    <Content Include="Extensions\Client\pythonBindings.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerCache_.cpp" />

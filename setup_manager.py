@@ -102,3 +102,25 @@ setup(name = 'buildpal_manager',
         'console_scripts': ['buildpal_manager = buildpal_manager.__main__']
     }
 )
+
+setup(name = 'buildpal_client',
+    version = '0.1',
+    description = 'BuildPal Client package',
+    ext_modules = [
+        Extension('buildpal_client',
+            sources = [
+                'Executables/Client/client.cpp',
+                'Extensions/Client/pythonBindings.cpp',
+            ],
+            define_macros = [
+                ('BOOST_ASIO_DISABLE_BOOST_REGEX', '1'),
+                ('BOOST_ASIO_DISABLE_BOOST_DATE_TIME', '1')
+            ],
+            libraries = ['shlwapi'],
+            extra_compile_args = ['/Zi', '/Od'],
+            extra_link_args = ['/DEBUG'],
+        ),
+    ],
+    cmdclass =  {'build_ext': build_ext},
+    command_packages = 'BuildDeps',
+)

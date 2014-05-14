@@ -1,7 +1,10 @@
+from buildpal_client import compile as buildpal_compile
+
 import os
 import subprocess
 import asyncio
 import sys
+import threading
 import pytest
 
 sys.path.append('..')
@@ -99,29 +102,37 @@ class LocateFiles(ProtocolTester):
         self.send_msg([b'EXIT', b'3124', b'', b''])
 
 @pytest.fixture(scope='function')
-def client_popen_args(tmpdir, vcenv, bp_cl):
+def buildpal_compile_args(tmpdir, vcenv_and_cl):
+    port = 'test_protocol_{}'.format(os.getpid())
     file = os.path.join(str(tmpdir), 'aaa.cpp')
     with open(file, 'wt'):
         pass
-    return dict(args=[bp_cl, '/c', file],
-        stdout=sys.stdout, stderr=sys.stderr, cwd=str(tmpdir),
-        env=vcenv)
+    args = ['compile', '/c', file]
+
+    env, cl = vcenv_and_cl
+    return ("msvc", cl, env, subprocess.list2cmdline(args), port)
 
 @pytest.mark.parametrize("protocol_tester", [RunLocallyTester,
     ExecuteGetOutputTester, ExecuteAndExitTester, ExitTester, LocateFiles])
-def test_protocol(client_popen_args, protocol_tester):
-    port = 'test_protocol_{}'.format(os.getpid())
-
+def test_protocol(buildpal_compile_args, protocol_tester):
     loop = asyncio.ProactorEventLoop()
     [server] = loop.run_until_complete(loop.start_serving_pipe(
-        lambda : protocol_tester(loop), "\\\\.\\pipe\\BuildPal_{}".format(port)))
+        lambda : protocol_tester(loop), "\\\\.\\pipe\\BuildPal_{}".format(buildpal_compile_args[-1])))
 
-    client_popen_args['env'].update({'BP_MANAGER_PORT' : port})
-    with subprocess.Popen(**client_popen_args) as proc:
-        loop.run_forever()
-        @asyncio.coroutine
-        def close_server():
-            server.close()
-        loop.run_until_complete(close_server())
-        protocol_tester.check_exit_code(proc.wait())
+    class ExitCode:
+        pass
+
+    def run_thread():
+        ExitCode.exit_code = buildpal_compile(*buildpal_compile_args)
+
+    thread = threading.Thread(target=run_thread)
+    thread.start()
+    loop.run_forever()
+    thread.join()
+    @asyncio.coroutine
+    def close_server():
+        server.close()
+    loop.run_until_complete(close_server())
+    assert ExitCode.exit_code != None
+    protocol_tester.check_exit_code(ExitCode.exit_code)
 

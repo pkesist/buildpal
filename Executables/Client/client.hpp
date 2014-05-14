@@ -20,7 +20,8 @@ public:
     Environment() {}
     Environment( void * vpEnv, bool unicode );
 
-    void remove( llvm::StringRef str );
+    void remove( llvm::StringRef key );
+    void add( llvm::StringRef key, llvm::StringRef val );
 
     std::string createEnvBlock() const;
 
@@ -31,17 +32,29 @@ PathList const & getPath( Environment const & );
 
 bool findOnPath( PathList const & pathList, std::string const & file, std::string & result );
 
-int createProcess( char const * appName, char * commandLine );
-int createProcess( wchar_t const * appName, wchar_t * commandLine );
+int createProcess(
+    char const * appName,
+    char * commandLine,
+    Environment const * env = 0,
+    char const * curDir = 0
+);
+
+int createProcess(
+    wchar_t const * appName,
+    wchar_t * commandLine,
+    Environment const * env = 0,
+    wchar_t const * curDir = 0
+);
 
 typedef int (*FallbackFunction)( void * );
 
 int distributedCompile(
-    llvm::StringRef compilerToolset,
-    llvm::StringRef compilerExecutable,
+    char const * compilerToolset,
+    char const * compilerExecutable,
     Environment const & env,
-    wchar_t const * commandLine,
-    llvm::StringRef portName,
+    char const * commandLine,
+    char const * cwd,
+    char const * portName,
     FallbackFunction fallbackFunc,
     void * fallbackParam
 );

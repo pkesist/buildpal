@@ -13,9 +13,13 @@ Future development wish-list
 
 * Support adding/removing farm nodes on-the-fly.
 
-* Move task delegation logic from Manager to build farm.
+* Communicate with the farm via a single machine (supervisor)
+    * Let the supervisor dispatch tasks to other machines.
     * This would make the farm 'client aware', providing better performance
       when multiple clients use the same farm.
+
+* Create a file system driver for the Server to allow mimicking Client's file
+  system hierarchy.
 
 * Object file caching support.
     * Farm could store object files, and return them later on in case of a

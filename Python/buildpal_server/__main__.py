@@ -16,6 +16,8 @@ def main(args, terminator=None):
     parser.add_argument('--max-jobs', '-j', metavar="#", dest='compile_slots', type=int,
         default=cpu_count(), help='Number of jobs, i.e. number of compiler '
         'processes that can run concurrently. (default=number of cores)')
+    parser.add_argument('--silent', '-s', action='store_true', dest='silent',
+        default=False, help='Do not print any output.')
     opts = parser.parse_args(args)
 
     if opts.compile_slots is not None and (opts.compile_slots <= 0 or
@@ -25,11 +27,13 @@ def main(args, terminator=None):
 
     server_runner = ServerRunner(opts.port, opts.compile_slots)
     try:
-        server_runner.run(terminator)
+        server_runner.run(terminator, opts.silent)
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        if not opts.silent:
+            print("\nShutting down...")
         server_runner.shutdown()
-        print("Done.")
+        if not opts.silent:
+            print("Done.")
         
 
 if __name__ == '__main__':

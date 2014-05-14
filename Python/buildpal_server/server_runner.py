@@ -514,10 +514,11 @@ class ServerRunner(ProcessRunner):
         asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, overrides),
             loop=self.loop).add_done_callback(done_callback)
 
-    def run_event_loop(self):
+    def run_event_loop(self, silent):
         @asyncio.coroutine
         def print_stats():
-            sys.stdout.write("Currently running {} tasks.\r".format(len(self.sessions)))
+            if not silent:
+                sys.stdout.write("Currently running {} tasks.\r".format(len(self.sessions)))
             self.__scheduler.run(False)
             yield from asyncio.sleep(1, loop=self.loop)
             asyncio.async(print_stats(), loop=self.loop)
@@ -525,7 +526,7 @@ class ServerRunner(ProcessRunner):
         asyncio.async(print_stats(), loop=self.loop)
         self.loop.run_forever()
 
-    def run(self, terminator=None):
+    def run(self, terminator=None, silent=False):
         def protocol_factory():
             return ServerProtocol(self)
         self.server = self.loop.run_until_complete(self.loop.create_server(
@@ -536,11 +537,12 @@ class ServerRunner(ProcessRunner):
         beacon = Beacon(self.__compile_slots, self.__port)
         beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
 
-        print("Running server on 'localhost:{}'.".format(self.__port))
-        print("Using {} job slots.".format(self.__compile_slots))
+        if not silent:
+            print("Running server on 'localhost:{}'.".format(self.__port))
+            print("Using {} job slots.".format(self.__compile_slots))
 
         try:
-            event_loop_thread = Thread(target=self.run_event_loop)
+            event_loop_thread = Thread(target=self.run_event_loop, args=(silent,))
             event_loop_thread.start()
             while not terminator or not terminator.should_stop():
                 sleep(1)

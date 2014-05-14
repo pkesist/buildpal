@@ -99,12 +99,13 @@ class LocateFiles(ProtocolTester):
         self.send_msg([b'EXIT', b'3124', b'', b''])
 
 @pytest.fixture(scope='function')
-def client_popen_args(tmpdir, vcvarsall, bp_cl):
+def client_popen_args(tmpdir, vcenv, bp_cl):
     file = os.path.join(str(tmpdir), 'aaa.cpp')
     with open(file, 'wt'):
         pass
-    return dict(args=[vcvarsall, '&&', bp_cl, '/c', file],
-        stdout=sys.stdout, stderr=sys.stderr, cwd=str(tmpdir))
+    return dict(args=[bp_cl, '/c', file],
+        stdout=sys.stdout, stderr=sys.stderr, cwd=str(tmpdir),
+        env=vcenv)
 
 @pytest.mark.parametrize("protocol_tester", [RunLocallyTester,
     ExecuteGetOutputTester, ExecuteAndExitTester, ExitTester, LocateFiles])
@@ -115,9 +116,7 @@ def test_protocol(client_popen_args, protocol_tester):
     [server] = loop.run_until_complete(loop.start_serving_pipe(
         lambda : protocol_tester(loop), "\\\\.\\pipe\\BuildPal_{}".format(port)))
 
-    env = os.environ
-    env['BP_MANAGER_PORT'] = port
-    client_popen_args.update(env=env)
+    client_popen_args['env'].update({'BP_MANAGER_PORT' : port})
     with subprocess.Popen(**client_popen_args) as proc:
         loop.run_forever()
         @asyncio.coroutine

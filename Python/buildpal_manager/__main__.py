@@ -108,7 +108,7 @@ def main(argv, terminator=None):
     #import logging
     #logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ui', choices=['gui', 'console'], default='gui', help='Select user interface')
+    parser.add_argument('--ui', choices=['gui', 'console', 'none'], default='gui', help='Select user interface')
     parser.add_argument('--port', dest='port', type=str, default=None, help='Port on which manager should run.')
     parser.add_argument('--ini', dest='ini_file', type=str, default=None, help='Specify .ini file.')
     parser.add_argument('profile', nargs='?', type=str, default=None, help='Profile to use. Must be present in the .ini file.')
@@ -140,16 +140,18 @@ def main(argv, terminator=None):
     if opts.ui == 'gui':
         run_gui(nodes, port)
     else:
+        silent = opts.ui == 'none'
         manager_runner = ManagerRunner(nodes, port, 0)
         def run():
-            manager_runner.run()
+            manager_runner.run(silent=silent)
         thread = Thread(target=run)
         thread.start()
         try:
             while not terminator or not terminator.should_stop():
                 sleep(1)
         finally:
-            print("Shutting down.")
+            if not silent:
+                print("Shutting down.")
             manager_runner.stop()
             thread.join()
 

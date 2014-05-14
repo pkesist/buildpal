@@ -102,7 +102,7 @@ class ManagerRunner:
         if self.n_pp_threads <= 0:
             self.n_pp_threads = cpu_count()
 
-    def run(self, update_ui=None):
+    def run(self, update_ui=None, silent=False):
         if update_ui is None:
             self.update_ui = lambda event_type, event_data : None
         else:
@@ -116,7 +116,7 @@ class ManagerRunner:
 
         self.loop = asyncio.ProactorEventLoop()
 
-        if update_ui is None:
+        if update_ui is None and not silent:
             class UIData: pass
             ui_data = UIData()
             ui_data.timer = self.timer

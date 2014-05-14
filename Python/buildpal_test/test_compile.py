@@ -60,7 +60,7 @@ node[0]=localhost:{}:4
     from buildpal_manager.__main__ import main as manager_main
     terminator = Terminator()
     def run_manager_thread():
-        manager_main(['--ui=console', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), 'test'], terminator)
+        manager_main(['--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), 'test'], terminator)
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
     # Give it some time to set up.
@@ -73,8 +73,10 @@ node[0]=localhost:{}:4
     return manager_thread
 
 @pytest.fixture(scope='function')
-def client_popen_args(tmpdir):
-    env = os.environ
+def client_popen_args(tmpdir, vcenv):
+    env = {}
+    env.update({(key.upper(), value) for key, value in os.environ.items()})
+    env.update({(key.upper(), value) for key, value in vcenv.items()})
     env.update({'BP_MANAGER_PORT' : str(MGR_PORT), 'BP_DISABLE_FALLBACK': ''})
     return dict(env=env, stderr=sys.stderr, stdout=sys.stdout, cwd=str(tmpdir))
 
@@ -83,7 +85,7 @@ def run_server(request):
     from buildpal_server.__main__ import main as server_main
     terminator = Terminator()
     def run_server_thread():
-        server_main(['--port={}'.format(SRV_PORT)], terminator)
+        server_main(['--port={}'.format(SRV_PORT), '--silent'], terminator)
     server_thread = threading.Thread(target=run_server_thread)
     server_thread.start()
     def teardown():
@@ -92,55 +94,55 @@ def run_server(request):
     request.addfinalizer(teardown)
     return server_thread
 
-def test_dummy(run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
-    with Popen([vcvarsall, '&&', bp_cl, 'silly_option'], 
+def test_dummy(run_server, run_manager, bp_cl, client_popen_args):
+    with Popen([bp_cl, 'silly_option'], 
         **client_popen_args) as proc:
         assert proc.wait(3) != 0
 
-def test_relative(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_relative(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('aaa/a1.cpp', '#include "../rel.hpp"\n')
     file_creator.create_file('rel.hpp', '\n')
     
-    with Popen([vcvarsall, '&&', bp_cl, '/c', file],
+    with Popen([bp_cl, '/c', file],
         **client_popen_args) as proc:
         assert proc.wait(3) == 0
 
-def test_system_headers(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_system_headers(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('a2.cpp', '#include <vector>\n')
-    with Popen([vcvarsall, '&&', bp_cl, '/c', file],
+    with Popen([bp_cl, '/c', file],
         **client_popen_args) as proc:
         assert proc.wait(3) == 0
 
-def test_cplusplus(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_cplusplus(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('a3.cpp', '''\
 #ifdef __cplusplus
 #include "doesnotexist.hpp"
 #endif
 ''')
 
-    with Popen([vcvarsall, '&&', bp_cl, '/c', file],
+    with Popen([bp_cl, '/c', file],
         **client_popen_args) as proc:
         assert proc.wait(3) != 0
 
-def test_link(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_link(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('linkme.cpp', "int main() {}\n")
     first_exe = file_creator.full_path('a_dist.exe')
     assert not os.path.exists(first_exe)
-    with Popen([vcvarsall, '&&', bp_cl, '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(first_exe)],
+    with Popen([bp_cl, '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(first_exe)],
         **client_popen_args) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(first_exe)
 
     second_exe = file_creator.full_path('a_local.exe')
     assert not os.path.exists(second_exe)
-    with Popen([vcvarsall, '&&', 'cl', '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
-        **client_popen_args) as proc:
+    with Popen(['cl', '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
+        shell=True, **client_popen_args) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(second_exe)
 
     assert os.stat(first_exe).st_size == os.stat(second_exe).st_size
 
-def test_rel_include(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_rel_include(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('imacppfile.cpp', '''
 #include "xxx/bbb.h"
 int main() {}
@@ -148,14 +150,14 @@ int main() {}
     decoy = file_creator.create_file('imaheaderfile.hpp', '#error "I should not be included!"\n')
     realmccoy = file_creator.create_file('xxx/imaheaderfile.hpp', '\n')
     bbb = file_creator.create_file('xxx/bbb.h', '#include "imaheaderfile.hpp"')
-    with Popen([vcvarsall, '&&', bp_cl, '/c', file],
+    with Popen([bp_cl, '/c', file],
         **client_popen_args) as proc:
         assert proc.wait(3) == 0
 
-def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, vcvarsall, bp_cl, client_popen_args):
+def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, bp_cl, client_popen_args):
     file = file_creator.create_file('test.cpp', '#include <asdf.h>')
     file_creator.create_file('inc/dodo.h')
     file_creator.create_file('inc/1/2/3/4/5/asdf.h', '#include "../../../../../dodo.h"')
-    with Popen([vcvarsall, '&&', bp_cl, '/c', '/Iinc/1/2/3/4/5', file],
+    with Popen([bp_cl, '/c', '/Iinc/1/2/3/4/5', file],
         **client_popen_args) as proc:
         assert proc.wait(3) == 0

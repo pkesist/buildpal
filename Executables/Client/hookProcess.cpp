@@ -14,6 +14,7 @@
 #include <llvm/Support/Process.h>
 
 #include <codecvt>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -40,14 +41,29 @@ struct CreateProcessParams
 struct DistributedCompileParams
 {
     HANDLE eventHandle;
-    std::string compilerToolset;
-    std::string compilerExecutable;
-    std::wstring commandLine;
+    char const * compilerToolset;
+    char const * compilerExecutable;
+    char const * commandLine;
+    char const * currentPath;
     FallbackFunction fallback;
     CreateProcessParams fallbackParams;
     BOOL completed;
     BOOL terminated;
     DWORD exitCode;
+
+    std::deque<std::string> values;
+
+    char const * saveString( std::string const & val )
+    {
+        return saveString( val.c_str() );
+    }
+
+    char const * saveString( char const * val )
+    {
+        if ( !val ) return val;
+        values.push_back( val );
+        return values.back().c_str();
+    }
 };
 
 typedef llvm::sys::fs::file_status FileStatus;
@@ -232,14 +248,15 @@ DWORD WINAPI distributedCompileWorker( void * params )
         pdcp->compilerToolset,
         pdcp->compilerExecutable,
         env,
-        pdcp->commandLine.c_str(),
-        hookData.portName,
+        pdcp->commandLine,
+        pdcp->currentPath,
+        hookData.portName.c_str(),
         pdcp->fallback,
         &pdcp->fallbackParams
     );
     {
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        DistributedCompileParams & dcp( hookData.distributedCompileParamsInfo[ eventHandle ] );
+        DistributedCompileParams & dcp( hookData.distributedCompileParamsInfo[ pdcp->eventHandle ] );
         if ( dcp.terminated )
             return 0;
         hookData.distributedCompileParamsInfo[ pdcp->eventHandle ].completed = TRUE;
@@ -253,6 +270,7 @@ bool shortCircuit
 (
     wchar_t const * appName,
     wchar_t const * commandLine,
+    wchar_t const * currentPath,
     FallbackFunction fallback,
     CreateProcessParams const & createProcessParams
 )
@@ -309,9 +327,10 @@ bool shortCircuit
     {
         DistributedCompileParams dcp;
         dcp.eventHandle = eventHandle;
-        dcp.compilerToolset = "msvc";
-        dcp.compilerExecutable = compiler;
-        dcp.commandLine = commandLine;
+        dcp.compilerToolset = dcp.saveString( "msvc" );
+        dcp.compilerExecutable = dcp.saveString( compiler );
+        dcp.commandLine = commandLine ? dcp.saveString( convert.to_bytes( commandLine ) ) : 0;
+        dcp.currentPath = currentPath ? dcp.saveString( convert.to_bytes( currentPath ) ) : 0;
         dcp.fallback = fallback;
         dcp.fallbackParams = createProcessParams;
         dcp.fallbackParams.eventHandle = eventHandle;
@@ -457,6 +476,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
     if ( shortCircuit(
         lpApplicationName ? convert.from_bytes( lpApplicationName ).c_str() : 0,
         lpCommandLine ? convert.from_bytes( lpCommandLine ).c_str() : 0,
+        lpCurrentDirectory ? convert.from_bytes( lpCurrentDirectory ).c_str() : 0,
         createProcessFallbackA, cpParams ) )
         return 1;
 
@@ -508,7 +528,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
         lpStartupInfo,
         lpProcessInformation
     };
-    if ( shortCircuit( lpApplicationName, lpCommandLine,
+    if ( shortCircuit( lpApplicationName, lpCommandLine, lpCurrentDirectory,
             createProcessFallbackW, cpParams ) )
         return 1;
 

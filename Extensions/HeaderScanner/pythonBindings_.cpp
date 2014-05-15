@@ -58,22 +58,6 @@ PyObject * PyPreprocessingContext_add_include_path( PyPreprocessingContext * sel
     Py_RETURN_NONE;
 }
 
-PyObject * PyPreprocessingContext_add_ignored_header( PyPreprocessingContext * self, PyObject * args, PyObject * kwds )
-{
-    static char * kwlist[] = { "name", NULL };
-
-    char const * name = 0;
-
-    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s", kwlist, &name ) )
-        return NULL;
-
-    if ( !self->ppContext )
-        return NULL;
-
-    self->ppContext->addIgnoredHeader( name );
-    Py_RETURN_NONE;
-}
-
 PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyObject * args, PyObject * kwds )
 {
     static char * kwlist[] = { "macro_name", "macro_value", NULL };
@@ -93,7 +77,6 @@ PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyOb
 
 PyMethodDef PyPreprocessingContext_methods[] =
 {
-    { "add_ignored_header", (PyCFunction)PyPreprocessingContext_add_ignored_header, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
     { "add_include_path"  , (PyCFunction)PyPreprocessingContext_add_include_path, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
     { "add_macro", (PyCFunction)PyPreprocessingContext_add_macro, METH_VARARGS | METH_KEYWORDS, "Add a macro." },
     {NULL}

@@ -65,6 +65,7 @@ struct Header
     llvm::MemoryBuffer const * buffer;
     std::size_t checksum;
     HeaderLocation::Enum loc;
+    bool hasPragmaOnce;
 };
 
 inline bool operator==( Header const & first, Header const & second )
@@ -140,18 +141,12 @@ public:
         defines_.push_back( std::make_pair( name, value ) );
     }
 
-    void addIgnoredHeader( llvm::StringRef name )
-    {
-        ignoredHeaders_.insert( name );
-    }
-
     typedef std::vector<llvm::SmallString<512> > SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
 
     SearchPath const & userSearchPath  () const { return userSearchPath_; }
     SearchPath const & systemSearchPath() const { return systemSearchPath_; }
     Defines    const & defines         () const { return defines_; }
-    HeaderList const & ignoredHeaders  () const { return ignoredHeaders_; }
 
 private:
     SearchPath userSearchPath_;

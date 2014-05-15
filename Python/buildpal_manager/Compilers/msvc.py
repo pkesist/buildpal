@@ -205,7 +205,7 @@ class MSVCCompiler:
         # executable.
         macros = ('_MSC_VER', '_MSC_FULL_VER', '_CPPLIB_VER', '_HAS_TR1',
             '_WIN32', '_WIN64', '_M_IX86', '_M_IA64', '_M_MPPC', '_M_MRX000',
-            '_M_PPC', '_M_X64', '_INTEGRAL_MAX_BITS', '__cplusplus')
+            '_M_PPC', '_M_X64', '_M_ARM', '_INTEGRAL_MAX_BITS', '__cplusplus')
         return MSVCCompiler.TestSource(macros, self.placeholder_string)
 
     def get_compiler_info(self, executable, stdout, stderr):

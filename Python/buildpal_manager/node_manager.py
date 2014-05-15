@@ -29,7 +29,7 @@ class NodeManager:
 
     def task_preprocessed(self, task, exception=None):
         if exception:
-            logging.error("Preprocessing failure: %s", exception)
+            logging.exception(exception)
             def task_error():
                 task.task_completed(-1, b'', 'BUILDPAL ERROR: {}\n'.format(exception).encode())
             self.loop.call_soon_threadsafe(task_error)
@@ -39,7 +39,7 @@ class NodeManager:
         for dir, data in task.header_info:
             logging.debug(dir)
             for file, relative, content, checksum in data:
-                logging.debug("    %s %s", file, "relative to source" if relative else "")
+                logging.debug("    %s %s", file, "[relative to source]" if relative else "")
                 if file[:2] == '..' and not relative:
                     logging.debug("Cannot distribute task: Uses a header outside include directory: '%s'\n", file)
                     task.cannot_distribute()

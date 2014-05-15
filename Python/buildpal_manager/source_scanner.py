@@ -12,7 +12,7 @@ from socket import getfqdn
 from threading import Thread
 from time import time
 
-def collect_headers(preprocessor, filename, includes, sysincludes, defines, ignored_headers=[]):
+def collect_headers(preprocessor, filename, includes, sysincludes, defines):
     preprocessor.set_ms_mode(True) # If MSVC.
     preprocessor.set_ms_ext(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
@@ -27,8 +27,6 @@ def collect_headers(preprocessor, filename, includes, sysincludes, defines, igno
         # /Dxxx is actually equivalent to /Dxxx=1.
         value = define[1] if len(define) == 2 else "1"
         ppc.add_macro(macro, value)
-    for ignored_header in ignored_headers:
-        ppc.add_ignored_header(ignored_header)
     return preprocessor.scan_headers(ppc, filename)
 
 def dump_cache():
@@ -37,8 +35,7 @@ def dump_cache():
 
 def header_info(preprocessor, task):
     header_info, missing_headers = collect_headers(preprocessor, task['source'], task['includes'],
-        task['sysincludes'], task['macros'],
-        ignored_headers=[task['pch_header']] if task['pch_header'] else [])
+        task['sysincludes'], task['macros'])
     shared_file_list = []
     for dir, data in header_info:
         shared_files_in_dir = []

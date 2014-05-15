@@ -58,7 +58,6 @@ namespace
             HeaderTracker & headerTracker,
             llvm::StringRef filename,
             clang::Preprocessor & preprocessor,
-            HeaderList const & ignoredHeaders,
             Headers & includedHeaders,
             HeaderList & missingHeaders
         )
@@ -66,7 +65,6 @@ namespace
             headerTracker_ ( headerTracker   ),
             preprocessor_  ( preprocessor    ),
             headers_       ( includedHeaders ),
-            ignoredHeaders_( ignoredHeaders  ),
             missingHeaders_( missingHeaders  ),
             filename_      ( filename        )
         {
@@ -119,7 +117,7 @@ namespace
                 clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
-                headerTracker_.leaveHeader( ignoredHeaders_ );
+                headerTracker_.leaveHeader();
             }
         }
 
@@ -181,7 +179,6 @@ namespace
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;
         llvm::StringRef filename_;
-        HeaderList const & ignoredHeaders_;
         Headers & headers_;
         HeaderList & missingHeaders_;
     };
@@ -344,7 +341,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
 
     HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
     preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, fileName,
-        preprocessor(), ppc.ignoredHeaders(), headers, missingHeaders ) );
+        preprocessor(), headers, missingHeaders ) );
 
     preprocessor().EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )

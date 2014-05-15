@@ -39,7 +39,6 @@ private:
     clang::Preprocessor const & preprocessor_;
     clang::FileEntry const * replacement_;
     HeaderCtx * parent_;
-    Header header_;
     CacheEntryPtr cacheHit_;
     MacroState definedHere_;
     MacroState usedHere_;
@@ -47,8 +46,7 @@ private:
     Headers includedHeaders_;
 
 public:
-    HeaderCtx( Header const & header,
-        clang::FileEntry const * replacement,
+    HeaderCtx( clang::FileEntry const * replacement,
         CacheEntryPtr const & cacheHit,
         clang::Preprocessor const & preprocessor
     )
@@ -56,12 +54,15 @@ public:
         preprocessor_( preprocessor ),
         replacement_( replacement ),
         parent_( 0 ),
-        header_( header ),
         cacheHit_( cacheHit )
     {
     }
 
-    void setParent( HeaderCtx * parent ) { parent_ = parent; }
+    void setParent( HeaderCtx * parent )
+    {
+        parent_ = parent;
+    }
+
     HeaderCtx * parent() const { return parent_; }
 
     void macroUsed( MacroName macroName )
@@ -108,7 +109,7 @@ public:
         includedHeaders_.insert( header );
     }
 
-    void propagateToParent( HeaderList const & ignoredHeaders ) const
+    void propagateToParent() const
     {
         assert( parent_ );
         assert( !parent_->fromCache() );
@@ -124,16 +125,13 @@ public:
         // Sometimes we do not want to propagate headers upwards. Specifically,
         // if we are in a PCH, headers it includes are not needed as
         // their contents is a part of the compiled PCH.
-        if ( ignoredHeaders.find( parent_->header_.name.get().str() ) == ignoredHeaders.end() )
-        {
-            std::copy
-            (
-                includedHeaders().begin(),
-                includedHeaders().end  (),
-                std::inserter( parent_->includedHeaders(),
-                    parent_->includedHeaders().begin() )
-            );
-        }
+        std::copy
+        (
+            includedHeaders().begin(),
+            includedHeaders().end  (),
+            std::inserter( parent_->includedHeaders(),
+                parent_->includedHeaders().begin() )
+        );
     }
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
@@ -196,7 +194,7 @@ public:
     void replaceFile( clang::FileEntry const * & fileEntry );
     void headerSkipped();
     void enterHeader();
-    void leaveHeader( HeaderList const & );
+    void leaveHeader();
     void pragmaOnce();
 
     void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );

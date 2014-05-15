@@ -5,7 +5,7 @@ import os
 from time import sleep
 
 def collect_headers(filename, includes=[], defines=[],
-        sysincludes=[], ignored_headers=[], use_cache=True):
+        sysincludes=[], use_cache=True):
     preprocessor = preprocessing.Preprocessor(preprocessing.Cache() if use_cache else None)
     ppc = preprocessing.PreprocessingContext()
     for path in includes:
@@ -18,8 +18,6 @@ def collect_headers(filename, includes=[], defines=[],
         macro = define[0]
         value = define[1] if len(define) == 2 else ""
         ppc.add_macro(macro, value)
-    for ignored_header in ignored_headers:
-        ppc.add_ignored_header(ignored_header)
     return preprocessor.scan_headers(ppc, filename)
 
 class Environment:

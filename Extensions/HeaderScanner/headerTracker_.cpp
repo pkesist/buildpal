@@ -248,14 +248,13 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 
     fileStack_.push_back( hwf );
 
-    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( hwf.header, 0, CacheEntryPtr(), preprocessor_ ) ) );
+    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( 0, CacheEntryPtr(), preprocessor_ ) ) );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
-    currentHeaderCtx().addHeader( fileStack_.back().header );
-    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( fileStack_.back().header, replacement_, cacheHit_, preprocessor_ ) ) );
+    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( replacement_, cacheHit_, preprocessor_ ) ) );
     replacement_ = 0;
     cacheHit_.reset();
 }
@@ -268,7 +267,7 @@ bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEn
     return headerCtx.replacement() == 0;
 }
 
-void HeaderTracker::leaveHeader( HeaderList const & ignoredHeaders )
+void HeaderTracker::leaveHeader()
 {
     assert( currentHeaderCtx().parent() );
 
@@ -279,8 +278,9 @@ void HeaderTracker::leaveHeader( HeaderList const & ignoredHeaders )
 
     if ( !cacheDisabled() && isViableForCache( currentHeaderCtx(), file ) )
         currentHeaderCtx().addToCache( cache(), searchPathId_, file );
-    currentHeaderCtx().propagateToParent( ignoredHeaders );
+    currentHeaderCtx().propagateToParent();
     popHeaderCtx();
+    currentHeaderCtx().addHeader( fileStack_.back().header );
 }
 
 void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file )

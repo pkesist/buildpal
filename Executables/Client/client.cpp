@@ -287,8 +287,11 @@ void Environment::add( llvm::StringRef key, llvm::StringRef val )
     envMap_.insert( std::pair<std::string, std::string>( key, val ) ); 
 }
 
-std::string Environment::createEnvBlock() const
+char * Environment::createEnvBlock() const
 {
+    if ( envMap_.empty() )
+        return 0;
+
     std::string result;
     for ( EnvMap::const_iterator iter = envMap_.begin(); iter != envMap_.end(); ++iter )
     {
@@ -297,8 +300,8 @@ std::string Environment::createEnvBlock() const
         result.append( iter->second );
         result.push_back( '\0' );
     }
-    result.push_back( '\0' );
-    return result;
+    envBlock_.swap( result );
+    return const_cast<char *>( envBlock_.c_str() );
 }
 
 PathList const & getPath( Environment const & env )
@@ -337,7 +340,7 @@ int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment c
         NULL,
         FALSE,
         0,
-        env ? const_cast<char *>( env->createEnvBlock().c_str() ) : NULL,
+        env->createEnvBlock(),
         currentDirectory,
         &startupInfo,
         &processInfo
@@ -371,7 +374,7 @@ int createProcess( char const * appName, char * commandLine, Environment const *
         NULL,
         FALSE,
         0,
-        env ? const_cast<char *>( env->createEnvBlock().c_str() ) : NULL,
+        env->createEnvBlock(),
         currentDirectory,
         &startupInfo,
         &processInfo
@@ -637,7 +640,7 @@ int distributedCompile(
                 NULL,
                 TRUE,
                 0,
-                const_cast<char *>( env.createEnvBlock().c_str() ),
+                env.createEnvBlock(),
                 currentPath,
                 &startupInfo,
                 &processInfo

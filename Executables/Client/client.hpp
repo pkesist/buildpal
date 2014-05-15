@@ -15,6 +15,7 @@ class Environment
 {
     typedef std::map<std::string, std::string> EnvMap;
     EnvMap envMap_;
+    mutable std::string envBlock_;
 
 public:
     Environment() {}
@@ -23,7 +24,7 @@ public:
     void remove( llvm::StringRef key );
     void add( llvm::StringRef key, llvm::StringRef val );
 
-    std::string createEnvBlock() const;
+    char * createEnvBlock() const;
 
     llvm::Optional<std::string> get( llvm::StringRef str ) const;
 };

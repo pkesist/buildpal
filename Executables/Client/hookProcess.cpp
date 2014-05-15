@@ -17,6 +17,7 @@
 #include <deque>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 
 #include <windows.h>
@@ -51,7 +52,9 @@ struct DistributedCompileParams
     BOOL terminated;
     DWORD exitCode;
 
-    std::deque<std::string> values;
+    typedef std::deque<std::string> StringSaver;
+
+    DistributedCompileParams() : values( new StringSaver() ) {}
 
     char const * saveString( std::string const & val )
     {
@@ -61,9 +64,12 @@ struct DistributedCompileParams
     char const * saveString( char const * val )
     {
         if ( !val ) return val;
-        values.push_back( val );
-        return values.back().c_str();
+        values->push_back( val );
+        return values->back().c_str();
     }
+
+private:
+    std::shared_ptr<StringSaver> values;
 };
 
 typedef llvm::sys::fs::file_status FileStatus;

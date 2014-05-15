@@ -103,8 +103,9 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     {
         // Remove '.' and '..' from searchPath
         llvm::SmallString<512> vec( searchPath );
+        llvm::sys::path::append( vec, relativePath );
         normalize( vec );
-        searchPath = vec.str();
+        llvm::StringRef fullName = vec.str();
 
         // Find the include directory searchPath is relative to.
         typedef std::vector<clang::DirectoryLookup> DirLookups;
@@ -115,34 +116,21 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         {
             clang::DirectoryLookup const & dirLookup( *iter );
             llvm::StringRef const dirName( dirLookup.getName() );
-            if ( searchPath.startswith_lower( dirName ) )
+            if ( fullName.startswith_lower( dirName ) )
             {
                 dir = Dir( dirName );
-                if ( searchPath == dirName )
-                {
-                    headerName = HeaderName( relativePath );
-                }
-                else
-                {
-                    llvm::StringRef const remainder( searchPath.data() + dirName.size(), searchPath.size() - dirName.size() );
-                    assert( llvm::sys::path::is_separator( remainder[0] ) );
-                    if ( remainder.size() == 1 )
-                    {
-                        headerName = HeaderName( relativePath );
-                    }
-                    else
-                    {
-                        llvm::SmallString<512> tmp( remainder.data() + 1, remainder.data() + remainder.size() );
-                        llvm::sys::path::append( tmp, relativePath );
-                        headerName = HeaderName( tmp.str() );
-                    }
-                }
+                llvm::StringRef const remainder( fullName.data() + dirName.size(), fullName.size() - dirName.size() );
+                assert( llvm::sys::path::is_separator( remainder[0] ) );
+                headerName = HeaderName( remainder.substr( 1 ) );
                 found = true;
                 break;
             }
         }
         if ( !found )
-            DebugBreak();
+        {
+            dir = Dir( searchPath );
+            headerName = HeaderName( relativePath );
+        }
     }
 
     HeaderWithFileEntry const headerWithFileEntry =

@@ -1,9 +1,10 @@
 from distutils.cmd import Command
-from distutils.core import setup, Extension
 from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
 from distutils.spawn import find_executable
 from distutils.command.build_ext import build_ext as distutils_build_ext
+
+from setuptools import Extension, setup
 
 import os
 import subprocess

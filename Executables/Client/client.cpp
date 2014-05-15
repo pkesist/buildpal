@@ -21,6 +21,10 @@
 #include <shlwapi.h>
 #include <windows.h>
 
+#ifdef __GNUC__
+#define alloca __builtin_alloca
+#endif
+
 namespace
 {
     class StringSaver : public llvm::cl::StringSaver

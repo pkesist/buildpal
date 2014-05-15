@@ -9,7 +9,7 @@ from time import sleep
 import os
 import sys
 
-class build_ext(setuptools_build_ext):
+class build_manager(setuptools_build_ext):
     setuptools_build_ext.user_options.append(('force-mingw', None,
         'force building with mingw'))
     setuptools_build_ext.boolean_options.append(('force-mingw'))
@@ -94,33 +94,11 @@ setup(name = 'buildpal_manager',
             ]
         )
     ],
-    cmdclass =  {'build_ext': build_ext},
+    cmdclass =  {'build_ext': build_manager},
     command_packages = 'BuildDeps',
     package_dir = {'': 'Python'},
     packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
     entry_points = {
         'console_scripts': ['buildpal_manager = buildpal_manager.__main__']
     }
-)
-
-setup(name = 'buildpal_client',
-    version = '0.1',
-    description = 'BuildPal Client package',
-    ext_modules = [
-        Extension('buildpal_client',
-            sources = [
-                'Executables/Client/client.cpp',
-                'Extensions/Client/pythonBindings.cpp',
-            ],
-            define_macros = [
-                ('BOOST_ASIO_DISABLE_BOOST_REGEX', '1'),
-                ('BOOST_ASIO_DISABLE_BOOST_DATE_TIME', '1')
-            ],
-            libraries = ['shlwapi'],
-            extra_compile_args = ['/Zi', '/Od'],
-            extra_link_args = ['/DEBUG'],
-        ),
-    ],
-    cmdclass =  {'build_ext': build_ext},
-    command_packages = 'BuildDeps',
 )

@@ -7,13 +7,6 @@
 #include <iostream>
 #include <windows.h>
 
-char const defaultPortName[] = "default";
-char const compilerExeFilename[] = "cl.exe";
-
-#ifdef __GNUC__
-#define alloca __builtin_alloca
-#endif
-
 int runLocallyFallback( void * vpCompilerExe )
 {
     char const * compilerExecutable = static_cast<char const *>( vpCompilerExe );
@@ -40,23 +33,14 @@ int main()
     Environment env( GetEnvironmentStringsA(), false );
 
     std::string compilerExecutable;
-    if ( !findOnPath( getPath( env ), compilerExeFilename, compilerExecutable ) )
+    if ( !findOnPath( getPath( env ), "cl.exe", compilerExecutable ) )
     {
         std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
         return -1;
     }
 
     bool const disableFallback = !!env.get( "BP_DISABLE_FALLBACK" );
-    llvm::Optional<std::string> portNameVar( env.get( "BP_MANAGER_PORT" ) );
-    llvm::StringRef portName;
-    if ( !portNameVar )
-    {
-        portName = defaultPortName;
-    }
-    else
-    {
-        portName = portNameVar;
-    }
+    llvm::Optional<std::string> const portNameVar( env.get( "BP_MANAGER_PORT" ) );
 
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     return distributedCompile(
@@ -65,7 +49,7 @@ int main()
         env,
         GetCommandLineA(),
         NULL,
-        portName.data(),
+        portNameVar ? portNameVar->data() : "default",
         disableFallback ? NULL : runLocallyFallback,
         const_cast<char *>( compilerExecutable.c_str() )
     );

@@ -36,7 +36,7 @@ class ClientTaskCompiler:
         for define in options.defines():
             call.append(compiler.set_define_option().format(define))
         if options.pch_file:
-            call.append(compiler.set_pch_file_option().format(options.pch_file))
+            call.append(compiler.set_pch_file_option().format(options.pch_file()))
         call.append(compiler.set_object_name_option().format(task.output))
         call.append(task.source)
         self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',

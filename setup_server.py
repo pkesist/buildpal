@@ -45,14 +45,21 @@ class build_ext(setuptools_build_ext):
             )
         ]
         build_dll.compile_args.append('/EHsc')
-        build_dll.link_libs.append('shlwapi')
+        #build_dll.compile_args.append('/Od')
+        #build_dll.compile_args.append('/Zi')
+        #build_dll.link_args.append('/DEBUG')
         build_dll.link_libs.append('psapi')
         build_dll.link_libs.append('user32')
+        build_dll.link_libs.append('shlwapi')
         self.run_command('build_dll')
 
         self.library_dirs.append(build_dll.build_clib)
         win64 = sys.maxsize > 2**32
         self.libraries.append('map_files_inj64' if win64 else 'map_files_inj32')
+        for ext_module in self.distribution.ext_modules:
+            #ext_module.extra_compile_args.extend(['/EHsc', '/Od', '/Zi'])
+            ext_module.extra_compile_args.extend(['/EHsc'])
+            ext_module.extra_link_args.extend(['/DEBUG'])
         super().run()
 
 setup(name = 'buildpal_server',

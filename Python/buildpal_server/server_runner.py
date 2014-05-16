@@ -10,7 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
 from subprocess import list2cmdline, Popen
 
-from .header_repository import HeaderRepository
+from .header_repository import MapFiles as HeaderRepository
+#from .header_repository import MapIncludeDirs as HeaderRepository
 from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
 from .beacon import Beacon
@@ -40,25 +41,23 @@ class Counter:
     def dec(self): self.__count -= 1
     def get(self): return self.__count
 
-
 class OverrideCreateProcess:
-    def __init__(self, overrides):
-        self.overrides = overrides
+    def __init__(self, file_maps):
+        if file_maps:
+            self.file_map_composition = map_files.FileMapComposition(*file_maps)
+        else:
+            self.file_map_composition = None
         self.save = None
 
     def __enter__(self):
-        if self.overrides:
+        if self.file_map_composition:
             self.save = subprocess._winapi.CreateProcess
-            subprocess._winapi.CreateProcess = self.create_process
+            subprocess._winapi.CreateProcess = self.file_map_composition.create_process
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.save:
             subprocess._winapi.CreateProcess = self.save
             self.save = None
-
-    def create_process(self, *args):
-        assert self.overrides
-        return map_files.createProcess(self.overrides, *args)
 
 class CompileSession:
     class SessionState:
@@ -81,9 +80,9 @@ class CompileSession:
             session.task = pickle.loads(msg[1].memory())
             # Determine headers which are missing
             missing_files_timer = SimpleTimer()
-            missing_files, session.repo_transaction_id = \
+            missing_files = \
                 session.runner.header_repository().missing_files(
-                session.task['fqdn'], session.task['filelist'])
+                session.task['fqdn'], id(session), session.task['filelist'])
             session.times['determine missing files'] = missing_files_timer.get()
             # Determine if we have this compiler
             session.compiler_required = session.runner.compiler_repository(
@@ -107,7 +106,6 @@ class CompileSession:
             assert msg[0] == b'TASK_FILES'
             fqdn = session.task['fqdn']
             new_files = pickle.loads(msg[1].memory())
-            session.src_loc = msg[2].tobytes().decode()
             session.waiting_for_manager_data = SimpleTimer()
             session.include_dirs_future = session.prepare_include_dirs(
                 session.runner.misc_thread_pool(), fqdn, new_files)
@@ -214,7 +212,6 @@ class CompileSession:
         self.local_id = runner.generate_unique_id()
         self.sender = self.Sender(send_msg, remote_id)
         self.runner = runner
-        self.include_path = tempfile.mkdtemp(dir=self.runner.scratch_dir)
         self.times = {}
         self.completed = False
         self.cancel_pending = False
@@ -277,8 +274,6 @@ class CompileSession:
             dir=self.runner.scratch_dir, suffix='.obj')
         os.close(obj_handle)
 
-        self.source_file = os.path.join(self.include_path, self.src_loc)
-
         compiler_info = self.task['compiler_info']
         output = compiler_info['set_object_name'].format(self.object_file)
         pch_switch = []
@@ -303,13 +298,14 @@ class CompileSession:
                 self.pch_file
             ))
 
-        include_dirs = self.include_dirs_future.result()
+        include_dirs, src_loc = self.include_dirs_future.result()
         includes = [compiler_info['set_include_option'].format(incpath)
             for incpath in include_dirs]
         command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
-            includes + [output, self.source_file])
+            includes + [output, src_loc])
 
-        self.runner.run_compiler(self, command, self.include_path, overrides,
+        cur_dir = self.runner.header_repository().tempdir(id(self))
+        self.runner.run_compiler(self, command, cur_dir, overrides,
             self.__compile_completed)
 
     def __compile_completed(self, future):
@@ -325,6 +321,7 @@ class CompileSession:
                 traceback.print_exc(file=tb)
                 tb.write("============================\n")
                 tb.seek(0)
+                logging.exception(e)
                 self.sender.send_msg([b'SERVER_FAILED',
                         tb.read().encode()])
                 self.session_done()
@@ -350,7 +347,8 @@ class CompileSession:
         if from_selfdestruct:
             self.sender.send_msg([b'TIMED_OUT'])
         else:
-            self.cancel_selfdestruct()
+                    self.cancel_selfdestruct()
+        self.runner.header_repository().session_complete(id(self))
         self.runner.terminate(self.local_id)
         self.close()
         self.completed = True
@@ -419,8 +417,8 @@ class CompileSession:
     @async
     def prepare_include_dirs(self, fqdn, new_files):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.runner.header_repository().prepare_dir(fqdn, new_files,
-            self.repo_transaction_id, self.include_path)
+        result = self.runner.header_repository().prepare_dir(fqdn, id(self),
+            new_files)
         self.times['prepare include directory'] = shared_prepare_dir_timer.get()
         return result
 
@@ -450,7 +448,7 @@ class ProcessRunner:
         self.loop = loop
 
     @asyncio.coroutine
-    def subprocess_exec(self, session, args, cwd, overrides):
+    def subprocess_exec(self, session, args, cwd, file_maps):
         start = time()
         while self.current == self.limit:
             yield from self.ready.wait()
@@ -460,7 +458,7 @@ class ProcessRunner:
         session.times['waiting for job slot'] = compile_start - start
         self.current += 1
         try:
-            with OverrideCreateProcess(overrides):
+            with OverrideCreateProcess(file_maps):
                 session.process = yield from asyncio.create_subprocess_exec(*args,
                     cwd=cwd, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, loop=self.loop)
@@ -511,7 +509,15 @@ class ServerRunner(ProcessRunner):
             callable, *args), loop=self.loop)
 
     def run_compiler(self, session, args, cwd, overrides, done_callback):
-        asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, overrides),
+        file_maps = []
+        if overrides:
+            file_map = map_files.FileMap()
+            for virtual_file, real_file in overrides.items():
+                file_map.map_file(virtual_file, real_file)
+            file_maps.append(file_map)
+        file_maps.extend(self.header_repository().get_mappings(
+            session.task['fqdn'], id(session)))
+        asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, file_maps),
             loop=self.loop).add_done_callback(done_callback)
 
     def run_event_loop(self, silent):

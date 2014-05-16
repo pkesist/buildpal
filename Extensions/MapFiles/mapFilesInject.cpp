@@ -15,14 +15,6 @@
 typedef std::unordered_map<std::wstring, std::wstring> FileMapping;
 typedef std::map<DWORD, FileMapping> FileMappings;
 
-// Global mapping - used for current process.
-FileMapping globalMapping;
-
-// Custom mappings - used for spawning other processes.
-FileMappings customMappings;
-
-DWORD counter = 0;
-
 HANDLE WINAPI createFileA(
   _In_      char const * lpFileName,
   _In_      DWORD dwDesiredAccess,
@@ -67,16 +59,27 @@ BOOL WINAPI createProcessW(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 );
 
-struct MapFilesAPIHookTraits
+struct MapFilesAPIHookDesc
 {
     static char const moduleName[];
     static APIHookItem const items[]; 
     static unsigned int const itemsCount;
+
+    struct Data
+    {
+        // Global mapping - used for current process.
+        FileMapping globalMapping;
+
+        // Custom mappings - used for spawning other processes.
+        FileMappings customMappings;
+
+        unsigned int counter;
+    };
 };
 
-char const MapFilesAPIHookTraits::moduleName[] = "kernel32.dll";
+char const MapFilesAPIHookDesc::moduleName[] = "kernel32.dll";
 
-APIHookItem const MapFilesAPIHookTraits::items[] = 
+APIHookItem const MapFilesAPIHookDesc::items[] = 
 {
     { "CreateFileA"   , (PROC)createFileA    },
     { "CreateFileW"   , (PROC)createFileW    },
@@ -84,7 +87,9 @@ APIHookItem const MapFilesAPIHookTraits::items[] =
     { "CreateProcessW", (PROC)createProcessW }
 };
 
-unsigned int const MapFilesAPIHookTraits::itemsCount = sizeof(items) / sizeof(items[0]);
+unsigned int const MapFilesAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
+
+typedef APIHooks<MapFilesAPIHookDesc> MapFilesAPIHook;
 
 
 namespace
@@ -148,7 +153,28 @@ namespace
         assert( written == 4 );
     }
 
-    bool hookProcess( HANDLE processHandle, FileMapping const & fileMapping )
+    struct InitArgs
+    {
+        FileMapping const * const * mappings;
+        DWORD mappingCount;
+        HANDLE writeHandle;
+    };
+
+    void writeMappings( void * vpInitArgs )
+    {
+        InitArgs const * initArgs( static_cast<InitArgs *>( vpInitArgs ) );
+        
+        for ( DWORD mappingIndex( 0 ); mappingIndex < initArgs->mappingCount; ++mappingIndex )
+        {
+            FileMapping const & fileMap = (*initArgs->mappings[ mappingIndex ]);
+            FileMapping::const_iterator end = fileMap.end();
+            for ( FileMapping::const_iterator iter = fileMap.begin(); iter != end; ++iter )
+                writeMapping( initArgs->writeHandle, iter->first, iter->second );
+        }
+        writeEnd( initArgs->writeHandle );
+    }
+
+    bool hookProcess( HANDLE processHandle, FileMapping const * const * fileMapping, DWORD fileMappingCount )
     {
         HANDLE pipeRead;
         HANDLE pipeWrite;
@@ -161,17 +187,19 @@ namespace
             DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
         assert( result );
 
-        FileMapping::const_iterator end = fileMapping.end();
-        for ( FileMapping::const_iterator iter = fileMapping.begin(); iter != end; ++iter )
-            writeMapping( pipeWrite, iter->first, iter->second );
-        writeEnd( pipeWrite );
-
         char const * dllNames[] = {
             "map_files_inj32.dll",
             "map_files_inj64.dll"
         };
         char const initFunc[] = "Initialize";
-        return injectLibrary( processHandle, dllNames, initFunc, targetRead );
+        InitArgs writeMappingsArgs =
+        {
+            fileMapping,
+            fileMappingCount,
+            pipeWrite
+        };
+        return injectLibrary( processHandle, dllNames,
+            initFunc, targetRead, writeMappings, &writeMappingsArgs  );
     }
 
     std::wstring normalizePath( std::wstring path )
@@ -198,9 +226,10 @@ HANDLE WINAPI createFileA(
 )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    FileMapping::const_iterator const iter = globalMapping.find( normalizePath(
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMapping::const_iterator const iter = data.globalMapping.find( normalizePath(
         convert.from_bytes( lpFileName ) ) );
-    return CreateFileA( iter == globalMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
+    return CreateFileA( iter == data.globalMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -220,11 +249,12 @@ HANDLE WINAPI createFileW(
   _In_opt_  HANDLE hTemplateFile
 )
 {
-    FileMapping::const_iterator const iter = globalMapping.find(
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMapping::const_iterator const iter = data.globalMapping.find(
         normalizePath( lpFileName ) );
     return CreateFileW
     ( 
-        iter == globalMapping.end() ? lpFileName : iter->second.c_str(),
+        iter == data.globalMapping.end() ? lpFileName : iter->second.c_str(),
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -247,7 +277,8 @@ namespace
         char const * lpCurrentDirectory,
         LPSTARTUPINFOA lpStartupInfo,
         LPPROCESS_INFORMATION lpProcessInformation,
-        FileMapping const & fileMapping
+        FileMapping const * const * fileMapping,
+        DWORD fileMappingCount
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -257,14 +288,15 @@ namespace
             lpProcessAttributes,
             lpThreadAttributes,
             bInheritHandles,
-            dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
+            dwCreationFlags | CREATE_SUSPENDED,
             lpEnvironment,
             lpCurrentDirectory,
             lpStartupInfo,
             lpProcessInformation);
-        if ( !fileMapping.empty() && result )
+        if ( result )
         {
-            hookProcess( lpProcessInformation->hProcess, fileMapping );
+            hookProcess( lpProcessInformation->hProcess, fileMapping,
+                fileMappingCount );
             if ( shouldResume )
                 ResumeThread( lpProcessInformation->hThread );
         }
@@ -282,7 +314,8 @@ namespace
         wchar_t const * lpCurrentDirectory,
         LPSTARTUPINFOW lpStartupInfo,
         LPPROCESS_INFORMATION lpProcessInformation,
-        FileMapping const & fileMapping
+        FileMapping const * const * fileMapping,
+        DWORD fileMappingCount
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -292,14 +325,15 @@ namespace
             lpProcessAttributes,
             lpThreadAttributes,
             bInheritHandles,
-            dwCreationFlags | ( fileMapping.empty() ? 0 : CREATE_SUSPENDED ),
+            dwCreationFlags | CREATE_SUSPENDED,
             lpEnvironment,
             lpCurrentDirectory,
             lpStartupInfo,
             lpProcessInformation);
-        if ( !fileMapping.empty() && result )
+        if ( result )
         {
-            hookProcess( lpProcessInformation->hProcess, fileMapping );
+            hookProcess( lpProcessInformation->hProcess, fileMapping,
+                fileMappingCount );
             if ( shouldResume )
                 ResumeThread( lpProcessInformation->hThread );
         }
@@ -320,10 +354,11 @@ BOOL WINAPI createProcessA(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 )
 {
+    FileMapping const * const mapping = &MapFilesAPIHook::getData().globalMapping;
     return createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, globalMapping );
+        lpProcessInformation, &mapping, 1 );
 }
 
 BOOL WINAPI createProcessW(
@@ -339,28 +374,29 @@ BOOL WINAPI createProcessW(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 )
 {
+    FileMapping const * const mapping = &MapFilesAPIHook::getData().globalMapping;
     return createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, globalMapping );
+        lpProcessInformation, &mapping, 1 );
 }
 
-extern "C" DWORD WINAPI hookWinAPIs()
+DWORD WINAPI hookWinAPIs()
 {
-    return APIHooks<MapFilesAPIHookTraits>::enable();
+    return MapFilesAPIHook::enable();
 }
 
-extern "C" DWORD WINAPI unhookWinAPIs()
+DWORD WINAPI unhookWinAPIs()
 {
-    return APIHooks<MapFilesAPIHookTraits>::disable();
+    return MapFilesAPIHook::disable();
 }
 
-extern "C" DWORD WINAPI Initialize( HANDLE readHandle )
+DWORD WINAPI Initialize( HANDLE readHandle )
 {
     std::wstring first;
     std::wstring second;
     while ( readMapping( readHandle, first, second ) )
-        globalMapping.insert( std::make_pair( normalizePath( first ), second ) );
+        MapFilesAPIHook::getData().globalMapping.insert( std::make_pair( normalizePath( first ), second ) );
     hookWinAPIs();
     return 0;
 }
@@ -379,55 +415,63 @@ namespace
     }
 }
 
-extern "C" BOOL mapFileGlobalA( char const * virtualFile, char const * file )
+BOOL mapFileGlobalA( char const * virtualFile, char const * file )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    return addMapping( globalMapping, convert.from_bytes( virtualFile ),
+    return addMapping( MapFilesAPIHook::getData().globalMapping, convert.from_bytes( virtualFile ),
         convert.from_bytes( file ) ) ? TRUE : FALSE;
 }
 
-extern "C" BOOL mapFileGlobalW( wchar_t const * virtualFile, wchar_t const * file )
+BOOL mapFileGlobalW( wchar_t const * virtualFile, wchar_t const * file )
 {
-    return addMapping( globalMapping, virtualFile, file ) ? TRUE : FALSE;
+    return addMapping( MapFilesAPIHook::getData().globalMapping, virtualFile, file ) ? TRUE : FALSE;
 }
 
-extern "C" BOOL unmapFileGlobalA( char const * virtualFile )
+BOOL unmapFileGlobalA( char const * virtualFile )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    return removeMapping( globalMapping, convert.from_bytes( virtualFile ) ) ? TRUE : FALSE;
+    return removeMapping( MapFilesAPIHook::getData().globalMapping, convert.from_bytes( virtualFile ) ) ? TRUE : FALSE;
 }
 
-extern "C" BOOL unmapFileGlobalW( wchar_t const * virtualFile )
+BOOL unmapFileGlobalW( wchar_t const * virtualFile )
 {
-    return removeMapping( globalMapping, virtualFile ) ? TRUE : FALSE;
+    return removeMapping( MapFilesAPIHook::getData().globalMapping, virtualFile ) ? TRUE : FALSE;
 }
 
-extern "C" DWORD createFileMap()
+DWORD createFileMap()
 {
-    counter += 1;
-    customMappings[ counter ];
-    return counter;
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    data.counter += 1;
+    data.customMappings[ data.counter ];
+    return data.counter;
 }
 
-extern "C" BOOL mapFileA( DWORD map, char const * virtualFile, char const * file )
+void destroyFileMap( DWORD id )
 {
-    FileMappings::iterator const iter = customMappings.find( map );
-    if ( iter == customMappings.end() )
+    MapFilesAPIHook::getData().customMappings.erase( id );
+}
+
+BOOL mapFileA( DWORD map, char const * virtualFile, char const * file )
+{
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMappings::iterator const iter = data.customMappings.find( map );
+    if ( iter == data.customMappings.end() )
         return FALSE;
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     return addMapping( iter->second, convert.from_bytes( virtualFile ),
         convert.from_bytes( file ) ) ? TRUE : FALSE;
 }
 
-extern "C" BOOL mapFileW( DWORD map, wchar_t * virtualFile, wchar_t * file )
+BOOL mapFileW( DWORD map, wchar_t * virtualFile, wchar_t * file )
 {
-    FileMappings::iterator const iter = customMappings.find( map );
-    if ( iter == customMappings.end() )
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMappings::iterator const iter = data.customMappings.find( map );
+    if ( iter == data.customMappings.end() )
         return FALSE;
     return addMapping( iter->second, virtualFile, file ) ? TRUE : FALSE;
 }
 
-extern "C" BOOL WINAPI createProcessWithMappingA(
+BOOL WINAPI createProcessWithMappingA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -438,21 +482,27 @@ extern "C" BOOL WINAPI createProcessWithMappingA(
     _In_opt_     char const * lpCurrentDirectory,
     _In_         LPSTARTUPINFOA lpStartupInfo,
     _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-    _In_         DWORD mapping
+    _In_         DWORD const * mappings,
+    _In_         DWORD mappingsCount
 )
 {
-    FileMappings::iterator const iter = customMappings.find( mapping );
-    if ( iter == customMappings.end() )
-        return FALSE;
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    std::vector<FileMapping const *> vec( mappingsCount );
+    for ( DWORD index( 0 ); index < mappingsCount; ++index )
+    {
+        FileMappings::iterator const iter = data.customMappings.find( mappings[ index ] );
+        if ( iter == data.customMappings.end() )
+            return FALSE;
+        vec[ index ] = &iter->second;
+    }
     BOOL const result = createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, iter->second );
-    customMappings.erase( iter );
+        lpProcessInformation, vec.data(), vec.size() );
     return result;
 }
 
-extern "C" BOOL WINAPI createProcessWithMappingW(
+BOOL WINAPI createProcessWithMappingW(
     _In_opt_     wchar_t const * lpApplicationName,
     _Inout_opt_  wchar_t * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -463,16 +513,22 @@ extern "C" BOOL WINAPI createProcessWithMappingW(
     _In_opt_     wchar_t const * lpCurrentDirectory,
     _In_         LPSTARTUPINFOW lpStartupInfo,
     _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-    _In_         DWORD mapping
+    _In_         DWORD const * mappings,
+    _In_         DWORD mappingsCount
 )
 {
-    FileMappings::iterator const iter = customMappings.find( mapping );
-    if ( iter == customMappings.end() )
-        return FALSE;
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    std::vector<FileMapping const *> vec( mappingsCount );
+    for ( DWORD index( 0 ); index < mappingsCount; ++index )
+    {
+        FileMappings::iterator const iter = data.customMappings.find( mappings[ index ] );
+        if ( iter == data.customMappings.end() )
+            return FALSE;
+        vec[ index ] = &iter->second;
+    }
     BOOL const result = createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
         lpProcessAttributes, lpThreadAttributes, bInheritHandles,
         dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, iter->second );
-    customMappings.erase( iter );
+        lpProcessInformation, vec.data(), vec.size() );
     return result;
 }

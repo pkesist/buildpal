@@ -89,9 +89,9 @@ class CompileSession:
             if self.cancelled:
                 self.sender.send_msg([b'CANCEL_SESSION'])
             missing_files, need_compiler, need_pch = pickle.loads(msg[2].memory())
-            new_files, src_loc = self.task_files_bundle(missing_files)
+            new_files = self.task_files_bundle(missing_files)
             self.sender.send_msg([b'TASK_FILES',
-                pickle.dumps(new_files), src_loc.encode()])
+                pickle.dumps(new_files)])
             if need_compiler:
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
@@ -160,7 +160,7 @@ class CompileSession:
         return False
 
     @classmethod
-    def header_beginning(cls, filename):
+    def header_heading(cls, filename):
         # 'sourceannotations.h' header is funny. If you add a #line directive to
         # it it will start tossing incomprehensible compiler erros. It would
         # seem that cl.exe has some hardcoded logic for this header. Person
@@ -174,9 +174,6 @@ class CompileSession:
         header_info = self.task.header_info
         source_file = self.task.source
 
-        relative_includes = {}
-        rel_counter = 0
-        max_depth = 0
         files = {}
         # Iterate over
         #
@@ -200,33 +197,12 @@ class CompileSession:
             if not relative and not (dir, file) in in_filelist:
                 # Not needed.
                 continue
-            path_elements = os.path.normpath(file).split(os.path.sep)
-            # Handle '..' in include directive.
-            header = self.header_beginning(os.path.join(dir, file))
-            if relative:
-                depth = 0
-                while path_elements[0] == '..':
-                    depth += 1
-                    if depth > max_depth:
-                        max_depth += 1
-                    del path_elements[0]
-                if depth:
-                    relative_includes.setdefault(depth - 1, []).append((dir,
-                        '/'.join(path_elements), content, header))
-                else:
-                    files[('', '/'.join(path_elements))] = header + content
-            else:
-                files[(dir, file)] = header + content
+            header = self.header_heading(os.path.join(dir, file))
+            files[(dir, file)] = header + content
 
-        curr_dir = ''
-        for depth in range(max_depth):
-            for dir, file, content, header in relative_includes[depth]:
-                files[('', curr_dir + file)] = header + content
-            curr_dir += 'dummy_rel/'
-        rel_file = curr_dir + os.path.basename(source_file)
         with open(source_file, 'rb') as src:
-            files[('', rel_file)] = self.header_beginning(source_file) + src.read()
-        return files, rel_file
+            files[('', source_file)] = self.header_heading(source_file) + src.read()
+        return files
 
     def get_info(self):
         assert self.state == self.STATE_FINISH

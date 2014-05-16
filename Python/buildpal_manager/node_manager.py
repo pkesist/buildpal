@@ -54,10 +54,8 @@ class NodeManager:
             logging.debug("Compile failure: Missing headers\n%s", missing_headers)
             task.task_completed('-1', b'', (error + missing_headers).encode())
             return
-        def schedule_task(task):
-            task.note_time('collected from preprocessor', 'preprocessed notification time')
-            self.schedule_task(task)
-        self.loop.call_soon_threadsafe(schedule_task, task)
+        task.note_time('collected from preprocessor', 'preprocessed notification time')
+        self.loop.call_soon_threadsafe(self.schedule_task, task)
 
     def schedule_task(self, task, node=None):
         if node is not None:

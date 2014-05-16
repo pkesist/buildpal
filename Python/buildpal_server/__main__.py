@@ -37,6 +37,8 @@ def main(args, terminator=None):
         
 
 if __name__ == '__main__':
+    #import logging
+    #logging.basicConfig(fileName='server_debug.log', level=logging.DEBUG)
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
     main(sys.argv[1:])

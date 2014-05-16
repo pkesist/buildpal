@@ -8,6 +8,8 @@
 #define NOMINMAX
 #include <Windows.h>
 
+typedef void (*InitFunc)( void * );
+
 bool injectLibrary(
     // process handle where to inject library
     void * processHandle,
@@ -17,7 +19,7 @@ bool injectLibrary(
     char const * dllNames[2],
     // initialization function to call in the DLL
     // signature must be DWORD (*)( void * );
-    char const * initFunc,
+    char const * initFunc = 0,
     // arguments to pass to the initialization function
     // note that this data must be available in the target
     // process:
@@ -25,7 +27,12 @@ bool injectLibrary(
     //     via DuplicateHandle().
     //     if it is memory, it should be allocated in the target process
     //     via VirtualAllocEx().
-    void * initArgs
+    void * initArgs = 0,
+    // local function to call after the remote thread has been spawned, but
+    // before it is joined.
+    InitFunc localInitFunc = 0,
+    // arguments for local function
+    void * localInitArgs = 0
 );
 
 DWORD hookWinAPI( PROC const * original, PROC const * replacement, unsigned int procCount );

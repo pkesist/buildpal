@@ -63,7 +63,9 @@ struct AllocProcessMemory
     DWORD len_;
 };
 
-bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char const * initFunc, void * initArgs )
+bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
+    char const * initFunc, void * initArgs, InitFunc localInitFunc,
+    void * localInitArgs )
 {
     HMODULE currentLoaded;
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -144,7 +146,6 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
             loaderCodeLength = sizeof(load32);
         }
 
-        DWORD remoteThreadExitCode;
         // Prepare the function
         AllocProcessMemory funcData( processHandle, loaderCodeLength, PAGE_EXECUTE_READWRITE );
         FAIL_IF_NOT( funcData.write( loaderCode, loaderCodeLength ) );
@@ -183,9 +184,18 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2], char c
     #undef FAIL_IF_NOT
 
         // Call the function.
-        HANDLE loadLibraryThread = CreateRemoteThread( processHandle, NULL, 0, (LPTHREAD_START_ROUTINE)funcData.get(), params.get(), 0, NULL );
-        ::WaitForSingleObject( loadLibraryThread, INFINITE );
-        ::GetExitCodeThread( loadLibraryThread, &remoteThreadExitCode );
+        HANDLE const remoteThreadHandle = CreateRemoteThread( processHandle,
+            NULL, 0, (LPTHREAD_START_ROUTINE)funcData.get(), params.get(), 0,
+            NULL );
+        if ( localInitFunc )
+        {
+            localInitFunc( localInitArgs );
+        };
+
+        DWORD remoteThreadExitCode;
+        ::WaitForSingleObject( remoteThreadHandle, INFINITE );
+        ::GetExitCodeThread( remoteThreadHandle, &remoteThreadExitCode );
+        ::CloseHandle( remoteThreadHandle );
         return remoteThreadExitCode == 0;
     }
     catch ( std::bad_alloc const & ) { return false; }

@@ -5,18 +5,19 @@
 #include <Windows.h>
 //------------------------------------------------------------------------------
 
-extern "C" DWORD WINAPI hookWinAPIs();
-extern "C" DWORD WINAPI unhookWinAPIs();
+DWORD WINAPI hookWinAPIs();
+DWORD WINAPI unhookWinAPIs();
 
-extern "C" BOOL mapFileGlobalA( char const * virtualFile, char const * file );
-extern "C" BOOL mapFileGlobalW( wchar_t const * virtualFile, wchar_t const * file );
-extern "C" BOOL unmapFileGlobalA( char const * virtualFile );
-extern "C" BOOL unmapFileGlobalW( wchar_t const * virtualFile );
+BOOL mapFileGlobalA( char const * virtualFile, char const * file );
+BOOL mapFileGlobalW( wchar_t const * virtualFile, wchar_t const * file );
+BOOL unmapFileGlobalA( char const * virtualFile );
+BOOL unmapFileGlobalW( wchar_t const * virtualFile );
 
-extern "C" DWORD createFileMap();
-extern "C" BOOL mapFileA( DWORD, char const * virtualFile, char const * file );
-extern "C" BOOL mapFileW( DWORD, wchar_t * virtualFile, wchar_t * file );
-extern "C" BOOL WINAPI createProcessWithMappingA(
+DWORD createFileMap();
+void destroyFileMap( DWORD );
+BOOL mapFileA( DWORD fileMap, char const * virtualFile, char const * file );
+BOOL mapFileW( DWORD fileMap, wchar_t * virtualFile, wchar_t * file );
+BOOL WINAPI createProcessWithMappingA(
   _In_opt_     char const * lpApplicationName,
   _Inout_opt_  char * lpCommandLine,
   _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -27,10 +28,11 @@ extern "C" BOOL WINAPI createProcessWithMappingA(
   _In_opt_     char const * lpCurrentDirectory,
   _In_         LPSTARTUPINFOA lpStartupInfo,
   _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-  _In_         DWORD fileMap
+  _In_         DWORD const * fileMaps,
+  _In_         DWORD fileMapsCount
 );
 
-extern "C" BOOL WINAPI createProcessWithMappingW(
+BOOL WINAPI createProcessWithMappingW(
   _In_opt_     wchar_t const * lpApplicationName,
   _Inout_opt_  wchar_t * lpCommandLine,
   _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -41,10 +43,11 @@ extern "C" BOOL WINAPI createProcessWithMappingW(
   _In_opt_     wchar_t const * lpCurrentDirectory,
   _In_         LPSTARTUPINFOW lpStartupInfo,
   _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-  _In_         DWORD fileMap
+  _In_         DWORD const * fileMaps,
+  _In_         DWORD fileMapsCount
 );
 
-extern "C" DWORD WINAPI Initialize( HANDLE readHandle );
+DWORD WINAPI Initialize( HANDLE readHandle );
 
 //------------------------------------------------------------------------------
 #endif

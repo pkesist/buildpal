@@ -5,6 +5,7 @@ class build_dll(build_clib):
     def initialize_options(self):
         super().initialize_options()
         self.compile_args = []
+        self.link_args = []
         self.link_libs = []
         self.plat = None
 
@@ -52,13 +53,13 @@ class build_dll(build_clib):
                 macros=macros,
                 include_dirs=include_dirs,
                 debug=self.debug,
-                extra_preargs=self.compile_args)
+                extra_postargs=self.compile_args)
 
+            link_args = self.link_args
+            link_args.append('/DEF:{}'.format(build_info['def_file']))
             compiler.link_shared_lib(objects, lib_name,
                 output_dir=self.build_clib,
                 debug=self.debug,
                 libraries=self.link_libs,
-                extra_preargs=[
-                    '/DEF:{}'.format(build_info['def_file']),
-                ])
+                extra_postargs=self.link_args)
 

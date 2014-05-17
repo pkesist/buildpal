@@ -6,7 +6,7 @@ from .gui import BPManagerApp
 
 def run_gui(nodes, port):
     app = BPManagerApp(nodes, port)
-    app.title('BuildPal Manager Console')
+    app.title('BuildPal Manager')
     app.mainloop()
 
 import argparse

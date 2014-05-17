@@ -152,7 +152,7 @@ class MapFiles(HeaderRepository):
             os.path.join(remote_dir, name), content)
 
     def create_shared_file(self, machine_id, remote_dir, name, content):
-        self._create_virtual_file(self.scratch_dir, self.global_map[machine_id],
+        self._create_virtual_file(self.dir, self.global_map[machine_id],
             os.path.join(remote_dir, name), content)
 
     def process_temp_files(self, session_id, temp_files):

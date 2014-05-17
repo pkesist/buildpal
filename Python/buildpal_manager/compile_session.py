@@ -159,17 +159,6 @@ class CompileSession:
             assert not "Invalid state"
         return False
 
-    @classmethod
-    def header_heading(cls, filename):
-        # 'sourceannotations.h' header is funny. If you add a #line directive to
-        # it it will start tossing incomprehensible compiler erros. It would
-        # seem that cl.exe has some hardcoded logic for this header. Person
-        # responsible for this should be severely punished.
-        if 'sourceannotations.h' in filename:
-            return b''
-        pretty_filename = os.path.normpath(filename).replace('\\', '\\\\')
-        return '#line 1 "{}"\r\n'.format(pretty_filename).encode()
-
     def task_files_bundle(self, in_filelist):
         header_info = self.task.header_info
         source_file = self.task.source
@@ -197,11 +186,10 @@ class CompileSession:
             if not relative and not (dir, file) in in_filelist:
                 # Not needed.
                 continue
-            header = self.header_heading(os.path.join(dir, file))
-            files[(dir, file)] = header + content
+            files[(dir, file)] = b'' + content
 
         with open(source_file, 'rb') as src:
-            files[('', source_file)] = self.header_heading(source_file) + src.read()
+            files[('', source_file)] = b'' + src.read()
         return files
 
     def get_info(self):

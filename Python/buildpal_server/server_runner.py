@@ -151,9 +151,7 @@ class CompileSession:
 
             def buffer_to_file(buffer, filename):
                 buf = BytesIO(buffer)
-                handle = os.open(filename, os.O_CREAT | os.O_WRONLY |
-                    os.O_NOINHERIT)
-                with os.fdopen(handle, 'wb') as file:
+                with open(filename, 'wb') as file:
                     for data in iter(lambda : buf.read(256 * 1024), b''):
                         file.write(data)
 
@@ -365,10 +363,8 @@ class CompileSession:
 
     def send_object_file(self, obj_file):
         def compress_disk_file():
-            fh = os.open(obj_file, os.O_RDONLY | os.O_BINARY |
-                os.O_NOINHERIT)
             try:
-                with os.fdopen(fh, 'rb') as file:
+                with open(obj_file, 'rb') as file:
                     return list(compress_file(file))
             finally:
                 os.remove(obj_file)

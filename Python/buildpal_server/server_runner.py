@@ -1,5 +1,5 @@
 from buildpal_common import SimpleTimer, MessageProtocol, compress_file, Profiler
-    
+
 import asyncio
 
 from io import BytesIO, StringIO
@@ -15,22 +15,21 @@ from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
 from .beacon import Beacon
 
-import subprocess
-import logging
+import map_files
 
+import logging
 import os
 import pickle
 import sched
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import traceback
 import tempfile
 import zipfile
 import zlib
-import queue
-import map_files
 
 class Counter:
     def __init__(self):
@@ -51,7 +50,8 @@ class OverrideCreateProcess:
     def __enter__(self):
         if self.file_map_composition:
             self.save = subprocess._winapi.CreateProcess
-            subprocess._winapi.CreateProcess = self.file_map_composition.create_process
+            subprocess._winapi.CreateProcess = \
+                self.file_map_composition.create_process
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.save:

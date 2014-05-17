@@ -16,9 +16,14 @@ class build_ext(setuptools_build_ext):
         self.compiler = self.compiler or get_default_compiler()
 
     def run(self):
+        extra_compile_args = []
+        extra_link_args = []
         if self.compiler == 'msvc':
             distutils.msvc9compiler.VERSION = 11.0
-            pass
+            extra_compile_args.append('/EHsc')
+            #extra_compile_args.append('/Od')
+            #extra_compile_args.append('/Zi')
+            #extra_link_args.append('/DEBUG')
         else:
             raise DistutilsOptionError("Unsupported compiler '{}'.".format(self.compiler))
 
@@ -44,10 +49,8 @@ class build_ext(setuptools_build_ext):
                 )
             )
         ]
-        build_dll.compile_args.append('/EHsc')
-        #build_dll.compile_args.append('/Od')
-        #build_dll.compile_args.append('/Zi')
-        #build_dll.link_args.append('/DEBUG')
+        build_dll.compile_args.extend(extra_compile_args)
+        build_dll.link_args.extend(extra_link_args)
         build_dll.link_libs.append('psapi')
         build_dll.link_libs.append('user32')
         build_dll.link_libs.append('shlwapi')
@@ -57,9 +60,8 @@ class build_ext(setuptools_build_ext):
         win64 = sys.maxsize > 2**32
         self.libraries.append('map_files_inj64' if win64 else 'map_files_inj32')
         for ext_module in self.distribution.ext_modules:
-            #ext_module.extra_compile_args.extend(['/EHsc', '/Od', '/Zi'])
-            ext_module.extra_compile_args.extend(['/EHsc'])
-            ext_module.extra_link_args.extend(['/DEBUG'])
+            ext_module.extra_compile_args.extend(extra_compile_args)
+            ext_module.extra_link_args.extend(extra_link_args)
         super().run()
 
 setup(name = 'buildpal_server',

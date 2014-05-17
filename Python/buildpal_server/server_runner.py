@@ -11,7 +11,6 @@ from threading import Thread
 from subprocess import list2cmdline, Popen
 
 from .header_repository import MapFiles as HeaderRepository
-#from .header_repository import MapIncludeDirs as HeaderRepository
 from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
 from .beacon import Beacon
@@ -104,11 +103,16 @@ class CompileSession:
         @classmethod
         def process_msg(cls, session, msg):
             assert msg[0] == b'TASK_FILES'
-            fqdn = session.task['fqdn']
-            new_files = pickle.loads(msg[1].memory())
+            msg.pop(0)
+            assert len(msg) % 3 == 0
+            parts = len(msg) // 3
+            new_files = {}
+            for part in range(parts):
+                dir, file, content = msg[3 * part:3 * part + 3]
+                new_files[(dir.decode(), file.decode())] = content.tobytes()
             session.waiting_for_manager_data = SimpleTimer()
             session.include_dirs_future = session.prepare_include_dirs(
-                session.runner.misc_thread_pool(), fqdn, new_files)
+                session.runner.misc_thread_pool(), new_files)
             if session.compiler_required:
                 session.change_state(CompileSession.StateDownloadingCompiler)
                 session.compiler_data = BytesIO()
@@ -411,10 +415,10 @@ class CompileSession:
             self.state.process_msg(self, msg)
 
     @async
-    def prepare_include_dirs(self, fqdn, new_files):
+    def prepare_include_dirs(self, new_files):
         shared_prepare_dir_timer = SimpleTimer()
-        result = self.runner.header_repository().prepare_dir(fqdn, id(self),
-            new_files)
+        result = self.runner.header_repository().prepare_dir(
+            self.task['fqdn'], id(self), new_files)
         self.times['prepare include directory'] = shared_prepare_dir_timer.get()
         return result
 

@@ -89,9 +89,9 @@ class CompileSession:
             if self.cancelled:
                 self.sender.send_msg([b'CANCEL_SESSION'])
             missing_files, need_compiler, need_pch = pickle.loads(msg[2].memory())
-            new_files = self.task_files_bundle(missing_files)
-            self.sender.send_msg([b'TASK_FILES',
-                pickle.dumps(new_files)])
+            task_files = [b'TASK_FILES']
+            task_files.extend(self.task_files_bundle(missing_files))
+            self.sender.send_msg(task_files)
             if need_compiler:
                 zip_data = BytesIO()
                 with zipfile.ZipFile(zip_data, mode='w') as zip_file:
@@ -163,7 +163,7 @@ class CompileSession:
         header_info = self.task.header_info
         source_file = self.task.source
 
-        files = {}
+        result = []
         # Iterate over
         #
         #    (dir1, [[a11, a12, ..., a1n], [b11, b12, ..., b1n], ..., [z11, z12, ..., z1n],]),
@@ -183,14 +183,15 @@ class CompileSession:
         #  ...
         for dir, (file, relative, content, checksum) in ((dir, stuff) for
             dir, data in header_info for stuff in data):
+            dir_bytes = dir.encode()
             if not relative and not (dir, file) in in_filelist:
                 # Not needed.
                 continue
-            files[(dir, file)] = b'' + content
+            result.extend((dir_bytes, file.encode(), content))
 
         with open(source_file, 'rb') as src:
-            files[('', source_file)] = b'' + src.read()
-        return files
+            result.extend((b'', source_file.encode(), src.read()))
+        return result
 
     def get_info(self):
         assert self.state == self.STATE_FINISH

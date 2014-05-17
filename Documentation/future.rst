@@ -19,7 +19,7 @@ Future development wish-list
       when multiple clients use the same farm.
 
 * Create a file system driver for the Server to allow mimicking Client's file
-  system hierarchy.
+  system hierarchy (currently done in userland via DLL injection/API hooking).
 
 * Object file caching support.
     * Farm could store object files, and return them later on in case of a

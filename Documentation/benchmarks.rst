@@ -1,7 +1,3 @@
-.. todo::
-
-    INCOMPLETE
-
 .. _benchmarks:
 
 Benchmarks
@@ -29,4 +25,4 @@ Environment.
 
 .. todo::
 
-    Create table with measurements.
+    INCOMPLETE

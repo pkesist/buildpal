@@ -18,10 +18,7 @@ install it by running::
 Get the sources from GitHub
 ---------------------------
 
-.. todo::
-
-    Write this once we upload to GitHub.
-
+Get the sources from <BuildPal GitHub repository `https://github.com/pkesist/buildpal`>_.
 
 Building the Manager
 --------------------

@@ -2,17 +2,11 @@
 Introduction
 ************
 
-.. epigraph::
-
-    *"Alone we can do so little; together we can do so much"*
-
-    -- Helen Keller
-
 What is it?
 ===========
 
 ``BuildPal`` is a tool for speeding up large C/C++ project build by
-distributing parts of build process to other machines on the network.
+distributing compilation to other machines on the network.
 
 Why another distributed compiler?
 =================================
@@ -30,9 +24,9 @@ following limitations.
     It is difficult to speed up project build time if you have to forfeit the
     best single-machine optimization.
 
-* **Sub-optimal task scheduling algorithms.**
+* **Sub-optimal task distribution algorithms.**
 
-    Task scheduling is usually round-robin, possibly weighted by number of
+    Task distribution is usually round-robin, possibly weighted by number of
     paralell jobs a machine can perform. This does not necessarily work well
     with a farm containing slaves with heterogeneous performance
     characteristics.
@@ -85,7 +79,7 @@ Features
 Supported platforms and compilers
 =================================
 
-At the moment the only supported compiler toolset is MS Visual C++ compiler.
+At the moment, the only supported compiler toolset is MS Visual C++ compiler.
 
 This includes:
 

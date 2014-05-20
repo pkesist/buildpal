@@ -4,7 +4,7 @@ from cx_Freeze import setup, Executable
 
 files_to_locate = [('map_files_inj32.dll',), ('map_files_inj64.dll',)]
 
-include_files = []
+include_files = [('../LICENSE.txt', ''), ('../COPYRIGHT.txt', '')]
 
 for f in files_to_locate:
     found = False

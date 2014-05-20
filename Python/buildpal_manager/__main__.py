@@ -105,17 +105,25 @@ def get_config(ini_file):
     return config
 
 def main(argv, terminator=None):
-    #import logging
-    #logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ui', choices=['gui', 'console', 'none'], default='gui', help='Select user interface')
-    parser.add_argument('--port', dest='port', type=str, default=None, help='Port on which manager should run.')
-    parser.add_argument('--ini', dest='ini_file', type=str, default=None, help='Specify .ini file.')
-    parser.add_argument('profile', nargs='?', type=str, default=None, help='Profile to use. Must be present in the .ini file.')
+    parser.add_argument('--ui', choices=['gui', 'console', 'none'],
+        default='gui', help='Select user interface')
+    parser.add_argument('--port', dest='port', type=str, default=None,
+        help='Port on which manager should run.')
+    parser.add_argument('--ini', dest='ini_file', type=str, default=None,
+        help='Specify .ini file.')
+    parser.add_argument('--debug', '-d', action='store_true', dest='debug',
+        default=False, help='Enable debug logging.')
+    parser.add_argument('profile', nargs='?', type=str, default=None,
+        help='Profile to use. Must be present in the .ini file.')
     
     opts = parser.parse_args(argv)
 
     config = None
+
+    if opts.debug:
+        import logging
+        logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)
 
     if opts.port is None:
         port = os.environ.get('BP_MANAGER_PORT')

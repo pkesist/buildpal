@@ -18,7 +18,13 @@ def main(args, terminator=None):
         'processes that can run concurrently. (default=number of cores)')
     parser.add_argument('--silent', '-s', action='store_true', dest='silent',
         default=False, help='Do not print any output.')
+    parser.add_argument('--debug', '-d', action='store_true', dest='debug',
+        default=False, help='Enable debug logging.')
     opts = parser.parse_args(args)
+
+    if opts.debug:
+        import logging
+        logging.basicConfig(fileName='server_debug.log', level=logging.DEBUG)
 
     if opts.compile_slots is not None and (opts.compile_slots <= 0 or
             opts.compile_slots > 4 * cpu_count()):
@@ -37,8 +43,6 @@ def main(args, terminator=None):
         
 
 if __name__ == '__main__':
-    #import logging
-    #logging.basicConfig(fileName='server_debug.log', level=logging.DEBUG)
     import signal
     signal.signal(signal.SIGBREAK, signal.default_int_handler)
     main(sys.argv[1:])

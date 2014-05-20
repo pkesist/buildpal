@@ -67,7 +67,9 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         assert( sourceManager().getMemoryBufferForFile( entry, 0 ) == contentEntry.buffer.get() );
     }
 
-    HeaderLocation::Enum const headerLocation = !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath )
+    bool const relativeToParent( !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath ) );
+
+    HeaderLocation::Enum const headerLocation = relativeToParent
         // This depends on the fact that source file location is 'relative'.
         ? parentLocation 
         : preprocessor().getHeaderSearchInfo().getFileDirFlavor( entry ) == clang::SrcMgr::C_System
@@ -85,7 +87,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     Dir dir;
     HeaderName headerName;
 
-    if ( headerLocation == HeaderLocation::relative )
+    if ( relativeToParent )
     {
         dir =  Dir( fileStack_.back().header.dir );
         llvm::StringRef const parentFilename = fileStack_.back().header.name.get();
@@ -101,36 +103,8 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     }
     else
     {
-        // Remove '.' and '..' from searchPath
-        llvm::SmallString<512> vec( searchPath );
-        llvm::sys::path::append( vec, relativePath );
-        normalize( vec );
-        llvm::StringRef fullName = vec.str();
-
-        // Find the include directory searchPath is relative to.
-        typedef std::vector<clang::DirectoryLookup> DirLookups;
-        DirLookups::const_iterator const end = preprocessor().getHeaderSearchInfo().search_dir_end();
-        DirLookups::const_iterator iter = preprocessor().getHeaderSearchInfo().search_dir_begin();
-        bool found = false;
-        for ( ; iter != end; ++iter )
-        {
-            clang::DirectoryLookup const & dirLookup( *iter );
-            llvm::StringRef const dirName( dirLookup.getName() );
-            if ( fullName.startswith_lower( dirName ) )
-            {
-                dir = Dir( dirName );
-                llvm::StringRef const remainder( fullName.data() + dirName.size(), fullName.size() - dirName.size() );
-                assert( llvm::sys::path::is_separator( remainder[0] ) );
-                headerName = HeaderName( remainder.substr( 1 ) );
-                found = true;
-                break;
-            }
-        }
-        if ( !found )
-        {
-            dir = Dir( searchPath );
-            headerName = HeaderName( relativePath );
-        }
+        dir = Dir( searchPath );
+        headerName = HeaderName( relativePath );
     }
 
     HeaderWithFileEntry const headerWithFileEntry =

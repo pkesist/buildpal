@@ -18,8 +18,7 @@ class Environment
     mutable std::string envBlock_;
 
 public:
-    Environment() {}
-    Environment( void * vpEnv, bool unicode );
+    Environment( void * vpEnv = 0, bool unicode = false );
 
     void remove( llvm::StringRef key );
     void add( llvm::StringRef key, llvm::StringRef val );
@@ -52,7 +51,7 @@ typedef int (*FallbackFunction)( void * );
 int distributedCompile(
     char const * compilerToolset,
     char const * compilerExecutable,
-    Environment const & env,
+    Environment & env,
     char const * commandLine,
     char const * cwd,
     char const * portName,

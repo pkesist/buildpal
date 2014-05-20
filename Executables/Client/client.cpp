@@ -219,7 +219,10 @@ namespace
 Environment::Environment( void * vpEnv, bool unicode )
 {
     if ( !vpEnv )
-        return;
+    {
+        unicode = false;
+        vpEnv = GetEnvironmentStringsA();
+    }
 
     if ( unicode )
     {
@@ -414,7 +417,7 @@ bool findOnPath( PathList const & pathList, std::string const & file, std::strin
 int distributedCompile(
     char const * compilerToolset,
     char const * compilerExecutable,
-    Environment const & env,
+    Environment & env,
     char const * commandLine,
     char const * currentPath,
     char const * portName,
@@ -423,6 +426,7 @@ int distributedCompile(
 )
 {
     Fallback const fallback( fallbackFunc, fallbackParam );
+    env.remove( "VS_UNICODE_OUTPUT" );
 
 #ifdef BOOST_WINDOWS
     HANDLE pipe;

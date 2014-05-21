@@ -149,7 +149,8 @@ class CompileSession:
                     with open(self.task.output, "wb") as obj:
                         for data in iter(lambda : fileobj.read(256 * 1024), b''):
                             obj.write(data)
-                self.write_to_disk_future = self.executor.submit(write_to_disk, self.obj_desc)
+                    return self.task.output
+                self.output_file_future = self.executor.submit(write_to_disk, self.obj_desc)
                 del self.obj_desc
                 self.timer.add_time('download object file', self.receive_result_time.get())
                 del self.receive_result_time

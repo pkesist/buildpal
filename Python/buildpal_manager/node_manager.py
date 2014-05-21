@@ -40,10 +40,6 @@ class NodeManager:
             logging.debug(dir)
             for file, relative, content, checksum in data:
                 logging.debug("    %s %s", file, "[relative to source]" if relative else "")
-                if file[:2] == '..' and not relative:
-                    logging.debug("Cannot distribute task: Uses a header outside include directory: '%s'\n", file)
-                    task.cannot_distribute()
-                    return
 
         if task.missing_headers:
             error = "BUILDPAL ERROR: Cannot compile '{}' due to missing headers:\n".format(

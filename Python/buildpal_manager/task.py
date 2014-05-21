@@ -78,7 +78,7 @@ class Task:
             self.task_result = (session.retcode, session.stdout,
                 session.stderr)
             if session.retcode == 0:
-                self.disk_future = session.write_to_disk_future
+                self.output_file_future = session.output_file_future
         elif session.result == SessionResult.failure:
             session.node.add_tasks_failed()
         elif session.result == SessionResult.cancelled:

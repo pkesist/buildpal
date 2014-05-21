@@ -139,10 +139,6 @@ class MSVCCompiler:
         return ['E', 'EP', 'P', 'Zg', 'Zs', 'Yc']
 
     @classmethod
-    def preprocessing_options(cls):
-        return ['AI', 'FU', 'D', 'FI', 'U' , 'I' , 'C', 'Fx', 'u' , 'X']
-
-    @classmethod
     def link_option(cls):
         return 'link'
 

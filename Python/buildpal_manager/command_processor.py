@@ -17,18 +17,18 @@ class ClientTaskCompiler:
     def client_ready(self):
         if self.tasks_waiting:
             self.current_task = self.tasks_waiting.pop(0)
-            self.send_to_client(*current_task)
+            self.compile_on_client(*current_task)
         else:
             self._client_ready = True
 
     def append_task(self, compiler, options, task):
         if self._client_ready:
             self._client_ready = False
-            self.send_to_client(compiler, options, task)
+            self.compile_on_client(compiler, options, task)
         else:
             self.tasks_waiting.append((compiler. options, taks))
 
-    def send_to_client(self, compiler, options, task):
+    def compile_on_client(self, compiler, options, task):
         self.current_task = task
         call = options.create_server_call()
         for include in options.includes():
@@ -120,7 +120,7 @@ class CommandProcessor:
 
     def compile_on_client(self, task):
         self.__client_task_compiler.append_task(self.compiler, self.__options, task)
-    
+
     def create_tasks(self):
         pch_file = None
         pch_header = self.__options.pch_header()
@@ -181,13 +181,16 @@ class CommandProcessor:
         error_code = None
         stdout = b''
         stderr = b''
+        objects = {}
         for task in self.completed_tasks:
             retcode, tmp_stdout, tmp_stderr = task.task_result
             if retcode != 0:
                 error_code = str(retcode).encode()
             else:
-                if hasattr(task, 'disk_future'):
-                    task.disk_future.result()
+                if hasattr(task, 'output_file_future'):
+                    objects[task.source] = task.output_file_future.result()
+                else:
+                    objects[task.source] = task.output
             stdout += tmp_stdout
             stderr += tmp_stderr
 
@@ -200,10 +203,6 @@ class CommandProcessor:
             self.client_conn.send_msg([b'EXIT', b'0', stdout, stderr])
             self.client_conn.close()
             return
-
-        objects = {}
-        for task in self.tasks:
-            objects[task.source] = task.output
 
         call = []
         for input in self.__options.input_files():

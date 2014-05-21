@@ -1,19 +1,25 @@
-from distutils.cmd import Command
 from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
 from distutils.spawn import find_executable
-from distutils.command.build_ext import build_ext as distutils_build_ext
 
 from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext as setuptools_build_ext
+
+from time import sleep
+import subprocess
 
 import os
-import subprocess
 import sys
 
-class build_client(distutils_build_ext):
+class build_client(setuptools_build_ext):
+    setuptools_build_ext.user_options.append(('force-mingw', None,
+        'force building with mingw'))
+    setuptools_build_ext.boolean_options.append(('force-mingw'))
+
     def initialize_options(self):
-        self.build_base = None
         super().initialize_options()
+        self.build_base = None
+        self.force_mingw = False
         self.x64 =  sys.maxsize > 2**32
 
     def finalize_options(self):
@@ -21,17 +27,23 @@ class build_client(distutils_build_ext):
             ('build_base', 'build_base'))
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
-        if self.compiler not in ('mingw32', 'msvc'):
-            raise DistutilsOptionError("Unsupported compiler '{}'."
-                .format(self.compiler))
         extra_compile_args = []
         extra_link_args = []
         if self.compiler == 'msvc':
             extra_compile_args.append('/EHsc')
+        elif self.compiler == 'mingw32':
+            if not self.force_mingw:
+                print("WARNING: Even though it is possible to build these \n"
+                      "extensions with MinGW, the resulting DLL will crash \n"
+                      "on load. If you *really* want to build it, add \n"
+                      "--force-mingw option to build command")
+                raise DistutilsOptionError("Unsupported compiler: Builds, but crashes.")
+            extra_compile_args.append('-std=c++11')
+        else:
+            raise DistutilsOptionError('Unsupported compiler')
         for ext_module in self.distribution.ext_modules:
             ext_module.extra_compile_args.extend(extra_compile_args)
             ext_module.extra_link_args.extend(extra_link_args)
-
 
     __boost_libs = ['chrono', 'system', 'thread', 'date_time']
 
@@ -108,10 +120,27 @@ class build_client(distutils_build_ext):
         self.build_client()
         super().run()
 
-setup(name = 'buildpal_client',
+
+setup(name = 'buildpal_manager',
     version = '0.1',
-    description = 'BuildPal Client package',
+    description = 'BuildPal Manager package',
     ext_modules = [
+        Extension('preprocessing',
+            sources = [
+                'Extensions/HeaderScanner/contentCache_.cpp',
+                'Extensions/HeaderScanner/headerCache_.cpp',
+                'Extensions/HeaderScanner/headerScanner_.cpp',
+                'Extensions/HeaderScanner/headerTracker_.cpp',
+                'Extensions/HeaderScanner/pythonBindings_.cpp',
+                'Extensions/HeaderScanner/utility_.cpp',
+            ]
+        ),
+        Extension('parse_args',
+            sources = [
+                'Extensions/ArgParser/argList_.cpp',
+                'Extensions/ArgParser/clangOpts_.cpp',
+            ]
+        ),
         Extension('buildpal_client',
             sources = [
                 'Executables/Client/client.cpp',
@@ -128,4 +157,9 @@ setup(name = 'buildpal_client',
     ],
     cmdclass =  {'build_ext': build_client},
     command_packages = 'BuildDeps',
+    package_dir = {'': 'Python'},
+    packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
+    entry_points = {
+        'console_scripts': ['buildpal_manager = buildpal_manager.__main__']
+    }
 )

@@ -43,7 +43,6 @@
     <Compile Include="Python\buildpal_server\__main__.py" />
     <Compile Include="Python\server_svc_config.py" />
     <Compile Include="Python\server_svc_handler.py" />
-    <Compile Include="setup_manager.py" />
     <Compile Include="setup_client.py" />
     <Compile Include="Python\buildpal_common\message.py" />
     <Compile Include="Python\buildpal_common\__init__.py" />

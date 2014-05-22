@@ -58,6 +58,26 @@ BOOL WINAPI createProcessW(
     _In_         LPSTARTUPINFOW lpStartupInfo,
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 );
+DWORD WINAPI getFileAttributesA( _In_  char const * lpFileName );
+DWORD WINAPI getFileAttributesW( _In_  wchar_t const * lpFileName );
+BOOL WINAPI getFileAttributesExA(
+  _In_   char const * lpFileName,
+  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
+  _Out_  LPVOID lpFileInformation
+);
+BOOL WINAPI getFileAttributesExW(
+  _In_   wchar_t const * lpFileName,
+  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
+  _Out_  LPVOID lpFileInformation
+);
+HANDLE WINAPI findFirstFileA(
+  _In_   char const * lpFileName,
+  _Out_  LPWIN32_FIND_DATAA lpFindFileData
+);
+HANDLE WINAPI findFirstFileW(
+  _In_   wchar_t const * lpFileName,
+  _Out_  LPWIN32_FIND_DATAW lpFindFileData
+);
 
 struct MapFilesAPIHookDesc
 {
@@ -84,7 +104,11 @@ APIHookItem const MapFilesAPIHookDesc::items[] =
     { "CreateFileA"   , (PROC)createFileA    },
     { "CreateFileW"   , (PROC)createFileW    },
     { "CreateProcessA", (PROC)createProcessA },
-    { "CreateProcessW", (PROC)createProcessW }
+    { "CreateProcessW", (PROC)createProcessW },
+    { "GetFileAttributesA", (PROC)getFileAttributesA },
+    { "GetFileAttributesW", (PROC)getFileAttributesW },
+    { "GetFileAttributesExA", (PROC)getFileAttributesExA },
+    { "GetFileAttributesExW", (PROC)getFileAttributesExW }
 };
 
 unsigned int const MapFilesAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -215,6 +239,55 @@ namespace
     }
 }
 
+DWORD WINAPI getFileAttributesA( _In_  char const * lpFileName )
+{
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    FileMapping::const_iterator const iter = data.globalMapping.find(
+            normalizePath( convert.from_bytes( lpFileName ) ) );
+    if ( iter != data.globalMapping.end() )
+        return GetFileAttributesW( iter->second.c_str() );
+    return GetFileAttributesA( lpFileName );
+}
+
+DWORD WINAPI getFileAttributesW( _In_  wchar_t const * lpFileName )
+{
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMapping::const_iterator const iter = data.globalMapping.find(
+            normalizePath( lpFileName ) );
+    if ( iter != data.globalMapping.end() )
+        return GetFileAttributesW( iter->second.c_str() );
+    return GetFileAttributesW( lpFileName );
+}
+
+BOOL WINAPI getFileAttributesExA(
+  _In_   char const * lpFileName,
+  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
+  _Out_  LPVOID lpFileInformation
+)
+{
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    FileMapping::const_iterator const iter = data.globalMapping.find(
+            normalizePath( convert.from_bytes( lpFileName ) ) );
+    if ( iter != data.globalMapping.end() )
+        return GetFileAttributesExW( iter->second.c_str(), fInfoLevelId, lpFileInformation );
+    return GetFileAttributesExA( lpFileName, fInfoLevelId, lpFileInformation );
+}
+BOOL WINAPI getFileAttributesExW(
+  _In_   wchar_t const * lpFileName,
+  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
+  _Out_  LPVOID lpFileInformation
+)
+{
+    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+    FileMapping::const_iterator const iter = data.globalMapping.find(
+            normalizePath( lpFileName ) );
+    if ( iter != data.globalMapping.end() )
+        return GetFileAttributesExW( iter->second.c_str(), fInfoLevelId, lpFileInformation );
+    return GetFileAttributesExW( lpFileName, fInfoLevelId, lpFileInformation );
+}
+
 HANDLE WINAPI createFileA(
   _In_      char const * lpFileName,
   _In_      DWORD dwDesiredAccess,
@@ -229,7 +302,17 @@ HANDLE WINAPI createFileA(
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
     FileMapping::const_iterator const iter = data.globalMapping.find( normalizePath(
         convert.from_bytes( lpFileName ) ) );
-    return CreateFileA( iter == data.globalMapping.end() ? lpFileName : convert.to_bytes( iter->second ).c_str(),
+    if ( iter != data.globalMapping.end() )
+        return CreateFileW( iter->second.c_str(),
+            dwDesiredAccess,
+            dwShareMode,
+            lpSecurityAttributes,
+            dwCreationDisposition,
+            dwFlagsAndAttributes,
+            hTemplateFile
+        );
+    return CreateFileA(
+        lpFileName,
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,
@@ -252,9 +335,8 @@ HANDLE WINAPI createFileW(
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
     FileMapping::const_iterator const iter = data.globalMapping.find(
         normalizePath( lpFileName ) );
-    return CreateFileW
-    ( 
-        iter == data.globalMapping.end() ? lpFileName : iter->second.c_str(),
+    return CreateFileW(
+        ( iter != data.globalMapping.end() ) ? iter->second.c_str() : lpFileName,
         dwDesiredAccess,
         dwShareMode,
         lpSecurityAttributes,

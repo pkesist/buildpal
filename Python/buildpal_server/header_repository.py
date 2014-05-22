@@ -85,7 +85,6 @@ class HeaderRepository:
         # Update headers.
         for (remote_dir, name), content in new_files.items():
             shared = (remote_dir, name) in needed_files
-            logging.debug("Processing '%s %s' %s", remote_dir, name, "SHARED" if shared else "TEMP")
             if shared:
                 checksum = needed_files[(remote_dir, name)]
                 self.create_shared(machine_id, session_id, remote_dir, name, checksum, content)
@@ -110,10 +109,8 @@ class HeaderRepository:
             else:
                 create_local = old_checksum != checksum
         if create_local:
-            logging.debug("Creating local file '%s' '%s'.", remote_dir, name)
             self.create_temp_file(session_id, remote_dir, name, content)
         if create_shared:
-            logging.debug("Creating shared file '%s' '%s'.", remote_dir, name)
             self.create_shared_file(machine_id, remote_dir, name, content)
             with lock:
                 checksums[key] = checksum
@@ -122,8 +119,13 @@ class HeaderRepository:
         raise NotImplementedError()
 
     def session_complete(self, session_id):
-        shutil.rmtree(self.tempdirs[session_id])
-        del self.tempdirs[session_id]
+        if session_id in self.tempdirs:
+            try:
+                shutil.rmtree(self.tempdirs[session_id])
+            except PermissionError:
+                pass
+            finally:
+                del self.tempdirs[session_id]
 
     def get_mappings(self, machine_id, session_id):
         return []
@@ -168,8 +170,8 @@ class MapFiles(HeaderRepository):
         return src_file
 
     def session_complete(self, session_id):
+        self.temp_map.pop(session_id, None)
         super().session_complete(session_id)
-        del self.temp_map[session_id]
 
     def get_mappings(self, machine_id, session_id):
         return [self.global_map[machine_id], self.temp_map[session_id]]

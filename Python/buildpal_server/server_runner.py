@@ -349,7 +349,7 @@ class CompileSession:
         if from_selfdestruct:
             self.sender.send_msg([b'TIMED_OUT'])
         else:
-                    self.cancel_selfdestruct()
+            self.cancel_selfdestruct()
         self.runner.header_repository().session_complete(id(self))
         self.runner.terminate(self.local_id)
         self.close()

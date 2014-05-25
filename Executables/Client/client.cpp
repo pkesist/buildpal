@@ -422,9 +422,16 @@ int distributedCompile(
     char const * currentPath,
     char const * portName,
     FallbackFunction fallbackFunc,
-    void * fallbackParam
+    void * fallbackParam,
+    HANDLE stdOutHandle,
+    HANDLE stdErrHandle
 )
 {
+    if ( !stdOutHandle )
+        stdOutHandle = GetStdHandle( STD_OUTPUT_HANDLE );
+    if ( !stdErrHandle )
+        stdErrHandle = GetStdHandle( STD_ERROR_HANDLE );
+
     Fallback const fallback( fallbackFunc, fallbackParam );
     env.remove( "VS_UNICODE_OUTPUT" );
 
@@ -706,9 +713,10 @@ int distributedCompile(
 
             llvm::StringRef const stdOut = receiver.getPart( 2 );
             llvm::StringRef const stdErr = receiver.getPart( 3 );
-            std::cout << stdOut.str();
-            if ( stdErr.size() )
-                std::cerr << stdErr.str();
+
+            DWORD written;
+            WriteFile( stdOutHandle, stdOut.data(), stdOut.size(), &written, 0 ); 
+            WriteFile( stdErrHandle, stdErr.data(), stdErr.size(), &written, 0 ); 
             return result;
         }
         else if ( request == "LOCATE_FILES" )

@@ -47,6 +47,7 @@ int createProcess(
 );
 
 typedef int (*FallbackFunction)( void * );
+typedef void * HANDLE;
 
 int distributedCompile(
     char const * compilerToolset,
@@ -56,7 +57,9 @@ int distributedCompile(
     char const * cwd,
     char const * portName,
     FallbackFunction fallbackFunc,
-    void * fallbackParam
+    void * fallbackParam,
+    HANDLE stdOut = 0,
+    HANDLE stdErr = 0
 );
 
 

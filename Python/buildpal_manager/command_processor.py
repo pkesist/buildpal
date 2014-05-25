@@ -90,6 +90,11 @@ class CommandProcessor:
             stdout = msg[1].tobytes()
             stderr = msg[2].tobytes()
             try:
+                if retcode != 0:
+                    self.client_conn.send_msg([b'{}'.format(retcode), b'',
+                        b"BuildPal - failed to run test compile.\r\n" + stdout,
+                        stderr])
+                    return
                 self.compiler_info, self.tmp_compiler_files = \
                     self.compiler.get_compiler_info(self.executable, stdout,
                     stderr)

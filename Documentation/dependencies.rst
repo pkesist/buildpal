@@ -11,11 +11,8 @@ Dependencies
 `Python <http://www.python.org>`_
 ---------------------------------
 
-`LLVM <http://www.llvm.org>`_
------------------------------
-
-`Clang <http://clang.llvm.org>`_
---------------------------------
+`LLVM <http://www.llvm.org>`_ &  `Clang <http://clang.llvm.org>`_
+-----------------------------------------------------------------
 
 .. _boost-libs:
 
@@ -23,7 +20,7 @@ Dependencies
 -------------------------------
 
 Used by all C++ parts of the project.
-    * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) IPC communication.
+    * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) IPC.
     * *Boost.MultiIndex* for Managers header cache.
     * *Boost.Spirit* as an alternative to ``atoi``/``itoa``/etc.
     * *Boost.Thread* for read-write mutexes.
@@ -31,3 +28,6 @@ Used by all C++ parts of the project.
 
 `pytest <http://pytest.org>`_
 -----------------------------
+
+`cx_Freeze <http://cx-freeze.sourceforge.net>`_
+-----------------------------------------------

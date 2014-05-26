@@ -24,6 +24,28 @@
 #include <shellapi.h>
 #include <psapi.h>
 
+struct StartupInfo
+{
+    DWORD  cb;
+    void * lpReserved;
+    void * lpDesktop;
+    void * lpTitle;
+    DWORD  dwX;
+    DWORD  dwY;
+    DWORD  dwXSize;
+    DWORD  dwYSize;
+    DWORD  dwXCountChars;
+    DWORD  dwYCountChars;
+    DWORD  dwFillAttribute;
+    DWORD  dwFlags;
+    WORD   wShowWindow;
+    WORD   cbReserved2;
+    LPBYTE lpReserved2;
+    HANDLE hStdInput;
+    HANDLE hStdOutput;
+    HANDLE hStdError;
+};
+
 struct CreateProcessParams
 {
     void const * lpApplicationName;
@@ -34,7 +56,7 @@ struct CreateProcessParams
     DWORD dwCreationFlags;
     void       * lpEnvironment;
     void const * lpCurrentDirectory;
-    void       * lpStartupInfo;
+    StartupInfo startupInfo;
     LPPROCESS_INFORMATION lpProcessInformation;
 };
 
@@ -55,7 +77,6 @@ class DistributedCompileParams
     DWORD exitCode_;
     HANDLE stdOutHandle_;
     HANDLE stdErrHandle_;
-
 
     char const * saveString( char const * str )
     {
@@ -80,10 +101,10 @@ class DistributedCompileParams
         createProcessParams_.dwCreationFlags = cpParams.dwCreationFlags;
         createProcessParams_.lpEnvironment = cpParams.lpEnvironment;
         createProcessParams_.lpCurrentDirectory = cpParams.lpCurrentDirectory;
-        createProcessParams_.lpStartupInfo = cpParams.lpStartupInfo;
+        createProcessParams_.startupInfo = cpParams.startupInfo;
         createProcessParams_.lpProcessInformation = cpParams.lpProcessInformation;
 
-        LPSTARTUPINFO const startupInfo = (LPSTARTUPINFO)createProcessParams_.lpStartupInfo;
+        StartupInfo const * startupInfo = &createProcessParams_.startupInfo;
         bool const hookHandles( ( startupInfo->dwFlags & STARTF_USESTDHANDLES ) != 0 );
         if ( hookHandles )
         {
@@ -93,6 +114,7 @@ class DistributedCompileParams
                 DuplicateHandle( currentProcess, startupInfo->hStdOutput,
                     currentProcess, &stdOutHandle_, 0, FALSE,
                     DUPLICATE_SAME_ACCESS );
+                createProcessParams_.startupInfo.hStdError = stdOutHandle_;
             }
 
             if ( startupInfo->hStdError != INVALID_HANDLE_VALUE )
@@ -101,6 +123,7 @@ class DistributedCompileParams
                     currentProcess, &stdErrHandle_, 0, FALSE,
                     DUPLICATE_SAME_ACCESS );
             }
+            createProcessParams_.startupInfo.hStdError = stdErrHandle_;
         }
     }
 
@@ -481,10 +504,10 @@ int createProcessFallbackA( void * params )
         cpp->lpProcessAttributes,
         cpp->lpThreadAttributes,
         cpp->bInheritHandles,
-        cpp->dwCreationFlags,
+        cpp->dwCreationFlags & (~CREATE_SUSPENDED), // No longer suspended.
         cpp->lpEnvironment,
         static_cast<char const *>( cpp->lpCurrentDirectory ),
-        static_cast<LPSTARTUPINFOA>( cpp->lpStartupInfo ),
+        reinterpret_cast<LPSTARTUPINFOA>( &cpp->startupInfo ),
         &processInfo
     );
     if ( !cpResult )
@@ -513,10 +536,10 @@ int createProcessFallbackW( void * params )
         cpp->lpProcessAttributes,
         cpp->lpThreadAttributes,
         cpp->bInheritHandles,
-        cpp->dwCreationFlags,
+        cpp->dwCreationFlags & (~CREATE_SUSPENDED), // No longer suspended.
         cpp->lpEnvironment,
         static_cast<wchar_t const *>( cpp->lpCurrentDirectory ),
-        static_cast<LPSTARTUPINFOW>( cpp->lpStartupInfo ),
+        reinterpret_cast<LPSTARTUPINFOW>( &cpp->startupInfo ),
         &processInfo
     );
     if ( !cpResult )
@@ -567,7 +590,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
         dwCreationFlags,
         lpEnvironment,
         lpCurrentDirectory,
-        lpStartupInfo,
+        *((StartupInfo *)lpStartupInfo),
         lpProcessInformation
     };
 
@@ -624,7 +647,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
         dwCreationFlags,
         lpEnvironment,
         lpCurrentDirectory,
-        lpStartupInfo,
+        *((StartupInfo *)lpStartupInfo),
         lpProcessInformation
     };
     if ( shortCircuit( lpApplicationName, lpCommandLine, lpCurrentDirectory,

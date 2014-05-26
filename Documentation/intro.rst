@@ -27,7 +27,7 @@ following limitations.
 * **Sub-optimal task distribution algorithms.**
 
     Task distribution is usually round-robin, possibly weighted by number of
-    paralell jobs a machine can perform. This does not necessarily work well
+    parallel jobs a machine can perform. This does not necessarily work well
     with a farm containing slaves with heterogeneous performance
     characteristics.
 

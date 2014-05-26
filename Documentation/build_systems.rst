@@ -36,12 +36,12 @@ needed:
     Currently, Boost.Build has certain limitations when used in distributed
     compilation.
 
-        * It cannot use more than 64 paralell processes (`PR <https://github.com/boostorg/build/pull/5>`__).
+        * It cannot use more than 64 parallel processes (`PR <https://github.com/boostorg/build/pull/5>`__).
 
         * It runs visual studio setup scripts before every compiler invocation.
 
             * Since ``MSVC 10.0`` these scripts became excruciatingly slow,
-              seriously affecting paralellism (`PR <https://github.com/boostorg/build/pull/6>`__).
+              seriously affecting parallelism (`PR <https://github.com/boostorg/build/pull/6>`__).
 
     Hopefully both issues wil be resolved soon.
 

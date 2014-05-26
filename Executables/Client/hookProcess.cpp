@@ -62,7 +62,7 @@ struct CreateProcessParams
 
 class DistributedCompileParams
 {
-    std::deque<std::string> stringSaver_;
+    std::deque<std::vector<unsigned char> > stringSaver_;
 
     HANDLE eventHandle_;
     char const * compilerToolset_;
@@ -78,23 +78,37 @@ class DistributedCompileParams
     HANDLE stdOutHandle_;
     HANDLE stdErrHandle_;
 
-    char const * saveString( char const * str )
+    template <typename T>
+    T * saveString( T const * ptr, std::size_t size )
     {
-        if ( !str ) return NULL;
-        stringSaver_.push_back( str );
-        return stringSaver_.back().c_str();
+        if ( !ptr )
+            return 0;
+        unsigned char const * start = reinterpret_cast<unsigned char const *>( ptr );
+        stringSaver_.push_back( std::vector<unsigned char>( start, start + size * sizeof(T) ) );
+        return reinterpret_cast<T *>( &stringSaver_.back()[0] );
     }
 
-    char const * saveString( std::string const & str )
+    wchar_t * saveStringW( wchar_t * ptr )
     {
-        stringSaver_.push_back( str );
-        return stringSaver_.back().c_str();
+        return saveString<wchar_t>( ptr, ptr ? wcslen( ptr ) + 1 : 0 );
     }
 
-    void storeCreateProcessParams( CreateProcessParams const & cpParams )
+    char const * saveStringA( char const * str )
     {
-        createProcessParams_.lpApplicationName = cpParams.lpApplicationName;
-        createProcessParams_.lpCommandLine = cpParams.lpCommandLine;
+        return saveString<char>( str, str ? strlen( str ) + 1 : 0 );
+    }
+
+    void storeCreateProcessParams( CreateProcessParams const & cpParams, bool const wide )
+    {
+        // Save all strings, as they might go out of scope by the time we execute
+        // fallback.
+        typedef void * (DistributedCompileParams::* StringSaver)(void const *);
+        StringSaver stringSaver = wide
+            ? (StringSaver)(&DistributedCompileParams::saveStringW)
+            : (StringSaver)(&DistributedCompileParams::saveStringA)
+        ;
+        createProcessParams_.lpApplicationName = (this->*stringSaver)(cpParams.lpApplicationName);
+        createProcessParams_.lpCommandLine = (this->*stringSaver)(cpParams.lpCommandLine);
         createProcessParams_.lpProcessAttributes = cpParams.lpProcessAttributes;
         createProcessParams_.lpThreadAttributes = cpParams.lpThreadAttributes;
         createProcessParams_.bInheritHandles = cpParams.bInheritHandles;
@@ -102,6 +116,10 @@ class DistributedCompileParams
         createProcessParams_.lpEnvironment = cpParams.lpEnvironment;
         createProcessParams_.lpCurrentDirectory = cpParams.lpCurrentDirectory;
         createProcessParams_.startupInfo = cpParams.startupInfo;
+
+        createProcessParams_.startupInfo.lpReserved = (this->*stringSaver)(createProcessParams_.startupInfo.lpReserved);
+        createProcessParams_.startupInfo.lpDesktop  = (this->*stringSaver)(createProcessParams_.startupInfo.lpDesktop );
+        createProcessParams_.startupInfo.lpTitle    = (this->*stringSaver)(createProcessParams_.startupInfo.lpTitle   );
         createProcessParams_.lpProcessInformation = cpParams.lpProcessInformation;
 
         StartupInfo const * startupInfo = &createProcessParams_.startupInfo;
@@ -143,14 +161,15 @@ public:
         char const * commandLine,
         char const * currentPath,
         FallbackFunction fallback,
-        CreateProcessParams const & createProcessParams
+        CreateProcessParams const & createProcessParams,
+        bool wide
     )
         :
         eventHandle_( eventHandle ),
-        compilerToolset_( saveString( compilerToolset ) ),
-        compilerExecutable_( saveString( compilerExecutable ) ),
-        commandLine_( saveString( commandLine ) ),
-        currentPath_( saveString( currentPath ) ),
+        compilerToolset_( saveStringA( compilerToolset ) ),
+        compilerExecutable_( saveStringA( compilerExecutable ) ),
+        commandLine_( saveStringA( commandLine ) ),
+        currentPath_( saveStringA( currentPath ) ),
         environment_( createProcessParams.lpEnvironment,
             ( createProcessParams.dwCreationFlags |
             CREATE_UNICODE_ENVIRONMENT ) != 0 ),
@@ -161,7 +180,7 @@ public:
         stdOutHandle_( 0 ),
         stdErrHandle_( 0 )
     {
-        storeCreateProcessParams( createProcessParams );
+        storeCreateProcessParams( createProcessParams, wide );
     }
 
     HANDLE eventHandle() const { return eventHandle_; }
@@ -374,6 +393,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     return 0;
 }
 
+
 DWORD WINAPI distributedCompileWorker( void * params )
 {
     DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
@@ -406,7 +426,8 @@ bool shortCircuit
     wchar_t const * commandLine,
     wchar_t const * currentPath,
     FallbackFunction fallback,
-    CreateProcessParams const & createProcessParams
+    CreateProcessParams const & createProcessParams,
+    bool wide
 )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
@@ -465,7 +486,8 @@ bool shortCircuit
             commandLine ? convert.to_bytes( commandLine ).c_str() : 0,
             currentPath ? convert.to_bytes( currentPath ).c_str() : 0,
             fallback,
-            createProcessParams
+            createProcessParams,
+            wide
         )
     );
 
@@ -599,7 +621,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
         lpApplicationName ? convert.from_bytes( lpApplicationName ).c_str() : 0,
         lpCommandLine ? convert.from_bytes( lpCommandLine ).c_str() : 0,
         lpCurrentDirectory ? convert.from_bytes( lpCurrentDirectory ).c_str() : 0,
-        createProcessFallbackA, cpParams ) )
+        createProcessFallbackA, cpParams, false ) )
         return 1;
 
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -651,7 +673,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
         lpProcessInformation
     };
     if ( shortCircuit( lpApplicationName, lpCommandLine, lpCurrentDirectory,
-            createProcessFallbackW, cpParams ) )
+            createProcessFallbackW, cpParams, true ) )
         return 1;
 
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;

@@ -82,11 +82,11 @@ cx_Freeze_.
 
 * Typically you need to execute something like::
 
-    python server_installer.py bdist_msi
-    python manager_installer.py bdist_msi
+    python standalone_server.py bdist_msi
+    python standalone_server.py bdist_msi
 
   For more information try::
 
-    python server_installer.py --help
-    python manager_installer.py --help
+    python standalone_server.py --help
+    python standalone_server.py --help
 

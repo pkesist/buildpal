@@ -31,7 +31,7 @@ This will build the needed client-side extensions and install them in Python `si
 
 .. note::
 
-    The first time you run this it will take a while, as BuildPal will download
+    First time installation will take a while, as BuildPal will download
     and build its dependencies. Subsequent builds will be *much* faster. 
 
 Once this is done, the Manager can be run with::

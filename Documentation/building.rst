@@ -27,8 +27,13 @@ In the top-level project directory run the following::
 
     python setup_client.py install
 
-
 This will build the needed client-side extensions and install them in Python `site-packages`.
+
+.. note::
+
+    The first time you run this it will take a while, as BuildPal will download
+    and build its dependencies. Subsequent builds will be *much* faster. 
+
 Once this is done, the Manager can be run with::
 
     python -m buildpal_manager

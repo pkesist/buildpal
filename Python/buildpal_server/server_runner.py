@@ -97,6 +97,7 @@ class CompileSession:
             session.sender.send_msg([session.local_id, b'MISSING_FILES',
                 pickle.dumps((missing_files, session.compiler_required,
                 session.pch_required))])
+            self.waiting_for_missing_files = SimpleTimer()
             session.change_state(CompileSession.StateDownloadMissingHeaders)
 
     class StateDownloadMissingHeaders(SessionState):
@@ -267,6 +268,8 @@ class CompileSession:
             self.compiler_id(), self.__run_compiler)
 
     def __run_compiler(self):
+        self.times['downloading missing files'] = \
+            self.waiting_for_missing_files.get()
         if self.cancel_pending:
             self.cancel_session()
             return

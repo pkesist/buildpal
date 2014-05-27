@@ -149,9 +149,9 @@ def main(argv, terminator=None):
         run_gui(nodes, port)
     else:
         silent = opts.ui == 'none'
-        manager_runner = ManagerRunner(nodes, port, 0)
+        manager_runner = ManagerRunner(port, 0)
         def run():
-            manager_runner.run(silent=silent)
+            manager_runner.run(nodes, silent=silent)
         thread = Thread(target=run)
         thread.start()
         try:

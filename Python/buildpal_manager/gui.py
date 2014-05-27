@@ -473,7 +473,7 @@ class BPManagerApp(Tk):
                 self.pp_threads_sb.get(), 4 * cpu_count()))
             return
         
-        self.manager_runner = ManagerRunner(self.nodes, self.port, threads)
+        self.manager_runner = ManagerRunner(self.port, threads)
         self.thread = Thread(target=self.__run_task_processor)
         self.thread.start()
         self.set_running(True)
@@ -486,7 +486,7 @@ class BPManagerApp(Tk):
 
     def __run_task_processor(self):
         try:
-            self.manager_runner.run(self.post_event)
+            self.manager_runner.run(self.nodes, update_ui=self.post_event)
         except Exception as e:
             self.post_event(GUIEvent.exception_in_run, e)
 

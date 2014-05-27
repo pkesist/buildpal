@@ -78,7 +78,7 @@ class ClientProcessor(MessageProtocol):
             self.task_created_func(task)
 
 class ManagerRunner:
-    def __init__(self, nodes, port, n_pp_threads):
+    def __init__(self, port, n_pp_threads):
         class CacheStats:
             def __init__(self):
                 self.hits = 0
@@ -95,14 +95,15 @@ class ManagerRunner:
         self.port = port
         self.compiler_info = {}
         self.timer = Timer()
-        self.node_info = [NodeInfo(node) for node in nodes]
         self.server = None
 
         self.n_pp_threads = n_pp_threads
         if self.n_pp_threads <= 0:
             self.n_pp_threads = cpu_count()
 
-    def run(self, update_ui=None, silent=False):
+    def run(self, nodes, update_ui=None, silent=False):
+        node_info = [NodeInfo(node) for node in nodes]
+
         if update_ui is None:
             self.update_ui = lambda event_type, event_data : None
         else:
@@ -120,10 +121,10 @@ class ManagerRunner:
             class UIData: pass
             ui_data = UIData()
             ui_data.timer = self.timer
-            ui_data.node_info = self.node_info
+            ui_data.node_info = node_info
             ui_data.command_db = self.database
             ui_data.cache_stats = lambda : source_scanner.get_cache_stats()
-            observer = ConsolePrinter(self.node_info, ui_data)
+            observer = ConsolePrinter(node_info, ui_data)
             @asyncio.coroutine
             def observe():
                 observer()
@@ -131,7 +132,7 @@ class ManagerRunner:
                 asyncio.async(observe(), loop=self.loop)
             asyncio.async(observe(), loop=self.loop)
 
-        node_manager = NodeManager(self.loop, self.node_info, self.update_ui)
+        node_manager = NodeManager(self.loop, node_info, self.update_ui)
         with DatabaseInserter(self.database, self.update_ui) as database_inserter, \
             SourceScanner(node_manager.task_preprocessed, self.update_ui,
                 self.n_pp_threads) as source_scanner:

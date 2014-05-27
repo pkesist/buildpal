@@ -41,10 +41,9 @@ Setting up the Client
 * In addition, there will be a :file:`bp_cl.exe` file in the installation
   directory.
 
-* Run Manager.
+* Run the Manager.
     * This will open Manager's GUI which can be used to view detected farm
-      configuration. If this is satisfactory, run the Manager by pressing its
-      `Start` button.
+      configuration.
 
 * Configure the build system.
     * You must configure your build system to use :file:`bp_cl.exe` instead of

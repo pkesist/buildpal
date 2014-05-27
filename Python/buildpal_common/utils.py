@@ -48,3 +48,16 @@ class Profiler:
     def print(self):
         self.stats.sort_stats('cumtime')
         self.stats.print_stats()
+
+class Timer:
+    def __init__(self):
+        self.times = {}
+        self.durations = {}
+        self.last_time = None
+
+    def note_time(self, time_point_name, interval_name=None):
+        curr_time = time()
+        self.times[time_point_name] = curr_time
+        if interval_name:
+            self.durations[interval_name] = curr_time - self.last_time
+        self.last_time = curr_time

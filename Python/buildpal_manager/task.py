@@ -1,24 +1,17 @@
 from .compile_session import SessionResult
+from buildpal_common import Timer
 
 from time import time
 
-class Task:
+class Task(Timer):
     def __init__(self, task_dict):
+        super().__init__()
         self.__dict__.update(task_dict)
         self.sessions_running = set()
         self.sessions_finished = set()
         self.first_session = None
         self.completed_by_session = None
-        self.last_time = time()
-        self.durations = {}
-        self.times = {}
         self.task_result = None
-
-    def note_time(self, time_point_name, interval_name=None):
-        curr_time = time()
-        self.times[time_point_name] = curr_time
-        if interval_name:
-            self.durations[interval_name], self.last_time = curr_time - self.last_time, curr_time
 
     @property
     def compiler_info(self):

@@ -1,4 +1,4 @@
-from buildpal_common import SimpleTimer, MessageProtocol, compress_file, Profiler
+from buildpal_common import SimpleTimer, Timer, MessageProtocol, compress_file, Profiler
 
 import asyncio
 
@@ -58,7 +58,7 @@ class OverrideCreateProcess:
             subprocess._winapi.CreateProcess = self.save
             self.save = None
 
-class CompileSession:
+class CompileSession(Timer):
     class SessionState:
         can_be_cancelled = False
 
@@ -77,12 +77,12 @@ class CompileSession:
             assert len(msg) == 2
             assert msg[0] == b'SERVER_TASK'
             session.task = pickle.loads(msg[1].memory())
+            session.note_time('received task', 'waiting for task')
             # Determine headers which are missing
             missing_files_timer = SimpleTimer()
             missing_files = \
                 session.runner.header_repository().missing_files(
                 session.task['fqdn'], id(session), session.task['filelist'])
-            session.times['determine missing files'] = missing_files_timer.get()
             # Determine if we have this compiler
             session.compiler_required = session.runner.compiler_repository(
                 ).compiler_required(session.compiler_id())
@@ -97,7 +97,7 @@ class CompileSession:
             session.sender.send_msg([session.local_id, b'MISSING_FILES',
                 pickle.dumps((missing_files, session.compiler_required,
                 session.pch_required))])
-            self.waiting_for_missing_files = SimpleTimer()
+            session.note_time('determined missing files', 'determine missing files')
             session.change_state(CompileSession.StateDownloadMissingHeaders)
 
     class StateDownloadMissingHeaders(SessionState):
@@ -111,6 +111,7 @@ class CompileSession:
             for part in range(parts):
                 dir, file, content = msg[3 * part:3 * part + 3]
                 new_files[(dir.decode(), file.decode())] = content.tobytes()
+            session.note_time('received missing headers', 'downloading headers')
             session.waiting_for_manager_data = SimpleTimer()
             session.include_dirs_future = session.prepare_include_dirs(
                 session.runner.misc_thread_pool(), new_files)
@@ -128,6 +129,7 @@ class CompileSession:
             more, data = msg
             session.compiler_data.write(data.memory())
             if more == b'\x00':
+                session.note_time('received compiler', 'downloading compiler')
                 session.compiler_data.seek(0)
                 dir = session.runner.compiler_repository().compiler_dir(
                     session.compiler_id())
@@ -161,12 +163,12 @@ class CompileSession:
                         file.write(data)
 
             def pch_completed(future):
+                session.note_time('received pch', 'downloading pch')
                 session.runner.pch_repository().file_completed(session.task['pch_file'])
                 session.compile()
 
             if more == b'\x00':
                 session.pch_desc.write(session.pch_decompressor.flush())
-                session.times['upload precompiled header'] = session.pch_timer.get()
                 session.runner.async_run(buffer_to_file,
                     session.pch_desc.getbuffer(), session.pch_file
                     ).add_done_callback(pch_completed)
@@ -212,14 +214,15 @@ class CompileSession:
         return wrapper
 
     def __init__(self, runner, send_msg, remote_id):
+        super().__init__()
         self.local_id = runner.generate_unique_id()
         self.sender = self.Sender(send_msg, remote_id)
         self.runner = runner
-        self.times = {}
         self.completed = False
         self.cancel_pending = False
         self.process = None
         self.__state = None
+        self.note_time('session created')
         self.change_state(self.StateGetTask)
 
     def close(self):
@@ -268,8 +271,6 @@ class CompileSession:
             self.compiler_id(), self.__run_compiler)
 
     def __run_compiler(self):
-        self.times['downloading missing files'] = \
-            self.waiting_for_missing_files.get()
         if self.cancel_pending:
             self.cancel_session()
             return
@@ -309,11 +310,13 @@ class CompileSession:
         command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
             includes + [output, src_loc])
 
+        self.note_time('ready for compile', 'prepare for compile')
         cur_dir = self.runner.header_repository().tempdir(id(self))
         self.runner.run_compiler(self, command, cur_dir, overrides,
             self.__compile_completed)
 
     def __compile_completed(self, future):
+        self.note_time('compilation done', 'running compiler')
         try:
             stdout, stderr, retcode = future.result()
         except Exception as e:
@@ -337,7 +340,7 @@ class CompileSession:
                 if retcode == 0:
                     self.change_state(self.StateWaitForConfirmation)
                 self.sender.send_msg([b'SERVER_DONE', pickle.dumps(
-                    (retcode, stdout, stderr, self.times))])
+                    (retcode, stdout, stderr, self.durations))])
                 if retcode == 0:
                     self.reschedule_selfdestruct()
                 else:
@@ -353,6 +356,7 @@ class CompileSession:
             self.sender.send_msg([b'TIMED_OUT'])
         else:
             self.cancel_selfdestruct()
+        self.note_time('session completed', 'finishing session')
         self.runner.header_repository().session_complete(id(self))
         self.runner.terminate(self.local_id)
         self.close()
@@ -380,6 +384,7 @@ class CompileSession:
             for buffer in future.result():
                 self.sender.send_msg([b'\x01', buffer])
             self.sender.send_msg([b'\x00', b''])
+            self.note_time('result sent', 'sending result')
             self.session_done()
 
         self.runner.async_run(compress_disk_file).add_done_callback(
@@ -419,10 +424,9 @@ class CompileSession:
 
     @async
     def prepare_include_dirs(self, new_files):
-        shared_prepare_dir_timer = SimpleTimer()
         result = self.runner.header_repository().prepare_dir(
             self.task['fqdn'], id(self), new_files)
-        self.times['prepare include directory'] = shared_prepare_dir_timer.get()
+        self.note_time('include dir ready', 'preparing include dir')
         return result
 
 class ServerProtocol(MessageProtocol):

@@ -15,9 +15,10 @@ from time import time
 from .gui_event import GUIEvent
 
 class NodeManager:
-    def __init__(self, loop, node_info, update_ui):
+    def __init__(self, loop, node_info_getter, update_ui):
         self.loop = loop
-        self.node_info = node_info
+        self.node_info_getter = node_info_getter
+        self.node_info = None
         self.update_ui = update_ui
         self.all_sockets = defaultdict(list)
         self.tasks_running = defaultdict(list)
@@ -26,6 +27,20 @@ class NodeManager:
         self.executor = ThreadPoolExecutor(2)
         self.compressor = Compressor(self.loop, self.executor)
         self.counter = 0
+        self.update_node_info()
+
+    def update_node_info(self):
+        asyncio.async(self.update_node_info_coro(), loop=self.loop)
+
+    def get_node_info(self):
+        return self.node_info
+
+    @asyncio.coroutine
+    def update_node_info_coro(self):
+        self.node_info = self.node_info_getter()
+        self.update_ui(GUIEvent.update_node_info, self.node_info)
+        yield from asyncio.sleep(2, loop=self.loop)
+        self.update_node_info()
 
     def task_preprocessed(self, task, exception=None):
         if exception:

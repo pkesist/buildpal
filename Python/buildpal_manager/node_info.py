@@ -18,6 +18,10 @@ class NodeInfo:
         self._avg_tasks = {}
         self._timer = Timer()
 
+    def node_id(self):
+        return "{}:{}".format(self._node_dict['hostname'],
+            self._node_dict['port'])
+
     def average_task_time(self):
         tasks_completed = self.tasks_completed()
         return self.total_time() / tasks_completed if tasks_completed else 0

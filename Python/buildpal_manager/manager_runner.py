@@ -6,7 +6,6 @@ from .database import Database, DatabaseInserter
 from .timer import Timer
 from .node_manager import NodeManager
 from .console import ConsolePrinter
-from .node_info import NodeInfo
 from .gui_event import GUIEvent
 
 import asyncio
@@ -101,9 +100,7 @@ class ManagerRunner:
         if self.n_pp_threads <= 0:
             self.n_pp_threads = cpu_count()
 
-    def run(self, nodes, update_ui=None, silent=False):
-        node_info = [NodeInfo(node) for node in nodes]
-
+    def run(self, node_info_getter, update_ui=None, silent=False):
         if update_ui is None:
             self.update_ui = lambda event_type, event_data : None
         else:
@@ -117,14 +114,15 @@ class ManagerRunner:
 
         self.loop = asyncio.ProactorEventLoop()
 
+        node_manager = NodeManager(self.loop, node_info_getter, self.update_ui)
+
         if update_ui is None and not silent:
             class UIData: pass
             ui_data = UIData()
             ui_data.timer = self.timer
-            ui_data.node_info = node_info
             ui_data.command_db = self.database
             ui_data.cache_stats = lambda : source_scanner.get_cache_stats()
-            observer = ConsolePrinter(node_info, ui_data)
+            observer = ConsolePrinter(node_manager.get_node_info, ui_data)
             @asyncio.coroutine
             def observe():
                 observer()
@@ -132,7 +130,6 @@ class ManagerRunner:
                 asyncio.async(observe(), loop=self.loop)
             asyncio.async(observe(), loop=self.loop)
 
-        node_manager = NodeManager(self.loop, node_info, self.update_ui)
         with DatabaseInserter(self.database, self.update_ui) as database_inserter, \
             SourceScanner(node_manager.task_preprocessed, self.update_ui,
                 self.n_pp_threads) as source_scanner:

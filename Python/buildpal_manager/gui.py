@@ -26,7 +26,7 @@ class MyTreeView(Treeview):
 
 class NodeList(MyTreeView):
     columns = (
-        {'cid' : "#0"        , 'text' : "Hostname"   , 'minwidth' : 150, 'anchor' : W     },
+        {'cid' : "#0"        , 'text' : "Hostname"   , 'minwidth' : 180, 'anchor' : W     },
         {'cid' : "JobSlots"  , 'text' : "Slots"      , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "TasksSent" , 'text' : "Sent"       , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Completed" , 'text' : "Completed"  , 'minwidth' : 20 , 'anchor' : CENTER},
@@ -42,19 +42,17 @@ class NodeList(MyTreeView):
 
     gui_events = ((GUIEvent.update_node_info, 'refresh'),)
 
-    def __init__(self, parent, nodes, **kwargs):
+    def __init__(self, parent, **kwargs):
         MyTreeView.__init__(self, parent, self.columns, selectmode='browse', **kwargs)
-        for node in nodes:
-            text = node['hostname']
-            self.insert('', 'end', text=text,
-                values=(node['job_slots'],))
+        self.tag_configure('ACTIVE', background="light green")
+        self.tag_configure('DEAD'  , background="tomato")
+        self.time_of_death = {}
+        self.node_rows = {}
+        self.node_info = {}
 
     def refresh(self, node_info):
-        items = self.get_children('')
-        assert len(items) == len(node_info)
-        for node, item in zip(node_info, items):
-            # Make sure the order did not change somehow.
-            assert self.item(item)['text'] == node.node_dict()['hostname']
+        rows_not_updated = set(self.get_children(''))
+        for node in node_info:
             values = (
                 node.node_dict()['job_slots'], 
                 node.tasks_sent     (),
@@ -68,7 +66,34 @@ class NodeList(MyTreeView):
                 node.tasks_pending  (),
                 "{:.2f}".format(node.average_tasks()),
                 "{:.2f}".format(node.average_task_time()))
-            self.item(item, values=values)
+
+            node_id = node.node_id()
+            node_row = self.node_rows.get(node.node_id())
+            if node_row in self.time_of_death:
+                del self.time_of_death[node_row]
+            self.node_info[node_row] = node
+            if node_row:
+                self.item(node_row, values=values, tag='ACTIVE')
+                rows_not_updated.remove(node_row)
+            else:
+                node_row = self.insert('', 'end', text=node_id,
+                    values=values, tag='ACTIVE')
+                self.node_rows[node_id] = node_row
+        rows_to_remove = []
+        for row in rows_not_updated:
+            time_of_death = self.time_of_death.setdefault(row, time())
+            if time() - time_of_death > 5:
+                del self.time_of_death[row]
+                rows_to_remove.append(row)
+            else:
+                self.item(row, tag='DEAD')
+        if rows_to_remove:
+            for row in rows_to_remove:
+                node_id = self.node_info[row].node_id()
+                del self.node_info[row]
+                del self.node_rows[node_id]
+            self.delete(tuple(rows_to_remove))
+
 
 class TimerDisplay(LabelFrame):
     columns = (
@@ -104,10 +129,9 @@ class GlobalTimerDisplay(TimerDisplay):
 class NodeDisplay(Frame):
     gui_events = ((GUIEvent.update_node_info, 'refresh'),)
 
-    def __init__(self, parent, nodes):
+    def __init__(self, parent):
         Frame.__init__(self)
-        self.nodes = nodes
-        self.node_index = None
+        self.current_selection = None
         self.draw()
 
     def draw(self):
@@ -119,7 +143,7 @@ class NodeDisplay(Frame):
         node_label_frame.rowconfigure(0, weight=1)
         node_label_frame.columnconfigure(0, weight=1)
 
-        self.node_list = NodeList(node_label_frame, self.nodes, height=6)
+        self.node_list = NodeList(node_label_frame, height=6)
         self.node_list.bind('<<TreeviewSelect>>', self.node_selected)
         self.node_list.grid(sticky=N+S+W+E)
         self.paned_window.add(node_label_frame, weight=1)
@@ -129,29 +153,20 @@ class NodeDisplay(Frame):
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
 
     def refresh(self, node_info):
-        self.node_info = node_info
-        if self.node_index is not None:
+        if self.current_selection and self.node_list.node_info.get(self.current_selection) \
+            == node_info:
             self.update_selection()
 
     def node_selected(self, event):
-        selection = self.node_list.selection()
-        if not selection:
-            self.node_index = None
-        else:
-            new_index = self.node_list.index(self.node_list.selection()[0])
-            if new_index == self.node_index:
-                return
-            self.node_index = new_index
+        self.current_selection = self.node_list.selection()
         self.update_selection()
 
     def update_selection(self):
-        if self.node_index is None or not hasattr(self, 'node_info'):
-            node = None
-            node_time_dict = {}
-        else:
-            node = self.node_info[self.node_index]
-            node_time_dict = node.timer().as_dict()
-        self.node_times.refresh(node_time_dict)
+        if not self.current_selection:
+            return
+        node = self.node_list.node_info.get(self.current_selection)
+        times = node.timer().as_dict() if node else {}
+        self.node_times.refresh(times)
 
 class CacheStats(LabelFrame):
     gui_events = ((GUIEvent.update_cache_stats, 'refresh'),)
@@ -217,10 +232,8 @@ class GlobalDataFrame(Frame):
         frame.grid(row=0, column=1, sticky=N+S+W+E)
 
 class SettingsFrame(LabelFrame):
-    def __init__(self, parent, port, start, stop, **kw):
+    def __init__(self, parent, port, **kw):
         LabelFrame.__init__(self, parent, text="Settings", **kw)
-        self.start = start
-        self.stop = stop
         self.port = port
         self.draw()
 
@@ -243,10 +256,6 @@ class SettingsFrame(LabelFrame):
 
         Separator(self).grid(row=2, column=0, columnspan=2, pady=10, sticky=E+W)
 
-        self.start_but = Button(self, text="Start", command=self.start)
-        self.start_but.grid(row=3, column=0, sticky=E+W)
-        self.stop_but = Button(self, text="Stop", command=self.stop, state=DISABLED)
-        self.stop_but.grid(row=3, column=1, sticky=E+W)
         if False:
             # Debugging stuff
             self.stop_but = Button(self, text="Run PDB", command=self.start_pdb)
@@ -387,9 +396,9 @@ class BPManagerApp(Tk):
 
     gui_events = ((GUIEvent.exception_in_run, '_exception_in_run'),)
 
-    def __init__(self, nodes, port):
+    def __init__(self, node_info_getter, port):
         Tk.__init__(self, None)
-        self.nodes = nodes
+        self.node_info_getter = node_info_getter
         self.port = port
         self.running = False
         self.initialize()
@@ -397,6 +406,7 @@ class BPManagerApp(Tk):
         self.event_data_lock = Lock()
         self.event_data = {}
         self.__periodic_refresh()
+        self.__start_running()
 
     def __periodic_refresh(self):
         with self.event_data_lock:
@@ -410,17 +420,14 @@ class BPManagerApp(Tk):
         self.columnconfigure(0, weight=1)
 
         # Row 0
-        self.settings_frame = SettingsFrame(self, self.port,
-            self.__start_running, self.__stop_running)
+        self.settings_frame = SettingsFrame(self, self.port)
         self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
         self.pp_threads_sb = self.settings_frame.pp_threads_sb
-        self.stop_but = self.settings_frame.stop_but
-        self.start_but = self.settings_frame.start_but
 
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
 
-        self.node_display = NodeDisplay(self.pane, self.nodes)
+        self.node_display = NodeDisplay(self.pane)
         self.node_display.grid(row=1, sticky=N+S+W+E)
         self.pane.add(self.node_display)
 
@@ -450,8 +457,6 @@ class BPManagerApp(Tk):
 
     def set_running(self, running):
         self.running = running
-        self.stop_but['state'] = 'enable' if self.running else 'disable'
-        self.start_but['state'] = 'enable' if not self.running else 'disable'
         self.pp_threads_sb['state'] = 'normal' if not self.running else 'disable'
 
     def destroy(self):
@@ -486,7 +491,7 @@ class BPManagerApp(Tk):
 
     def __run_task_processor(self):
         try:
-            self.manager_runner.run(self.nodes, update_ui=self.post_event)
+            self.manager_runner.run(self.node_info_getter, update_ui=self.post_event)
         except Exception as e:
             self.post_event(GUIEvent.exception_in_run, e)
 

@@ -2,6 +2,7 @@ from .compile_session import SessionResult
 from buildpal_common import Timer
 
 from time import time
+import logging
 
 class Task(Timer):
     def __init__(self, task_dict):
@@ -9,9 +10,7 @@ class Task(Timer):
         self.__dict__.update(task_dict)
         self.sessions_running = set()
         self.sessions_finished = set()
-        self.first_session = None
         self.completed_by_session = None
-        self.task_result = None
 
     @property
     def compiler_info(self):
@@ -29,12 +28,8 @@ class Task(Timer):
         return bool(self.completed_by_session)
 
     def register_session(self, session):
-        if not self.sessions_running:
-            self.first_session = session
-            session.node.add_tasks_sent()
-            self.note_time('assigned to a server session', 'waiting for server')
-        else:
-            session.node.add_tasks_stolen()
+        session.node.add_tasks_sent()
+        self.note_time('assigned to a server session', 'waiting for server')
         self.sessions_running.add(session)
 
     def register_completion(self, session):
@@ -42,8 +37,6 @@ class Task(Timer):
             return False
         self.note_time('completed notification', 'remote completion notification')
         self.completed_by_session = session
-        if session != self.first_session:
-            session.node.add_tasks_successfully_stolen()
         for other_session in (s for s in self.sessions_running if s != session):
             other_session.cancel()
         return True
@@ -59,33 +52,38 @@ class Task(Timer):
         assert session in self.sessions_running
         self.sessions_running.remove(session)
         self.sessions_finished.add(session)
-        session_succeeded = False
+        session.node.process_session_result(session.result)
+
+        def task_completed():
+            node = session.node
+            node.timer().add_time("session duration",
+                session.time_completed - session.time_started)
+            node.add_total_time(
+                session.time_completed - session.time_started)
+            result = (session.retcode, session.stdout,
+                session.stderr)
+            self.command_processor.task_completed(self, result)
+
+        def output_file_arrived(future):
+            try:
+                session.task.output = future.result()
+            except Exception:
+                logging.debug("HERE!!!!")
+                raise
+            else:
+                task_completed()
+
         if session.result == SessionResult.success:
             assert session == self.completed_by_session
-            self.note_time('result received', 'result download time')
-            session.node.add_tasks_completed()
-            session.node.timer().add_time("session duration",
-                session.time_completed - session.time_started)
-            session.node.add_total_time(
-                session.time_completed - session.time_started)
-            self.task_result = (session.retcode, session.stdout,
-                session.stderr)
+            self.note_time('session successful', 'waiting for session result')
             if session.retcode == 0:
-                self.output_file_future = session.output_file_future
-        elif session.result == SessionResult.failure:
-            session.node.add_tasks_failed()
-        elif session.result == SessionResult.cancelled:
-            session.node.add_tasks_cancelled()
-        elif session.result == SessionResult.timed_out:
-            session.node.add_tasks_timed_out()
-        elif session.result == SessionResult.too_late:
-            session.node.add_tasks_too_late()
-        if not self.sessions_running and self.task_result is not None:
-            self.command_processor.task_completed(self)
+                session.output_file_future.add_done_callback(
+                    output_file_arrived)
+            else:
+                task_completed()
 
     def task_completed(self, retcode, stdout, stderr):
-        self.task_result = (retcode, stdout, stderr)
-        self.command_processor.task_completed(self)
+        self.command_processor.task_completed(self, (retcode, stdout, stderr))
 
     def get_info(self):
         assert not self.sessions_running

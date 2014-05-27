@@ -3,6 +3,7 @@ from buildpal_common import SimpleTimer, send_file, send_compressed_file
 from enum import Enum
 from io import BytesIO
 
+import logging
 import os
 import pickle
 import zipfile
@@ -16,6 +17,7 @@ class SessionResult(Enum):
     cancelled = 3
     too_late = 4
     timed_out = 5
+    terminated = 6
 
 class CompileSession:
     STATE_START = 0
@@ -56,6 +58,10 @@ class CompileSession:
         if self.sender:
             self.sender.send_msg([b'CANCEL_SESSION'])
         self.cancelled = True
+
+    def terminate(self):
+        self.state = self.STATE_FINISH
+        self.__complete(SessionResult.terminated)
 
     def __complete(self, result):
         self.state = self.STATE_FINISH
@@ -119,6 +125,7 @@ class CompileSession:
             else:
                 assert server_status == b'SERVER_DONE'
                 self.retcode, self.stdout, self.stderr, server_times = pickle.loads(msg[1].memory())
+                logging.debug("Got {} retcode".format(self.retcode))
                 for name, duration in server_times.items():
                     self.timer.add_time(name, duration)
                 if self.task.register_completion(self):

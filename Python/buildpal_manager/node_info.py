@@ -1,4 +1,5 @@
 from .timer import Timer
+from .compile_session import SessionResult
 
 from time import time
 
@@ -12,8 +13,7 @@ class NodeInfo:
         self._tasks_too_late   = 0
         self._tasks_timed_out  = 0
         self._total_time       = 0
-        self._tasks_stolen     = 0
-        self._tasks_successfully_stolen = 0
+        self._tasks_terminated = 0
         self._tasks_change     = None
         self._avg_tasks = {}
         self._timer = Timer()
@@ -25,6 +25,8 @@ class NodeInfo:
     def average_task_time(self):
         tasks_completed = self.tasks_completed()
         return self.total_time() / tasks_completed if tasks_completed else 0
+
+    def tasks_terminated(self): return self._tasks_terminated
 
     def tasks_sent(self): return self._tasks_sent
 
@@ -38,13 +40,10 @@ class NodeInfo:
 
     def tasks_timed_out(self): return self._tasks_timed_out
 
-    def tasks_stolen(self): return self._tasks_stolen
-
-    def tasks_successfully_stolen(self): return self._tasks_successfully_stolen
-
-    def tasks_pending(self): return (self.tasks_sent() + self.tasks_stolen() -
+    def tasks_pending(self): return (self.tasks_sent() -
         self.tasks_completed() - self.tasks_failed() - self.tasks_too_late() -
-        self.tasks_cancelled() - self.tasks_timed_out())
+        self.tasks_cancelled() - self.tasks_timed_out() -
+        self.tasks_terminated())
 
     def total_time(self): return self._total_time
 
@@ -65,33 +64,24 @@ class NodeInfo:
         else:
             self._tasks_change = time()
 
+    def process_session_result(self, result):
+        self.__tasks_pending_about_to_change()
+        if result == SessionResult.success:
+            self._tasks_completed += 1
+        elif result == SessionResult.failure:
+            self._tasks_failed += 1
+        elif result == SessionResult.cancelled:
+            self._tasks_cancelled += 1
+        elif result == SessionResult.timed_out:
+            self._tasks_timed_out += 1
+        elif result == SessionResult.too_late:
+            self._tasks_too_late += 1
+        elif result == SessionResult.terminated:
+            self._tasks_terminated += 1
+
     def add_tasks_sent(self):
         self.__tasks_pending_about_to_change()
         self._tasks_sent += 1
-
-    def add_tasks_timed_out(self):
-        self.__tasks_pending_about_to_change()
-        self._tasks_timed_out += 1
-
-    def add_tasks_completed(self):
-        self.__tasks_pending_about_to_change()
-        self._tasks_completed += 1
-
-    def add_tasks_too_late(self):
-        self.__tasks_pending_about_to_change()
-        self._tasks_too_late += 1
-
-    def add_tasks_stolen(self):
-        self._tasks_stolen += 1
-
-    def add_tasks_successfully_stolen(self):
-        self._tasks_successfully_stolen += 1
-
-    def add_tasks_cancelled(self):
-        self.__tasks_pending_about_to_change()
-        self._tasks_cancelled += 1
-
-    def add_tasks_failed(self): self._tasks_failed += 1
 
     def add_total_time(self, value): self._total_time += value
 

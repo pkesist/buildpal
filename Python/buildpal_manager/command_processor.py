@@ -5,6 +5,7 @@ from .gui_event import GUIEvent
 from subprocess import list2cmdline
 
 import os
+import logging
 from time import time
 
 class ClientTaskCompiler:
@@ -169,42 +170,40 @@ class CommandProcessor:
         self.completed_tasks = set()
         return self.tasks
 
-    def task_completed(self, task):
+    def task_completed(self, task, result):
         assert task in self.tasks
         assert task not in self.completed_tasks
-        assert task.task_result is not None
         self.update_task_ui(task)
         self.completed_tasks.add(task)
         if self.tasks == self.completed_tasks:
             self.__database_inserter.async_insert(self.get_info())
-            self.postprocess()
+            self.postprocess(result)
 
     def should_invoke_linker(self):
         return self.__options.should_invoke_linker()
 
-    def postprocess(self):
+    def postprocess(self, result):
         error_code = None
         stdout = b''
         stderr = b''
         objects = {}
         for task in self.completed_tasks:
-            retcode, tmp_stdout, tmp_stderr = task.task_result
+            retcode, tmp_stdout, tmp_stderr = result
             if retcode != 0:
                 error_code = str(retcode).encode()
             else:
-                if hasattr(task, 'output_file_future'):
-                    objects[task.source] = task.output_file_future.result()
-                else:
-                    objects[task.source] = task.output
+                objects[task.source] = task.output
             stdout += tmp_stdout
             stderr += tmp_stderr
 
         if error_code:
+            logging.debug("Exiting with error code {}".format(error_code))
             self.client_conn.send_msg([b'EXIT', error_code, stdout, stderr])
             self.client_conn.close()
             return
 
         if not self.should_invoke_linker():
+            logging.debug("Exiting with success error code")
             self.client_conn.send_msg([b'EXIT', b'0', stdout, stderr])
             self.client_conn.close()
             return

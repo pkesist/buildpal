@@ -32,8 +32,7 @@ class NodeList(MyTreeView):
         {'cid' : "Completed" , 'text' : "Completed"  , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "TooLate"   , 'text' : "Too Late"   , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "TimedOut"  , 'text' : "Timed Out"  , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "Stolen"    , 'text' : "Stolen"     , 'minwidth' : 20 , 'anchor' : CENTER},
-        {'cid' : "StolenDone", 'text' : "Stolen Done", 'minwidth' : 20 , 'anchor' : CENTER},
+        {'cid' : "Terminated", 'text' : "Terminated" , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Cancelled" , 'text' : "Cancelled"  , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Failed"    , 'text' : "Failed"     , 'minwidth' : 20 , 'anchor' : CENTER},
         {'cid' : "Pending"   , 'text' : "Pending"    , 'minwidth' : 20 , 'anchor' : CENTER},
@@ -55,15 +54,14 @@ class NodeList(MyTreeView):
         for node in node_info:
             values = (
                 node.node_dict()['job_slots'], 
-                node.tasks_sent     (),
-                node.tasks_completed(),
-                node.tasks_too_late (),
-                node.tasks_timed_out(),
-                node.tasks_stolen   (),
-                node.tasks_successfully_stolen(),
-                node.tasks_cancelled(),
-                node.tasks_failed   (),
-                node.tasks_pending  (),
+                node.tasks_sent      (),
+                node.tasks_completed (),
+                node.tasks_too_late  (),
+                node.tasks_timed_out (),
+                node.tasks_terminated(),
+                node.tasks_cancelled (),
+                node.tasks_failed    (),
+                node.tasks_pending   (),
                 "{:.2f}".format(node.average_tasks()),
                 "{:.2f}".format(node.average_task_time()))
 

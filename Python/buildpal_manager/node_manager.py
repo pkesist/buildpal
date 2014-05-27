@@ -18,7 +18,7 @@ class NodeManager:
     def __init__(self, loop, node_info_getter, update_ui):
         self.loop = loop
         self.node_info_getter = node_info_getter
-        self.node_info = None
+        self.node_info = []
         self.update_ui = update_ui
         self.all_sockets = defaultdict(list)
         self.tasks_running = defaultdict(list)
@@ -37,7 +37,19 @@ class NodeManager:
 
     @asyncio.coroutine
     def update_node_info_coro(self):
-        self.node_info = self.node_info_getter()
+        new_node_info = self.node_info_getter()
+        sessions_to_reschedule = []
+        for node in (node for node in self.node_info if node not in new_node_info):
+            for session in self.sessions.values():
+                if session.node == node:
+                    sessions_to_reschedule.append(session)
+        new_nodes = [node for node in new_node_info if node not in self.node_info]
+        self.node_info = new_node_info
+        for session in sessions_to_reschedule:
+            session.terminate()
+            self._session_completed(session)
+        for node in new_nodes:
+            self.__find_work(node)
         self.update_ui(GUIEvent.update_node_info, self.node_info)
         yield from asyncio.sleep(2, loop=self.loop)
         self.update_node_info()
@@ -71,7 +83,7 @@ class NodeManager:
     def schedule_task(self, task, node=None):
         if node is not None:
             self.tasks_running[node].append(task)
-        elif self.unassigned_tasks:
+        elif self.unassigned_tasks or not self.node_info:
             self.unassigned_tasks.append(task)
             self.update_ui(GUIEvent.update_unassigned_tasks,
                 len(self.unassigned_tasks))
@@ -147,17 +159,17 @@ class NodeManager:
             return None
         return min(free_nodes, key=current_node_weight)
 
-    def __steal_tasks(self, node):
-        tasks_to_steal = self.__free_slots(node)
-        while tasks_to_steal > 0:
+    def __find_work(self, node):
+        available_slots = self.__free_slots(node)
+        while available_slots > 0:
             while self.unassigned_tasks:
                 task = self.unassigned_tasks.pop(0)
                 self.update_ui(GUIEvent.update_unassigned_tasks,
                     len(self.unassigned_tasks))
                 task.note_time('taken from unassigned task queue', 'unassigned time')
                 self.schedule_task(task, node)
-                tasks_to_steal -= 1
-                if tasks_to_steal == 0:
+                available_slots -= 1
+                if available_slots == 0:
                     return
             if not self.__can_steal_task(node):
                 return
@@ -167,8 +179,8 @@ class NodeManager:
                 for task in reversed(self.__tasks_viable_for_stealing(from_node, node)):
                     if not task.is_completed() and task not in self.tasks_running[node]:
                         self.schedule_task(task, node)
-                        tasks_to_steal -= 1
-                        if tasks_to_steal <= 0:
+                        available_slots -= 1
+                        if available_slots <= 0:
                             return
             return
 
@@ -184,20 +196,23 @@ class NodeManager:
         assert node_sockets
         return node_sockets[0][1], node
 
+    def _session_completed(self, session):
+        del self.sessions[session.local_id]
+        self.tasks_running[session.node].remove(session.task)
+        self.__find_work(session.node)
+        # In case we got a server failure, reschedule the task.
+        if session.result in (SessionResult.failure, SessionResult.timed_out,
+            SessionResult.terminated) and not session.task.is_completed() and \
+            len(session.task.sessions_running) == 1:
+                self.schedule_task(session.task)
+        session.task.session_completed(session)
+        self.update_ui(GUIEvent.update_node_info, self.node_info)
+
     def process_msg(self, msg):
         session_id, *msg = msg
         session = self.sessions.get(session_id)
         if not session:
             return
-        if not session.got_data_from_server(msg):
-            return
-        del self.sessions[session_id]
-        self.tasks_running[session.node].remove(session.task)
-        self.__steal_tasks(session.node)
-        # In case we got a server failure, reschedule the task.
-        if session.result in (SessionResult.failure, SessionResult.timed_out) \
-            and not session.task.is_completed() and \
-            len(session.task.sessions_running) == 1:
-                self.schedule_task(session.task)
-        session.task.session_completed(session)
-        self.update_ui(GUIEvent.update_node_info, self.node_info)
+        session_completed = session.got_data_from_server(msg)
+        if session_completed:
+            self._session_completed(session)

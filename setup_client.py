@@ -143,7 +143,7 @@ setup(name = 'buildpal_manager',
         ),
         Extension('buildpal_client',
             sources = [
-                'Executables/Client/client.cpp',
+                'Extensions/Client/client.cpp',
                 'Extensions/Client/pythonBindings.cpp',
             ],
             define_macros = [

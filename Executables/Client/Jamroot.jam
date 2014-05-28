@@ -1,7 +1,7 @@
 import errors ;
 import project ;
 
-path-constant MAP_FILES : ../../Extensions/MapFiles ;
+path-constant CLIENT : ../../Extensions/Client ;
 
 local rule get-jam-var ( variable-name )
 {
@@ -71,7 +71,7 @@ local release-variants = release profile ;
 exe bp_cl
 :
     bp_cl.cpp
-    client.cpp
+    $(CLIENT)/client.cpp
     boost-stuff
     clang-stuff
 :

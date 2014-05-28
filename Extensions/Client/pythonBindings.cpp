@@ -1,4 +1,4 @@
-#include "../../Executables/Client/client.hpp"
+#include "client.hpp"
 
 #include <Python.h>
 

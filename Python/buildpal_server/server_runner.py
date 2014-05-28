@@ -450,7 +450,6 @@ class ProcessRunner:
     def __init__(self, limit, loop):
         self.limit = limit
         self.current = 0
-        self.waiters = []
         self.ready = asyncio.Event(loop=loop)
         self.loop = loop
 

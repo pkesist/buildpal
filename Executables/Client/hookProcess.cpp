@@ -24,7 +24,7 @@
 #include <shellapi.h>
 #include <psapi.h>
 
-struct StartupInfo
+struct StartupInfoEx
 {
     DWORD  cb;
     void * lpReserved;
@@ -44,6 +44,7 @@ struct StartupInfo
     HANDLE hStdInput;
     HANDLE hStdOutput;
     HANDLE hStdError;
+    PPROC_THREAD_ATTRIBUTE_LIST lpAttributeList;
 };
 
 struct CreateProcessParams
@@ -56,7 +57,7 @@ struct CreateProcessParams
     DWORD dwCreationFlags;
     void       * lpEnvironment;
     void const * lpCurrentDirectory;
-    StartupInfo startupInfo;
+    void       * lpStartupInfo;
     LPPROCESS_INFORMATION lpProcessInformation;
 };
 
@@ -88,7 +89,12 @@ class DistributedCompileParams
         return reinterpret_cast<T *>( &stringSaver_.back()[0] );
     }
 
-    wchar_t * saveStringW( wchar_t * ptr )
+    void * saveMemory( void const * ptr, std::size_t size )
+    {
+        return saveString<char>( static_cast<char const *>( ptr ), size );
+    }
+
+    wchar_t * saveStringW( wchar_t const * ptr )
     {
         return saveString<wchar_t>( ptr, ptr ? wcslen( ptr ) + 1 : 0 );
     }
@@ -100,8 +106,11 @@ class DistributedCompileParams
 
     void storeCreateProcessParams( CreateProcessParams const & cpParams, bool const wide )
     {
-        // Save all strings, as they might go out of scope by the time we execute
-        // fallback.
+        // Store and adjust parameters user sent to CreateProcess function.
+        // User will get the chance to destroy these structures, so we should
+        // make sure to copy anything we need beforehand.
+
+        // Save all strings.
         typedef void * (DistributedCompileParams::* StringSaver)(void const *);
         StringSaver stringSaver = wide
             ? (StringSaver)(&DistributedCompileParams::saveStringW)
@@ -115,14 +124,33 @@ class DistributedCompileParams
         createProcessParams_.dwCreationFlags = cpParams.dwCreationFlags;
         createProcessParams_.lpEnvironment = cpParams.lpEnvironment;
         createProcessParams_.lpCurrentDirectory = cpParams.lpCurrentDirectory;
-        createProcessParams_.startupInfo = cpParams.startupInfo;
+        StartupInfoEx const * lpOrigStartupInfo = (StartupInfoEx const *)cpParams.lpStartupInfo;
+        createProcessParams_.lpStartupInfo = saveMemory( lpOrigStartupInfo, lpOrigStartupInfo->cb );
+        StartupInfoEx * startupInfo( static_cast<StartupInfoEx *>( createProcessParams_.lpStartupInfo ) );
 
-        createProcessParams_.startupInfo.lpReserved = (this->*stringSaver)(createProcessParams_.startupInfo.lpReserved);
-        createProcessParams_.startupInfo.lpDesktop  = (this->*stringSaver)(createProcessParams_.startupInfo.lpDesktop );
-        createProcessParams_.startupInfo.lpTitle    = (this->*stringSaver)(createProcessParams_.startupInfo.lpTitle   );
+        if ( ( createProcessParams_.dwCreationFlags & EXTENDED_STARTUPINFO_PRESENT ) != 0 )
+        {
+            // The user sent STARTUPINFOEX, not STARTUPINFO.
+            // It would be a nightmare to keep the extended part alive until we
+            // (might) need it. At this point we are certain that we are running
+            // the compiler, so just slice off the extended part.
+            //
+            // Note that we could just copy the pointer and hope that the target
+            // structure does not go out of scope. It seems to work in practice,
+            // but I'd rather not.
+            createProcessParams_.dwCreationFlags &= ~EXTENDED_STARTUPINFO_PRESENT;
+            // Probably unnecessary, but can't hurt.
+            startupInfo->cb = sizeof(STARTUPINFO);
+        }
+        // Remove suspended flag
+        createProcessParams_.dwCreationFlags &= ~CREATE_SUSPENDED;
+
+        startupInfo->lpReserved = (this->*stringSaver)(startupInfo->lpReserved);
+        startupInfo->lpDesktop  = (this->*stringSaver)(startupInfo->lpDesktop );
+        startupInfo->lpTitle    = (this->*stringSaver)(startupInfo->lpTitle   );
+
         createProcessParams_.lpProcessInformation = cpParams.lpProcessInformation;
 
-        StartupInfo const * startupInfo = &createProcessParams_.startupInfo;
         bool const hookHandles( ( startupInfo->dwFlags & STARTF_USESTDHANDLES ) != 0 );
         if ( hookHandles )
         {
@@ -132,7 +160,7 @@ class DistributedCompileParams
                 DuplicateHandle( currentProcess, startupInfo->hStdOutput,
                     currentProcess, &stdOutHandle_, 0, FALSE,
                     DUPLICATE_SAME_ACCESS );
-                createProcessParams_.startupInfo.hStdError = stdOutHandle_;
+                startupInfo->hStdOutput = stdOutHandle_;
             }
 
             if ( startupInfo->hStdError != INVALID_HANDLE_VALUE )
@@ -141,7 +169,7 @@ class DistributedCompileParams
                     currentProcess, &stdErrHandle_, 0, FALSE,
                     DUPLICATE_SAME_ACCESS );
             }
-            createProcessParams_.startupInfo.hStdError = stdErrHandle_;
+            startupInfo->hStdError = stdErrHandle_;
         }
     }
 
@@ -526,10 +554,10 @@ int createProcessFallbackA( void * params )
         cpp->lpProcessAttributes,
         cpp->lpThreadAttributes,
         cpp->bInheritHandles,
-        cpp->dwCreationFlags & (~CREATE_SUSPENDED), // No longer suspended.
+        cpp->dwCreationFlags,
         cpp->lpEnvironment,
         static_cast<char const *>( cpp->lpCurrentDirectory ),
-        reinterpret_cast<LPSTARTUPINFOA>( &cpp->startupInfo ),
+        reinterpret_cast<LPSTARTUPINFOA>( cpp->lpStartupInfo ),
         &processInfo
     );
     if ( !cpResult )
@@ -558,10 +586,10 @@ int createProcessFallbackW( void * params )
         cpp->lpProcessAttributes,
         cpp->lpThreadAttributes,
         cpp->bInheritHandles,
-        cpp->dwCreationFlags & (~CREATE_SUSPENDED), // No longer suspended.
+        cpp->dwCreationFlags,
         cpp->lpEnvironment,
         static_cast<wchar_t const *>( cpp->lpCurrentDirectory ),
-        reinterpret_cast<LPSTARTUPINFOW>( &cpp->startupInfo ),
+        reinterpret_cast<LPSTARTUPINFOW>( cpp->lpStartupInfo ),
         &processInfo
     );
     if ( !cpResult )
@@ -602,7 +630,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 )
 {
-    CreateProcessParams const cpParams = 
+    CreateProcessParams cpParams = 
     {
         lpApplicationName,
         lpCommandLine,
@@ -612,7 +640,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
         dwCreationFlags,
         lpEnvironment,
         lpCurrentDirectory,
-        *((StartupInfo *)lpStartupInfo),
+        lpStartupInfo,
         lpProcessInformation
     };
 
@@ -669,7 +697,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
         dwCreationFlags,
         lpEnvironment,
         lpCurrentDirectory,
-        *((StartupInfo *)lpStartupInfo),
+        lpStartupInfo,
         lpProcessInformation
     };
     if ( shortCircuit( lpApplicationName, lpCommandLine, lpCurrentDirectory,

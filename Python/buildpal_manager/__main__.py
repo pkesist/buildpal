@@ -16,36 +16,45 @@ import configparser
 from threading import Thread
 from time import sleep
 
-def get_nodes_from_ini_file(config, profile):
-    if not profile in config:
-        raise Exception("ERROR: No '{}' section in '{}'.".format(profile, opts.ini_file))
+class FixedNodeList:
+    def __init__(self, config, profile):
+        nodes = FixedNodeList.get_nodes_from_ini_file(config, profile)
+        self.node_info = [NodeInfo(node) for node in nodes]
 
-    nodes = []
-    section = config[profile]
-    done = False
-    while not done:
-        option = "node[{}]".format(len(nodes))
-        if option in section:
-            value = section[option]
-            delim = ':'
-            if not delim in value:
-                raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>[:<job_slots>]")
-            port_index = value.index(delim)
-            try:
-                job_slots_index = value.index(':', port_index + 1)
-                server_port = int(value[port_index + 1 : job_slots_index])
-                job_slots = int(value[job_slots_index + 1 : ])
-            except ValueError:
-                server_port = int(value[port_index + 1:])
-                job_slots = None
-            nodes.append({
-                'address' : value[:port_index],
-                'hostname' : '<{}>'.format(value[:port_index]),
-                'port' : server_port,
-                'job_slots' : job_slots })
-        else:
-            done = True
-    return nodes
+    def __call__(self):
+        return self.node_info
+
+    @staticmethod
+    def get_nodes_from_ini_file(config, profile):
+        if not profile in config:
+            raise Exception("ERROR: No '{}' section in '{}'.".format(profile, opts.ini_file))
+
+        nodes = []
+        section = config[profile]
+        done = False
+        while not done:
+            option = "node[{}]".format(len(nodes))
+            if option in section:
+                value = section[option]
+                delim = ':'
+                if not delim in value:
+                    raise RuntimeError("Invalid node value. Node values should be given as <host>:<port>[:<job_slots>]")
+                port_index = value.index(delim)
+                try:
+                    job_slots_index = value.index(':', port_index + 1)
+                    server_port = int(value[port_index + 1 : job_slots_index])
+                    job_slots = int(value[job_slots_index + 1 : ])
+                except ValueError:
+                    server_port = int(value[port_index + 1:])
+                    job_slots = None
+                nodes.append({
+                    'address' : value[:port_index],
+                    'hostname' : '<{}>'.format(value[:port_index]),
+                    'port' : server_port,
+                    'job_slots' : job_slots })
+            else:
+                done = True
+        return nodes
 
 class NodeDetector:
     def __init__(self):
@@ -153,8 +162,7 @@ def main(argv, terminator=None):
         if not opts.ini_file:
             print("ERROR: Profile specified, but .ini file is not.", file=sys.stderr)
             return -1
-        nodes = get_nodes_from_ini_file(get_config(opts.ini_file), opts.profile)
-        node_info_getter = lambda : nodes
+        node_info_getter = FixedNodeList(get_config(opts.ini_file), opts.profile)
 
     if opts.ui == 'gui':
         run_gui(node_info_getter, port)

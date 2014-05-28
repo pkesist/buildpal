@@ -108,8 +108,6 @@
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />
     <Content Include="Executables\Client\bp_cl.cpp" />
-    <Content Include="Executables\Client\client.cpp" />
-    <Content Include="Executables\Client\client.hpp" />
     <Content Include="Executables\Client\hookMeister.cpp" />
     <Content Include="Executables\Client\hookProcess.cpp" />
     <Content Include="Executables\Client\hookProcess.def" />
@@ -119,6 +117,8 @@
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.hpp" />
     <Content Include="Extensions\ArgParser\test.cpp" />
+    <Content Include="Extensions\Client\client.cpp" />
+    <Content Include="Extensions\Client\client.hpp" />
     <Content Include="Extensions\Client\pythonBindings.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.hpp" />

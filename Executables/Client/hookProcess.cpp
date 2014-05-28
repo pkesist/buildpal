@@ -1,6 +1,6 @@
 #include "hookProcess.hpp"
 
-#include "client.hpp"
+#include "../../Extensions/Client/client.hpp"
 
 #include <apiHooks.hpp>
 

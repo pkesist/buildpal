@@ -1,6 +1,7 @@
 import errors ;
 import project ;
 
+path-constant MAP_FILES : ../../Extensions/MapFiles ;
 path-constant CLIENT : ../../Extensions/Client ;
 
 local rule get-jam-var ( variable-name )
@@ -101,8 +102,8 @@ explicit bp_cl ;
 alias bp_cli_inj
 :
     $(MAP_FILES)/dllInject.cpp
+    $(CLIENT)/client.cpp
     hookProcess.cpp
-    client.cpp
     boost-stuff
     clang-stuff
 :

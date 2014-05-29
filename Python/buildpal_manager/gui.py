@@ -66,10 +66,9 @@ class NodeList(MyTreeView):
                 "{:.2f}".format(node.average_task_time()))
 
             node_id = node.node_id()
-            node_row = self.node_rows.get(node.node_id())
+            node_row = self.node_rows.get(node_id)
             if node_row in self.time_of_death:
                 del self.time_of_death[node_row]
-            self.node_info[node_row] = node
             if node_row:
                 self.item(node_row, values=values, tag='ACTIVE')
                 rows_not_updated.remove(node_row)
@@ -77,6 +76,7 @@ class NodeList(MyTreeView):
                 node_row = self.insert('', 'end', text=node_id,
                     values=values, tag='ACTIVE')
                 self.node_rows[node_id] = node_row
+            self.node_info[node_row] = node
         rows_to_remove = []
         for row in rows_not_updated:
             time_of_death = self.time_of_death.setdefault(row, time())
@@ -90,7 +90,7 @@ class NodeList(MyTreeView):
                 node_id = self.node_info[row].node_id()
                 del self.node_info[row]
                 del self.node_rows[node_id]
-            self.delete(tuple(rows_to_remove))
+            self.delete(*rows_to_remove)
 
 
 class TimerDisplay(LabelFrame):

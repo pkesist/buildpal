@@ -18,32 +18,17 @@ class build_client(setuptools_build_ext):
 
     def initialize_options(self):
         super().initialize_options()
+        self.debug = None
         self.build_base = None
         self.force_mingw = False
         self.x64 =  sys.maxsize > 2**32
 
     def finalize_options(self):
         self.set_undefined_options('build',
-            ('build_base', 'build_base'))
+            ('build_base', 'build_base'),
+            ('debug', 'debug'))
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
-        extra_compile_args = []
-        extra_link_args = []
-        if self.compiler == 'msvc':
-            extra_compile_args.append('/EHsc')
-        elif self.compiler == 'mingw32':
-            if not self.force_mingw:
-                print("WARNING: Even though it is possible to build these \n"
-                      "extensions with MinGW, the resulting DLL will crash \n"
-                      "on load. If you *really* want to build it, add \n"
-                      "--force-mingw option to build command")
-                raise DistutilsOptionError("Unsupported compiler: Builds, but crashes.")
-            extra_compile_args.append('-std=c++11')
-        else:
-            raise DistutilsOptionError('Unsupported compiler')
-        for ext_module in self.distribution.ext_modules:
-            ext_module.extra_compile_args.extend(extra_compile_args)
-            ext_module.extra_link_args.extend(extra_link_args)
 
     __boost_libs = ['chrono', 'system', 'thread', 'date_time']
 
@@ -115,6 +100,27 @@ class build_client(setuptools_build_ext):
         subprocess.check_call(call, env=env, cwd='Executables\Client')
 
     def run(self):
+        extra_compile_args = []
+        extra_link_args = []
+        if self.compiler == 'msvc':
+            extra_compile_args.append('/EHsc')
+            if not self.debug:
+                extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
+                extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
+        elif self.compiler == 'mingw32':
+            if not self.force_mingw:
+                print("WARNING: Even though it is possible to build these \n"
+                      "extensions with MinGW, the resulting DLL will crash \n"
+                      "on load. If you *really* want to build it, add \n"
+                      "--force-mingw option to build command")
+                raise DistutilsOptionError("Unsupported compiler: Builds, but crashes.")
+            extra_compile_args.append('-std=c++11')
+        else:
+            raise DistutilsOptionError('Unsupported compiler')
+        for ext_module in self.distribution.ext_modules:
+            ext_module.extra_compile_args.extend(extra_compile_args)
+            ext_module.extra_link_args.extend(extra_link_args)
+
         self.build_boost()
         self.build_clang()
         self.build_client()
@@ -151,8 +157,6 @@ setup(name = 'buildpal_manager',
                 ('BOOST_ASIO_DISABLE_BOOST_DATE_TIME', '1')
             ],
             libraries = ['shlwapi'],
-            #extra_compile_args = ['/Zi', '/Od'],
-            #extra_link_args = ['/DEBUG'],
         ),
     ],
     cmdclass =  {'build_ext': build_client},

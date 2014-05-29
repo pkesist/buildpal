@@ -10,8 +10,11 @@ import os
 class build_ext(setuptools_build_ext):
     def initialize_options(self):
         super().initialize_options()
+        self.debug = None
 
     def finalize_options(self):
+        self.set_undefined_options('build',
+            ('debug', 'debug'))
         super().finalize_options()
         self.compiler = self.compiler or get_default_compiler()
 
@@ -21,6 +24,9 @@ class build_ext(setuptools_build_ext):
         if self.compiler == 'msvc':
             distutils.msvc9compiler.VERSION = 11.0
             extra_compile_args.append('/EHsc')
+            if not self.debug:
+                extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
+                extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
             #extra_compile_args.append('/Od')
             #extra_compile_args.append('/Zi')
             #extra_link_args.append('/DEBUG')

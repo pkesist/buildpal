@@ -19,7 +19,7 @@ class SessionResult(Enum):
     timed_out = 5
     terminated = 6
 
-class CompileSession:
+class ServerSession:
     STATE_START = 0
     STATE_WAIT_FOR_MISSING_FILES = 1
     STATE_RECEIVE_RESULT_FILE = 2
@@ -34,18 +34,20 @@ class CompileSession:
         def send_msg(self, data):
             self._send_msg([self._session_id] + list(data))
 
-    def __init__(self, id, task, send_msg, node, executor, compressor):
+    def __init__(self, id, task, send_msg, node, async_call, compressor,
+                 completion_callback):
         self.state = self.STATE_START
         self.task = task
         self.node = node
         self.task.register_session(self)
         self.cancelled = False
-        self.executor = executor
+        self.async_call = async_call
         self.compressor = compressor
         self.result = None
         self.local_id = id
         self.send_msg = send_msg
         self.sender = None
+        self.completion_callback = completion_callback
 
     def start(self):
         assert self.state == self.STATE_START
@@ -67,6 +69,7 @@ class CompileSession:
         self.state = self.STATE_FINISH
         self.time_completed = time()
         self.result = result
+        self.completion_callback(self)
 
     @property
     def timer(self):
@@ -151,17 +154,29 @@ class CompileSession:
             self.obj_desc.write(self.obj_decompressor.decompress(data.memory()))
             if more == b'\x00':
                 self.obj_desc.write(self.obj_decompressor.flush())
+
+                # Write to disk worker.
                 def write_to_disk(fileobj):
                     fileobj.seek(0)
                     with open(self.task.output, "wb") as obj:
                         for data in iter(lambda : fileobj.read(256 * 1024), b''):
                             obj.write(data)
                     return self.task.output
-                self.output_file_future = self.executor.submit(write_to_disk, self.obj_desc)
-                del self.obj_desc
-                self.timer.add_time('download object file', self.receive_result_time.get())
-                del self.receive_result_time
-                self.__complete(SessionResult.success)
+
+                # Completion for write to disk.
+                def complete_session(future):
+                    try:
+                        if self.state == self.STATE_FINISH:
+                            return
+                        self.output = future.result()
+                    except Exception:
+                        self.__complete(SessionResult.failure)
+                    else:
+                        self.__complete(SessionResult.success)
+                self.async_call(write_to_disk, self.obj_desc).add_done_callback(
+                    complete_session)
+                self.timer.add_time('download object file',
+                    self.receive_result_time.get())
                 return True
         else:
             assert not "Invalid state"

@@ -1,4 +1,4 @@
-from .compile_session import CompileSession, SessionResult
+from .compile_session import ServerSession, SessionResult
 from .compressor import Compressor
 
 from buildpal_common import MessageProtocol
@@ -10,7 +10,6 @@ import struct
 from concurrent.futures import ThreadPoolExecutor
 from math import floor
 from collections import defaultdict
-from queue import Queue, Empty
 from time import time
 from .gui_event import GUIEvent
 
@@ -47,7 +46,6 @@ class NodeManager:
         self.node_info = new_node_info
         for session in sessions_to_reschedule:
             session.terminate()
-            self._session_completed(session)
         for node in new_nodes:
             self.__find_work(node)
         self.update_ui(GUIEvent.update_node_info, self.node_info)
@@ -80,27 +78,37 @@ class NodeManager:
         task.note_time('collected from preprocessor', 'preprocessed notification time')
         self.loop.call_soon_threadsafe(self.schedule_task, task)
 
-    def schedule_task(self, task, node=None):
+    def schedule_task(self, task, node=None, high_priority=False):
         if node is not None:
             self.tasks_running[node].append(task)
         elif self.unassigned_tasks or not self.node_info:
-            self.unassigned_tasks.append(task)
+            if high_priority:
+                self.unassigned_tasks.insert(0, task)
+            else:
+                self.unassigned_tasks.append(task)
             self.update_ui(GUIEvent.update_unassigned_tasks,
                 len(self.unassigned_tasks))
             return
         asyncio.async(self.__get_server_conn(node), loop=self.loop
-            ).add_done_callback(lambda f : self.create_session(task, node, f))
+            ).add_done_callback(lambda f : self.create_session(task, node, f,
+            high_priority))
 
-    def create_session(self, task, predetermined_node, future):
+    def create_session(self, task, predetermined_node, future, high_priority=False):
         result = future.result()
         if result is None:
-            self.unassigned_tasks.append(task)
+            if high_priority:
+                self.unassigned_tasks.insert(0, task)
+            else:
+                self.unassigned_tasks.append(task)
             self.update_ui(GUIEvent.update_unassigned_tasks,
                 len(self.unassigned_tasks))
             return
         protocol, node = result
-        session = CompileSession(self.generate_unique_id(), task,
-            protocol.send_msg, node, self.executor, self.compressor)
+        def async_call(callable, *args):
+            return self.loop.run_in_executor(self.executor, callable, *args)
+        session = ServerSession(self.generate_unique_id(), task,
+            protocol.send_msg, node, async_call, self.compressor,
+            self._session_completed)
         self.sessions[session.local_id] = session
         if not predetermined_node:
             self.tasks_running[node].append(task)
@@ -200,19 +208,13 @@ class NodeManager:
         del self.sessions[session.local_id]
         self.tasks_running[session.node].remove(session.task)
         self.__find_work(session.node)
-        # In case we got a server failure, reschedule the task.
-        if session.result in (SessionResult.failure, SessionResult.timed_out,
-            SessionResult.terminated) and not session.task.is_completed() and \
-            len(session.task.sessions_running) == 1:
-                self.schedule_task(session.task)
-        session.task.session_completed(session)
+        if not session.task.session_completed(session):
+            # Give the task high priority.
+            self.schedule_task(session.task, high_priority=True)
         self.update_ui(GUIEvent.update_node_info, self.node_info)
 
     def process_msg(self, msg):
         session_id, *msg = msg
         session = self.sessions.get(session_id)
-        if not session:
-            return
-        session_completed = session.got_data_from_server(msg)
-        if session_completed:
-            self._session_completed(session)
+        if session:
+            session.got_data_from_server(msg)

@@ -81,10 +81,9 @@ class NodeDetector:
         # socket.INADDR_ANY. Windows will send multicast message through
         # only one interface - loopback. We need to enumerate interfaces
         # and add membership to each one.
-        addrinfo = []
-        addrinfo.extend((info for info in socket.getaddrinfo('', 0)))
-        addrinfo.extend((info for info in socket.getaddrinfo('localhost', 0)))
-        for x, y, z, (address, *port) in (x[1:] for x in addrinfo if x[0] == socket.AF_INET):
+        addrinfo = socket.getaddrinfo('', 0, family=socket.AF_INET)
+        addrinfo.extend(socket.getaddrinfo('localhost', 0, family=socket.AF_INET))
+        for _, _, _, _, (address, port) in addrinfo:
             mreq = struct.pack('=4s4s', socket.inet_aton(multicast_group), socket.inet_aton(address))
             udp.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

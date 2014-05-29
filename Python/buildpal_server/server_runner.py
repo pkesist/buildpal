@@ -434,6 +434,10 @@ class ServerProtocol(MessageProtocol):
         MessageProtocol.__init__(self)
         self.runner = runner
 
+    def close(self):
+        if self.transport:
+            self.transport.write_eof()
+
     def process_msg(self, msg):
         session_id, *msg = msg
         if session_id == b'NEW_SESSION':

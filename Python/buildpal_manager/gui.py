@@ -151,12 +151,11 @@ class NodeDisplay(Frame):
         self.paned_window.grid(row=0, column=0, sticky=N+S+W+E)
 
     def refresh(self, node_info):
-        if self.current_selection and self.node_list.node_info.get(self.current_selection) \
-            == node_info:
+        if self.current_selection:
             self.update_selection()
 
     def node_selected(self, event):
-        self.current_selection = self.node_list.selection()
+        (self.current_selection,) = self.node_list.selection()
         self.update_selection()
 
     def update_selection(self):

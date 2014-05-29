@@ -1,6 +1,5 @@
 from io import BytesIO, FileIO
 
-import logging
 import os
 import shutil
 import tempfile

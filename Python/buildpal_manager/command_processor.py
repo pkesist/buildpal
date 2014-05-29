@@ -168,6 +168,7 @@ class CommandProcessor:
         self.tasks = set(create_task(source, target) for source, target in
             self.__options.files())
         self.completed_tasks = set()
+        self.tasks_with_sessions_done = set()
         return self.tasks
 
     def task_completed(self, task, result):
@@ -176,8 +177,12 @@ class CommandProcessor:
         self.update_task_ui(task)
         self.completed_tasks.add(task)
         if self.tasks == self.completed_tasks:
-            self.__database_inserter.async_insert(self.get_info())
             self.postprocess(result)
+
+    def all_sessions_done(self, task):
+        self.tasks_with_sessions_done.add(task)
+        if self.tasks_with_sessions_done == self.tasks:
+            self.__database_inserter.async_insert(self.get_info())
 
     def should_invoke_linker(self):
         return self.__options.should_invoke_linker()
@@ -223,7 +228,7 @@ class CommandProcessor:
         self.client_conn.close()
 
     def get_info(self):
-        assert self.tasks == self.completed_tasks
+        assert self.tasks_with_sessions_done == self.tasks
         return {
             'command' : ', '.join(self.__options.input_files()),
             'tasks' : [task.get_info() for task in self.tasks]

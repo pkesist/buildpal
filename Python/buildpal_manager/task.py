@@ -53,6 +53,9 @@ class Task(Timer):
         self.sessions_running.remove(session)
         self.sessions_finished.add(session)
         session.node.process_session_result(session.result)
+        # No more sessions.
+        if not self.sessions_running and self.completed_by_session:
+            self.command_processor.all_sessions_done(self)
 
         def task_completed():
             node = session.node
@@ -68,8 +71,8 @@ class Task(Timer):
             try:
                 session.task.output = future.result()
             except Exception:
-                logging.debug("HERE!!!!")
-                raise
+                # TODO:
+                pass
             else:
                 task_completed()
 

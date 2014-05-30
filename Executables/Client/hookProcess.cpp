@@ -543,7 +543,7 @@ bool shortCircuit
     return true;
 }
 
-int createProcessFallbackA( void * params )
+int createProcessFallbackA( char const * /*reason*/, void * params )
 {
     DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
     PROCESS_INFORMATION processInfo;
@@ -575,7 +575,7 @@ int createProcessFallbackA( void * params )
     return result;
 }
 
-int createProcessFallbackW( void * params )
+int createProcessFallbackW( char const * /*reason*/, void * params )
 {
     DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
     PROCESS_INFORMATION processInfo;

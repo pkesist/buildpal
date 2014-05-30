@@ -78,47 +78,53 @@ class NodeManager:
         task.note_time('collected from preprocessor', 'preprocessed notification time')
         self.loop.call_soon_threadsafe(self.schedule_task, task)
 
-    def schedule_task(self, task, node=None, high_priority=False):
-        if node is not None:
-            self.tasks_running[node].append(task)
-        elif self.unassigned_tasks or not self.node_info:
-            if high_priority:
-                self.unassigned_tasks.insert(0, task)
-            else:
-                self.unassigned_tasks.append(task)
-            self.update_ui(GUIEvent.update_unassigned_tasks,
-                len(self.unassigned_tasks))
-            return
+    def __schedule_task_to_specific_node(self, task, node):
+        assert node is not None
         asyncio.async(self.__get_server_conn(node), loop=self.loop
-            ).add_done_callback(lambda f : self.create_session(task, node, f,
-            high_priority))
+            ).add_done_callback(lambda f : self.create_session(task, f))
 
-    def create_session(self, task, predetermined_node, future, high_priority=False):
-        result = future.result()
-        if result is None:
+    def schedule_task(self, task, high_priority=False):
+        add_to_queue = False
+        if self.unassigned_tasks:
+            add_to_queue = True
+        else:
+            node = self.__best_node()
+            if node is None:
+                add_to_queue = True
+
+        if add_to_queue:
             if high_priority:
                 self.unassigned_tasks.insert(0, task)
             else:
                 self.unassigned_tasks.append(task)
             self.update_ui(GUIEvent.update_unassigned_tasks,
                 len(self.unassigned_tasks))
-            return
-        protocol, node = result
+        else:
+            self.__schedule_task_to_specific_node(task, node)
+
+    def create_session(self, task, future):
+        protocol, node = future.result()
         def async_call(callable, *args):
             return self.loop.run_in_executor(self.executor, callable, *args)
-        session = ServerSession(self.generate_unique_id(), task,
+
+        def session_completed(session):
+            del self.sessions[session.local_id]
+            self.tasks_running[session.node].remove(session.task)
+            self.__find_work(session.node)
+            if not session.task.session_completed(session):
+                # Give the task high priority.
+                self.schedule_task(session.task, high_priority=True)
+            self.update_ui(GUIEvent.update_node_info, self.node_info)
+
+        session = ServerSession(self.__generate_unique_id(), task,
             protocol.send_msg, node, async_call, self.compressor,
-            self._session_completed)
+            session_completed)
+        self.tasks_running[node].append(task)
         self.sessions[session.local_id] = session
-        if not predetermined_node:
-            self.tasks_running[node].append(task)
-        else:
-            assert task in self.tasks_running[node]
-            assert node == predetermined_node
         session.start()
         self.update_ui(GUIEvent.update_node_info, self.node_info)
 
-    def generate_unique_id(self):
+    def __generate_unique_id(self):
         self.counter += 1
         return struct.pack('!I', self.counter)
 
@@ -160,8 +166,9 @@ class NodeManager:
 
     def __best_node(self):
         def current_node_weight(node):
-            return (len(self.tasks_running[node]) * node.average_task_time(),
-                node.average_task_time())
+            task_count = len(self.tasks_running[node])
+            average_time = node.average_task_time()
+            return (task_count * average_time, average_time, task_count)
         free_nodes = [node for node in self.node_info if self.__free_slots(node) > 0]
         if not free_nodes:
             return None
@@ -175,7 +182,7 @@ class NodeManager:
                 self.update_ui(GUIEvent.update_unassigned_tasks,
                     len(self.unassigned_tasks))
                 task.note_time('taken from unassigned task queue', 'unassigned time')
-                self.schedule_task(task, node)
+                self.__schedule_task_to_specific_node(task, node)
                 available_slots -= 1
                 if available_slots == 0:
                     return
@@ -186,7 +193,7 @@ class NodeManager:
                     continue
                 for task in reversed(self.__tasks_viable_for_stealing(from_node, node)):
                     if not task.is_completed() and task not in self.tasks_running[node]:
-                        self.schedule_task(task, node)
+                        self.__schedule_task_to_specific_node(task, node)
                         available_slots -= 1
                         if available_slots <= 0:
                             return
@@ -194,24 +201,12 @@ class NodeManager:
 
     @asyncio.coroutine
     def __get_server_conn(self, node):
-        if not node:
-            node = self.__best_node()
-        if not node:
-            return None
+        assert node
         node_sockets = self.all_sockets[node]
         if not node_sockets:
             yield from self.__connect_to_node(node)
         assert node_sockets
         return node_sockets[0][1], node
-
-    def _session_completed(self, session):
-        del self.sessions[session.local_id]
-        self.tasks_running[session.node].remove(session.task)
-        self.__find_work(session.node)
-        if not session.task.session_completed(session):
-            # Give the task high priority.
-            self.schedule_task(session.task, high_priority=True)
-        self.update_ui(GUIEvent.update_node_info, self.node_info)
 
     def process_msg(self, msg):
         session_id, *msg = msg

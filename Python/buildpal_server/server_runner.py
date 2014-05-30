@@ -8,7 +8,6 @@ from time import sleep, time
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
-from subprocess import list2cmdline, Popen
 
 from .header_repository import MapFiles as HeaderRepository
 from .pch_repository import PCHRepository

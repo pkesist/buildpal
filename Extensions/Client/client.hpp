@@ -46,7 +46,7 @@ int createProcess(
     wchar_t const * curDir = 0
 );
 
-typedef int (*FallbackFunction)( void * );
+typedef int (*FallbackFunction)( char const *, void * );
 typedef void * HANDLE;
 
 int distributedCompile(

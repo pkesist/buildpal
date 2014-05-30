@@ -10,11 +10,23 @@ struct CallPyObjInfo
     PyThreadState * * threadState;
 };
 
-int callPyObj( void * vpCallPyObj )
+int callPyObj( char const * reason, void * vpCallPyObj )
 {
     CallPyObjInfo * const callPyObjInfo( reinterpret_cast<CallPyObjInfo *>( vpCallPyObj ) );
     PyEval_RestoreThread( *callPyObjInfo->threadState );
-    PyObject * resultObj = PyObject_Call( callPyObjInfo->callable, callPyObjInfo->args, callPyObjInfo->kwArgs );
+    PyObject * kwArgs;
+    if ( callPyObjInfo->kwArgs )
+    {
+        kwArgs = callPyObjInfo->kwArgs;
+        Py_INCREF( kwArgs );
+    }
+    else
+    {
+        kwArgs = PyDict_New();
+    }
+    PyDict_SetItemString( kwArgs, "reason", PyUnicode_FromString( reason ) );
+    PyObject * resultObj = PyObject_Call( callPyObjInfo->callable, callPyObjInfo->args, kwArgs );
+    Py_DECREF( kwArgs );
     int result;
     if ( !resultObj || !PyLong_Check( resultObj ) )
         result = -2;

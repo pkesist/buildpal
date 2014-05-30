@@ -7,10 +7,11 @@
 #include <iostream>
 #include <windows.h>
 
-int runLocallyFallback( void * vpCompilerExe )
+int runLocallyFallback( char const * reason, void * vpCompilerExe )
 {
     char const * compilerExecutable = static_cast<char const *>( vpCompilerExe );
-    std::cout << "Running command locally...\n";
+    std::cerr
+        << "ERROR: " << reason << "\nRunning command locally...\n";
     return createProcess( compilerExecutable, GetCommandLineA() );
 }
 

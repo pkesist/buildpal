@@ -74,8 +74,10 @@ node[0]=localhost:{}:4
     request.addfinalizer(teardown)
     return manager_thread
 
-def fallback():
-    return -666
+def fallback(**kwargs):
+    if 'reason' in kwargs:
+        print(kwargs['reason'])
+    return 666
 
 @pytest.fixture(scope='function')
 def buildpal_compile(vcenv_and_cl, tmpdir):

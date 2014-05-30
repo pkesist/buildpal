@@ -13,6 +13,7 @@
 #include <deque>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <list>
 #include <memory>
 #include <string>
@@ -205,9 +206,12 @@ namespace
               fallbackParam_( fallbackParam )
         {}
 
-        int complete() const
+        int complete( std::string const & error ) const
         {
-            return fallbackFunction_ ? fallbackFunction_( fallbackParam_ ) : -1;
+            return fallbackFunction_
+                ? fallbackFunction_( error.c_str(), fallbackParam_ )
+                : -1
+            ;
         }
 
     private:
@@ -360,7 +364,6 @@ int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment c
     }
     else
     {
-        std::cerr << "ERROR: CreateProcess()\n";
         return -1;
     }
 }
@@ -394,7 +397,6 @@ int createProcess( char const * appName, char * commandLine, Environment const *
     }
     else
     {
-        std::cerr << "ERROR: CreateProcess()\n";
         return -1;
     }
 }
@@ -464,8 +466,9 @@ int distributedCompile(
         }
             
         boost::system::error_code const error( ::GetLastError(), boost::system::system_category() );
-        std::cerr << "Failed to create pipe '" << pipeName << "'. (" << error.message() << ").\n";
-        return fallback.complete();
+        std::stringstream stream;
+        stream << "Failed to create pipe '" << pipeName << "'. (" << error.message() << ").";
+        return fallback.complete( stream.str() );
     }
     typedef boost::asio::windows::stream_handle StreamType;
 
@@ -474,10 +477,7 @@ int distributedCompile(
 #else
     unsigned long const lport = std::strtoul( portName.data() );
     if ( lport > std::numeric_limits<unsigned short>::max() )
-    {
-        std::cerr << "Failed to parse BP_MANAGER_PORT environment variable value.\n";
-        return fallback.complete();
-    }
+        return fallback.complete( "Failed to parse BP_MANAGER_PORT environment variable value." );
     unsigned short const port = static_cast<unsigned short>( lport );
     
     boost::asio::ip::address localhost;
@@ -485,8 +485,9 @@ int distributedCompile(
     localhost = boost::asio::ip::address::from_string( "127.0.0.1", addressError );
     if ( addressError )
     {
-        std::cerr << "Could not resolve address: " << addressError.message() << '\n';
-        return fallback.complete();
+        std::stringstream stream;
+        stream << "Could not resolve address. (" << addressError.message() << ").";
+        return fallback.complete( stream.str() );
     }
     
     boost::asio::io_service ioService;
@@ -500,8 +501,9 @@ int distributedCompile(
     sock.connect( endpoint, connectError );
     if ( connectError )
     {
-        std::cerr << "Failed to connect to 'localhost:" << port << "'.\n";
-        return fallback.complete();
+        std::stringstream stream;
+        stream << "Failed to connect to 'localhost:" << port << "'.";
+        return fallback.complete( stream.str() );
     }
 #endif
 
@@ -543,8 +545,7 @@ int distributedCompile(
     {
         // ExpandResponseFiles always returns false, even on success.
         // Fixed in trunk, but did not make it to Clang 3.4.
-        //std::cerr << "FATAL: Failed to expand response files.";
-        //return fallback.complete();
+        //return fallback.complete( "Failed to expand response files." );
     }
 
     for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
@@ -556,8 +557,9 @@ int distributedCompile(
     msgSender.send( sock, writeError );
     if ( writeError )
     {
-        std::cerr << "Failed to send message (" << writeError.message() << ").\n";
-        return fallback.complete();
+        std::stringstream stream;
+        stream << "Failed to send message (" << writeError.message() << ").";
+        return fallback.complete( stream.str() );
     }
 
     MsgReceiver receiver;
@@ -567,33 +569,24 @@ int distributedCompile(
         receiver.getMessage( sock, error );
         if ( error )
         {
-            std::cerr << "ERROR: Failed to get message (" << error.message() << ")\n";
-            return fallback.complete();
+            std::stringstream stream;
+            stream << "Failed to get message (" << error.message() << ").";
+            return fallback.complete( stream.str() );
         }
 
         if ( receiver.parts() == 0 )
-        {
-            std::cerr << "ERROR: Empty message\n";
-            return fallback.complete();
-        }
+            return fallback.complete( "Empty message." );
 
         llvm::StringRef const request = receiver.getPart( 0 );
 
         if ( request == "RUN_LOCALLY" )
         {
-            if ( receiver.parts() != 1 )
-            {
-                std::cerr << "ERROR: Invalid message length\n";
-            }
             return createProcess( compilerExecutable, const_cast<char *>( commandLine ), &env, currentPath );
         }
         else if ( request == "EXECUTE_AND_EXIT" )
         {
             if ( receiver.parts() != 2 )
-            {
-                std::cerr << "ERROR: Invalid message length\n";
-                return fallback.complete();
-            }
+                return fallback.complete( "Invalid message length." );
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
             char const compiler[] = "compiler";
@@ -608,10 +601,7 @@ int distributedCompile(
         else if ( request == "EXECUTE_GET_OUTPUT" )
         {
             if ( receiver.parts() != 2 )
-            {
-                std::cerr << "ERROR: Invalid message length\n";
-                return fallback.complete();
-            }
+                return fallback.complete( "Invalid message length." );
 
             llvm::StringRef const commandLine = receiver.getPart( 1 );
             // Running the compiler is implied.
@@ -677,8 +667,9 @@ int distributedCompile(
                 msgSender.send( sock, writeError );
                 if ( writeError )
                 {
-                    std::cerr << "Failed to send message (" << writeError.message() << ").\n";
-                    return fallback.complete();
+                    std::stringstream stream;
+                    stream << "Failed to send message (" << writeError.message() << ").";
+                    return fallback.complete( stream.str() );
                 }
                 CloseHandle( processInfo.hProcess );
                 CloseHandle( processInfo.hThread );
@@ -688,28 +679,15 @@ int distributedCompile(
                 CloseHandle( stdErrWrite );
             }
             else
-            {
-                std::cerr << "ERROR: CreateProcess()\n";
-                return fallback.complete();
-            }
+                return fallback.complete( "Failed to create process." );
         }
         else if ( request == "EXIT" )
         {
             if ( receiver.parts() != 4 )
-            {
-                std::cerr << "ERROR: Invalid message length\n";
-                return fallback.complete();
-            }
-            int result;
-            try
-            {
-                result = std::stoi( receiver.getPart( 1 ).str() );
-            }
-            catch ( std::exception const & )
-            {
-                std::cerr << "ERROR: Failed to parse exit code.\n";
-                return fallback.complete();
-            }
+                return fallback.complete( "Invalid message length." );
+            
+            if ( receiver.getPart( 1 ).size() != 4 )
+                return fallback.complete( "Invalid exit code length." );
 
             llvm::StringRef const stdOut = receiver.getPart( 2 );
             llvm::StringRef const stdErr = receiver.getPart( 3 );
@@ -717,15 +695,17 @@ int distributedCompile(
             DWORD written;
             WriteFile( stdOutHandle, stdOut.data(), stdOut.size(), &written, 0 ); 
             WriteFile( stdErrHandle, stdErr.data(), stdErr.size(), &written, 0 ); 
-            return result;
+
+            unsigned char const * data = reinterpret_cast<unsigned char const *>(
+                receiver.getPart( 1 ).data() );
+            return static_cast<int>( (data[0] << 24) | (data[1] << 16) |
+                data[2] << 8 | data[3] );
         }
         else if ( request == "LOCATE_FILES" )
         {
             if ( receiver.parts() <= 1 )
-            {
-                std::cerr << "ERROR: Invalid message length\n";
-                return fallback.complete();
-            }
+                return fallback.complete( "Invalid message length." );
+
             std::vector<std::string> files;
             // First search relative to compiler dir, then path.
             PathList pathList;
@@ -747,14 +727,16 @@ int distributedCompile(
             msgSender.send( sock, writeError );
             if ( writeError )
             {
-                std::cerr << "Failed to send message (" << writeError.message() << ").\n";
-                return fallback.complete();
+                std::stringstream stream;
+                stream << "Failed to send message (" << writeError.message() << ").\n";
+                return fallback.complete( stream.str() );
             }
         }
         else
         {
-            std::cerr << "ERROR: GOT " << request.str();
-            return fallback.complete();
+            std::stringstream stream;
+            stream << "Invalid request (" << request.str() << ").";
+            return fallback.complete( stream.str() );
         }
     }
 }

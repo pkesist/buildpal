@@ -4,6 +4,7 @@ import os
 import subprocess
 import asyncio
 import sys
+import struct
 import threading
 import pytest
 
@@ -78,13 +79,15 @@ class ExecuteGetOutputTester(ProtocolTester):
         assert retcode != 0
         assert not stdout.memory()
         assert b'missing source filename' in stderr.tobytes()
-        self.send_msg([b'EXIT', b'6132', b'', b''])
+        self.send_msg([b'EXIT', struct.pack('!I', self.expected_exit_code & 0xFFFFFFFF), b'',
+            b''])
 
 class ExitTester(ProtocolTester):
     expected_exit_code = 666
 
     def send_request(self):
-        self.send_msg([b'EXIT', b'666', b'', b''])
+        self.send_msg([b'EXIT', struct.pack('!I', self.expected_exit_code & 0xFFFFFFFF), b'',
+            b''])
 
 class LocateFiles(ProtocolTester):
     expected_exit_code = 3124
@@ -99,7 +102,8 @@ class LocateFiles(ProtocolTester):
         for file, full in zip(self.files, msg):
             assert os.path.basename(full.tobytes()) == file
             assert os.path.isfile(full.tobytes())
-        self.send_msg([b'EXIT', b'3124', b'', b''])
+        self.send_msg([b'EXIT', struct.pack('!I', self.expected_exit_code & 0xFFFFFFFF), b'',
+            b''])
 
 @pytest.fixture(scope='function')
 def buildpal_compile_args(tmpdir, vcenv_and_cl):

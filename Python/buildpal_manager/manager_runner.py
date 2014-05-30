@@ -8,6 +8,8 @@ from .node_manager import NodeManager
 from .console import ConsolePrinter
 from .gui_event import GUIEvent
 
+from struct import pack as struct_pack
+
 import asyncio
 import os
 import sys
@@ -31,6 +33,25 @@ class ClientProcessor(MessageProtocol):
         self.command_processor = None
         self.database_inserter = database_inserter
 
+    def do_exit(self, retcode, stdout, stderr):
+        self.send_msg([b'EXIT', struct_pack('!I', retcode & 0xFFFFFFFF), stdout,
+            stderr])
+        self.close()
+
+    def do_run_locally(self):
+        self.send_msg([b'RUN_LOCALLY'])
+        self.close()
+
+    def do_execute_and_exit(self, cmd):
+        self.send_msg([b'EXECUTE_AND_EXIT', list2cmdline(cmd).encode()])
+        self.close()
+
+    def do_locate_files(self, files):
+        self.send_msg([b'LOCATE_FILES'] + files)
+
+    def do_execute_get_output(self, cmd):    
+        self.send_msg([b'EXECUTE_GET_OUTPUT', list2cmdline(cmd).encode()])
+
     def process_msg(self, msg):
         if self.command_processor is not None:
             self.command_processor.got_data_from_client(msg)
@@ -50,8 +71,7 @@ class ClientProcessor(MessageProtocol):
             self.global_timer, self.update_ui)
 
         if self.command_processor.build_local():
-            self.send_msg([b'RUN_LOCALLY'])
-            self.close()
+            self.do_run_locally()
             return True
 
         if executable in self.compiler_info:

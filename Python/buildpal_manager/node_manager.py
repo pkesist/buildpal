@@ -73,7 +73,7 @@ class NodeManager:
             for h in task.missing_headers:
                 missing_headers += "    {}\n".format(h)
             logging.debug("Compile failure: Missing headers\n%s", missing_headers)
-            task.task_completed('-1', b'', (error + missing_headers).encode())
+            task.task_completed(-1, b'', (error + missing_headers).encode())
             return
         task.note_time('collected from preprocessor', 'preprocessed notification time')
         self.loop.call_soon_threadsafe(self.schedule_task, task)

@@ -2,9 +2,8 @@ from .compile_session import SessionResult
 from .task import Task
 from .gui_event import GUIEvent
 
-from subprocess import list2cmdline
-
 import os
+import struct
 import logging
 from time import time
 
@@ -40,8 +39,7 @@ class ClientTaskCompiler:
             call.append(compiler.set_pch_file_option().format(options.pch_file()))
         call.append(compiler.set_object_name_option().format(task.output))
         call.append(task.source)
-        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',
-            list2cmdline(call).encode()])
+        self.client_conn.do_execute_get_output(call)
 
     def task_done(self, msg):
         assert self.current_task
@@ -79,11 +77,13 @@ class CommandProcessor:
     def request_compiler_info(self, on_completion):
         self.got_compiler_info = on_completion
         self.test_source = self.compiler.prepare_test_source()
-        self.client_conn.send_msg([b'EXECUTE_GET_OUTPUT',
-            list2cmdline(self.test_source.command()).encode()])
+        self.client_conn.do_execute_get_output(self.test_source.command())
         self.state = self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT
 
     def got_data_from_client(self, msg):
+        def pack_retcode(retcode):
+            return struct.pack('!I', retcode & 0xFFFFFFFF)
+
         if self.state == self.STATE_WAIT_FOR_COMPILER_INFO_OUTPUT:
             self.test_source.destroy()
             del self.test_source
@@ -92,18 +92,18 @@ class CommandProcessor:
             stderr = msg[2].tobytes()
             try:
                 if retcode != 0:
-                    self.client_conn.send_msg([b'{}'.format(retcode), b'',
+                    self.client_conn.do_exit(retcode,
                         b"BuildPal - failed to run test compile.\r\n" + stdout,
-                        stderr])
+                        stderr)
                     return
                 self.compiler_info, self.tmp_compiler_files = \
                     self.compiler.get_compiler_info(self.executable, stdout,
                     stderr)
             except Exception:
                 # Failed to identify compiler.
-                self.client_conn.send_msg([b'RUN_LOCALLY'])
+                self.client_conn.do_run_locally()
             else:
-                self.client_conn.send_msg([b'LOCATE_FILES'] + self.tmp_compiler_files)
+                self.client_conn.do_locate_files(self.tmp_compiler_files)
                 self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
             assert len(msg) == len(self.tmp_compiler_files)
@@ -188,29 +188,28 @@ class CommandProcessor:
         return self.__options.should_invoke_linker()
 
     def postprocess(self, result):
-        error_code = None
+        exit_error_code = 0
         stdout = b''
         stderr = b''
         objects = {}
         for task in self.completed_tasks:
             retcode, tmp_stdout, tmp_stderr = result
             if retcode != 0:
-                error_code = str(retcode).encode()
+                exit_error_code = retcode
             else:
                 objects[task.source] = task.output
             stdout += tmp_stdout
             stderr += tmp_stderr
 
-        if error_code:
-            logging.debug("Exiting with error code {}".format(error_code))
-            self.client_conn.send_msg([b'EXIT', error_code, stdout, stderr])
-            self.client_conn.close()
+        if exit_error_code:
+            logging.debug("Exiting with error code {}".format(exit_error_code))
+            print(type(exit_error_code))
+            self.client_conn.do_exit(exit_error_code, stdout, stderr)
             return
 
         if not self.should_invoke_linker():
             logging.debug("Exiting with success error code")
-            self.client_conn.send_msg([b'EXIT', b'0', stdout, stderr])
-            self.client_conn.close()
+            self.client_conn.do_exit(0, stdout, stderr)
             return
 
         call = []
@@ -224,8 +223,7 @@ class CommandProcessor:
         if link_opts:
             call.extend(*link_opts)
 
-        self.client_conn.send_msg([b'EXECUTE_AND_EXIT', list2cmdline(call).encode()])
-        self.client_conn.close()
+        self.client_conn.do_execute_and_exit(call)
 
     def get_info(self):
         assert self.tasks_with_sessions_done == self.tasks

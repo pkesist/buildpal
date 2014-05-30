@@ -109,17 +109,6 @@ class build_clang(Command):
                 os.path.abspath(ninja_command.ninja_exe), llvm_info, clang_info,
                 self.clang_src_dir, self.build_base, True)
 
-        #build_ext = self.get_finalized_command('build_ext')
-        #build_ext.include_dirs.extend([
-        #    os.path.join(build_dir, 'include'),
-        #    os.path.join(build_dir, 'tools', 'clang', 'include'),
-        #    os.path.join(self.clang_src_dir, 'include'),
-        #    os.path.join(self.clang_src_dir, 'tools', 'clang', 'include')])
-        #build_ext.library_dirs.append(os.path.join(build_dir, 'lib'))
-        #build_ext.libraries.extend(self.__clang_libs)
-        #if self.compiler == 'mingw32':
-        #    build_ext.libraries.append('imagehlp')
-
     def __build_clang(self, cmake_exe, ninja_exe, llvm_info, clang_info,
             clang_src_dir, cache_dir, x64):
         build_dir = self.get_build_dir_x64() if x64 else self.get_build_dir_x86()

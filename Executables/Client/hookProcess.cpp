@@ -124,6 +124,18 @@ class DistributedCompileParams
         createProcessParams_.dwCreationFlags = cpParams.dwCreationFlags;
         createProcessParams_.lpEnvironment = cpParams.lpEnvironment;
         createProcessParams_.lpCurrentDirectory = cpParams.lpCurrentDirectory;
+        if ( !createProcessParams_.lpCurrentDirectory )
+        {
+            if ( wide )
+            {
+                std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+                createProcessParams_.lpCurrentDirectory = saveStringW( convert.from_bytes( currentPath_ ).c_str() );
+            }
+            else
+            {
+                createProcessParams_.lpCurrentDirectory = currentPath_;
+            }
+        }
         StartupInfoEx const * lpOrigStartupInfo = (StartupInfoEx const *)cpParams.lpStartupInfo;
         createProcessParams_.lpStartupInfo = saveMemory( lpOrigStartupInfo, lpOrigStartupInfo->cb );
         StartupInfoEx * startupInfo( static_cast<StartupInfoEx *>( createProcessParams_.lpStartupInfo ) );
@@ -503,6 +515,17 @@ bool shortCircuit
     if ( !compiler )
         return false;
 
+    // We must get the current path in case none was given.
+    // The caller might change directory before we get to worker thread.
+    // (and CMake does that)
+    char * curPath;
+    if ( !currentPath )
+    {
+        DWORD size( GetCurrentDirectory( 0, NULL ) );
+        curPath = static_cast<char *>( alloca( size ) );
+        GetCurrentDirectory( size, curPath );
+    }
+
     // We will use this as a result - it is waitable.
     HANDLE eventHandle = CreateEvent( NULL, TRUE, FALSE, NULL );
 
@@ -512,7 +535,7 @@ bool shortCircuit
             "msvc",
             compiler,
             commandLine ? convert.to_bytes( commandLine ).c_str() : 0,
-            currentPath ? convert.to_bytes( currentPath ).c_str() : 0,
+            currentPath ? convert.to_bytes( currentPath ).c_str() : curPath,
             fallback,
             createProcessParams,
             wide

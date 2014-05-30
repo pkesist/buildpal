@@ -75,7 +75,7 @@ class CompileOptions:
         return result
 
     def input_files(self):
-        return list(x for x in itertools.chain(*self.value_dict.get('<input>')) if x != '/FD')
+        return list(x for x in itertools.chain(*self.value_dict.get('<input>', [])) if x != '/FD')
 
     def output_file(self):
         result = self.value_dict.get(self.compiler.object_name_option())

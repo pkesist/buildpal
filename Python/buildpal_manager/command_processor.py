@@ -167,6 +167,10 @@ class CommandProcessor:
             ))
         self.tasks = set(create_task(source, target) for source, target in
             self.__options.files())
+        if not self.tasks:
+            # No idea what the user wanted.
+            self.client_conn.do_run_locally()
+            return []
         self.completed_tasks = set()
         self.tasks_with_sessions_done = set()
         return self.tasks

@@ -1,4 +1,6 @@
 EXPORTS
+    createProcessA
+    createProcessW
     registerCompiler
     setPortName
     Initialize

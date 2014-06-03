@@ -45,34 +45,35 @@ class DistributedCompilation;
 typedef std::shared_ptr<DistributedCompilation> DistributedCompilationPtr;
 typedef std::map<HANDLE, DistributedCompilationPtr> DistributedCompilationInfo;
 
+BOOL WINAPI createProcessA(
+    char const * lpApplicationName,
+    char * lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    BOOL bInheritHandles,
+    DWORD dwCreationFlags,
+    LPVOID lpEnvironment,
+    char const * lpCurrentDirectory,
+    LPSTARTUPINFOA lpStartupInfo,
+    LPPROCESS_INFORMATION lpProcessInformation
+);
+BOOL WINAPI createProcessW(
+    wchar_t const * lpApplicationName,
+    wchar_t * lpCommandLine,
+    LPSECURITY_ATTRIBUTES lpProcessAttributes,
+    LPSECURITY_ATTRIBUTES lpThreadAttributes,
+    BOOL bInheritHandles,
+    DWORD dwCreationFlags,
+    LPVOID lpEnvironment,
+    wchar_t const * lpCurrentDirectory,
+    LPSTARTUPINFOW lpStartupInfo,
+    LPPROCESS_INFORMATION lpProcessInformation
+);
+
+
 class HookProcessAPIHookDesc
 {
 private:
-    static BOOL WINAPI createProcessA(
-        char const * lpApplicationName,
-        char * lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        char const * lpCurrentDirectory,
-        LPSTARTUPINFOA lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation
-    );
-    static BOOL WINAPI createProcessW(
-        wchar_t const * lpApplicationName,
-        wchar_t * lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        wchar_t const * lpCurrentDirectory,
-        LPSTARTUPINFOW lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation
-    );
-
     static BOOL WINAPI closeHandle( HANDLE );
     static BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode );
     static BOOL WINAPI terminateProcess( HANDLE hProcess, UINT uExitCode );
@@ -617,7 +618,7 @@ void setPortName( char const * portName )
     hookData.portName = portName;
 }
 
-BOOL WINAPI HookProcessAPIHookDesc::createProcessA(
+BOOL WINAPI createProcessA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -660,7 +661,7 @@ BOOL WINAPI HookProcessAPIHookDesc::createProcessA(
     return result;
 }
 
-BOOL WINAPI HookProcessAPIHookDesc::createProcessW(
+BOOL WINAPI createProcessW(
     _In_opt_     wchar_t const * lpApplicationName,
     _Inout_opt_  wchar_t * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,

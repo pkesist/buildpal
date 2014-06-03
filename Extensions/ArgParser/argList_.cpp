@@ -29,11 +29,14 @@ static PyModuleDef parseArgsModule = {
 
 typedef struct {
     PyObject_HEAD
+    PyObject * inputList;
     llvm::opt::InputArgList * argList;
 } PyArgList;
 
 void PyArgList_dealloc( PyArgList * self )
 {
+    Py_XDECREF( self->inputList );
+    self->inputList = 0;
     delete self->argList;
     Py_TYPE(self)->tp_free( (PyObject *)self );
 }
@@ -59,7 +62,7 @@ int PyArgList_init( PyArgList * self, PyObject * args, PyObject * kwds )
     if ( !argList || !PyList_Check( argList ) )
     {
         PyErr_SetString( PyExc_Exception, "Parameter must be a list of arguments." );
-        return 0;
+        return -1;
     }
 
     std::size_t const argCount = PyList_Size( argList );
@@ -70,12 +73,12 @@ int PyArgList_init( PyArgList * self, PyObject * args, PyObject * kwds )
         if ( !PyUnicode_Check( listItem ) )
         {
             PyErr_SetString( PyExc_Exception, "Found non-string argument." );
-            return 0;
+            return -1;
         }   
         argListCPtrs[ index ] = PyUnicode_AsUTF8( listItem );
     }
-
-
+    self->inputList = argList;
+    Py_INCREF( self->inputList );
     unsigned missingArgIndex, missingArgCount;
     self->argList = unaliasedOptTable().ParseArgs( &argListCPtrs[0], &argListCPtrs[0] + argCount, missingArgIndex, missingArgCount );
     return 0;

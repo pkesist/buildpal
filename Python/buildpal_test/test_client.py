@@ -8,7 +8,6 @@ import struct
 import threading
 import pytest
 
-sys.path.append('..')
 from buildpal_common import MessageProtocol
 
 class ProtocolTester(MessageProtocol):

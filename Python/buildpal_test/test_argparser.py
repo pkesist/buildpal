@@ -25,4 +25,10 @@ def test_input_files(input, expected):
     options = MSVCCompiler.parse_options(input)
     assert set(options.input_files()) == expected
 
+@pytest.mark.parametrize(("input", "expected"), (
+    (['/D_ASDF', '/D_FDSA'], {'_ASDF', '_FDSA'}),
+))
+def test_macro_defs(input, expected):
+    options = MSVCCompiler.parse_options(input)
+    assert set(options.defines()) == expected
 

@@ -264,9 +264,9 @@ DWORD replaceIATEntries( HMODULE module, PROC const * original, PROC const * rep
                     continue;
 
                 DWORD dwOld;
-                VirtualProtect(ppfn, sizeof(PROC *), PAGE_READWRITE, &dwOld);
+                while( !VirtualProtect(ppfn, sizeof(PROC *), PAGE_READWRITE, &dwOld) );
                 *ppfn = replacement[ procIndex ];
-                VirtualProtect(ppfn, sizeof(PROC *), dwOld, &dwOld);
+                while( !VirtualProtect(ppfn, sizeof(PROC *), dwOld, &dwOld) );
                 ++installedHooks;
             }
         }

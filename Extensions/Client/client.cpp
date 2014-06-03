@@ -347,7 +347,7 @@ int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment c
         NULL,
         FALSE,
         0,
-        env->createEnvBlock(),
+        env ? env->createEnvBlock() : 0,
         currentDirectory,
         &startupInfo,
         &processInfo
@@ -380,7 +380,7 @@ int createProcess( char const * appName, char * commandLine, Environment const *
         NULL,
         FALSE,
         0,
-        env->createEnvBlock(),
+        env ? env->createEnvBlock() : 0,
         currentDirectory,
         &startupInfo,
         &processInfo

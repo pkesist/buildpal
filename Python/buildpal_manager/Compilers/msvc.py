@@ -75,7 +75,24 @@ class CompileOptions:
         return result
 
     def input_files(self):
-        return list(x for x in itertools.chain(*self.value_dict.get('<input>', [])) if x != '/FD')
+        # All files explicitly set to C
+        for x in itertools.chain(*self.value_dict.get('Tc', [])):
+            yield x
+        # All files explicitly set to CPP
+        for x in itertools.chain(*self.value_dict.get('Tp', [])):
+            yield x
+
+        # Treat all files as X.
+        all_inputs_are_sources = 'TC' in self.option_names or \
+            'TP' in self.option_names
+        for x in itertools.chain(*self.value_dict.get('<input>', [])):
+            # Not recognized by Clang argument parser.
+            if x == '/FD':
+                continue
+            elif all_inputs_are_sources:
+                yield x
+            elif os.path.splitext(x)[1].lower() in ['.c', '.cc', '.cxx', '.cpp']:
+                yield x
 
     def output_file(self):
         result = self.value_dict.get(self.compiler.object_name_option())
@@ -85,7 +102,7 @@ class CompileOptions:
         return result[-1][0]
 
     def files(self):
-        sources = self.input_files()
+        sources = list(self.input_files())
         output = self.output_file()
         if output:
             if output[-1] == os.path.sep or output[-1] == os.path.altsep:
@@ -136,7 +153,13 @@ class MSVCCompiler:
 
     @classmethod
     def build_local_options(cls): 
-        return ['E', 'EP', 'P', 'Zg', 'Zs', 'Yc']
+        return [
+            'E', 'EP', 'P', # Preprocess
+            'Zg', # Create prototype, do not compile
+            'Zs', # Check syntax only
+            'Yc', # Create PCH
+            'FA', 'Fa', # Create ASM listing
+        ]
 
     @classmethod
     def link_option(cls):

@@ -195,19 +195,15 @@ class CommandProcessor:
         exit_error_code = 0
         stdout = b''
         stderr = b''
-        objects = {}
         for task in self.completed_tasks:
             retcode, tmp_stdout, tmp_stderr = result
             if retcode != 0:
                 exit_error_code = retcode
-            else:
-                objects[task.source] = task.output
             stdout += tmp_stdout
             stderr += tmp_stderr
 
         if exit_error_code:
             logging.debug("Exiting with error code {}".format(exit_error_code))
-            print(type(exit_error_code))
             self.client_conn.do_exit(exit_error_code, stdout, stderr)
             return
 
@@ -217,9 +213,11 @@ class CommandProcessor:
             return
 
         call = []
+        input_to_output = dict(x for x in self.__options.files())
         for input in self.__options.input_files():
-            if input in objects:
-                call.append(objects[input])
+            output = input_to_output.get(input)
+            if output:
+                call.append(output)
             else:
                 call.append(input)
 

@@ -6,8 +6,6 @@
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
-#include <boost/mpl/vector.hpp>
-#include <boost/mpl/for_each.hpp>
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/FileSystem.h>
@@ -23,240 +21,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <psapi.h>
-
-struct StartupInfoEx
-{
-    DWORD  cb;
-    void * lpReserved;
-    void * lpDesktop;
-    void * lpTitle;
-    DWORD  dwX;
-    DWORD  dwY;
-    DWORD  dwXSize;
-    DWORD  dwYSize;
-    DWORD  dwXCountChars;
-    DWORD  dwYCountChars;
-    DWORD  dwFillAttribute;
-    DWORD  dwFlags;
-    WORD   wShowWindow;
-    WORD   cbReserved2;
-    LPBYTE lpReserved2;
-    HANDLE hStdInput;
-    HANDLE hStdOutput;
-    HANDLE hStdError;
-    PPROC_THREAD_ATTRIBUTE_LIST lpAttributeList;
-};
-
-struct CreateProcessParams
-{
-    void const * lpApplicationName;
-    void       * lpCommandLine;
-    LPSECURITY_ATTRIBUTES lpProcessAttributes;
-    LPSECURITY_ATTRIBUTES lpThreadAttributes;
-    BOOL bInheritHandles;
-    DWORD dwCreationFlags;
-    void       * lpEnvironment;
-    void const * lpCurrentDirectory;
-    void       * lpStartupInfo;
-    LPPROCESS_INFORMATION lpProcessInformation;
-};
-
-class DistributedCompileParams
-{
-    std::deque<std::vector<unsigned char> > stringSaver_;
-
-    HANDLE eventHandle_;
-    char const * compilerToolset_;
-    char const * compilerExecutable_;
-    char const * commandLine_;
-    char const * currentPath_;
-    FallbackFunction fallback_;
-    Environment environment_;
-    CreateProcessParams createProcessParams_;
-    bool completed_;
-    bool terminated_;
-    DWORD exitCode_;
-    HANDLE stdOutHandle_;
-    HANDLE stdErrHandle_;
-
-    template <typename T>
-    T * saveString( T const * ptr, std::size_t size )
-    {
-        if ( !ptr )
-            return 0;
-        unsigned char const * start = reinterpret_cast<unsigned char const *>( ptr );
-        stringSaver_.push_back( std::vector<unsigned char>( start, start + size * sizeof(T) ) );
-        return reinterpret_cast<T *>( &stringSaver_.back()[0] );
-    }
-
-    void * saveMemory( void const * ptr, std::size_t size )
-    {
-        return saveString<char>( static_cast<char const *>( ptr ), size );
-    }
-
-    wchar_t * saveStringW( wchar_t const * ptr )
-    {
-        return saveString<wchar_t>( ptr, ptr ? wcslen( ptr ) + 1 : 0 );
-    }
-
-    char const * saveStringA( char const * str )
-    {
-        return saveString<char>( str, str ? strlen( str ) + 1 : 0 );
-    }
-
-    void storeCreateProcessParams( CreateProcessParams const & cpParams, bool const wide )
-    {
-        // Store and adjust parameters user sent to CreateProcess function.
-        // User will get the chance to destroy these structures, so we should
-        // make sure to copy anything we need beforehand.
-
-        // Save all strings.
-        typedef void * (DistributedCompileParams::* StringSaver)(void const *);
-        StringSaver stringSaver = wide
-            ? (StringSaver)(&DistributedCompileParams::saveStringW)
-            : (StringSaver)(&DistributedCompileParams::saveStringA)
-        ;
-        createProcessParams_.lpApplicationName = (this->*stringSaver)(cpParams.lpApplicationName);
-        createProcessParams_.lpCommandLine = (this->*stringSaver)(cpParams.lpCommandLine);
-        createProcessParams_.lpProcessAttributes = cpParams.lpProcessAttributes;
-        createProcessParams_.lpThreadAttributes = cpParams.lpThreadAttributes;
-        createProcessParams_.bInheritHandles = cpParams.bInheritHandles;
-        createProcessParams_.dwCreationFlags = cpParams.dwCreationFlags;
-        createProcessParams_.lpEnvironment = cpParams.lpEnvironment;
-        createProcessParams_.lpCurrentDirectory = cpParams.lpCurrentDirectory;
-        if ( !createProcessParams_.lpCurrentDirectory )
-        {
-            if ( wide )
-            {
-                std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-                createProcessParams_.lpCurrentDirectory = saveStringW( convert.from_bytes( currentPath_ ).c_str() );
-            }
-            else
-            {
-                createProcessParams_.lpCurrentDirectory = currentPath_;
-            }
-        }
-        StartupInfoEx const * lpOrigStartupInfo = (StartupInfoEx const *)cpParams.lpStartupInfo;
-        createProcessParams_.lpStartupInfo = saveMemory( lpOrigStartupInfo, lpOrigStartupInfo->cb );
-        StartupInfoEx * startupInfo( static_cast<StartupInfoEx *>( createProcessParams_.lpStartupInfo ) );
-
-        if ( ( createProcessParams_.dwCreationFlags & EXTENDED_STARTUPINFO_PRESENT ) != 0 )
-        {
-            // The user sent STARTUPINFOEX, not STARTUPINFO.
-            // It would be a nightmare to keep the extended part alive until we
-            // (might) need it. At this point we are certain that we are running
-            // the compiler, so just slice off the extended part.
-            //
-            // Note that we could just copy the pointer and hope that the target
-            // structure does not go out of scope. It seems to work in practice,
-            // but I'd rather not.
-            createProcessParams_.dwCreationFlags &= ~EXTENDED_STARTUPINFO_PRESENT;
-            // Probably unnecessary, but can't hurt.
-            startupInfo->cb = sizeof(STARTUPINFO);
-        }
-        // Remove suspended flag
-        createProcessParams_.dwCreationFlags &= ~CREATE_SUSPENDED;
-
-        startupInfo->lpReserved = (this->*stringSaver)(startupInfo->lpReserved);
-        startupInfo->lpDesktop  = (this->*stringSaver)(startupInfo->lpDesktop );
-        startupInfo->lpTitle    = (this->*stringSaver)(startupInfo->lpTitle   );
-
-        createProcessParams_.lpProcessInformation = cpParams.lpProcessInformation;
-
-        bool const hookHandles( ( startupInfo->dwFlags & STARTF_USESTDHANDLES ) != 0 );
-        if ( hookHandles )
-        {
-            HANDLE const currentProcess = GetCurrentProcess(); 
-            if ( startupInfo->hStdOutput != INVALID_HANDLE_VALUE )
-            {
-                DuplicateHandle( currentProcess, startupInfo->hStdOutput,
-                    currentProcess, &stdOutHandle_, 0, FALSE,
-                    DUPLICATE_SAME_ACCESS );
-                startupInfo->hStdOutput = stdOutHandle_;
-            }
-
-            if ( startupInfo->hStdError != INVALID_HANDLE_VALUE )
-            {
-                DuplicateHandle( currentProcess, startupInfo->hStdError,
-                    currentProcess, &stdErrHandle_, 0, FALSE,
-                    DUPLICATE_SAME_ACCESS );
-            }
-            startupInfo->hStdError = stdErrHandle_;
-        }
-    }
-
-private:
-    // Noncopyable
-    DistributedCompileParams( DistributedCompileParams const & );
-    DistributedCompileParams operator=( DistributedCompileParams const & );
-    DistributedCompileParams( DistributedCompileParams && );
-    DistributedCompileParams operator=( DistributedCompileParams && );
-
-public:
-    DistributedCompileParams
-    (
-        HANDLE eventHandle,
-        char const * compilerToolset,
-        char const * compilerExecutable,
-        char const * commandLine,
-        char const * currentPath,
-        FallbackFunction fallback,
-        CreateProcessParams const & createProcessParams,
-        bool wide
-    )
-        :
-        eventHandle_( eventHandle ),
-        compilerToolset_( saveStringA( compilerToolset ) ),
-        compilerExecutable_( saveStringA( compilerExecutable ) ),
-        commandLine_( saveStringA( commandLine ) ),
-        currentPath_( saveStringA( currentPath ) ),
-        environment_( createProcessParams.lpEnvironment,
-            ( createProcessParams.dwCreationFlags |
-            CREATE_UNICODE_ENVIRONMENT ) != 0 ),
-        fallback_( fallback ),
-        completed_( false ),
-        terminated_( false ),
-        exitCode_( 0 ),
-        stdOutHandle_( 0 ),
-        stdErrHandle_( 0 )
-    {
-        storeCreateProcessParams( createProcessParams, wide );
-    }
-
-    HANDLE eventHandle() const { return eventHandle_; }
-    char const * compilerToolset() const { return compilerToolset_; }
-    char const * compilerExecutable() const { return compilerExecutable_; }
-    char const * commandLine() const { return commandLine_; }
-    char const * currentPath() const { return currentPath_; }
-    FallbackFunction fallback() const { return fallback_; }
-    CreateProcessParams * cpParams() { return &createProcessParams_; }
-    Environment & environment() { return environment_; }
-    HANDLE stdOutHandle() const { return stdOutHandle_; }
-    HANDLE stdErrHandle() const { return stdErrHandle_; }
-
-    bool complete( DWORD exitCode )
-    {
-        if ( stdOutHandle_ ) CloseHandle( stdOutHandle_ );
-        if ( stdErrHandle_ ) CloseHandle( stdErrHandle_ );
-        if ( terminated_ )
-            return false;
-        completed_ = true;
-        exitCode_ = (DWORD)exitCode;
-        return true;
-    }
-
-    void terminate( DWORD exitCode )
-    {
-        if ( stdOutHandle_ ) CloseHandle( stdOutHandle_ );
-        if ( stdErrHandle_ ) CloseHandle( stdErrHandle_ );
-        terminated_ = true;
-        exitCode_ = (DWORD)exitCode;
-    }
-
-    bool completed() const { return completed_; }
-    bool terminated() const { return terminated_; }
-    DWORD exitCode() const { return exitCode_; }
-};
 
 typedef llvm::sys::fs::file_status FileStatus;
 bool getFileStatus( llvm::StringRef path, FileStatus & result )
@@ -277,10 +41,11 @@ struct CompilerExecutables
     }
 };
 
-typedef std::shared_ptr<DistributedCompileParams> DistributedCompileParamsPtr;
-typedef std::map<HANDLE, DistributedCompileParamsPtr> DistributedCompileParamsInfo;
+class DistributedCompilation;
+typedef std::shared_ptr<DistributedCompilation> DistributedCompilationPtr;
+typedef std::map<HANDLE, DistributedCompilationPtr> DistributedCompilationInfo;
 
-class HookProcessAPIHookTraits
+class HookProcessAPIHookDesc
 {
 private:
     static BOOL WINAPI createProcessA(
@@ -324,14 +89,14 @@ public:
 
         CompilerExecutables compilers;
         std::string portName;
-        DistributedCompileParamsInfo distributedCompileParamsInfo;
+        DistributedCompilationInfo distributedCompilationInfo;
         std::recursive_mutex mutex;
     };
 };
 
-char const HookProcessAPIHookTraits::moduleName[] = "kernel32.dll";
+char const HookProcessAPIHookDesc::moduleName[] = "kernel32.dll";
 
-APIHookItem const HookProcessAPIHookTraits::items[] = 
+APIHookItem const HookProcessAPIHookDesc::items[] = 
 {
     { "CreateProcessA"    , (PROC)createProcessA     },
     { "CreateProcessW"    , (PROC)createProcessW     },
@@ -341,9 +106,341 @@ APIHookItem const HookProcessAPIHookTraits::items[] =
     { "ExitProcess"       , (PROC)exitProcess        }
 };
 
-unsigned int const HookProcessAPIHookTraits::itemsCount = sizeof(items) / sizeof(items[0]);
+unsigned int const HookProcessAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
 
-typedef APIHooks<HookProcessAPIHookTraits> HookProcessAPIHooks;
+typedef APIHooks<HookProcessAPIHookDesc> HookProcessAPIHooks;
+
+template <typename CharType>
+class StringSaver
+{
+    typedef std::basic_string<CharType> StringType;
+    typedef std::deque<StringType> Storage;
+    Storage storage_;
+
+public:
+    CharType * save( CharType const * str )
+    {
+        if ( !str ) return NULL;
+        storage_.push_back( str );
+        return &storage_.back()[ 0 ];
+    }
+};
+
+typedef std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> WideConverter;
+
+struct StartupInfoEx : public STARTUPINFOW
+{
+    StartupInfoEx( LPSTARTUPINFOA si, StringSaver<wchar_t> & s, WideConverter & c )
+    {
+        static_cast<STARTUPINFOW &>( *this ) = *reinterpret_cast<LPSTARTUPINFOW>( si );
+        this->lpReserved = widen( s, c, si->lpReserved );
+        this->lpDesktop = widen( s, c, si->lpDesktop );
+        this->lpTitle = widen( s, c, si->lpTitle );
+    }
+
+    StartupInfoEx( LPSTARTUPINFOW si )
+    {
+        static_cast<STARTUPINFOW &>( *this ) = *si;
+    }
+
+    void saveInfo( StringSaver<wchar_t> & saver )
+    {
+        lpReserved = saver.save( lpReserved );
+        lpDesktop = saver.save( lpDesktop );
+        lpTitle = saver.save( lpTitle );
+    }
+
+    static wchar_t * widen( StringSaver<wchar_t> & saver, WideConverter & converter, char const * str )
+    {
+        if ( !str )
+            return NULL;
+        return saver.save( converter.from_bytes( str ).c_str() );
+    }
+};
+
+struct CreateProcessParams
+{
+    typedef std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> WideConverter;
+
+    bool savedInfo_;
+    bool stringsCopied_;
+
+    CreateProcessParams( char const * appName, char * commandLine,
+        LPSECURITY_ATTRIBUTES procAttr, LPSECURITY_ATTRIBUTES threadAttr,
+        BOOL inherit, DWORD flags, void * env, char const * curDir,
+        LPSTARTUPINFOA pStartupInfo )
+        :
+        savedInfo_( false ),
+        stringSaver_( new StringSaver<wchar_t>() ),
+        stringsCopied_( true ),
+        lpApplicationName( widen( appName ) ),
+        lpCommandLine( widen( commandLine ) ),
+        lpProcessAttributes( procAttr ),
+        lpThreadAttributes( threadAttr ),
+        bInheritHandles( inherit ),
+        dwCreationFlags( flags ),
+        environment( env, ( flags & CREATE_UNICODE_ENVIRONMENT ) != 0 ),
+        lpCurrentDirectory( widen( curDir ) ),
+        startupInfo( pStartupInfo, *stringSaver_, converter_ )
+    {
+    }
+
+    CreateProcessParams( wchar_t const * appName, wchar_t * commandLine,
+        LPSECURITY_ATTRIBUTES procAttr, LPSECURITY_ATTRIBUTES threadAttr,
+        BOOL inherit, DWORD flags, void * env, wchar_t const * curDir,
+        LPSTARTUPINFOW pStartupInfo )
+        :
+        savedInfo_( false ),
+        stringsCopied_( false ),
+        lpApplicationName( appName ),
+        lpCommandLine( commandLine ),
+        lpProcessAttributes( procAttr ),
+        lpThreadAttributes( threadAttr ),
+        bInheritHandles( inherit ),
+        dwCreationFlags( flags ),
+        environment( env, ( flags & CREATE_UNICODE_ENVIRONMENT ) != 0 ),
+        lpCurrentDirectory( curDir ),
+        startupInfo( pStartupInfo )
+    {
+    }
+
+    ~CreateProcessParams()
+    {
+        if ( savedInfo_ )
+        {
+            CloseHandle( startupInfo.hStdOutput );
+            CloseHandle( startupInfo.hStdError );
+        }
+    }
+
+    std::shared_ptr<StringSaver<wchar_t> > stringSaver_;
+    WideConverter converter_;
+    wchar_t const * lpApplicationName;
+    wchar_t * lpCommandLine;
+    LPSECURITY_ATTRIBUTES lpProcessAttributes;
+    LPSECURITY_ATTRIBUTES lpThreadAttributes;
+    BOOL bInheritHandles;
+    DWORD dwCreationFlags;
+    Environment environment;
+    wchar_t const * lpCurrentDirectory;
+    StartupInfoEx startupInfo;
+
+    void saveInfo()
+    {
+        if ( savedInfo_ )
+            return;
+
+        savedInfo_ = true;
+
+        // Ignore STARTUPINFOEX, use only STARTUPINFO.
+        // It would be a nightmare to keep the extended part alive until we
+        // (might) need it. At this point we are certain that we are running
+        // the compiler, so just slice off the extended part.
+        //
+        // Note that we could just copy the EX pointer and hope that the target
+        // structure does not go out of scope. It seems to work in practice,
+        // but I'd rather not.
+        dwCreationFlags &= ~EXTENDED_STARTUPINFO_PRESENT;
+
+        // Remove suspended flag
+        dwCreationFlags &= ~CREATE_SUSPENDED;
+
+        // We will always send narrow environment.
+        dwCreationFlags &= ~CREATE_UNICODE_ENVIRONMENT;
+
+        // Store current directory. The caller might change it by the time we
+        // spawn worker thread. (CMake does that)
+        if ( !lpCurrentDirectory )
+        {
+            DWORD size( GetCurrentDirectoryW( 0, NULL ) );
+            wchar_t * curPath = static_cast<wchar_t *>( alloca( size * sizeof(wchar_t) ) );
+            GetCurrentDirectoryW( size, curPath );
+            if ( stringsCopied_ )
+                lpCurrentDirectory = store( curPath );
+            else
+                lpCurrentDirectory = curPath;
+        }
+
+        // Store stdout/stderr handles. Create duplicates, as user is free to
+        // close handles after successful CreateProcess call.
+        bool const hookHandles( ( startupInfo.dwFlags & STARTF_USESTDHANDLES ) != 0 );
+        startupInfo.dwFlags |= STARTF_USESTDHANDLES;
+        HANDLE const currentProcess = GetCurrentProcess(); 
+        if ( !hookHandles || ( startupInfo.hStdOutput == INVALID_HANDLE_VALUE ) )
+            startupInfo.hStdOutput =  GetStdHandle( STD_OUTPUT_HANDLE );
+        DuplicateHandle( currentProcess, startupInfo.hStdOutput,
+            currentProcess, &startupInfo.hStdOutput, 0, TRUE,
+            DUPLICATE_SAME_ACCESS );
+
+        if ( !hookHandles || ( startupInfo.hStdError == INVALID_HANDLE_VALUE ) )
+            startupInfo.hStdError = GetStdHandle( STD_ERROR_HANDLE );
+        DuplicateHandle( currentProcess, startupInfo.hStdError,
+            currentProcess, &startupInfo.hStdError, 0, TRUE,
+            DUPLICATE_SAME_ACCESS );
+
+        if ( stringsCopied_ )
+            return;
+
+        stringSaver_.reset( new StringSaver<wchar_t>() );
+        lpApplicationName = store( lpApplicationName );
+        lpCommandLine = store( lpCommandLine );
+        lpCurrentDirectory = store( lpCurrentDirectory );
+        startupInfo.saveInfo( *stringSaver_ );
+        stringsCopied_ = true;
+    }
+
+    wchar_t * widen( char const * str )
+    {
+        if ( !str )
+            return NULL;
+        return stringSaver_->save( converter_.from_bytes( str ).c_str() );
+    }
+
+    wchar_t * store( wchar_t const * str )
+    {
+        if ( !str )
+            return NULL;
+        return stringSaver_->save( str );
+    }
+};
+
+class DistributedCompilation
+{
+    std::deque<std::vector<unsigned char> > stringSaver_;
+
+    HANDLE eventHandle_;
+    char const * compilerToolset_;
+    char const * compilerExecutable_;
+    FallbackFunction fallback_;
+    std::unique_ptr<CreateProcessParams> cpParams_;
+    bool completed_;
+    DWORD exitCode_;
+
+private:
+    // Noncopyable
+    DistributedCompilation( DistributedCompilation const & );
+    DistributedCompilation operator=( DistributedCompilation const & );
+    DistributedCompilation( DistributedCompilation && );
+    DistributedCompilation operator=( DistributedCompilation && );
+
+    static int fallbackFunction( char const * /*reason*/, void * params )
+    {
+        DistributedCompilation * pdcp = (DistributedCompilation *)params;
+        return pdcp->fallback();
+    }
+
+    int fallback()
+    {
+        PROCESS_INFORMATION processInfo;
+        BOOL const cpResult = CreateProcessW(
+            cpParams_->lpApplicationName,
+            cpParams_->lpCommandLine,
+            cpParams_->lpProcessAttributes,
+            cpParams_->lpThreadAttributes,
+            TRUE,
+            cpParams_->dwCreationFlags,
+            cpParams_->environment.createEnvBlock(),
+            cpParams_->lpCurrentDirectory,
+            reinterpret_cast<LPSTARTUPINFOW>( &cpParams_->startupInfo ),
+            &processInfo
+        );
+        if ( !cpResult )
+        {
+            // This is really bad. We already told the user that we successfully
+            // created the process, and now the fallback failed to do that.
+            // Best we can do is return some error code and walk away whistling.
+            return -1;
+        }
+        WaitForSingleObject( processInfo.hProcess, INFINITE );
+        std::int32_t result;
+        GetExitCodeProcess( processInfo.hProcess, (DWORD *)&result );
+        CloseHandle( processInfo.hThread );
+        CloseHandle( processInfo.hProcess );
+        return result;
+    }
+
+    static DWORD WINAPI distributedCompileWorker( void * params )
+    {
+        DistributedCompilation * pdcp = (DistributedCompilation *)params;
+        return pdcp->distributedCompile();
+    }
+
+    DWORD distributedCompile()
+    {
+        WideConverter converter;
+        std::string const commandLine( converter.to_bytes( cpParams_->lpCommandLine ) );
+        std::string const currentPath( converter.to_bytes( cpParams_->lpCurrentDirectory ) );
+
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        int result = ::distributedCompile(
+            compilerToolset_,
+            compilerExecutable_,
+            cpParams_->environment,
+            commandLine.c_str(),
+            currentPath.c_str(),
+            hookData.portName.c_str(),
+            fallbackFunction,
+            this,
+            cpParams_->startupInfo.hStdOutput,
+            cpParams_->startupInfo.hStdError
+        );
+        {
+            std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+            if ( !complete( (DWORD)result ) )
+                return 0;
+        }
+        SetEvent( eventHandle_ );
+        return 0;
+    }
+
+public:
+    DistributedCompilation
+    (
+        HANDLE eventHandle,
+        char const * compilerToolset,
+        char const * compilerExecutable,
+        CreateProcessParams const & cpParams
+    )
+        :
+        eventHandle_( eventHandle ),
+        compilerToolset_( compilerToolset ),
+        compilerExecutable_( compilerExecutable ),
+        cpParams_( new CreateProcessParams( cpParams ) ), 
+        completed_( false ),
+        exitCode_( 0 )
+    {
+        cpParams_->saveInfo();
+    }
+
+    bool complete( DWORD exitCode )
+    {
+        if ( completed_ )
+            return false;
+        cpParams_.reset();
+        completed_ = true;
+        exitCode_ = (DWORD)exitCode;
+        return true;
+    }
+
+    bool completed() const { return completed_; }
+    DWORD exitCode() const { return exitCode_; }
+
+    void startThread( LPPROCESS_INFORMATION lpProcessInformation, bool const suspended )
+    {
+        // When faking process id - use a ridiculously large number.
+        lpProcessInformation->dwProcessId = 0x80000000 | ( (DWORD)eventHandle_ >> 1 );
+
+        lpProcessInformation->hThread = CreateThread(
+            NULL,
+            64 * 1024,
+            &distributedCompileWorker,
+            this,
+            suspended ? CREATE_SUSPENDED : 0,
+            &lpProcessInformation->dwThreadId
+        );
+        lpProcessInformation->hProcess = eventHandle_;
+    }
+};
 
 bool hookProcess( HANDLE processHandle )
 {
@@ -359,7 +456,7 @@ bool hookProcess( HANDLE processHandle )
     assert( result );
 
     
-    HookProcessAPIHookTraits::Data const & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookDesc::Data const & hookData( HookProcessAPIHooks::getData() );
     CompilerExecutables::FileMap const & compilerFiles( hookData.compilers.files );
 
     for
@@ -393,7 +490,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
 {
     bool readingPortName = false;
     bool done = false;
-    HookProcessAPIHookTraits::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookDesc::Data & hookData( HookProcessAPIHooks::getData() );
     while ( !done )
     {
         char buffer[ 1024 ];
@@ -433,57 +530,29 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     return 0;
 }
 
-
-DWORD WINAPI distributedCompileWorker( void * params )
-{
-    DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
-
-    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-    int result = distributedCompile(
-        pdcp->compilerToolset(),
-        pdcp->compilerExecutable(),
-        pdcp->environment(),
-        pdcp->commandLine(),
-        pdcp->currentPath(),
-        hookData.portName.c_str(),
-        pdcp->fallback(),
-        pdcp,
-        pdcp->stdOutHandle(),
-        pdcp->stdErrHandle()
-    );
-    {
-        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        if ( !pdcp->complete( (DWORD)result ) )
-            return 0;
-    }
-    SetEvent( pdcp->eventHandle() );
-    return 0;
-}
-
 bool shortCircuit
 (
-    wchar_t const * appName,
-    wchar_t const * commandLine,
-    wchar_t const * currentPath,
-    FallbackFunction fallback,
     CreateProcessParams const & createProcessParams,
-    bool wide
+    LPPROCESS_INFORMATION lpProcessInformation
 )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     FileStatus fileStatus;
     bool haveStatus = false;
     std::string args;
-    if ( appName )
+    if ( createProcessParams.lpApplicationName )
     {
-        haveStatus = getFileStatus( convert.to_bytes( appName ), fileStatus );
+        haveStatus = getFileStatus( convert.to_bytes(
+            createProcessParams.lpApplicationName ), fileStatus );
     }
     else
     {
         int argc;
-        wchar_t * * argv = CommandLineToArgvW( commandLine, &argc );
+        wchar_t * * argv = CommandLineToArgvW(
+            createProcessParams.lpCommandLine, &argc );
         wchar_t buffer[ MAX_PATH ];
         wchar_t * bufferEnd;
+        
         DWORD length = ::SearchPathW( NULL, argv[0], L".exe", MAX_PATH, buffer, &bufferEnd );
         if ( length )
         {
@@ -515,117 +584,25 @@ bool shortCircuit
     if ( !compiler )
         return false;
 
-    // We must get the current path in case none was given.
-    // The caller might change directory before we get to worker thread.
-    // (and CMake does that)
-    char * curPath;
-    if ( !currentPath )
-    {
-        DWORD size( GetCurrentDirectory( 0, NULL ) );
-        curPath = static_cast<char *>( alloca( size ) );
-        GetCurrentDirectory( size, curPath );
-    }
-
-    // We will use this as a result - it is waitable.
+    // Use an event handle to fake process handle to avoid hooking WFSO/WFMO.
     HANDLE eventHandle = CreateEvent( NULL, TRUE, FALSE, NULL );
 
-    DistributedCompileParamsPtr const pDcp(
-        new DistributedCompileParams(
+    DistributedCompilationPtr const pDcp(
+        new DistributedCompilation(
             eventHandle,
             "msvc",
             compiler,
-            commandLine ? convert.to_bytes( commandLine ).c_str() : 0,
-            currentPath ? convert.to_bytes( currentPath ).c_str() : curPath,
-            fallback,
-            createProcessParams,
-            wide
+            createProcessParams
         )
     );
 
     {
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        hookData.distributedCompileParamsInfo.insert( std::make_pair( eventHandle, pDcp ) );
+        hookData.distributedCompilationInfo.insert( std::make_pair( eventHandle, pDcp ) );
     }
 
-    // When faking process id - use a ridiculously large number.
-    DWORD processId = 0x80000000 | ( (DWORD)eventHandle >> 1 );
-
-    DWORD threadId;
-    HANDLE threadHandle = CreateThread(
-        NULL,
-        64 * 1024,
-        &distributedCompileWorker,
-        pDcp.get(),
-        createProcessParams.dwCreationFlags & CREATE_SUSPENDED ? CREATE_SUSPENDED :  0,
-        &threadId
-    );
-    createProcessParams.lpProcessInformation->hProcess = eventHandle;
-    createProcessParams.lpProcessInformation->hThread = threadHandle;
-    createProcessParams.lpProcessInformation->dwProcessId = processId;
-    createProcessParams.lpProcessInformation->dwThreadId = threadId;
+    pDcp->startThread( lpProcessInformation, ( createProcessParams.dwCreationFlags & CREATE_SUSPENDED ) != 0 );
     return true;
-}
-
-int createProcessFallbackA( char const * /*reason*/, void * params )
-{
-    DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
-    PROCESS_INFORMATION processInfo;
-    CreateProcessParams * cpp = pdcp->cpParams();
-    BOOL const cpResult = CreateProcessA(
-        static_cast<char const *>( cpp->lpApplicationName ),
-        static_cast<char       *>( cpp->lpCommandLine ),
-        cpp->lpProcessAttributes,
-        cpp->lpThreadAttributes,
-        cpp->bInheritHandles,
-        cpp->dwCreationFlags,
-        cpp->lpEnvironment,
-        static_cast<char const *>( cpp->lpCurrentDirectory ),
-        reinterpret_cast<LPSTARTUPINFOA>( cpp->lpStartupInfo ),
-        &processInfo
-    );
-    if ( !cpResult )
-    {
-        // This is really bad. We already told the user that we successfully
-        // created the process, and now the fallback failed to do that.
-        // Best we can do is return some error code and walk away whistling.
-        return -1;
-    }
-    WaitForSingleObject( processInfo.hProcess, INFINITE );
-    std::int32_t result;
-    GetExitCodeProcess( processInfo.hProcess, (DWORD *)&result );
-    CloseHandle( processInfo.hThread );
-    CloseHandle( processInfo.hProcess );
-    return result;
-}
-
-int createProcessFallbackW( char const * /*reason*/, void * params )
-{
-    DistributedCompileParams * pdcp = (DistributedCompileParams *)params;
-    PROCESS_INFORMATION processInfo;
-    CreateProcessParams * cpp = pdcp->cpParams();
-    BOOL const cpResult = CreateProcessW(
-        static_cast<wchar_t const *>( cpp->lpApplicationName ),
-        static_cast<wchar_t       *>( cpp->lpCommandLine ),
-        cpp->lpProcessAttributes,
-        cpp->lpThreadAttributes,
-        cpp->bInheritHandles,
-        cpp->dwCreationFlags,
-        cpp->lpEnvironment,
-        static_cast<wchar_t const *>( cpp->lpCurrentDirectory ),
-        reinterpret_cast<LPSTARTUPINFOW>( cpp->lpStartupInfo ),
-        &processInfo
-    );
-    if ( !cpResult )
-    {
-        // See above.
-        return -1;
-    }
-    WaitForSingleObject( processInfo.hProcess, INFINITE );
-    std::int32_t result;
-    GetExitCodeProcess( processInfo.hProcess, (DWORD *)&result );
-    CloseHandle( processInfo.hThread );
-    CloseHandle( processInfo.hProcess );
-    return result;
 }
 
 void registerCompiler( char const * compilerPath )
@@ -640,7 +617,7 @@ void setPortName( char const * portName )
     hookData.portName = portName;
 }
 
-BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
+BOOL WINAPI HookProcessAPIHookDesc::createProcessA(
     _In_opt_     char const * lpApplicationName,
     _Inout_opt_  char * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -653,26 +630,12 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 )
 {
-    CreateProcessParams cpParams = 
-    {
-        lpApplicationName,
-        lpCommandLine,
-        lpProcessAttributes,
-        lpThreadAttributes,
-        bInheritHandles,
-        dwCreationFlags,
-        lpEnvironment,
-        lpCurrentDirectory,
-        lpStartupInfo,
-        lpProcessInformation
-    };
+    CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
+        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+        dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+        lpStartupInfo );
 
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    if ( shortCircuit(
-        lpApplicationName ? convert.from_bytes( lpApplicationName ).c_str() : 0,
-        lpCommandLine ? convert.from_bytes( lpCommandLine ).c_str() : 0,
-        lpCurrentDirectory ? convert.from_bytes( lpCurrentDirectory ).c_str() : 0,
-        createProcessFallbackA, cpParams, false ) )
+    if ( shortCircuit( cpParams, lpProcessInformation ) )
         return 1;
 
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -697,7 +660,7 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessA(
     return result;
 }
 
-BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
+BOOL WINAPI HookProcessAPIHookDesc::createProcessW(
     _In_opt_     wchar_t const * lpApplicationName,
     _Inout_opt_  wchar_t * lpCommandLine,
     _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -710,21 +673,11 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
     _Out_        LPPROCESS_INFORMATION lpProcessInformation
 )
 {
-    CreateProcessParams cpParams = 
-    {
-        lpApplicationName,
-        lpCommandLine,
-        lpProcessAttributes,
-        lpThreadAttributes,
-        bInheritHandles,
-        dwCreationFlags,
-        lpEnvironment,
-        lpCurrentDirectory,
-        lpStartupInfo,
-        lpProcessInformation
-    };
-    if ( shortCircuit( lpApplicationName, lpCommandLine, lpCurrentDirectory,
-            createProcessFallbackW, cpParams, true ) )
+    CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
+        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo );
+
+    if ( shortCircuit( cpParams, lpProcessInformation ) )
         return 1;
 
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
@@ -749,13 +702,13 @@ BOOL WINAPI HookProcessAPIHookTraits::createProcessW(
     return result;
 }
 
-BOOL WINAPI HookProcessAPIHookTraits::getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
+BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
 {
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        DistributedCompileParamsInfo::const_iterator const dcpIter = hookData.distributedCompileParamsInfo.find( hProcess );
-        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
+        DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( hProcess );
+        if ( dcpIter != hookData.distributedCompilationInfo.end() )
         {
             if ( !dcpIter->second->completed() )
                 return STILL_ACTIVE;
@@ -766,27 +719,27 @@ BOOL WINAPI HookProcessAPIHookTraits::getExitCodeProcess( HANDLE hProcess, LPDWO
     return GetExitCodeProcess( hProcess, lpExitCode );
 }
 
-BOOL WINAPI HookProcessAPIHookTraits::closeHandle( HANDLE handle )
+BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
 {
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        DistributedCompileParamsInfo::const_iterator const dcpIter = hookData.distributedCompileParamsInfo.find( handle );
-        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
-            hookData.distributedCompileParamsInfo.erase( dcpIter );
+        DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
+        if ( dcpIter != hookData.distributedCompilationInfo.end() )
+            hookData.distributedCompilationInfo.erase( dcpIter );
     }
     return CloseHandle( handle );
 }
 
-BOOL WINAPI HookProcessAPIHookTraits::terminateProcess( HANDLE handle, UINT uExitCode )
+BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitCode )
 {
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
-        DistributedCompileParamsInfo::iterator const dcpIter = hookData.distributedCompileParamsInfo.find( handle );
-        if ( dcpIter != hookData.distributedCompileParamsInfo.end() )
+        DistributedCompilationInfo::iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
+        if ( dcpIter != hookData.distributedCompilationInfo.end() )
         {
-            dcpIter->second->terminate( uExitCode );
+            dcpIter->second->complete( uExitCode );
             lock.unlock();
             SetEvent( handle );
             return TRUE;
@@ -795,7 +748,7 @@ BOOL WINAPI HookProcessAPIHookTraits::terminateProcess( HANDLE handle, UINT uExi
     return TerminateProcess( handle, uExitCode );
 }
 
-VOID WINAPI HookProcessAPIHookTraits::exitProcess( UINT uExitCode )
+VOID WINAPI HookProcessAPIHookDesc::exitProcess( UINT uExitCode )
 {
     HookProcessAPIHooks::disable();
     return ExitProcess( uExitCode );

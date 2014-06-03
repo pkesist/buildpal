@@ -35,6 +35,7 @@
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Python\buildpal_test\test_argparser.py" />
     <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
     <Compile Include="Python\buildpal_manager\compilers\utils.py" />

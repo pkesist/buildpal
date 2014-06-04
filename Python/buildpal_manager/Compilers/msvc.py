@@ -64,12 +64,19 @@ class CompileOptions:
 
     def create_server_call(self):
         result = ['/c']
-        exclude_opts = ['c', 'I', 'Fo', 'link', '<input>', 'Fp', 'Yc']
+        exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc']
         for name, value in zip(self.option_names, self.arg_values):
             if name == 'Zi':
                 # Disable generating PDB files when compiling cpp into obj.
                 # Store debug info in the obj file itself.
                 result.append('/Z7')
+            if name == '<input>':
+                for val in value:
+                    if val[0] == '/':
+                        # This is hardly an input file. Most likely a compiler
+                        # option not recognized by Clang. We will consider it
+                        # to be a flag.
+                        result.append(val)
             elif name not in exclude_opts:
                 result.extend(value)
         return result
@@ -86,8 +93,8 @@ class CompileOptions:
         all_inputs_are_sources = 'TC' in self.option_names or \
             'TP' in self.option_names
         for x in itertools.chain(*self.value_dict.get('<input>', [])):
-            # Not recognized by Clang argument parser.
-            if x == '/FD':
+            # Probably a flag not recognized by Clang argument parser.
+            if x[0] == '/':
                 continue
             elif all_inputs_are_sources:
                 yield x

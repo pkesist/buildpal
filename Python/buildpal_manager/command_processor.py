@@ -221,10 +221,7 @@ class CommandProcessor:
             else:
                 call.append(input)
 
-        link_opts = self.__options.link_options()
-        if link_opts:
-            call.extend(*link_opts)
-
+        call.extend(self.__options.link_options())
         self.client_conn.do_execute_and_exit(call)
 
     def get_info(self):

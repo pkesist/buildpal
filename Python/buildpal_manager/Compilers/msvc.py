@@ -118,7 +118,7 @@ class CompileOptions:
             for src in sources]
 
     def link_options(self):
-        return self.arg_dict.get(self.compiler.link_option())
+        return itertools.chain(*self.arg_dict.get(self.compiler.link_option(), []))
 
 class MSVCCompiler:
     @classmethod

@@ -3,6 +3,11 @@
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
 #include "clang/Driver/Options.h"
+#include "clang/Basic/Version.h"
+
+#if CLANG_VERSION_MAJOR != 3 || CLANG_VERSION_MINOR != 4
+#error "Unexpected Clang version detected. Check supported compiler options."
+#endif
 
 #define PREFIX(NAME, VALUE) static const char * const NAME[]= VALUE;
 #include "clang/Driver/Options.inc"
@@ -10,6 +15,7 @@
 
 using namespace llvm::opt;
 using namespace clang::driver::options;
+
 static const llvm::opt::OptTable::Info unaliasedInfoTable[] = {
 #define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM, \
                HELPTEXT, METAVAR)   \

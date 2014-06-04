@@ -1,6 +1,6 @@
 //------------------------------------------------------------------------------
-#ifndef mapFilesInject_HPP__A6FF475B_B11B_486F_B491_549FBAFAEA1A
-#define mapFilesInject_HPP__A6FF475B_B11B_486F_B491_549FBAFAEA1A
+#ifndef mapFiles_HPP__A6FF475B_B11B_486F_B491_549FBAFAEA1A
+#define mapFiles_HPP__A6FF475B_B11B_486F_B491_549FBAFAEA1A
 //------------------------------------------------------------------------------
 #include <Windows.h>
 //------------------------------------------------------------------------------

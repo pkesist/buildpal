@@ -15,16 +15,16 @@ class build_ext(_build_ext):
         build_dll.libraries = [
             ('map_files_inj32', dict(
                     sources=['Extensions/MapFiles/dllInject.cpp',
-                        'Extensions/MapFiles/mapFilesInject.cpp'],
-                    def_file='Extensions/MapFiles/mapFilesInject.def',
+                        'Extensions/MapFiles/mapFiles.cpp'],
+                    def_file='Extensions/MapFiles/mapFiles.def',
                     include_dirs=[os.path.dirname(asm_inc_dir)],
                     plat='win32'
                 )
             ),
             ('map_files_inj64', dict(
                     sources=['Extensions/MapFiles/dllInject.cpp',
-                        'Extensions/MapFiles/mapFilesInject.cpp'],
-                    def_file='Extensions/MapFiles/mapFilesInject.def',
+                        'Extensions/MapFiles/mapFiles.cpp'],
+                    def_file='Extensions/MapFiles/mapFiles.def',
                     include_dirs=[os.path.dirname(asm_inc_dir)],
                     plat='win-amd64'
                 )

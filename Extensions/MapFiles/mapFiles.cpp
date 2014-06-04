@@ -1,4 +1,4 @@
-#include "mapFilesInject.hpp"
+#include "mapFiles.hpp"
 
 #include "..\Common\createProcessMacros.hpp"
 #include "apiHooks.hpp"

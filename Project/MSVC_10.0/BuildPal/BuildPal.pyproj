@@ -30,6 +30,7 @@
     <Compile Include="BuildDeps\build_clang.py" />
     <Compile Include="BuildDeps\build_cmake.py" />
     <Compile Include="BuildDeps\build_dll.py" />
+    <Compile Include="BuildDeps\build_ext.py" />
     <Compile Include="BuildDeps\build_ninja.py" />
     <Compile Include="BuildDeps\generate_loader_asm.py" />
     <Compile Include="BuildDeps\utils.py" />
@@ -90,6 +91,7 @@
     <Folder Include="Executables\" />
     <Folder Include="Extensions\MapFiles\Loader\" />
     <Folder Include="Extensions\Client\" />
+    <Folder Include="Extensions\Common" />
     <Folder Include="Python\" />
     <Folder Include="Python\buildpal_manager" />
     <Folder Include="Python\buildpal_common" />
@@ -121,6 +123,9 @@
     <Content Include="Extensions\Client\client.cpp" />
     <Content Include="Extensions\Client\client.hpp" />
     <Content Include="Extensions\Client\pythonBindings.cpp" />
+    <Content Include="Extensions\Common\createProcess.cpp" />
+    <Content Include="Extensions\Common\createProcess.hpp" />
+    <Content Include="Extensions\Common\createProcessMacros.hpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerCache_.cpp" />
@@ -136,9 +141,9 @@
     <Content Include="Extensions\MapFiles\dllInject.cpp" />
     <Content Include="Extensions\MapFiles\dllInject.hpp" />
     <Content Include="Extensions\MapFiles\Loader\loader.cpp" />
-    <Content Include="Extensions\MapFiles\mapFilesInject.cpp" />
-    <Content Include="Extensions\MapFiles\mapFilesInject.def" />
-    <Content Include="Extensions\MapFiles\mapFilesInject.hpp" />
+    <Content Include="Extensions\MapFiles\mapFiles.cpp" />
+    <Content Include="Extensions\MapFiles\mapFiles.def" />
+    <Content Include="Extensions\MapFiles\mapFiles.hpp" />
     <Content Include="Extensions\MapFiles\pydll.cpp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />

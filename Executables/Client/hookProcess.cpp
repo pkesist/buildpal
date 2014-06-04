@@ -1,9 +1,8 @@
 #include "hookProcess.hpp"
 
 #include "../../Extensions/Client/client.hpp"
+#include "../../Extensions/Common/apiHooks.hpp"
 #include "../../Extensions/Common/createProcessMacros.hpp"
-
-#include <apiHooks.hpp>
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>

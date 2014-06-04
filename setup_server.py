@@ -11,23 +11,21 @@ class build_ext(_build_ext):
         build_dll = self.get_finalized_command('build_dll')
         asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
         from BuildDeps.generate_loader_asm import main as generate_loader_asm
-        generate_loader_asm('Extensions/MapFiles/Loader/loader.cpp', asm_inc_dir, self.build_temp)
+        generate_loader_asm('Extensions/Common/Loader/loader.cpp', asm_inc_dir, self.build_temp)
         build_dll.libraries = [
             ('map_files_inj32', dict(
-                    sources=['Extensions/MapFiles/dllInject.cpp',
-                        'Extensions/MapFiles/mapFiles.cpp'],
-                    def_file='Extensions/MapFiles/mapFiles.def',
-                    include_dirs=[os.path.dirname(asm_inc_dir)],
-                    plat='win32'
-                )
+                sources=['Extensions/Common/dllInject.cpp',
+                    'Extensions/MapFiles/mapFiles.cpp'],
+                def_file='Extensions/MapFiles/mapFiles.def',
+                include_dirs=[os.path.dirname(asm_inc_dir)],
+                plat='win32')
             ),
             ('map_files_inj64', dict(
-                    sources=['Extensions/MapFiles/dllInject.cpp',
-                        'Extensions/MapFiles/mapFiles.cpp'],
-                    def_file='Extensions/MapFiles/mapFiles.def',
-                    include_dirs=[os.path.dirname(asm_inc_dir)],
-                    plat='win-amd64'
-                )
+                sources=['Extensions/Common/dllInject.cpp',
+                    'Extensions/MapFiles/mapFiles.cpp'],
+                def_file='Extensions/MapFiles/mapFiles.def',
+                include_dirs=[os.path.dirname(asm_inc_dir)],
+                plat='win-amd64')
             )
         ]
         build_dll.compile_args.extend(self.extra_compile_args)

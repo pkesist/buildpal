@@ -1,7 +1,7 @@
 #include "mapFiles.hpp"
 
+#include "..\Common\apiHooks.hpp"
 #include "..\Common\createProcessMacros.hpp"
-#include "apiHooks.hpp"
 
 #include <cassert>
 #include <iostream>

@@ -1,5 +1,5 @@
 //----------------------------------------------------------------------------
-#include "DLLInject.hpp"
+#include "dllInject.hpp"
 
 #include <cassert>
 #include <stdexcept>

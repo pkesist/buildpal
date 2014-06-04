@@ -86,10 +86,10 @@
     <Folder Include="Executables\Client\" />
     <Folder Include="Extensions\" />
     <Folder Include="Extensions\ArgParser\" />
+    <Folder Include="Extensions\Common\Loader\" />
     <Folder Include="Extensions\HeaderScanner\" />
     <Folder Include="Extensions\MapFiles\" />
     <Folder Include="Executables\" />
-    <Folder Include="Extensions\MapFiles\Loader\" />
     <Folder Include="Extensions\Client\" />
     <Folder Include="Extensions\Common" />
     <Folder Include="Python\" />
@@ -123,9 +123,13 @@
     <Content Include="Extensions\Client\client.cpp" />
     <Content Include="Extensions\Client\client.hpp" />
     <Content Include="Extensions\Client\pythonBindings.cpp" />
+    <Content Include="Extensions\Common\apiHooks.hpp" />
     <Content Include="Extensions\Common\createProcess.cpp" />
     <Content Include="Extensions\Common\createProcess.hpp" />
     <Content Include="Extensions\Common\createProcessMacros.hpp" />
+    <Content Include="Extensions\Common\dllInject.cpp" />
+    <Content Include="Extensions\Common\dllInject.hpp" />
+    <Content Include="Extensions\Common\Loader\loader.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerCache_.cpp" />
@@ -137,10 +141,6 @@
     <Content Include="Extensions\HeaderScanner\PythonBindings_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />
-    <Content Include="Extensions\MapFiles\apiHooks.hpp" />
-    <Content Include="Extensions\MapFiles\dllInject.cpp" />
-    <Content Include="Extensions\MapFiles\dllInject.hpp" />
-    <Content Include="Extensions\MapFiles\Loader\loader.cpp" />
     <Content Include="Extensions\MapFiles\mapFiles.cpp" />
     <Content Include="Extensions\MapFiles\mapFiles.def" />
     <Content Include="Extensions\MapFiles\mapFiles.hpp" />

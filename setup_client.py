@@ -1,4 +1,3 @@
-from distutils.ccompiler import get_default_compiler
 from distutils.errors import DistutilsOptionError
 from distutils.spawn import find_executable
 
@@ -18,7 +17,6 @@ class build_client(_build_ext):
 
     def initialize_options(self):
         super().initialize_options()
-        self.debug = None
         self.build_base = None
         self.build_lib = None
         self.force_mingw = False
@@ -26,10 +24,8 @@ class build_client(_build_ext):
 
     def finalize_options(self):
         self.set_undefined_options('build',
-            ('build_base', 'build_base'),
-            ('debug', 'debug'))
+            ('build_base', 'build_base'))
         super().finalize_options()
-        self.compiler = self.compiler or get_default_compiler()
 
     __boost_libs = ['chrono', 'system', 'thread', 'date_time']
 
@@ -97,33 +93,25 @@ class build_client(_build_ext):
             call.append('address-model=64')
         if self.force:
             call.append('-a')
-        call.append('debug' if self.debug else 'release')
+        if self._debug:
+            call.append('debug-symbols=on')
+            call.append('optimization=off')
+        call.append('release')
         subprocess.check_call(call, env=env, cwd='Executables\Client')
         self.additional_package_data = [('', ('bp_cli_inj32.dll',
             'bp_cli_inj64.dll', 'hookMeister.exe'))]
 
     def run(self):
-        extra_compile_args = []
-        extra_link_args = []
-        if self.compiler == 'msvc':
-            extra_compile_args.append('/EHsc')
-            extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
-            extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
-            #extra_compile_args.extend(['/Zi', '/Od'])
-            #extra_link_args.extend(['/DEBUG'])
-        elif self.compiler == 'mingw32':
+        self.setup_compiler()
+        if self.compiler == 'mingw32':
             if not self.force_mingw:
                 print("WARNING: Even though it is possible to build these \n"
                       "extensions with MinGW, the resulting DLL will crash \n"
                       "on load. If you *really* want to build it, add \n"
                       "--force-mingw option to build command")
                 raise DistutilsOptionError("Unsupported compiler: Builds, but crashes.")
-            extra_compile_args.append('-std=c++11')
-        else:
-            raise DistutilsOptionError('Unsupported compiler')
-        for ext_module in self.distribution.ext_modules:
-            ext_module.extra_compile_args.extend(extra_compile_args)
-            ext_module.extra_link_args.extend(extra_link_args)
+            for ext_module in self.distribution.ext_modules:
+                ext_module.extra_compile_args.append('-std=c++11')
 
         self.build_boost()
         self.build_clang()

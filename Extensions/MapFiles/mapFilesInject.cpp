@@ -1,5 +1,6 @@
 #include "mapFilesInject.hpp"
 
+#include "..\Common\createProcessMacros.hpp"
 #include "apiHooks.hpp"
 
 #include <cassert>
@@ -34,30 +35,9 @@ HANDLE WINAPI createFileW(
   _In_      DWORD dwFlagsAndAttributes,
   _In_opt_  HANDLE hTemplateFile
 );
-BOOL WINAPI createProcessA(
-    _In_opt_     char const * lpApplicationName,
-    _Inout_opt_  char * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     char const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOA lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation
-);
-BOOL WINAPI createProcessW(
-    _In_opt_     wchar_t const * lpApplicationName,
-    _Inout_opt_  wchar_t * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     wchar_t const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOW lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation
-);
+BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA );
+BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW );
+
 DWORD WINAPI getFileAttributesA( _In_  char const * lpFileName );
 DWORD WINAPI getFileAttributesW( _In_  wchar_t const * lpFileName );
 BOOL WINAPI getFileAttributesExA(
@@ -239,7 +219,7 @@ namespace
     }
 }
 
-DWORD WINAPI getFileAttributesA( _In_  char const * lpFileName )
+DWORD WINAPI getFileAttributesA( char const * lpFileName )
 {
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
@@ -250,7 +230,7 @@ DWORD WINAPI getFileAttributesA( _In_  char const * lpFileName )
     return GetFileAttributesA( lpFileName );
 }
 
-DWORD WINAPI getFileAttributesW( _In_  wchar_t const * lpFileName )
+DWORD WINAPI getFileAttributesW( wchar_t const * lpFileName )
 {
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
     FileMapping::const_iterator const iter = data.globalMapping.find(
@@ -349,32 +329,16 @@ HANDLE WINAPI createFileW(
 namespace
 {
     BOOL createProcessWithMappingWorkerA(
-        char const * lpApplicationName,
-        char * lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        char const * lpCurrentDirectory,
-        LPSTARTUPINFOA lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation,
+        CREATE_PROCESS_PARAMSA,
         FileMapping const * const * fileMapping,
         DWORD fileMappingCount
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-        BOOL result = CreateProcessA(
-            lpApplicationName,
-            lpCommandLine,
-            lpProcessAttributes,
-            lpThreadAttributes,
-            bInheritHandles,
-            dwCreationFlags | CREATE_SUSPENDED,
-            lpEnvironment,
-            lpCurrentDirectory,
-            lpStartupInfo,
-            lpProcessInformation);
+        BOOL result = CreateProcessA( lpApplicationName, lpCommandLine,
+            lpProcessAttributes, lpThreadAttributes,bInheritHandles,
+            dwCreationFlags | CREATE_SUSPENDED,lpEnvironment,lpCurrentDirectory,
+            lpStartupInfo, lpProcessInformation);
         if ( result )
         {
             hookProcess( lpProcessInformation->hProcess, fileMapping,
@@ -386,32 +350,16 @@ namespace
     }
 
     BOOL createProcessWithMappingWorkerW(
-        wchar_t const * lpApplicationName,
-        wchar_t * lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        wchar_t const * lpCurrentDirectory,
-        LPSTARTUPINFOW lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation,
+        CREATE_PROCESS_PARAMSW,
         FileMapping const * const * fileMapping,
         DWORD fileMappingCount
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-        BOOL result = CreateProcessW(
-            lpApplicationName,
-            lpCommandLine,
-            lpProcessAttributes,
-            lpThreadAttributes,
-            bInheritHandles,
-            dwCreationFlags | CREATE_SUSPENDED,
-            lpEnvironment,
-            lpCurrentDirectory,
-            lpStartupInfo,
-            lpProcessInformation);
+        BOOL result = CreateProcessW( lpApplicationName, lpCommandLine,
+            lpProcessAttributes, lpThreadAttributes,bInheritHandles,
+            dwCreationFlags | CREATE_SUSPENDED,lpEnvironment,lpCurrentDirectory,
+            lpStartupInfo, lpProcessInformation);
         if ( result )
         {
             hookProcess( lpProcessInformation->hProcess, fileMapping,
@@ -423,44 +371,16 @@ namespace
     }
 }
 
-BOOL WINAPI createProcessA(
-    _In_opt_     char const * lpApplicationName,
-    _Inout_opt_  char * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     char const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOA lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation
-)
+BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
 {
     FileMapping const * const mapping = &MapFilesAPIHook::getData().globalMapping;
-    return createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, &mapping, 1 );
+    return createProcessWithMappingWorkerA( CREATE_PROCESS_ARGS, &mapping, 1 );
 }
 
-BOOL WINAPI createProcessW(
-    _In_opt_     wchar_t const * lpApplicationName,
-    _Inout_opt_  wchar_t * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     wchar_t const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOW lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation
-)
+BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
 {
     FileMapping const * const mapping = &MapFilesAPIHook::getData().globalMapping;
-    return createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, &mapping, 1 );
+    return createProcessWithMappingWorkerW( CREATE_PROCESS_ARGS, &mapping, 1 );
 }
 
 DWORD WINAPI hookWinAPIs()
@@ -554,18 +474,9 @@ BOOL mapFileW( DWORD map, wchar_t * virtualFile, wchar_t * file )
 }
 
 BOOL WINAPI createProcessWithMappingA(
-    _In_opt_     char const * lpApplicationName,
-    _Inout_opt_  char * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     char const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOA lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-    _In_         DWORD const * mappings,
-    _In_         DWORD mappingsCount
+    CREATE_PROCESS_PARAMSA,
+    DWORD const * mappings,
+    DWORD mappingsCount
 )
 {
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
@@ -577,26 +488,15 @@ BOOL WINAPI createProcessWithMappingA(
             return FALSE;
         vec[ index ] = &iter->second;
     }
-    BOOL const result = createProcessWithMappingWorkerA( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, vec.data(), vec.size() );
+    BOOL const result = createProcessWithMappingWorkerA( CREATE_PROCESS_ARGS,
+        vec.data(), vec.size() );
     return result;
 }
 
 BOOL WINAPI createProcessWithMappingW(
-    _In_opt_     wchar_t const * lpApplicationName,
-    _Inout_opt_  wchar_t * lpCommandLine,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-    _In_opt_     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-    _In_         BOOL bInheritHandles,
-    _In_         DWORD dwCreationFlags,
-    _In_opt_     LPVOID lpEnvironment,
-    _In_opt_     wchar_t const * lpCurrentDirectory,
-    _In_         LPSTARTUPINFOW lpStartupInfo,
-    _Out_        LPPROCESS_INFORMATION lpProcessInformation,
-    _In_         DWORD const * mappings,
-    _In_         DWORD mappingsCount
+    CREATE_PROCESS_PARAMSW,
+    DWORD const * mappings,
+    DWORD mappingsCount
 )
 {
     MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
@@ -608,9 +508,7 @@ BOOL WINAPI createProcessWithMappingW(
             return FALSE;
         vec[ index ] = &iter->second;
     }
-    BOOL const result = createProcessWithMappingWorkerW( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo,
-        lpProcessInformation, vec.data(), vec.size() );
+    BOOL const result = createProcessWithMappingWorkerW( CREATE_PROCESS_ARGS,
+        vec.data(), vec.size() );
     return result;
 }

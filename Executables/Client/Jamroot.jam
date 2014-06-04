@@ -124,5 +124,12 @@ alias select_inject_module : bp_cli_inj64 : <address-model>64 ;
 
 exe hookMeister : hookMeister.cpp select_inject_module advapi32 ;
 
-install _ : bp_cl : <location>$(TARGET_DIR) ;
-install __ : hookMeister bp_cli_inj32 bp_cli_inj64 : <location>D:\\Sandboxes\\PKE\\Libraries\\Boost\\boost_1_53_0 <install-type>EXE <install-type>SHARED_LIB ;
+install _
+:   bp_cl
+    hookMeister
+    bp_cli_inj32
+    bp_cli_inj64
+:   <location>$(TARGET_DIR)
+    <install-type>EXE
+    <install-type>SHARED_LIB
+;

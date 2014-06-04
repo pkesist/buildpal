@@ -3,7 +3,7 @@ from distutils.errors import DistutilsOptionError
 from distutils.spawn import find_executable
 
 from setuptools import Extension, setup
-from setuptools.command.build_ext import build_ext as setuptools_build_ext
+from BuildDeps.build_ext import build_ext as _build_ext
 
 from time import sleep
 import subprocess
@@ -11,15 +11,16 @@ import subprocess
 import os
 import sys
 
-class build_client(setuptools_build_ext):
-    setuptools_build_ext.user_options.append(('force-mingw', None,
+class build_client(_build_ext):
+    _build_ext.user_options.append(('force-mingw', None,
         'force building with mingw'))
-    setuptools_build_ext.boolean_options.append(('force-mingw'))
+    _build_ext.boolean_options.append(('force-mingw'))
 
     def initialize_options(self):
         super().initialize_options()
         self.debug = None
         self.build_base = None
+        self.build_lib = None
         self.force_mingw = False
         self.x64 =  sys.maxsize > 2**32
 
@@ -88,7 +89,7 @@ class build_client(setuptools_build_ext):
             '-sCLANG_BUILD_ROOT_X86={}'.format(os.path.abspath(build_clang.get_build_dir_x86())),
             '-sCLANG_BUILD_ROOT_X64={}'.format(os.path.abspath(build_clang.get_build_dir_x64())),
             '-sCLANG_SRC_ROOT={}'.format(os.path.abspath(build_clang.clang_src_dir)),
-            '-sTARGET_DIR={}'.format(os.getcwd()),
+            '-sTARGET_DIR={}'.format(os.path.abspath(self.build_lib)),
             '-sTMP_INCLUDE_DIR={}'.format(os.path.abspath(self.build_temp)),
             '-sBUILD_DIR={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
@@ -98,15 +99,18 @@ class build_client(setuptools_build_ext):
             call.append('-a')
         call.append('debug' if self.debug else 'release')
         subprocess.check_call(call, env=env, cwd='Executables\Client')
+        self.additional_package_data = [('', ('bp_cli_inj32.dll',
+            'bp_cli_inj64.dll', 'hookMeister.exe'))]
 
     def run(self):
         extra_compile_args = []
         extra_link_args = []
         if self.compiler == 'msvc':
             extra_compile_args.append('/EHsc')
-            if not self.debug:
-                extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
-                extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
+            extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
+            extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
+            #extra_compile_args.extend(['/Zi', '/Od'])
+            #extra_link_args.extend(['/DEBUG'])
         elif self.compiler == 'mingw32':
             if not self.force_mingw:
                 print("WARNING: Even though it is possible to build these \n"

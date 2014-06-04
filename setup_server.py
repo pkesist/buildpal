@@ -2,12 +2,12 @@ import distutils.ccompiler
 from distutils.ccompiler import get_default_compiler
 from setuptools import setup, Extension
 
-from setuptools.command.build_ext import build_ext as setuptools_build_ext
+from BuildDeps.build_ext import build_ext as _build_ext
 
 import sys
 import os
 
-class build_ext(setuptools_build_ext):
+class build_ext(_build_ext):
     def initialize_options(self):
         super().initialize_options()
         self.debug = None
@@ -61,6 +61,7 @@ class build_ext(setuptools_build_ext):
         build_dll.link_libs.append('user32')
         build_dll.link_libs.append('shlwapi')
         self.run_command('build_dll')
+        self.additional_package_data = [('', ['map_files_inj32.dll', 'map_files_inj64.dll'])]
 
         self.library_dirs.append(build_dll.build_clib)
         win64 = sys.maxsize > 2**32

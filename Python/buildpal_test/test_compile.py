@@ -1,4 +1,4 @@
-from buildpal_client import compile as bp_compile
+import buildpal_client
 
 import os
 import pytest
@@ -6,6 +6,7 @@ import sys
 import tempfile
 import shutil
 import signal
+import subprocess
 import threading
 
 from subprocess import list2cmdline, Popen
@@ -62,7 +63,7 @@ node[0]=localhost:{}:4
     from buildpal_manager.__main__ import main as manager_main
     terminator = Terminator()
     def run_manager_thread():
-        manager_main(['--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), 'test'], terminator)
+        manager_main(['--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
     # Give it some time to set up.
@@ -79,10 +80,17 @@ def fallback(**kwargs):
         print(kwargs['reason'])
     return 666
 
-@pytest.fixture(scope='function')
-def buildpal_compile(vcenv_and_cl, tmpdir):
+@pytest.fixture(scope='function', params=(True, False))
+def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
     env, cl = vcenv_and_cl
-    return lambda args : bp_compile("msvc", cl, env,
+    use_bp_cl = request.param
+    if use_bp_cl:
+        def func(args):
+            env['BP_MANAGER_PORT'] = str(MGR_PORT)
+            args[0] = bp_cl
+            return subprocess.call(args, env=env, cwd=str(tmpdir))
+        return func
+    return lambda args : buildpal_client.compile("msvc", cl, env,
         list2cmdline(args), str(MGR_PORT), str(tmpdir), fallback)
 
 @pytest.fixture(scope='module')
@@ -119,8 +127,15 @@ def test_cplusplus(file_creator, run_server, run_manager, buildpal_compile):
 ''')
     assert buildpal_compile(['compiler', '/c', file]) != 0
 
-def test_link(file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
-    file = file_creator.create_file('linkme.cpp', "int main() {}\n")
+def test_link_and_run(file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
+    file = file_creator.create_file('linkme.cpp', '''
+#include <iostream>
+int main()
+{
+    std::cout << "I'm a little teapot";
+    return 0;
+}
+''')
     first_exe = file_creator.full_path('a_dist.exe')
     assert not os.path.exists(first_exe)
     assert buildpal_compile(['compiler', '/EHsc', file, '/link',
@@ -130,11 +145,13 @@ def test_link(file_creator, run_server, run_manager, buildpal_compile, vcenv_and
     second_exe = file_creator.full_path('a_local.exe')
     assert not os.path.exists(second_exe)
     env, cl = vcenv_and_cl
-    with Popen([cl, '/EHsc', file, "/link", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
+    with Popen([cl, '/EHsc', file, "/link", "/Ox", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
             env=env) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(second_exe)
-
+    with subprocess.Popen([first_exe], stdout=subprocess.PIPE) as proc:
+        stdout, _ = proc.communicate()
+        assert stdout == b"I'm a little teapot"
     assert os.stat(first_exe).st_size == os.stat(second_exe).st_size
 
 def test_rel_include(file_creator, run_server, run_manager, buildpal_compile):

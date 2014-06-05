@@ -80,14 +80,14 @@ class build_client(_build_ext):
         generate_loader_asm('Extensions/Common/Loader/loader.cpp', asm_inc_dir, self.build_temp)
         call = [b2,
             'toolset={}'.format('msvc' if self.compiler == 'msvc' else 'gcc'),
-            '-sBOOST_ROOT={}'.format(os.path.abspath(boost_build_dir)),
+            '-sBOOST_ROOT="{}"'.format(os.path.abspath(boost_build_dir)),
             '-sBOOST_LIBS={}'.format(" ".join(self.__boost_libs)),
-            '-sCLANG_BUILD_ROOT_X86={}'.format(os.path.abspath(build_clang.get_build_dir_x86())),
-            '-sCLANG_BUILD_ROOT_X64={}'.format(os.path.abspath(build_clang.get_build_dir_x64())),
-            '-sCLANG_SRC_ROOT={}'.format(os.path.abspath(build_clang.clang_src_dir)),
-            '-sTARGET_DIR={}'.format(os.path.abspath(self.build_lib)),
-            '-sTMP_INCLUDE_DIR={}'.format(os.path.abspath(self.build_temp)),
-            '-sBUILD_DIR={}'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
+            '-sCLANG_BUILD_ROOT_X86="{}"'.format(os.path.abspath(build_clang.get_build_dir_x86())),
+            '-sCLANG_BUILD_ROOT_X64="{}"'.format(os.path.abspath(build_clang.get_build_dir_x64())),
+            '-sCLANG_SRC_ROOT="{}"'.format(os.path.abspath(build_clang.clang_src_dir)),
+            '-sTARGET_DIR="{}"'.format(os.path.abspath(self.build_lib)),
+            '-sTMP_INCLUDE_DIR="{}"'.format(os.path.abspath(self.build_temp)),
+            '-sBUILD_DIR="{}"'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
         if sys.maxsize > 2**32:
             call.append('address-model=64')

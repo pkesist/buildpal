@@ -313,3 +313,31 @@ class MSVCCompiler:
             b'1033/pgoui.dll',
             b'1033/vcomp110ui.dll'],
        }
+
+def detect_compilers():
+    versions = ('8.0', '9.0', '10.0', '11.0')
+    compiler_dirs = ('bin', 'bin\\amd64', 'bin\\x86_amd64', 'bin\\x86_ia64')
+    import winreg
+    win32subkey = "WOW6432Node\\" if sys.maxsize > 2**32 else ""
+
+    for version in versions:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                r'SOFTWARE\{}Microsoft\VisualStudio\{}\Setup\VC'.
+                format(win32subkey, version)) as key:
+                dir = winreg.QueryValueEx(key, 'ProductDir')[0]
+                for rel_dir in compiler_dirs:
+                    compiler_path = os.path.join(dir, rel_dir, 'cl.exe')
+                    if os.path.exists(compiler_path):
+                        yield compiler_path
+        except FileNotFoundError:
+            pass
+
+def setup_hooks(port_name):
+    import buildpal_client
+    for compiler in detect_compilers():
+        print("detected compiler '{}'".format(compiler))
+        buildpal_client.register_compiler(compiler)
+    buildpal_client.set_port_name(port_name)
+    return buildpal_client.create_process
+

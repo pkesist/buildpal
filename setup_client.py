@@ -115,6 +115,10 @@ class build_client(_build_ext):
         self.build_boost()
         self.build_clang()
         self.build_client()
+
+        win64 = sys.maxsize > 2**32
+        self.library_dirs.append(self.build_lib)
+        self.libraries.append('bp_cli_inj64' if win64 else 'bp_cli_inj32')
         super().run()
 
 
@@ -142,6 +146,7 @@ setup(name = 'buildpal_manager',
             sources = [
                 'Extensions/Client/client.cpp',
                 'Extensions/Client/pythonBindings.cpp',
+                'Extensions/Common/createProcess.cpp'
             ],
             define_macros = [
                 ('BOOST_ASIO_DISABLE_BOOST_REGEX', '1'),

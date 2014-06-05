@@ -84,7 +84,7 @@ exe bp_cl
     <target-os>windows:<define>_WIN32_WINNT=0x0501
 
     # MSVC settings
-    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /Gy /WL"
+    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /WL"
     <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG /STACK:64"
     <toolset>msvc:<library>shlwapi
 
@@ -111,6 +111,9 @@ alias bp_cli_inj
 :
 :
     <target-os>windows:<define>_WIN32_WINNT=0x0501
+    # MSVC settings
+    <toolset>msvc,<variant>$(release-variants):<cxxflags>"/Ox /GF /GL /GS /GT /GR /WL"
+    <toolset>msvc,<variant>$(release-variants):<linkflags>"/OPT:REF /OPT:ICF /LTCG"
     <toolset>msvc:<library>shlwapi
     <include>$(MAP_FILES)
     <include>$(TMP_INCLUDE_DIR)
@@ -132,5 +135,6 @@ install _
     bp_cli_inj64
 :   <location>$(TARGET_DIR)
     <install-type>EXE
+    <install-type>IMPORT_LIB
     <install-type>SHARED_LIB
 ;

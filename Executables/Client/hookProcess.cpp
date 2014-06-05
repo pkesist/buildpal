@@ -2,7 +2,6 @@
 
 #include "../../Extensions/Client/client.hpp"
 #include "../../Extensions/Common/apiHooks.hpp"
-#include "../../Extensions/Common/createProcessMacros.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
@@ -44,9 +43,6 @@ struct CompilerExecutables
 class DistributedCompilation;
 typedef std::shared_ptr<DistributedCompilation> DistributedCompilationPtr;
 typedef std::map<HANDLE, DistributedCompilationPtr> DistributedCompilationInfo;
-
-BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA );
-BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW );
 
 class HookProcessAPIHookDesc
 {
@@ -505,6 +501,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
         }
         remainder += std::string( buffer + last, read - last );
     }
+    HookProcessAPIHooks::enable();
     return 0;
 }
 
@@ -708,22 +705,4 @@ VOID WINAPI HookProcessAPIHookDesc::exitProcess( UINT uExitCode )
 {
     HookProcessAPIHooks::disable();
     return ExitProcess( uExitCode );
-}
-
-
-BOOL WINAPI DllMain(
-  _In_  HINSTANCE hinstDLL,
-  _In_  DWORD fdwReason,
-  _In_  LPVOID lpvReserved
-)
-{
-    if ( fdwReason == DLL_PROCESS_ATTACH )
-    {
-        HookProcessAPIHooks::enable();
-    }
-    else if ( fdwReason == DLL_PROCESS_DETACH )
-    {
-        HookProcessAPIHooks::disable();
-    }
-    return TRUE;
 }

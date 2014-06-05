@@ -1,5 +1,9 @@
 #include "client.hpp"
 
+#include "../Common/createProcess.hpp"
+#include "../Common/createProcessMacros.hpp"
+#include "../../Executables/Client/hookProcess.hpp"
+
 #include <Python.h>
 
 struct CallPyObjInfo
@@ -153,8 +157,42 @@ PyObject * Client_distributedCompile( PyObject * self, PyObject * args, PyObject
     return PyLong_FromLong( result );
 }
 
+namespace
+{
+    BOOL WINAPI createProcessHelper( CREATE_PROCESS_PARAMSW, void * )
+    {
+        return createProcessW( CREATE_PROCESS_ARGS );
+    }
+}
+
+PyObject * Client_createProcess( PyObject * self, PyObject * args )
+{
+    return pythonCreateProcess( args, createProcessHelper, 0 );
+}
+
+PyObject * Client_registerCompiler( PyObject * self, PyObject * args )
+{
+    char const * compiler;
+    if ( !PyArg_ParseTuple( args, "s", &compiler ) )
+        return NULL;
+    registerCompiler( compiler );
+    Py_RETURN_NONE;
+}
+
+PyObject * Client_setPortName( PyObject * self, PyObject * args )
+{
+    char const * portName;
+    if ( !PyArg_ParseTuple( args, "s", &portName ) )
+        return NULL;
+    setPortName( portName );
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef clientMethods[] = {
     {"compile", (PyCFunction)Client_distributedCompile, METH_VARARGS | METH_KEYWORDS, Client_distributedCompileDoc},
+    {"create_process", (PyCFunction)Client_createProcess, METH_VARARGS, NULL},
+    {"register_compiler", (PyCFunction)Client_registerCompiler, METH_VARARGS, NULL},
+    {"set_port_name", (PyCFunction)Client_setPortName, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}
 };
 

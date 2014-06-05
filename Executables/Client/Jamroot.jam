@@ -10,9 +10,11 @@ local rule get-jam-var ( variable-name )
     {
         import errors ;
         errors.user-error $(variable-name) must be defined. ;
-        return ;
     }
-    return $(result) ;
+    else
+    {
+        return $(result) ;
+    }
 }
 
 local BOOST_PATH = [ get-jam-var BOOST_PATH ] ;

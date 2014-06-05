@@ -74,7 +74,7 @@ class build_client(_build_ext):
 
         # Build Client executable
         env = os.environ
-        env['BOOST_BUILD_PATH'] = os.path.join(boost_build_dir, 'tools', 'build', 'v2')
+        env['BOOST_BUILD_PATH'] = os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build', 'v2'))
         asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
         from BuildDeps.generate_loader_asm import main as generate_loader_asm
         generate_loader_asm('Extensions/Common/Loader/loader.cpp', asm_inc_dir, self.build_temp)

@@ -1,4 +1,3 @@
-import errors ;
 import project ;
 
 path-constant COMMON : ../../Extensions/Common ;
@@ -9,7 +8,7 @@ local rule get-jam-var ( variable-name )
     local result = [ modules.peek : $(variable-name) ] ;
     if ! $(result)
     {
-        import errors
+        import errors ;
         errors.user-error $(variable-name) must be defined. ;
         return ;
     }

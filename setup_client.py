@@ -20,7 +20,7 @@ class build_client(_build_ext):
         self.build_base = None
         self.build_lib = None
         self.force_mingw = False
-        self.x64 =  sys.maxsize > 2**32
+        self.x64 =  sys.maxsize > 2 ** 32
 
     def finalize_options(self):
         self.set_undefined_options('build',
@@ -88,7 +88,7 @@ class build_client(_build_ext):
             '-sTMP_INCLUDE_DIR="{}"'.format(os.path.abspath(self.build_temp)),
             '-sBUILD_DIR="{}"'.format(os.path.join(os.path.abspath(self.build_base), 'client')),
         ]
-        if sys.maxsize > 2**32:
+        if sys.maxsize > 2 ** 32:
             call.append('address-model=64')
         if self.force:
             call.append('-a')

@@ -73,13 +73,12 @@ class build_client(_build_ext):
         assert b2 is not None
 
         # Build Client executable
-        env = os.environ
-        env['BOOST_BUILD_PATH'] = os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build', 'v2'))
         asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
         from BuildDeps.generate_loader_asm import main as generate_loader_asm
         generate_loader_asm('Extensions/Common/Loader/loader.cpp', asm_inc_dir, self.build_temp)
         call = [b2,
             'toolset={}'.format('msvc' if self.compiler == 'msvc' else 'gcc'),
+            '-sBOOST_BUILD_PATH="{}"'.format(os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build', 'v2'))),
             '-sBOOST_PATH="{}"'.format(os.path.abspath(boost_build_dir)),
             '-sBOOST_LIBS={}'.format(" ".join(self.__boost_libs)),
             '-sCLANG_BUILD_ROOT_X86="{}"'.format(os.path.abspath(build_clang.get_build_dir_x86())),
@@ -97,7 +96,7 @@ class build_client(_build_ext):
             call.append('debug-symbols=on')
             call.append('optimization=off')
         call.append('release')
-        subprocess.check_call(call, env=env, cwd='Executables\Client')
+        subprocess.check_call(call, cwd='Executables\Client')
         self.additional_package_data = [('', ('bp_cli_inj32.dll',
             'bp_cli_inj64.dll', 'hookMeister.exe'))]
 

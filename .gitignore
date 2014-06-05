@@ -2,3 +2,6 @@ __pycache__
 /Documentation/_build
 /dist
 /build
+*.bak
+*.pyc
+*.pyo

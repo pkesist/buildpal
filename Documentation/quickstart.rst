@@ -20,8 +20,7 @@ Setting up the Server (slave) nodes
 
 On each slave on the network do the following:
 
-* Grab the installer from SourceForge.
-* Install it. This will create 'BuildPal Server' shortcut on your desktop.
+* Install BuildPal. This will create 'BuildPal Server' shortcut on your desktop.
 * Run the shortcut.
 
 .. note:
@@ -36,27 +35,48 @@ On each slave on the network do the following:
 Setting up the Client
 ---------------------
 
-* Grab the installer from SourceForge.
-* Install it. This will create 'BuildPal Manager' shortcut on your desktop.
-* In addition, there will be a :file:`bp_cl.exe` file in the installation
-  directory.
+* Install BuildPal on the Client machine.
+* There are several ways to run the build.
 
-* Run the Manager.
-    * This will open Manager's GUI which can be used to view detected farm
-      configuration.
+CreateProcess Hooking
+---------------------
 
-* Configure the build system.
-    * You must configure your build system to use :file:`bp_cl.exe` instead of
-      MSVC :file:`cl.exe`.
-    * For information on how to integrate with some build systems see :ref:`here \
-      <integrating-with-build-systems>`.
+This is by far the most convenient method as it does not require any changes to
+your projects build system. Unfortunately, it does not generally work.
 
-.. note::
+The idea is intercept all calls a build system makes to the compiler, and to
+delegate this work to the farm, avoiding compiler process creation on
+the client machine. BuildPal will try to fool the build system into thinking
+that a process as actually created. This approach works for most build systems.
+It will not work if the build system attempts do to something smart with the
+(supposedly) created compiler process.
 
-    Calling MSVC compiler setup scripts (such as ``vcvarsall.bat``) is still
-    required. :file:`bp_cl.exe` uses the environment to locate the compiler,
-    system headers etc.
+Run the build as you usually would, but prepend `buildpal_client --run`. You
+should also increase max number of parallel jobs.
 
-* Run the build.
-    * Number of concurrent jobs should be set to as many as your machine can
-      manage.
+For example, instead of running::
+
+    ninja.exe target -j 4
+
+You should run::
+
+    buildpal_client --run ninja.exe target -j 128
+
+You can go wild with the `-j` option - use as much as your build will allow. As
+there is no process creation there will be little or no overhead.
+
+
+Compiler Substitution
+---------------------
+
+If the above approach fails with your build system, there is an alternative.
+BuildPal installation has a drop-in compiler substitute :file:`bp_cl.exe`.
+
+.. todo::
+
+    Create runner which does compiler substitution.
+
+With this approach, a real process will be created, so excercise caution when
+passing -j. On the other hand, most modern hardware should not have any
+problems in spawning a hundred of these processes.
+

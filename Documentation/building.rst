@@ -20,40 +20,24 @@ Get the sources from GitHub
 
 Get the sources from `BuildPal GitHub repository <https://github.com/pkesist/buildpal>`_.
 
-Building the Client
--------------------
+Building
+--------
 
-In the top-level project directory run the following::
+`BuildPal` uses distutils and setuptools. Just use any of the usual setuptools
+targets::
 
-    python setup_client.py install
+    python setup.py build
+    python setup.py install
+    python setup.py develop
+    ...
 
-This will build the needed client-side extensions and install them in Python `site-packages`.
+See ``python setup.py --help``
 
 .. note::
 
-    First time installation will take a while, as BuildPal will download
-    and build its dependencies. Subsequent builds will be *much* faster. 
-
-Once this is done, the Manager can be run with::
-
-    python -m buildpal_manager
-
-In addition, this will produce a client executable, :file:`bp_cl.exe` in the
-top-level project directory. To simplify its usage, you might consider moving
-the executable somewhere on ``PATH``.
-
-
-Building the Server
--------------------
-
-In the top-level project directory run the following::
-
-    python setup_server.py install
-
-Similar to Manager, this will build extensions and register the Server with Python.
-It can be run with::
-
-    python -m buildpal_server
+    First time build will take a while. BuildPal will download, unpack and build
+    several chubby libraries (`Boost` and `LLVM/Clang`). Subsequent builds will be
+    much faster.
 
 .. _cx-freeze::
 
@@ -72,21 +56,11 @@ cx_Freeze_.
 .. note::
 
     You need to use cx_Freeze_ 4.3.3 or newer. Previous releases do not support
-    Python 3.4 very well.
+    Python 3.4 very well. In addition, if cx_Freeze release is not built for
+    your exact Python release (including minor version), there is a good chance
+    that the executable it produces will not work. If this happens, you need to
+    build cx_Freeze yourself.
 
-* In the ``Python`` subdirectory there are cx_Freeze_ scripts for creating
-  standalone packages.
-
-    * :file:`standalone_manager.py`
-    * :file:`standalone_server.py`
-
-* Typically you need to execute something like::
-
-    python standalone_server.py bdist_msi
-    python standalone_server.py bdist_msi
-
-  For more information try::
-
-    python standalone_server.py --help
-    python standalone_server.py --help
+* Do either ``setup.py install`` or ``setup.py develop``.
+* Run ``cx_freeze_setup.py bdist_msi``
 

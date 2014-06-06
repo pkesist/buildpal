@@ -22,8 +22,7 @@ def main(argv, terminator=None):
         help='Trailing arguments specify command to run.')
 
     server_parser = subparsers.add_parser('server', aliases=['srv', 's'])
-    server_parser.add_argument('--port', '-p', metavar="#", dest='port',
-        type=int, default=0,
+    server_parser.add_argument('--port', '-p', metavar="#", type=int, default=0,
         help='TCP port on which server will listen. (default=ephemeral)')
     server_parser.add_argument('--max-jobs', '-j', metavar="#",
         dest='compile_slots', type=int, default=cpu_count(),

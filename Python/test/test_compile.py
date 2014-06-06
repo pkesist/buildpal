@@ -63,7 +63,8 @@ node[0]=localhost:{}:4
     from buildpal.__main__ import main
     terminator = Terminator()
     def run_manager_thread():
-        main(['client', '--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
+        main(['mgr', 'client', '--ui=none', '--ini={}'.format(ini_file),
+            '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
     # Give it some time to set up.
@@ -98,7 +99,7 @@ def run_server(request):
     from buildpal.__main__ import main
     terminator = Terminator()
     def run_server_thread():
-        main(['server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
+        main(['srv', 'server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
     server_thread = threading.Thread(target=run_server_thread)
     server_thread.start()
     def teardown():

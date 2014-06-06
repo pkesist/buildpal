@@ -1,8 +1,8 @@
 Quick Start
-===========
+###########
 
 Requirements
-------------
+============
 
 1. A C/C++ project (duh) using a build system capable of running parallel
    tasks.
@@ -16,7 +16,7 @@ Requirements
       all slave machines need to run Windows.
 
 Setting up the Server (slave) nodes
------------------------------------
+===================================
 
 On each slave on the network do the following:
 
@@ -33,7 +33,7 @@ On each slave on the network do the following:
     Slaves do not need to have compiler pre-installed.
 
 Setting up the Client
----------------------
+=====================
 
 * Install BuildPal on the Client machine.
 * There are several ways to run the build.
@@ -44,7 +44,7 @@ CreateProcess Hooking
 This is by far the most convenient method as it does not require any changes to
 your projects build system. Unfortunately, it does not generally work.
 
-The idea is intercept all calls a build system makes to the compiler, and to
+The idea is to intercept all calls a build system makes to the compiler, and to
 delegate this work to the farm, avoiding compiler process creation on
 the client machine. BuildPal will try to fool the build system into thinking
 that a process as actually created. This approach works for most build systems.

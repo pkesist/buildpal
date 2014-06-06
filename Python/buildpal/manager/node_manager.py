@@ -1,7 +1,7 @@
 from .compile_session import ServerSession, SessionResult
 from .compressor import Compressor
 
-from buildpal_common import MessageProtocol
+from buildpal.common import MessageProtocol
 
 import asyncio
 import logging

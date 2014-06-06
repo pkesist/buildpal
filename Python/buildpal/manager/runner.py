@@ -1,4 +1,4 @@
-from buildpal_common import SimpleTimer, MessageProtocol
+from buildpal.common import SimpleTimer, MessageProtocol
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor

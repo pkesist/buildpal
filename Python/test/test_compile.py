@@ -60,10 +60,10 @@ def run_manager(request):
 node[0]=localhost:{}:4
 
 """.format(SRV_PORT))
-    from buildpal_manager.__main__ import main as manager_main
+    from buildpal.__main__ import main
     terminator = Terminator()
     def run_manager_thread():
-        manager_main(['--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
+        main(['client', '--ui=none', '--ini={}'.format(ini_file), '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
     # Give it some time to set up.
@@ -95,10 +95,10 @@ def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
 
 @pytest.fixture(scope='module')
 def run_server(request):
-    from buildpal_server.__main__ import main as server_main
+    from buildpal.__main__ import main
     terminator = Terminator()
     def run_server_thread():
-        server_main(['--port={}'.format(SRV_PORT), '--silent'], terminator)
+        main(['server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
     server_thread = threading.Thread(target=run_server_thread)
     server_thread.start()
     def teardown():

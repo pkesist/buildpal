@@ -1,5 +1,5 @@
 from .compile_session import SessionResult
-from buildpal_common import Timer
+from buildpal.common import Timer
 
 from time import time
 import logging

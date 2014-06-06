@@ -70,7 +70,7 @@ class CompileOptions:
                 # Disable generating PDB files when compiling cpp into obj.
                 # Store debug info in the obj file itself.
                 result.append('/Z7')
-            if name == '<input>':
+            elif name == '<input>':
                 for val in value:
                     if val[0] == '/':
                         # This is hardly an input file. Most likely a compiler
@@ -81,7 +81,7 @@ class CompileOptions:
                 result.extend(value)
         return result
 
-    def input_files(self):
+    def source_files(self):
         # All files explicitly set to C
         for x in itertools.chain(*self.value_dict.get('Tc', [])):
             yield x
@@ -101,6 +101,14 @@ class CompileOptions:
             elif os.path.splitext(x)[1].lower() in ['.c', '.cc', '.cxx', '.cpp']:
                 yield x
 
+    def input_files(self):
+        source_files = set(self.source_files())
+        for x in itertools.chain(*self.value_dict.get('<input>', [])):
+            if x[0] == '/':
+                continue
+            if x not in source_files:
+                yield x
+
     def output_file(self):
         result = self.value_dict.get(self.compiler.object_name_option())
         if not result:
@@ -109,7 +117,7 @@ class CompileOptions:
         return result[-1][0]
 
     def files(self):
-        sources = list(self.input_files())
+        sources = list(self.source_files())
         output = self.output_file()
         if output:
             if output[-1] == os.path.sep or output[-1] == os.path.altsep:
@@ -125,7 +133,10 @@ class CompileOptions:
             for src in sources]
 
     def link_options(self):
-        return itertools.chain(*self.arg_dict.get(self.compiler.link_option(), []))
+        options = []
+        options.extend(self.arg_dict.get('Fe', []))
+        options.extend(self.arg_dict.get(self.compiler.link_option(), []))
+        return itertools.chain(*options)
 
 class MSVCCompiler:
     @classmethod
@@ -258,8 +269,29 @@ class MSVCCompiler:
 
 
     compiler_files = {
+        b'14.00' : 
+        [
+            b'msvcr90.dll',
+            b'c1.dll',
+            b'c1ast.dll',
+            b'c1xx.dll',
+            b'c1xxast.dll',
+            b'c2.dll',
+            b'cl.exe',
+            b'mspdb80.dll',
+            b'1033/atlprovui.dll',
+            b'1033/bscmakeui.dll',
+            b'1033/clui.dll',
+            b'1033/cvtresui.dll',
+            b'1033/linkui.dll',
+            b'1033/mspft80ui.dll',
+            b'1033/nmakeui.dll',
+            b'1033/pgort80ui.dll',
+            b'1033/pgoui.dll',
+            b'1033/vcomp80ui.dll'],
         b'15.00' : 
         [
+            b'msvcr90.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',
@@ -279,6 +311,7 @@ class MSVCCompiler:
             b'1033/vcomp90ui.dll'],
         b'16.00' :
         [
+            b'msvcr100.dll',
             b'c1.dll',
             b'c1xx.dll',
             b'c2.dll',
@@ -295,6 +328,7 @@ class MSVCCompiler:
             b'1033/vcomp100ui.dll'],
         b'17.00' :
         [
+            b'msvcr110.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',
@@ -312,32 +346,21 @@ class MSVCCompiler:
             b'1033/pgort110ui.dll',
             b'1033/pgoui.dll',
             b'1033/vcomp110ui.dll'],
+        b'18.00' :
+        [
+            b'msvcr120.dll',
+            b'c1.dll',
+            b'c1ast.dll',
+            b'c1xx.dll',
+            b'c1xxast.dll',
+            b'c2.dll',
+            b'cl.exe',
+            b'mspdb120.dll',
+            b'1033/bscmakeui.dll',
+            b'1033/clui.dll',
+            b'1033/cvtresui.dll',
+            b'1033/linkui.dll',
+            b'1033/mspft120ui.dll',
+            b'1033/nmakeui.dll',
+            b'1033/vcomp120ui.dll'],
        }
-
-def detect_compilers():
-    versions = ('8.0', '9.0', '10.0', '11.0')
-    compiler_dirs = ('bin', 'bin\\amd64', 'bin\\x86_amd64', 'bin\\x86_ia64')
-    import winreg
-    win32subkey = "WOW6432Node\\" if sys.maxsize > 2**32 else ""
-
-    for version in versions:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                r'SOFTWARE\{}Microsoft\VisualStudio\{}\Setup\VC'.
-                format(win32subkey, version)) as key:
-                dir = winreg.QueryValueEx(key, 'ProductDir')[0]
-                for rel_dir in compiler_dirs:
-                    compiler_path = os.path.join(dir, rel_dir, 'cl.exe')
-                    if os.path.exists(compiler_path):
-                        yield compiler_path
-        except FileNotFoundError:
-            pass
-
-def setup_hooks(port_name):
-    import buildpal_client
-    for compiler in detect_compilers():
-        print("detected compiler '{}'".format(compiler))
-        buildpal_client.register_compiler(compiler)
-    buildpal_client.set_port_name(port_name)
-    return buildpal_client.create_process
-

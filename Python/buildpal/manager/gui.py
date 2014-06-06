@@ -10,7 +10,7 @@ from threading import Thread, Lock
 from time import time
 from multiprocessing import cpu_count
 
-from .manager_runner import ManagerRunner
+from .runner import ManagerRunner
 from .gui_event import GUIEvent
 
 class MyTreeView(Treeview):
@@ -244,21 +244,12 @@ class SettingsFrame(LabelFrame):
         self.port_var.set(self.port)
         Entry(self, state=DISABLED, textvariable=self.port_var).grid(row=0, column=1)
 
-        Label(self, text="Preprocessor Threads").grid(row=1, column=0, sticky=E+W)
-        self.pp_threads_sb = Spinbox(self, from_=1, to=4 * cpu_count(),
-            increment=1, validate='key', validatecommand=(self.digits_filter, '%P'))
-        self.pp_threads_sb.delete(0, "end")
-        self.pp_threads_sb.insert(0, cpu_count())
-        self.pp_threads_sb.grid(row=1, column=1)
-
-        Separator(self).grid(row=2, column=0, columnspan=2, pady=10, sticky=E+W)
-
         if False:
             # Debugging stuff
             self.stop_but = Button(self, text="Run PDB", command=self.start_pdb)
-            self.stop_but.grid(row=3, column=2, sticky=E+W)
+            self.stop_but.grid(row=3, column=0, sticky=E+W)
             self.stop_but = Button(self, text="Run Interpreter", command=self.start_interpreter)
-            self.stop_but.grid(row=3, column=3, sticky=E+W)
+            self.stop_but.grid(row=3, column=1, sticky=E+W)
 
     @staticmethod
     def start_pdb():
@@ -403,7 +394,6 @@ class BPManagerApp(Tk):
         self.event_data_lock = Lock()
         self.event_data = {}
         self.__periodic_refresh()
-        self.__start_running()
 
     def __periodic_refresh(self):
         with self.event_data_lock:
@@ -419,7 +409,6 @@ class BPManagerApp(Tk):
         # Row 0
         self.settings_frame = SettingsFrame(self, self.port)
         self.settings_frame.grid(row=0, sticky=E+W, padx=5, pady=(0, 5))
-        self.pp_threads_sb = self.settings_frame.pp_threads_sb
 
         # Row 1
         self.pane = PanedWindow(self, orient=VERTICAL)
@@ -452,49 +441,8 @@ class BPManagerApp(Tk):
         self.node_display.refresh()
         self.command_browser.refresh()
 
-    def set_running(self, running):
-        self.running = running
-        self.pp_threads_sb['state'] = 'normal' if not self.running else 'disable'
-
-    def destroy(self):
-        if self.running:
-            self.__stop_running()
-        Tk.destroy(self)
-
-    def __start_running(self):
-        if self.running:
-            return
-
-        try:
-            threads = int(self.pp_threads_sb.get())
-            if not (1 <= threads <= 4 * cpu_count()):
-                raise ValueError()
-        except ValueError:
-            msgbox.showerror("Invalid Thread Count", "Thread count '{}' is invalid.\n"
-                "It should be between 1 and {}.".format(
-                self.pp_threads_sb.get(), 4 * cpu_count()))
-            return
-        
-        self.manager_runner = ManagerRunner(self.port, threads)
-        self.thread = Thread(target=self.__run_task_processor)
-        self.thread.start()
-        self.set_running(True)
-
     def _exception_in_run(self, exception):
         assert self.running
         self.thread.join()
         self.set_running(False)
         msgbox.showerror("Startup failure", "{}".format(exception))
-
-    def __run_task_processor(self):
-        try:
-            self.manager_runner.run(self.node_info_getter, update_ui=self.post_event)
-        except Exception as e:
-            self.post_event(GUIEvent.exception_in_run, e)
-
-    def __stop_running(self):
-        if not self.running:
-            return
-        self.manager_runner.stop()
-        self.thread.join()
-        self.set_running(False)

@@ -1,9 +1,8 @@
-import sys
 import pytest
 
-sys.path.append('..')
+from buildpal.common.message import msg_from_bytes, msg_to_bytes, MessageProtocol
 
-from buildpal_common.message import msg_from_bytes, msg_to_bytes, MessageProtocol
+from sys import getrefcount
 
 def test_msg():
     data = list(b'asdf' * x for x in range(256))
@@ -19,13 +18,13 @@ def test_memoryview_wrapper():
     total_len = next(byte_data_gen)
     bytes = b''.join(byte_data_gen)
     mv = memoryview(bytes)
-    assert sys.getrefcount(bytes) == 1 + 1 + 1
-    assert sys.getrefcount(mv) == 1 + 1
+    assert getrefcount(bytes) == 1 + 1 + 1
+    assert getrefcount(mv) == 1 + 1
     recreated_data = list(msg_from_bytes(mv))
-    assert sys.getrefcount(bytes) == 1 + 1 + 1
+    assert getrefcount(bytes) == 1 + 1 + 1
     del mv
     del recreated_data
-    assert sys.getrefcount(bytes) == 1 + 1
+    assert getrefcount(bytes) == 1 + 1
 
 def test_error_when_storing_msgs():
     class Protocol(MessageProtocol):

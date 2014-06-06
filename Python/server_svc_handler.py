@@ -27,7 +27,7 @@ class Handler(object):
     # for the stop event or the service GUI will not respond to requests to
     # stop the service
     def Run(self):
-        from buildpal_server.server_runner import ServerRunner
+        from buildpal.server.runner import ServerRunner
         ServerRunner(0, cpu_count()).run(self.terminator)
 
     # called when the service is being stopped by the service manager GUI

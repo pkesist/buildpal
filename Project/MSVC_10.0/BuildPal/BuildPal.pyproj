@@ -5,7 +5,8 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3833c67e-4b33-4b52-8ff0-d9794b868300}</ProjectGuid>
     <ProjectHome>..\..\..\</ProjectHome>
-    <StartupFile>Python\buildpal_manager\gui.py</StartupFile>
+    <StartupFile>
+    </StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -35,50 +36,53 @@
     <Compile Include="BuildDeps\generate_loader_asm.py" />
     <Compile Include="BuildDeps\utils.py" />
     <Compile Include="BuildDeps\__init__.py" />
+    <Compile Include="cx_freeze_setup.py" />
     <Compile Include="Documentation\conf.py" />
-    <Compile Include="Python\buildpal_test\test_argparser.py" />
+    <Compile Include="Python\buildpal\common\message.py" />
+    <Compile Include="Python\buildpal\common\utils.py" />
+    <Compile Include="Python\buildpal\common\__init__.py" />
+    <Compile Include="Python\buildpal\manager\command_processor.py" />
+    <Compile Include="Python\buildpal\manager\compilers\msvc.py" />
+    <Compile Include="Python\buildpal\manager\compilers\utils.py" />
+    <Compile Include="Python\buildpal\manager\compilers\__init__.py" />
+    <Compile Include="Python\buildpal\manager\compile_session.py" />
+    <Compile Include="Python\buildpal\manager\compressor.py" />
+    <Compile Include="Python\buildpal\manager\console.py" />
+    <Compile Include="Python\buildpal\manager\database.py" />
+    <Compile Include="Python\buildpal\manager\gui.py" />
+    <Compile Include="Python\buildpal\manager\gui_event.py" />
+    <Compile Include="Python\buildpal\manager\runner.py" />
+    <Compile Include="Python\buildpal\manager\node_info.py" />
+    <Compile Include="Python\buildpal\manager\node_manager.py" />
+    <Compile Include="Python\buildpal\manager\source_scanner.py" />
+    <Compile Include="Python\buildpal\manager\task.py" />
+    <Compile Include="Python\buildpal\manager\timer.py" />
+    <Compile Include="Python\buildpal\manager\__init__.py" />
+    <Compile Include="Python\buildpal\manager\__main__.py" />
+    <Compile Include="Python\buildpal\server\beacon.py" />
+    <Compile Include="Python\buildpal\server\compiler_repository.py" />
+    <Compile Include="Python\buildpal\server\header_repository.py" />
+    <Compile Include="Python\buildpal\server\pch_repository.py" />
+    <Compile Include="Python\buildpal\server\runner.py" />
+    <Compile Include="Python\buildpal\server\__init__.py" />
+    <Compile Include="Python\buildpal\server\__main__.py" />
+    <Compile Include="Python\buildpal\__init__.py" />
+    <Compile Include="Python\buildpal\__main__.py" />
     <Compile Include="Python\manager_starter.py" />
-    <Compile Include="Python\buildpal_manager\compilers\msvc.py" />
-    <Compile Include="Python\buildpal_manager\compilers\utils.py" />
-    <Compile Include="Python\buildpal_manager\compilers\__init__.py" />
-    <Compile Include="Python\buildpal_manager\__main__.py" />
-    <Compile Include="Python\buildpal_server\__main__.py" />
     <Compile Include="Python\server_svc_config.py" />
     <Compile Include="Python\server_svc_handler.py" />
-    <Compile Include="setup_client.py" />
-    <Compile Include="Python\buildpal_common\message.py" />
-    <Compile Include="Python\buildpal_common\__init__.py" />
+    <Compile Include="Python\starter.py" />
+    <Compile Include="Python\test\conftest.py" />
+    <Compile Include="Python\test\test_argparser.py" />
+    <Compile Include="Python\test\test_client.py" />
+    <Compile Include="Python\test\test_compile.py" />
+    <Compile Include="Python\test\test_database.py" />
+    <Compile Include="Python\test\test_message.py" />
+    <Compile Include="Python\test\test_source_scanner.py" />
+    <Compile Include="setup.py" />
     <Compile Include="Python\server_starter.py" />
-    <Compile Include="Python\buildpal_manager\command_processor.py" />
-    <Compile Include="Python\buildpal_manager\compile_session.py" />
-    <Compile Include="Python\buildpal_manager\compressor.py" />
-    <Compile Include="Python\buildpal_manager\console.py" />
-    <Compile Include="Python\buildpal_manager\database.py" />
-    <Compile Include="Python\buildpal_manager\gui.py" />
-    <Compile Include="Python\buildpal_manager\gui_event.py" />
-    <Compile Include="Python\buildpal_manager\node_info.py" />
-    <Compile Include="Python\buildpal_manager\node_manager.py" />
-    <Compile Include="Python\buildpal_manager\task.py" />
-    <Compile Include="Python\buildpal_manager\timer.py" />
-    <Compile Include="Python\buildpal_manager\source_scanner.py" />
-    <Compile Include="Python\buildpal_manager\manager_runner.py" />
-    <Compile Include="Python\buildpal_manager\__init__.py" />
-    <Compile Include="Python\buildpal_common\utils.py" />
-    <Compile Include="Python\buildpal_server\beacon.py" />
-    <Compile Include="Python\buildpal_server\compiler_repository.py" />
-    <Compile Include="Python\buildpal_server\server_runner.py" />
-    <Compile Include="Python\buildpal_server\header_repository.py" />
-    <Compile Include="Python\buildpal_server\pch_repository.py" />
-    <Compile Include="Python\buildpal_server\__init__.py" />
     <Compile Include="Python\standalone_manager.py" />
     <Compile Include="Python\standalone_server.py" />
-    <Compile Include="Python\buildpal_test\test_client.py" />
-    <Compile Include="Python\buildpal_test\test_compile.py" />
-    <Compile Include="Python\buildpal_test\test_database.py" />
-    <Compile Include="Python\buildpal_test\test_message.py" />
-    <Compile Include="Python\buildpal_test\test_source_scanner.py" />
-    <Compile Include="Python\buildpal_test\conftest.py" />
-    <Compile Include="setup_server.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
@@ -93,11 +97,12 @@
     <Folder Include="Extensions\Client\" />
     <Folder Include="Extensions\Common" />
     <Folder Include="Python\" />
-    <Folder Include="Python\buildpal_manager" />
-    <Folder Include="Python\buildpal_common" />
-    <Folder Include="Python\buildpal_manager\compilers" />
-    <Folder Include="Python\buildpal_test" />
-    <Folder Include="Python\buildpal_server" />
+    <Folder Include="Python\buildpal\common" />
+    <Folder Include="Python\buildpal\manager" />
+    <Folder Include="Python\buildpal\manager\compilers" />
+    <Folder Include="Python\buildpal\server" />
+    <Folder Include="Python\buildpal\" />
+    <Folder Include="Python\test\" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Documentation\benchmarks.rst" />
@@ -111,7 +116,6 @@
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />
     <Content Include="Executables\Client\bp_cl.cpp" />
-    <Content Include="Executables\Client\hookMeister.cpp" />
     <Content Include="Executables\Client\hookProcess.cpp" />
     <Content Include="Executables\Client\hookProcess.def" />
     <Content Include="Executables\Client\hookProcess.hpp" />

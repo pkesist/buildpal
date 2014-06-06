@@ -214,7 +214,7 @@ class CommandProcessor:
 
         call = []
         input_to_output = dict(x for x in self.__options.files())
-        for input in self.__options.input_files():
+        for input in self.__options.source_files():
             output = input_to_output.get(input)
             if output:
                 call.append(output)
@@ -222,12 +222,13 @@ class CommandProcessor:
                 call.append(input)
 
         call.extend(self.__options.link_options())
+        call.extend(self.__options.input_files())
         self.client_conn.do_execute_and_exit(call)
 
     def get_info(self):
         assert self.tasks_with_sessions_done == self.tasks
         return {
-            'command' : ', '.join(self.__options.input_files()),
+            'command' : ', '.join(self.__options.source_files()),
             'tasks' : [task.get_info() for task in self.tasks]
         }
 

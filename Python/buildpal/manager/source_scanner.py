@@ -1,6 +1,6 @@
 from .gui_event import GUIEvent
 
-from buildpal_common import SimpleTimer
+from buildpal.common import SimpleTimer
 
 import preprocessing
 import os

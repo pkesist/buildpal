@@ -3,15 +3,9 @@ import sys
 import subprocess
 
 from .gui import BPManagerApp
-from .manager_runner import ManagerRunner
+from .runner import ManagerRunner
 from .node_info import NodeInfo
 
-def run_gui(node_info_getter, port):
-    app = BPManagerApp(node_info_getter, port)
-    app.title('BuildPal Manager')
-    app.mainloop()
-
-import argparse
 import configparser
 
 from threading import Thread
@@ -127,90 +121,69 @@ def get_config(ini_file):
             "'{}'.".format(ini_file))
     return config
 
-def main(argv, terminator=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ui', choices=['gui', 'console', 'none'],
-        default='gui', help='Select user interface')
-    parser.add_argument('--port', dest='port', type=str, default=None,
-        help='Port on which manager should run.')
-    parser.add_argument('--ini', dest='ini_file', type=str, default=None,
-        help='Specify .ini file.')
-    parser.add_argument('--debug', '-d', action='store_true', dest='debug',
-        default=False, help='Enable debug logging.')
-    parser.add_argument('--profile', type=str, default=None,
-        help='Profile to use. Must be present in the .ini file.')
-    parser.add_argument('--connect', dest='connect', type=str, default=None,
-        help='Manager port to connect to.')
-    parser.add_argument('--run', nargs=argparse.REMAINDER,
-        help='Trailing arguments specify command to run.')
-
-    opts = parser.parse_args(argv)
-
+def main(opts, terminator=None):
     config = None
 
     if opts.debug:
         import logging
         logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)
 
-    if opts.connect is None:
-        if opts.port is None:
-            port = os.environ.get('BP_MANAGER_PORT')
-            if port is None:
-                print("Port name not specified, using default port ('default').", file=sys.stdout)
-                port = 'default'
-        else:
-            port = opts.port
-
-        if opts.profile is None:
-            node_info_getter = NodeDetector()
-        else:
-            if not opts.ini_file:
-                print("ERROR: Profile specified, but .ini file is not.", file=sys.stderr)
-                return -1
-            node_info_getter = FixedNodeList(get_config(opts.ini_file), opts.profile)
+    if opts.port is None:
+        port = os.environ.get('BP_MANAGER_PORT')
+        if port is None:
+            print("Port name not specified, using default port ('default').", file=sys.stdout)
+            port = 'default'
     else:
-        port = opts.connect
+        port = opts.port
 
-    class OverrideCreateProcess:
-        from buildpal_manager.compilers.msvc import setup_hooks
-        create_process = setup_hooks(port)
+    if opts.profile is None:
+        node_info_getter = NodeDetector()
+    else:
+        if not opts.ini_file:
+            print("ERROR: Profile specified, but .ini file is not.", file=sys.stderr)
+            return -1
+        node_info_getter = FixedNodeList(get_config(opts.ini_file), opts.profile)
 
-        def __enter__(self):
-            self.save = subprocess._winapi.CreateProcess
-            subprocess._winapi.CreateProcess = self.create_process
+    if opts.ui == 'gui':
+        app = BPManagerApp(node_info_getter, port)
+        app.title('BuildPal Manager')
 
-        def __exit__(self, exc_type, exc_value, traceback):
-            subprocess._winapi.CreateProcess = self.save
-            self.save = None
-
-    proc = None
-    if opts.run:
-        with OverrideCreateProcess():
-            proc = subprocess.Popen(['cmd.exe', '/S', '/K'] + opts.run,
-                creationflags=subprocess.CREATE_NEW_CONSOLE |
-                    subprocess.CREATE_NEW_PROCESS_GROUP)
-
-    if opts.connect is None:
-        if opts.ui == 'gui':
-            run_gui(node_info_getter, port)
-        else:
-            silent = opts.ui == 'none'
-            manager_runner = ManagerRunner(port, 0)
-            def run():
-                manager_runner.run(node_info_getter, silent=silent)
-            thread = Thread(target=run)
-            thread.start()
+        def run(runner):
             try:
-                while not terminator or not terminator.should_stop():
-                    sleep(1)
-            finally:
-                if not silent:
-                    print("Shutting down.")
-                manager_runner.stop()
-                thread.join()
-        if proc:
-            proc.terminate()
-            proc.wait()
+                runner.run(node_info_getter, update_ui=app.post_event)
+            except Exception as e:
+                app.post_event(GUIEvent.exception_in_run, e)
+
+        def wait():
+            app.mainloop()
+
+        manager_runner = ManagerRunner(port, 0)
+        thread = Thread(target=run, args=(manager_runner,))
+        thread.start()
+        try:
+            wait()
+        finally:
+            manager_runner.stop()
+            thread.join()
+
+    else:
+        try:
+            manager_runner = ManagerRunner(port, 0)
+            if terminator:
+                terminator.initialize(manager_runner.stop)
+            manager_runner.run(node_info_getter, silent=opts.ui == 'none')
+        except KeyboardInterrupt:
+            pass
+        #def run(runner):
+        #    runner.run(node_info_getter, silent=opts.ui == 'none')
+        #
+        #def wait():
+        #    try:
+        #        while not terminator or not terminator.should_stop():
+        #            sleep(1)
+        #    except KeyboardInterrupt:
+        #        pass
+
 
 if __name__ == '__main__':
     import signal

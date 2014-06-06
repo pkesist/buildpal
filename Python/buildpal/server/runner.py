@@ -1,4 +1,4 @@
-from buildpal_common import SimpleTimer, Timer, MessageProtocol, compress_file, Profiler
+from buildpal.common import SimpleTimer, Timer, MessageProtocol, compress_file, Profiler
 
 import asyncio
 
@@ -557,15 +557,15 @@ class ServerRunner(ProcessRunner):
             print("Using {} job slots.".format(self.__compile_slots))
 
         try:
-            event_loop_thread = Thread(target=self.run_event_loop, args=(silent,))
-            event_loop_thread.start()
-            while not terminator or not terminator.should_stop():
-                sleep(1)
+            def stop():
+                self.loop.stop()
+            if terminator:
+                terminator.initialize(stop)
+            self.run_event_loop(silent)
         finally:
             beacon.stop()
             self.server.close()
             self.loop.stop()
-            event_loop_thread.join()
             self.loop.close()
 
     def shutdown(self):

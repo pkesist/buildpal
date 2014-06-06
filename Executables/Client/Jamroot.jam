@@ -126,11 +126,8 @@ alias select_inject_module : bp_cli_inj32 ;
 alias select_inject_module : bp_cli_inj32 : <address-model>32 ;
 alias select_inject_module : bp_cli_inj64 : <address-model>64 ;
 
-exe hookMeister : hookMeister.cpp select_inject_module advapi32 ;
-
 install _
 :   bp_cl
-    hookMeister
     bp_cli_inj32
     bp_cli_inj64
 :   <location>$(TARGET_DIR)

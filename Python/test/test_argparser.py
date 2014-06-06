@@ -1,6 +1,6 @@
 import pytest
 
-from buildpal_manager.compilers.msvc import MSVCCompiler
+from buildpal.manager.compilers.msvc import MSVCCompiler
 
 @pytest.mark.parametrize(("option"), (
     'AI', 'bigobj',

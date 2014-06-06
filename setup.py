@@ -10,7 +10,7 @@ import subprocess
 import os
 import sys
 
-class build_client(_build_ext):
+class build_ext(_build_ext):
     _build_ext.user_options.append(('force-mingw', None,
         'force building with mingw'))
     _build_ext.boolean_options.append(('force-mingw'))
@@ -65,6 +65,15 @@ class build_client(_build_ext):
             self.libraries.append('imagehlp')
         return build_clang
 
+    def generate_loader(self):
+        self.asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
+        os.makedirs(self.asm_inc_dir, exist_ok=True)
+        from BuildDeps.generate_loader_asm import generate_code
+        generate_code('win32', 'Extensions/Common/Loader/loader.cpp',
+            os.path.join(self.asm_inc_dir, 'loader32.inc'), self.build_temp)
+        generate_code('win-amd64', 'Extensions/Common/Loader/loader.cpp',
+            os.path.join(self.asm_inc_dir, 'loader64.inc'), self.build_temp)
+
     def build_client(self):
         build_boost = self.get_finalized_command('build_boost')
         build_clang = self.get_finalized_command('build_clang')
@@ -73,9 +82,6 @@ class build_client(_build_ext):
         assert b2 is not None
 
         # Build Client executable
-        asm_inc_dir = os.path.abspath(os.path.join(self.build_temp, 'Loader'))
-        from BuildDeps.generate_loader_asm import main as generate_loader_asm
-        generate_loader_asm('Extensions/Common/Loader/loader.cpp', asm_inc_dir, self.build_temp)
         call = [b2,
             'toolset={}'.format('msvc' if self.compiler == 'msvc' else 'gcc'),
             '-sBOOST_BUILD_PATH="{}"'.format(os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build', 'v2'))),
@@ -97,8 +103,43 @@ class build_client(_build_ext):
             call.append('optimization=off')
         call.append('release')
         subprocess.check_call(call, cwd='Executables/Client')
-        self.additional_package_data = [('', ('bp_cli_inj32.dll',
-            'bp_cli_inj64.dll', 'hookMeister.exe'))]
+        self.additional_package_data.append(('', ('bp_cli_inj32.dll',
+            'bp_cli_inj64.dll')))
+
+        win64 = sys.maxsize > 2**32
+        self.library_dirs.append(self.build_lib)
+        self.libraries.append('bp_cli_inj64' if win64 else 'bp_cli_inj32')
+
+
+    def build_server(self):
+        build_dll = self.get_finalized_command('build_dll')
+        build_dll.libraries = [
+            ('map_files_inj32', dict(
+                sources=['Extensions/Common/dllInject.cpp',
+                    'Extensions/MapFiles/mapFiles.cpp'],
+                def_file='Extensions/MapFiles/mapFiles.def',
+                include_dirs=[os.path.dirname(self.asm_inc_dir)],
+                plat='win32')
+            ),
+            ('map_files_inj64', dict(
+                sources=['Extensions/Common/dllInject.cpp',
+                    'Extensions/MapFiles/mapFiles.cpp'],
+                def_file='Extensions/MapFiles/mapFiles.def',
+                include_dirs=[os.path.dirname(self.asm_inc_dir)],
+                plat='win-amd64')
+            )
+        ]
+        build_dll.compile_args.extend(self.extra_compile_args)
+        build_dll.link_args.extend(self.extra_link_args)
+        build_dll.link_libs.append('psapi')
+        build_dll.link_libs.append('user32')
+        build_dll.link_libs.append('shlwapi')
+        self.run_command('build_dll')
+        self.additional_package_data.append(('', ['map_files_inj32.dll', 'map_files_inj64.dll']))
+
+        self.library_dirs.append(build_dll.build_clib)
+        win64 = sys.maxsize > 2**32
+        self.libraries.append('map_files_inj64' if win64 else 'map_files_inj32')
 
     def run(self):
         self.setup_compiler()
@@ -114,17 +155,14 @@ class build_client(_build_ext):
 
         self.build_boost()
         self.build_clang()
+        self.generate_loader()
         self.build_client()
-
-        win64 = sys.maxsize > 2**32
-        self.library_dirs.append(self.build_lib)
-        self.libraries.append('bp_cli_inj64' if win64 else 'bp_cli_inj32')
+        self.build_server()
         super().run()
 
-
-setup(name = 'buildpal_manager',
+setup(name = 'buildpal',
     version = '0.1',
-    description = 'BuildPal Manager package',
+    description = 'BuildPal package',
     ext_modules = [
         Extension('preprocessing',
             sources = [
@@ -154,12 +192,22 @@ setup(name = 'buildpal_manager',
             ],
             libraries = ['shlwapi'],
         ),
+        Extension('map_files',
+            sources = [
+                'Extensions/MapFiles/pydll.cpp',
+                'Extensions/Common/createProcess.cpp'
+            ]
+        ),
     ],
-    cmdclass =  {'build_ext': build_client},
+    cmdclass =  {'build_ext': build_ext},
     command_packages = 'BuildDeps',
     package_dir = {'': 'Python'},
-    packages = ['buildpal_manager', 'buildpal_common', 'buildpal_manager.compilers'],
+    packages = [
+        'buildpal',
+        'buildpal.common',       
+        'buildpal.server',
+        'buildpal.manager'],
     entry_points = {
-        'console_scripts': ['buildpal_manager = buildpal_manager.__main__']
+        'console_scripts': ['buildpal = __main__']
     }
 )

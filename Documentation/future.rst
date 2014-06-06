@@ -11,8 +11,6 @@ Future development wish-list
 
 * IPV6 support.
 
-* Support adding/removing farm nodes on-the-fly.
-
 * Communicate with the farm via a single machine (supervisor)
     * Let the supervisor dispatch tasks to other machines.
     * This would make the farm 'client aware', providing better performance

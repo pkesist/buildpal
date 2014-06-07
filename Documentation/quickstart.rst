@@ -36,20 +36,27 @@ Setting up the Client
 =====================
 
 * Install BuildPal on the Client machine.
-* There are several ways to run the build.
+
+Running the distributed build can be accomplished in two ways. Neither requires
+changes to your project build system.
+
+.. createprocess_hooking:
 
 CreateProcess Hooking
 ---------------------
 
-This is by far the most convenient method as it does not require any changes to
-your projects build system. Unfortunately, it does not generally work.
+This is the best way to run distributed build with `BuildPal`. Unfortunately, it
+does not generally work.
 
 The idea is to intercept all calls a build system makes to the compiler, and to
-delegate this work to the farm, avoiding compiler process creation on
-the client machine. BuildPal will try to fool the build system into thinking
-that a process as actually created. This approach works for most build systems.
+delegate this work to the farm, completely avoiding compiler process creation on
+the client machine. `BuildPal` will try to fool the build system into thinking
+that a process was actually created. This approach works for most build systems.
 It will not work if the build system attempts do to something smart with the
 (supposedly) created compiler process.
+
+This approach is also the most efficient -- process spawning on Windows is quite
+expensive.
 
 Run the build as you usually would, but prepend `buildpal_client --run`. You
 should also increase max number of parallel jobs.
@@ -65,6 +72,7 @@ You should run::
 You can go wild with the `-j` option - use as much as your build will allow. As
 there is no process creation there will be little or no overhead.
 
+.. compiler_substitution:
 
 Compiler Substitution
 ---------------------
@@ -77,6 +85,7 @@ BuildPal installation has a drop-in compiler substitute :file:`bp_cl.exe`.
     Create runner which does compiler substitution.
 
 With this approach, a real process will be created, so excercise caution when
-passing -j. On the other hand, most modern hardware should not have any
-problems in spawning a hundred of these processes.
+passing determining `-j`. On the other hand, :file:`bp_cl.exe` is small and
+relatively lightweight, so most modern hardware should not have any problems
+in running many concurrently.
 

@@ -16,27 +16,35 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
 #include <windows.h>
 #include <shellapi.h>
 #include <psapi.h>
 
-typedef llvm::sys::fs::file_status FileStatus;
+typedef llvm::sys::fs::UniqueID FileStatus;
 bool getFileStatus( llvm::StringRef path, FileStatus & result )
 {
-    return !llvm::sys::fs::status( path, result );
+    return !llvm::sys::fs::getUniqueID( path, result );
 }
+
+struct CompilerDescription
+{
+    std::string compilerPath;
+    std::string replacement;
+};
 
 struct CompilerExecutables
 {
-    typedef std::vector<std::pair<FileStatus, std::string> > FileMap;
+    typedef std::map<FileStatus, CompilerDescription> FileMap;
     FileMap files;
 
-    void registerFile( llvm::StringRef compilerPath )
+    void registerFile( llvm::StringRef compilerPath, llvm::StringRef replacement )
     {
         FileStatus fileStatus;
+        CompilerDescription desc = { compilerPath.str(), replacement.str() };
         if ( getFileStatus( compilerPath, fileStatus ) )
-            files.push_back( std::make_pair( fileStatus, compilerPath ) );
+            files.insert( std::make_pair( fileStatus, desc ) );
     }
 };
 
@@ -441,8 +449,10 @@ bool hookProcess( HANDLE processHandle )
     )
     {
         DWORD bytesWritten;
-        WriteFile( pipeWrite, iter->second.c_str(), iter->second.size() + 1, &bytesWritten, NULL );
-        assert( iter->second.size() + 1 == bytesWritten );
+        WriteFile( pipeWrite, iter->second.compilerPath.c_str(), iter->second.compilerPath.size() + 1, &bytesWritten, NULL );
+        assert( iter->second.compilerPath.size() + 1 == bytesWritten );
+        WriteFile( pipeWrite, iter->second.replacement.c_str(), iter->second.replacement.size() + 1, &bytesWritten, NULL );
+        assert( iter->second.replacement.size() + 1 == bytesWritten );
     }
     char zero[ 1 ] = { 0 };
     DWORD bytesWritten;
@@ -463,6 +473,7 @@ bool hookProcess( HANDLE processHandle )
 DWORD WINAPI Initialize( HANDLE pipeHandle )
 {
     bool readingPortName = false;
+    bool readingReplacement = false;
     bool done = false;
     HookProcessAPIHookDesc::Data & hookData( HookProcessAPIHooks::getData() );
     while ( !done )
@@ -472,29 +483,36 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
         DWORD read;
         ReadFile( pipeHandle, buffer, 1024, &read, 0 );
         std::string remainder;
+        std::string compilerPath;
         for ( DWORD index( 0 ); index < read; ++index )
         {
             if ( buffer[ index ] == '\0' )
             {
                 if ( last == index )
                 {
-                    if ( !readingPortName )
+                    if ( !readingReplacement && !readingPortName )
                     {
                         last++;
                         readingPortName = true;
                         continue;
                     }
                 }
-                std::string const file = remainder + std::string( buffer + last, index - last );
+                std::string const data = remainder + std::string( buffer + last, index - last );
                 remainder.clear();
                 if ( readingPortName )
                 {
                     done = true;
-                    hookData.portName = file;
+                    hookData.portName = data;
+                }
+                else if ( readingReplacement )
+                {
+                    hookData.compilers.registerFile( compilerPath, data );
+                    readingReplacement = false;
                 }
                 else
                 {
-                    hookData.compilers.registerFile( file );
+                    compilerPath = data;
+                    readingReplacement = true;
                 }
                 last = index + 1;
             }
@@ -505,26 +523,20 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     return 0;
 }
 
-bool shortCircuit
-(
-    CreateProcessParams const & createProcessParams,
-    LPPROCESS_INFORMATION lpProcessInformation
-)
+CompilerDescription const * isCompiler( wchar_t const * appName, wchar_t const * cmd )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     FileStatus fileStatus;
     bool haveStatus = false;
     std::string args;
-    if ( createProcessParams.lpApplicationName )
+    if ( appName )
     {
-        haveStatus = getFileStatus( convert.to_bytes(
-            createProcessParams.lpApplicationName ), fileStatus );
+        haveStatus = getFileStatus( convert.to_bytes( appName ), fileStatus );
     }
     else
     {
         int argc;
-        wchar_t * * argv = CommandLineToArgvW(
-            createProcessParams.lpCommandLine, &argc );
+        wchar_t * * argv = CommandLineToArgvW( cmd, &argc );
         wchar_t buffer[ MAX_PATH ];
         wchar_t * bufferEnd;
         
@@ -539,7 +551,7 @@ bool shortCircuit
     if ( !haveStatus )
         return false;
 
-    char const * compiler = NULL;
+    CompilerDescription * compilerDesc = NULL;
     HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
     CompilerExecutables::FileMap::const_iterator const end = hookData.compilers.files.end();
     for
@@ -549,16 +561,29 @@ bool shortCircuit
         ++iter
     )
     {
-        if ( llvm::sys::fs::equivalent( iter->first, fileStatus ) )
+        if ( iter->first == fileStatus )
         {
-            compiler = iter->second.c_str();
-            break;
+            return &iter->second;
         }
     }
 
-    if ( !compiler )
-        return false;
+    return NULL;
+}
 
+CompilerDescription const * isCompiler( char const * appName, char const * cmd )
+{
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+    return isCompiler( convert.from_bytes( appName ).c_str(),
+        convert.from_bytes( cmd ).c_str() );
+}
+
+bool shortCircuit
+(
+    CreateProcessParams const & createProcessParams,
+    LPPROCESS_INFORMATION lpProcessInformation,
+    std::string const & compilerPath
+)
+{
     // Use an event handle to fake process handle to avoid hooking WFSO/WFMO.
     HANDLE eventHandle = CreateEvent( NULL, TRUE, FALSE, NULL );
 
@@ -566,12 +591,13 @@ bool shortCircuit
         new DistributedCompilation(
             eventHandle,
             "msvc",
-            compiler,
+            compilerPath.c_str(),
             createProcessParams
         )
     );
 
     {
+        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
         hookData.distributedCompilationInfo.insert( std::make_pair( eventHandle, pDcp ) );
     }
@@ -580,10 +606,10 @@ bool shortCircuit
     return true;
 }
 
-void registerCompiler( char const * compilerPath )
+void registerCompiler( char const * compilerPath, char const * replacement )
 {
     HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-    hookData.compilers.registerFile( compilerPath );
+    hookData.compilers.registerFile( compilerPath, replacement );
 }
 
 void setPortName( char const * portName )
@@ -594,14 +620,40 @@ void setPortName( char const * portName )
 
 BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
 {
-    CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory,
-        lpStartupInfo );
+    CompilerDescription const * compilerDesc( isCompiler(
+        lpApplicationName,
+        lpCommandLine )
+    );
 
-    if ( shortCircuit( cpParams, lpProcessInformation ) )
-        return 1;
+    if ( compilerDesc )
+    {
+        if ( compilerDesc->replacement.empty() )
+        {
+            CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
+                lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+                dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+                lpStartupInfo );
 
+            shortCircuit( cpParams, lpProcessInformation, compilerDesc->compilerPath );
+            return 1;
+        }
+        else
+        {
+            return CreateProcessA( 
+                compilerDesc->replacement.c_str(),
+                lpCommandLine,
+                lpProcessAttributes,
+                lpThreadAttributes,
+                bInheritHandles,
+                dwCreationFlags,
+                lpEnvironment,
+                lpCurrentDirectory,
+                lpStartupInfo,
+                lpProcessInformation
+            );
+        }
+    }
+    
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
     BOOL result = CreateProcessA( 
         lpApplicationName,
@@ -626,13 +678,41 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
 
 BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
 {
-    CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
-        lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-        dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo );
+    CompilerDescription const * compilerDesc( isCompiler(
+        lpApplicationName,
+        lpCommandLine )
+    );
 
-    if ( shortCircuit( cpParams, lpProcessInformation ) )
-        return 1;
+    if ( compilerDesc )
+    {
+        if ( compilerDesc->replacement.empty() )
+        {
+            CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
+                lpProcessAttributes, lpThreadAttributes, bInheritHandles,
+                dwCreationFlags, lpEnvironment, lpCurrentDirectory,
+                lpStartupInfo );
 
+            shortCircuit( cpParams, lpProcessInformation, compilerDesc->compilerPath );
+            return 1;
+        }
+        else
+        {
+            std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
+            return CreateProcessW( 
+                convert.from_bytes( compilerDesc->replacement ).c_str(),
+                lpCommandLine,
+                lpProcessAttributes,
+                lpThreadAttributes,
+                bInheritHandles,
+                dwCreationFlags,
+                lpEnvironment,
+                lpCurrentDirectory,
+                lpStartupInfo,
+                lpProcessInformation
+            );
+        }
+    }
+    
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
     BOOL result = CreateProcessW( 
         lpApplicationName,

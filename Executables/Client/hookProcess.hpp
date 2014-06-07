@@ -11,7 +11,7 @@
 BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA );
 BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW );
 
-void registerCompiler( char const * compilerPath );
+void registerCompiler( char const * compilerPath, char const * replacement );
 void setPortName( char const * portName );
 
 

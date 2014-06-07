@@ -173,9 +173,11 @@ PyObject * Client_createProcess( PyObject * self, PyObject * args )
 PyObject * Client_registerCompiler( PyObject * self, PyObject * args )
 {
     char const * compiler;
-    if ( !PyArg_ParseTuple( args, "s", &compiler ) )
+    char const * replacement;
+    if ( !PyArg_ParseTuple( args, "ss", &compiler, &replacement ) )
         return NULL;
-    registerCompiler( compiler );
+
+    registerCompiler( compiler, replacement );
     Py_RETURN_NONE;
 }
 

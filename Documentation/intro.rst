@@ -21,7 +21,7 @@ following limitations.
 
 * **No precompiled header support.**
 
-    It is difficult to speed up project build time if you have to forfeit the
+    It is difficult to reduce project build time if you have to forfeit the
     best single-machine optimization.
 
 * **Sub-optimal task distribution algorithms.**
@@ -43,9 +43,13 @@ Features
 
 **Easy setup**
 
-    No additional files, other than BuildPal Server, are needed on the
+    No additional files, other than ``BuildPal`` Server, are needed on the
     slave machines. All required files are automatically transferred
     on-demand.
+
+**Non-intrusive**
+
+    ``BuildPal`` does not require any changes to build system or project files.
 
 **Node auto-detection**
 
@@ -53,7 +57,7 @@ Features
 
 **Build Consistency**
 
-    BuildPal takes care to produce object files which are equivalent
+    ``BuildPal`` takes care to produce object files which are equivalent
     to the files which would be produced on local compilation.
 
 **Remote preprocessing**
@@ -83,8 +87,8 @@ At the moment, the only supported compiler toolset is MS Visual C++ compiler.
 
 This includes:
 
-    * ``Visual C++ 2005 (8.0)``
     * ``Visual C++ 2008 (9.0)``
     * ``Visual C++ 2010 (10.0)``
     * ``Visual C++ 2012 (11.0)``
+    * ``Visual C++ 2013 (12.0)``
 

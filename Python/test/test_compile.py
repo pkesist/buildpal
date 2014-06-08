@@ -36,19 +36,21 @@ class FileCreator:
 def file_creator(tmpdir):
     return FileCreator(str(tmpdir))
 
-def terminate_proc(proc):
-    proc.kill()
-    proc.communicate()
-
 class Terminator:
     def __init__(self):
-        self._should_stop = False
+        self.stop_func = None
+        self.should_stop = False
+
+    def initialize(self, stop_func):
+        self.stop_func = stop_func
+        if self.should_stop:
+            self.stop()
 
     def stop(self):
-        self._should_stop = True
-
-    def should_stop(self):
-        return self._should_stop
+        if self.stop_func:
+            self.stop_func()
+        else:
+            self.should_stop = True
 
 @pytest.fixture(scope='module')
 def run_manager(request):
@@ -63,7 +65,7 @@ node[0]=localhost:{}:4
     from buildpal.__main__ import main
     terminator = Terminator()
     def run_manager_thread():
-        main(['mgr', 'client', '--ui=none', '--ini={}'.format(ini_file),
+        main(['buildpal', 'manager', '--ui=none', '--ini={}'.format(ini_file),
             '--port={}'.format(MGR_PORT), '--profile', 'test'], terminator)
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
@@ -81,25 +83,46 @@ def fallback(**kwargs):
         print(kwargs['reason'])
     return 666
 
-@pytest.fixture(scope='function', params=(True, False))
+class InternalCompile: pass
+class CompilerSubstitute: pass
+class CreateProcessHook: pass
+class CompilerSubstituteHook: pass
+
+@pytest.fixture(scope='function', params=(
+    InternalCompile,
+    CompilerSubstitute,
+    CreateProcessHook,
+    CompilerSubstituteHook
+))
 def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
     env, cl = vcenv_and_cl
-    use_bp_cl = request.param
-    if use_bp_cl:
+    if request.param == InternalCompile:
+        return lambda args : buildpal_client.compile("msvc", cl, env,
+            list2cmdline(args), str(MGR_PORT), str(tmpdir), fallback)
+    elif request.param == CompilerSubstitute:
         def func(args):
             env['BP_MANAGER_PORT'] = str(MGR_PORT)
             args[0] = bp_cl
             return subprocess.call(args, env=env, cwd=str(tmpdir))
         return func
-    return lambda args : buildpal_client.compile("msvc", cl, env,
-        list2cmdline(args), str(MGR_PORT), str(tmpdir), fallback)
+    else:
+        assert request.param in (CreateProcessHook, CompilerSubstituteHook)
+        from buildpal.__main__ import main
+        call = [sys.executable, '-m', 'buildpal', 'client', '--connect', str(MGR_PORT)]
+        if request.param == CompilerSubstituteHook:
+            call.append('--cs')
+        call.append('--run')
+        def func(args):
+            args[0] = 'cl'
+            return subprocess.call(call + args, env=env, cwd=str(tmpdir), shell=False)
+        return func
 
 @pytest.fixture(scope='module')
 def run_server(request):
     from buildpal.__main__ import main
     terminator = Terminator()
     def run_server_thread():
-        main(['srv', 'server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
+        main(['buildpal', 'server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
     server_thread = threading.Thread(target=run_server_thread)
     server_thread.start()
     def teardown():

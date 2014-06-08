@@ -104,7 +104,7 @@ class build_ext(_build_ext):
         call.append('release')
         subprocess.check_call(call, cwd='Executables/Client')
         self.additional_package_data.append(('', ('bp_cli_inj32.dll',
-            'bp_cli_inj64.dll')))
+            'bp_cli_inj64.dll', 'bp_cl.exe')))
 
         win64 = sys.maxsize > 2**32
         self.library_dirs.append(self.build_lib)

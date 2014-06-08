@@ -33,12 +33,14 @@ setup(name='BuildPal',
         bdist_msi = dict(upgrade_code='{BC7F4969-6098-4E53-A040-2AEE0683FC9F}')),
     executables = [
         Executable('Python/starter.py', targetName=exe_file('buildpal'),
-            icon='Documentation/static/buildpal.ico', base='Console'),
+            base='Console'),
+        Executable('Python/client_starter.py', targetName=exe_file('buildpal_client'),
+            base='Console'),
+        Executable('Python/manager_starter.py', targetName=exe_file('buildpal_manager'),
+            icon='Documentation/static/buildpal2.ico', base='Console',
+            shortcutName = 'BuildPal Manager', shortcutDir='DesktopFolder'),
         Executable('Python/server_starter.py', targetName=exe_file('buildpal_server'),
             icon='Documentation/static/buildpal.ico', base='Console',
             shortcutName='BuildPal Server', shortcutDir='DesktopFolder'),
-        Executable('Python/manager_starter.py', targetName=exe_file('buildpal_client'),
-            icon='Documentation/static/buildpal2.ico', base='Console',
-            shortcutName = 'BuildPal Client Manager', shortcutDir='DesktopFolder')
     ],
 )

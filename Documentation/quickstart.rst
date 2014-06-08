@@ -36,6 +36,7 @@ Setting up the Client
 =====================
 
 * Install BuildPal on the Client machine.
+* Run the 'BuildPal Manager' shortcut.
 
 Running the distributed build can be accomplished in two ways. Neither requires
 changes to your project build system.
@@ -80,9 +81,11 @@ Compiler Substitution
 If the above approach fails with your build system, there is an alternative.
 BuildPal installation has a drop-in compiler substitute :file:`bp_cl.exe`.
 
-.. todo::
+The invocation is similar to the one above::
 
-    Create runner which does compiler substitution.
+    buildpal_client --cs --run ninja.exe target -j 128
+
+Note the extra `--cs` flag.
 
 With this approach, a real process will be created, so excercise caution when
 passing determining `-j`. On the other hand, :file:`bp_cl.exe` is small and

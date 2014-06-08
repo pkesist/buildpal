@@ -563,8 +563,8 @@ CompilerDescription const * isCompiler( wchar_t const * appName, wchar_t const *
 CompilerDescription const * isCompiler( char const * appName, char const * cmd )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    return isCompiler( convert.from_bytes( appName ).c_str(),
-        convert.from_bytes( cmd ).c_str() );
+    return isCompiler( appName ? convert.from_bytes( appName ).c_str() : NULL,
+        cmd ? convert.from_bytes( cmd ).c_str() : NULL );
 }
 
 bool shortCircuit

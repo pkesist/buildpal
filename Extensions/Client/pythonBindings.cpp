@@ -190,11 +190,26 @@ PyObject * Client_setPortName( PyObject * self, PyObject * args )
     Py_RETURN_NONE;
 }
 
+PyObject * Client_enableHooks( PyObject * self, PyObject * args )
+{
+    enableHooks();
+    Py_RETURN_NONE;
+}
+
+PyObject * Client_disableHooks( PyObject * self, PyObject * args )
+{
+    disableHooks();
+    Py_RETURN_NONE;
+}
+
+
 static PyMethodDef clientMethods[] = {
     {"compile", (PyCFunction)Client_distributedCompile, METH_VARARGS | METH_KEYWORDS, Client_distributedCompileDoc},
     {"create_process", (PyCFunction)Client_createProcess, METH_VARARGS, NULL},
     {"register_compiler", (PyCFunction)Client_registerCompiler, METH_VARARGS, NULL},
     {"set_port_name", (PyCFunction)Client_setPortName, METH_VARARGS, NULL},
+    {"enable_hooks", (PyCFunction)Client_enableHooks, METH_VARARGS, NULL},
+    {"disable_hooks", (PyCFunction)Client_disableHooks, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}
 };
 

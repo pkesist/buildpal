@@ -120,13 +120,9 @@ struct StartupInfoEx : public STARTUPINFOW
         this->lpTitle = widen( s, c, si->lpTitle );
     }
 
-    StartupInfoEx( LPSTARTUPINFOW si )
+    StartupInfoEx( LPSTARTUPINFOW si, StringSaver<wchar_t> & saver )
     {
         static_cast<STARTUPINFOW &>( *this ) = *si;
-    }
-
-    void saveInfo( StringSaver<wchar_t> & saver )
-    {
         lpReserved = saver.save( lpReserved );
         lpDesktop = saver.save( lpDesktop );
         lpTitle = saver.save( lpTitle );
@@ -152,9 +148,7 @@ struct CreateProcessParams
         BOOL inherit, DWORD flags, void * env, char const * curDir,
         LPSTARTUPINFOA pStartupInfo )
         :
-        savedInfo_( false ),
         stringSaver_( new StringSaver<wchar_t>() ),
-        stringsCopied_( true ),
         lpApplicationName( widen( appName ) ),
         lpCommandLine( widen( commandLine ) ),
         lpProcessAttributes( procAttr ),
@@ -165,6 +159,7 @@ struct CreateProcessParams
         lpCurrentDirectory( widen( curDir ) ),
         startupInfo( pStartupInfo, *stringSaver_, converter_ )
     {
+        postProcessArgs();
     }
 
     CreateProcessParams( wchar_t const * appName, wchar_t * commandLine,
@@ -172,48 +167,32 @@ struct CreateProcessParams
         BOOL inherit, DWORD flags, void * env, wchar_t const * curDir,
         LPSTARTUPINFOW pStartupInfo )
         :
+        stringSaver_( new StringSaver<wchar_t>() ),
         savedInfo_( false ),
         stringsCopied_( false ),
-        lpApplicationName( appName ),
-        lpCommandLine( commandLine ),
+        lpApplicationName( store( appName ) ),
+        lpCommandLine( store( commandLine ) ),
         lpProcessAttributes( procAttr ),
         lpThreadAttributes( threadAttr ),
         bInheritHandles( inherit ),
         dwCreationFlags( flags ),
         environment( env, ( flags & CREATE_UNICODE_ENVIRONMENT ) != 0 ),
-        lpCurrentDirectory( curDir ),
-        startupInfo( pStartupInfo )
+        lpCurrentDirectory( store( curDir ) ),
+        startupInfo( pStartupInfo, *stringSaver_ )
     {
+        postProcessArgs();
     }
 
     ~CreateProcessParams()
     {
-        if ( savedInfo_ )
-        {
-            CloseHandle( startupInfo.hStdOutput );
-            CloseHandle( startupInfo.hStdError );
-        }
+        CloseHandle( startupInfo.hStdOutput );
+        CloseHandle( startupInfo.hStdError );
     }
 
-    std::shared_ptr<StringSaver<wchar_t> > stringSaver_;
-    WideConverter converter_;
-    wchar_t const * lpApplicationName;
-    wchar_t * lpCommandLine;
-    LPSECURITY_ATTRIBUTES lpProcessAttributes;
-    LPSECURITY_ATTRIBUTES lpThreadAttributes;
-    BOOL bInheritHandles;
-    DWORD dwCreationFlags;
-    Environment environment;
-    wchar_t const * lpCurrentDirectory;
-    StartupInfoEx startupInfo;
 
-    void saveInfo()
+private:
+    void postProcessArgs()
     {
-        if ( savedInfo_ )
-            return;
-
-        savedInfo_ = true;
-
         // Ignore STARTUPINFOEX, use only STARTUPINFO.
         // It would be a nightmare to keep the extended part alive until we
         // (might) need it. At this point we are certain that we are running
@@ -237,10 +216,7 @@ struct CreateProcessParams
             DWORD size( GetCurrentDirectoryW( 0, NULL ) );
             wchar_t * curPath = static_cast<wchar_t *>( alloca( size * sizeof(wchar_t) ) );
             GetCurrentDirectoryW( size, curPath );
-            if ( stringsCopied_ )
-                lpCurrentDirectory = store( curPath );
-            else
-                lpCurrentDirectory = curPath;
+            lpCurrentDirectory = store( curPath );
         }
 
         // Store stdout/stderr handles. Create duplicates, as user is free to
@@ -259,16 +235,6 @@ struct CreateProcessParams
         DuplicateHandle( currentProcess, startupInfo.hStdError,
             currentProcess, &startupInfo.hStdError, 0, TRUE,
             DUPLICATE_SAME_ACCESS );
-
-        if ( stringsCopied_ )
-            return;
-
-        stringSaver_.reset( new StringSaver<wchar_t>() );
-        lpApplicationName = store( lpApplicationName );
-        lpCommandLine = store( lpCommandLine );
-        lpCurrentDirectory = store( lpCurrentDirectory );
-        startupInfo.saveInfo( *stringSaver_ );
-        stringsCopied_ = true;
     }
 
     wchar_t * widen( char const * str )
@@ -284,6 +250,20 @@ struct CreateProcessParams
             return NULL;
         return stringSaver_->save( str );
     }
+
+    std::shared_ptr<StringSaver<wchar_t> > stringSaver_;
+    WideConverter converter_;
+
+public:
+    wchar_t const * lpApplicationName;
+    wchar_t * lpCommandLine;
+    LPSECURITY_ATTRIBUTES lpProcessAttributes;
+    LPSECURITY_ATTRIBUTES lpThreadAttributes;
+    BOOL bInheritHandles;
+    DWORD dwCreationFlags;
+    Environment environment;
+    wchar_t const * lpCurrentDirectory;
+    StartupInfoEx startupInfo;
 };
 
 class DistributedCompilation
@@ -381,17 +361,16 @@ public:
         HANDLE eventHandle,
         char const * compilerToolset,
         char const * compilerExecutable,
-        CreateProcessParams const & cpParams
+        CreateProcessParams * cpParams
     )
         :
         eventHandle_( eventHandle ),
         compilerToolset_( compilerToolset ),
         compilerExecutable_( compilerExecutable ),
-        cpParams_( new CreateProcessParams( cpParams ) ), 
+        cpParams_( cpParams ), 
         completed_( false ),
         exitCode_( 0 )
     {
-        cpParams_->saveInfo();
     }
 
     bool complete( DWORD exitCode )
@@ -523,6 +502,17 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     return 0;
 }
 
+void enableHooks()
+{
+    HookProcessAPIHooks::enable();
+}
+
+void disableHooks()
+{
+    HookProcessAPIHooks::disable();
+}
+
+
 CompilerDescription const * isCompiler( wchar_t const * appName, wchar_t const * cmd )
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
@@ -579,9 +569,10 @@ CompilerDescription const * isCompiler( char const * appName, char const * cmd )
 
 bool shortCircuit
 (
-    CreateProcessParams const & createProcessParams,
+    CreateProcessParams * cpParams,
     LPPROCESS_INFORMATION lpProcessInformation,
-    std::string const & compilerPath
+    std::string const & compilerPath,
+    bool suspended
 )
 {
     // Use an event handle to fake process handle to avoid hooking WFSO/WFMO.
@@ -592,7 +583,7 @@ bool shortCircuit
             eventHandle,
             "msvc",
             compilerPath.c_str(),
-            createProcessParams
+            cpParams
         )
     );
 
@@ -602,7 +593,7 @@ bool shortCircuit
         hookData.distributedCompilationInfo.insert( std::make_pair( eventHandle, pDcp ) );
     }
 
-    pDcp->startThread( lpProcessInformation, ( createProcessParams.dwCreationFlags & CREATE_SUSPENDED ) != 0 );
+    pDcp->startThread( lpProcessInformation, suspended );
     return true;
 }
 
@@ -629,12 +620,16 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
     {
         if ( compilerDesc->replacement.empty() )
         {
-            CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
-                lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-                dwCreationFlags, lpEnvironment, lpCurrentDirectory,
-                lpStartupInfo );
-
-            shortCircuit( cpParams, lpProcessInformation, compilerDesc->compilerPath );
+            shortCircuit
+            (
+                new CreateProcessParams(
+                    lpApplicationName, lpCommandLine, lpProcessAttributes,
+                    lpThreadAttributes, bInheritHandles, dwCreationFlags,
+                    lpEnvironment, lpCurrentDirectory, lpStartupInfo ),
+                lpProcessInformation,
+                compilerDesc->compilerPath,
+                ( dwCreationFlags & CREATE_SUSPENDED ) != 0
+            );
             return 1;
         }
         else
@@ -687,12 +682,16 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
     {
         if ( compilerDesc->replacement.empty() )
         {
-            CreateProcessParams const cpParams( lpApplicationName, lpCommandLine,
-                lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-                dwCreationFlags, lpEnvironment, lpCurrentDirectory,
-                lpStartupInfo );
-
-            shortCircuit( cpParams, lpProcessInformation, compilerDesc->compilerPath );
+            shortCircuit
+            (
+                new CreateProcessParams(
+                    lpApplicationName, lpCommandLine, lpProcessAttributes,
+                    lpThreadAttributes, bInheritHandles, dwCreationFlags,
+                    lpEnvironment, lpCurrentDirectory, lpStartupInfo ),
+                lpProcessInformation,
+                compilerDesc->compilerPath,
+                ( dwCreationFlags & CREATE_SUSPENDED ) != 0
+            );
             return 1;
         }
         else

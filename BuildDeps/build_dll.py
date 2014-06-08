@@ -1,5 +1,8 @@
 from distutils.command.build_clib import build_clib
 from distutils.ccompiler import new_compiler
+from distutils.dep_util import newer
+
+import os
 
 class build_dll(build_clib):
     def initialize_options(self):
@@ -45,6 +48,9 @@ class build_dll(build_clib):
                        "'sources' must be present and must be "
                        "a list of source filenames" % lib_name)
             sources = list(sources)
+            target = os.path.join(self.build_clib, lib_name + ".dll")
+            if not any([newer(source, target) for source in sources]):
+                continue
 
             macros = build_info.get('macros')
             include_dirs = build_info.get('include_dirs')

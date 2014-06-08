@@ -6,22 +6,28 @@ import subprocess
 
 @pytest.fixture(scope='module')
 def bp_cl():
-    return os.path.normpath(os.path.join(os.path.dirname(
-        os.path.realpath(__file__)), '..', '..', 'bp_cl.exe'))
+    curdir = os.path.dirname(os.path.realpath(__file__))
+    while True:
+        bp_cl = os.path.join(curdir, 'bp_cl.exe')
+        if os.path.exists(bp_cl):
+            return bp_cl
+        curdir = os.path.dirname(curdir)
+        if not curdir:
+            pytest.skip("Could not find 'bp_cl.exe'")
 
 def vcvarsall(version):
     dir = None
-    try:
-        win32subkey = "WOW6432Node\\" if sys.maxsize > 2**32 else ""
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-            r'SOFTWARE\{}Microsoft\VisualStudio\{}\Setup\VC'.
-            format(win32subkey, version)) as key:
-            dir = winreg.QueryValueEx(key, 'ProductDir')[0]
-    except:
-        pass
-    if not dir:
-        pytest.skip("Visual Studio {} not found.".format(version))
-    return os.path.join(dir, 'vcvarsall.bat')
+    for kind in ('VisualStudio', 'VCExpress'):
+        try:
+            win32subkey = "WOW6432Node\\" if sys.maxsize > 2**32 else ""
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                r'SOFTWARE\{}Microsoft\{}\{}\Setup\VC'.
+                format(win32subkey, kind, version)) as key:
+                dir = winreg.QueryValueEx(key, 'ProductDir')[0]
+                return os.path.join(dir, 'vcvarsall.bat')
+        except FileNotFoundError:
+            pass
+    pytest.skip("Visual Studio {} not found.".format(version))
 
 @pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
 def vcenv_and_cl(request):

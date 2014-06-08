@@ -102,7 +102,7 @@ class build_ext(_build_ext):
             call.append('debug-symbols=on')
             call.append('optimization=off')
         call.append('release')
-        subprocess.check_call(call, cwd='Executables/Client')
+        subprocess.check_call(call, cwd='Extensions/Client')
         self.additional_package_data.append(('', ('bp_cli_inj32.dll',
             'bp_cli_inj64.dll', 'bp_cl.exe')))
 

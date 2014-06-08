@@ -38,6 +38,8 @@
     <Compile Include="BuildDeps\__init__.py" />
     <Compile Include="cx_freeze_setup.py" />
     <Compile Include="Documentation\conf.py" />
+    <Compile Include="Python\buildpal\client\__init__.py" />
+    <Compile Include="Python\buildpal\client\__main__.py" />
     <Compile Include="Python\buildpal\common\message.py" />
     <Compile Include="Python\buildpal\common\utils.py" />
     <Compile Include="Python\buildpal\common\__init__.py" />
@@ -81,8 +83,6 @@
     <Compile Include="Python\test\test_source_scanner.py" />
     <Compile Include="setup.py" />
     <Compile Include="Python\server_starter.py" />
-    <Compile Include="Python\standalone_manager.py" />
-    <Compile Include="Python\standalone_server.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
@@ -100,6 +100,7 @@
     <Folder Include="Python\buildpal\common" />
     <Folder Include="Python\buildpal\manager" />
     <Folder Include="Python\buildpal\manager\compilers" />
+    <Folder Include="Python\buildpal\client" />
     <Folder Include="Python\buildpal\server" />
     <Folder Include="Python\buildpal\" />
     <Folder Include="Python\test\" />

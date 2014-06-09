@@ -32,8 +32,8 @@ def main(argv, terminator=None):
     client_parser = subparsers.add_parser('client', aliases=['cli', 'c'])
     client_parser.add_argument('--connect', type=str, default='default',
         help='Manager port to connect to.')
-    client_parser.add_argument('--cs', dest='cs', action='store_true',
-        default=False, help='Use compiler substitution.')
+    client_parser.add_argument('--no-cp', dest='no_cp', action='store_true',
+        default=False, help='Do not create compile processes locally.')
     client_parser.add_argument('--run', nargs=argparse.REMAINDER,
         help='Trailing arguments specify command to run.')
 

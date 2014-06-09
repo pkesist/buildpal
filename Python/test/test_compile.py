@@ -109,8 +109,8 @@ def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
         assert request.param in (CreateProcessHook, CompilerSubstituteHook)
         from buildpal.__main__ import main
         call = [sys.executable, '-m', 'buildpal', 'client', '--connect', str(MGR_PORT)]
-        if request.param == CompilerSubstituteHook:
-            call.append('--cs')
+        if request.param == CreateProcessHook:
+            call.append('--no-cp')
         call.append('--run')
         def func(args):
             args[0] = 'cl'

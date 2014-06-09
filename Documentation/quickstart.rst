@@ -41,54 +41,47 @@ Setting up the Client
 Running the distributed build can be accomplished in two ways. Neither requires
 changes to your project build system.
 
-.. createprocess_hooking:
-
-CreateProcess Hooking
----------------------
-
-This is the best way to run distributed build with `BuildPal`. Unfortunately, it
-does not generally work.
-
-The idea is to intercept all calls a build system makes to the compiler, and to
-delegate this work to the farm, completely avoiding compiler process creation on
-the client machine. `BuildPal` will try to fool the build system into thinking
-that a process was actually created. This approach works for most build systems.
-It will not work if the build system attempts do to something smart with the
-(supposedly) created compiler process.
-
-This approach is also the most efficient -- process spawning on Windows is quite
-expensive.
-
-Run the build as you usually would, but prepend `buildpal_client --run`. You
-should also increase max number of parallel jobs.
-
-For example, instead of running::
-
-    ninja.exe target -j 4
-
-You should run::
-
-    buildpal_client --run ninja.exe target -j 128
-
-You can go wild with the `-j` option - use as much as your build will allow. As
-there is no process creation there will be little or no overhead.
-
 .. compiler_substitution:
 
 Compiler Substitution
 ---------------------
 
-If the above approach fails with your build system, there is an alternative.
-BuildPal installation has a drop-in compiler substitute :file:`bp_cl.exe`.
+``BuildPal`` provides a drop-in compiler subtitute :file:`bp_cl.exe`. You can
+use ``BuildPal`` runner which will detect calls to compiler and replace them
+with a call to :file:`bp_cl.exe` on-the-fly. Additionally, you should also
+increase max number of paralell jobs.
 
-The invocation is similar to the one above::
+E.g. instead of calling:
 
-    buildpal_client --cs --run ninja.exe target -j 128
+    ninja.exe target -j 4
 
-Note the extra `--cs` flag.
+You should call:
 
-With this approach, a real process will be created, so excercise caution when
-passing determining `-j`. On the other hand, :file:`bp_cl.exe` is small and
-relatively lightweight, so most modern hardware should not have any problems
-in running many concurrently.
+    buildpal_client --run ninja.exe target -j 128
 
+:file:`bp_cl.exe` is small and relatively lightweight, so most modern hardware
+should not have any problems in running many concurrently.
+
+.. createprocess_hooking:
+
+CreateProcess Hooking
+---------------------
+
+There is a faster, albeit less general and less safe method.
+
+The idea is to intercept all calls a build system makes to the compiler, and to
+delegate this work to the farm, completely avoiding compiler process creation on
+the client machine. `BuildPal` will try to fool the build system into thinking
+that a process was actually created.
+
+This approach works for most build systems. It will not work if the build system
+attempts do to anything 'smart' with the (supposedly) created compiler process.
+For example, this technique will not work with *MSBuild*.
+
+Run the build as you would with :ref:`compiler_substitution`, but add an additional
+flag, `--no-cp`:
+
+    buildpal_client --no-cp --run ninja.exe target -j 128
+
+Here you can go wild with the `-j` option - use as much as your build will allow.
+As there is no process creation there will be very little overhead.

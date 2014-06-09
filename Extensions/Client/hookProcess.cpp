@@ -84,7 +84,8 @@ APIHookItem const HookProcessAPIHookDesc::items[] =
     { "CreateProcessW"    , (PROC)createProcessW     },
     { "GetExitCodeProcess", (PROC)getExitCodeProcess },
     { "CloseHandle"       , (PROC)closeHandle        },
-    { "TerminateProcess"  , (PROC)terminateProcess   }
+    { "TerminateProcess"  , (PROC)terminateProcess   },
+    { "ExitProcess"       , (PROC)exitProcess        }
 };
 
 unsigned int const HookProcessAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -780,4 +781,13 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
         }
     }
     return TerminateProcess( handle, uExitCode );
+}
+
+VOID WINAPI HookProcessAPIHookDesc::exitProcess( UINT uExitCode )
+{
+    // Some processes are evil, and they call ExitProcess before any exit hooks
+    // (DLLMain, atexit, static destructors). After that, any CRT objects are
+    // invalid and must not be used.
+    HookProcessAPIHooks::disable();
+    return ExitProcess( uExitCode );
 }

@@ -41,7 +41,7 @@ Setting up the Client
 Running the distributed build can be accomplished in two ways. Neither requires
 changes to your project build system.
 
-.. compiler_substitution:
+.. _compiler_substitution:
 
 Compiler Substitution
 ---------------------
@@ -62,7 +62,7 @@ You should call:
 :file:`bp_cl.exe` is small and relatively lightweight, so most modern hardware
 should not have any problems in running many concurrently.
 
-.. createprocess_hooking:
+.. _createprocess_hooking:
 
 CreateProcess Hooking
 ---------------------

@@ -41,39 +41,39 @@ following limitations.
 Features
 ========
 
-**Easy setup**
+* **Easy setup**
 
     No additional files, other than ``BuildPal`` Server, are needed on the
     slave machines. All required files are automatically transferred
     on-demand.
 
-**Non-intrusive**
+* **Non-intrusive**
 
     ``BuildPal`` does not require any changes to build system or project files.
 
-**Node auto-detection**
+* **Node auto-detection**
 
     Build nodes on LAN are automatically detected and used.
 
-**Build Consistency**
+* **Build Consistency**
 
     ``BuildPal`` takes care to produce object files which are equivalent
     to the files which would be produced on local compilation.
 
-**Remote preprocessing**
+* **Remote preprocessing**
 
     ``BuildPal`` does not preprocess headers on the local machine.
     Headers used by a source file are collected and transfered to the slave.
     These headers will be reused by the slave machines for subsequent
     compilations.
 
-**PCH support**
+* **PCH support**
 
     ``BuildPal`` supports precompiled headers. Precompiled headers are
     created locally, on the client machine and are transferred to slave machines
     as needed.
 
-**Self-balancing**
+* **Self-balancing**
 
     ``BuildPal`` tries to balance the work between the nodes appropriately by
     keeping track of their statistics, giving more work to faster machines.

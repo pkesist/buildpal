@@ -9,8 +9,6 @@ Future development wish-list
     * Linux platform support (GCC/Clang).
     * ...
 
-* Stop creating icons on Desktop. There are already 3, and more coming.
-
 * IPV6 support.
 
 * Communicate with the farm via a single machine (supervisor)

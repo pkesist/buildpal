@@ -84,8 +84,7 @@ APIHookItem const HookProcessAPIHookDesc::items[] =
     { "CreateProcessW"    , (PROC)createProcessW     },
     { "GetExitCodeProcess", (PROC)getExitCodeProcess },
     { "CloseHandle"       , (PROC)closeHandle        },
-    { "TerminateProcess"  , (PROC)terminateProcess   },
-    { "ExitProcess"       , (PROC)exitProcess        }
+    { "TerminateProcess"  , (PROC)terminateProcess   }
 };
 
 unsigned int const HookProcessAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -736,6 +735,7 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
 
 BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
 {
+    if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
@@ -753,6 +753,7 @@ BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD
 
 BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
 {
+    if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
@@ -765,6 +766,7 @@ BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
 
 BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitCode )
 {
+    if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
@@ -778,10 +780,4 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
         }
     }
     return TerminateProcess( handle, uExitCode );
-}
-
-VOID WINAPI HookProcessAPIHookDesc::exitProcess( UINT uExitCode )
-{
-    HookProcessAPIHooks::disable();
-    return ExitProcess( uExitCode );
 }

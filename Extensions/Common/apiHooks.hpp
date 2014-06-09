@@ -39,6 +39,17 @@ struct APIHookHelper
     typedef std::vector<PROC> ProcVector;
     ProcVector originals_;
     ProcVector replacements_;
+    // Implementation note:
+    //   Ideally we wouldn't track whether hooks are active or not. When
+    // inactive, our function pointers are removed from import tables and
+    // shouldn't be called at all. However, a module can store a pointer
+    // obtained by GetProcAddress() and call it whenever it wants.
+    
+    // Additionally, hook functions should be written to merely do the original
+    // action if called when not active.
+    bool active_;
+
+    APIHookHelper() : active_( false ) {}
 
     template <typename APIHookDescription>
     void addAPIHook()
@@ -51,13 +62,21 @@ struct APIHookHelper
         }
     }
 
-    DWORD installHooks() const
+    ~APIHookHelper()
     {
+        if ( active_ )
+            removeHooks();
+    }
+
+    DWORD installHooks()
+    {
+        active_ = true;
         return hookWinAPI( originals_.data(), replacements_.data(), originals_.size() );
     }
 
-    DWORD removeHooks() const
+    DWORD removeHooks()
     {
+        active_ = false;
         return hookWinAPI( replacements_.data(), originals_.data(), originals_.size() );
     }
 
@@ -70,6 +89,8 @@ struct APIHookHelper
         }
         return proc;
     }
+
+    bool active() const { return active_; }
 };
 
 
@@ -107,6 +128,7 @@ private:
     static PROC translate( PROC proc ) { return singleton.translateProc( proc ); }
 
 public:
+    static bool isActive() { return singleton.active(); }
     static DWORD enable() { return singleton.installHooks(); }
     static DWORD disable() { return singleton.removeHooks(); }
     static Data & getData() { return singleton.data; }
@@ -135,7 +157,8 @@ template <typename APIHookDescription>
 HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryA( char * lpFileName )
 {
     HMODULE result = LoadLibraryA( lpFileName );
-    APIHooks<APIHookDescription>::enable();
+    if ( isActive() )
+        APIHooks<APIHookDescription>::enable();
     return result;
 }
 
@@ -143,7 +166,8 @@ template <typename APIHookDescription>
 HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryW( wchar_t * lpFileName )
 {
     HMODULE result = LoadLibraryW( lpFileName );
-    APIHooks<APIHookDescription>::enable();
+    if ( isActive() )
+        APIHooks<APIHookDescription>::enable();
     return result;
 }
 
@@ -151,7 +175,8 @@ template <typename APIHookDescription>
 HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
 {
     HMODULE result = LoadLibraryExA( lpFileName, hFile, dwFlags );
-    APIHooks<APIHookDescription>::enable();
+    if ( isActive() )
+        APIHooks<APIHookDescription>::enable();
     return result;
 }
 
@@ -159,14 +184,16 @@ template <typename APIHookDescription>
 HMODULE WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
 {
     HMODULE result = LoadLibraryExW( lpFileName, hFile, dwFlags );
-    APIHooks<APIHookDescription>::enable();
+    if ( isActive() )
+        APIHooks<APIHookDescription>::enable();
     return result;
 }
 
 template <typename APIHookDescription>
 PROC WINAPI APIHooks<APIHookDescription>::LoadLibraryHooks::getProcAddress( HMODULE hModule, LPCSTR lpProcName )
 {
-    return APIHooks<APIHookDescription>::translate( GetProcAddress( hModule, lpProcName ) ); 
+    PROC proc = GetProcAddress( hModule, lpProcName );
+    return isActive() ? APIHooks<APIHookDescription>::translate( proc ) : proc; 
 }
 
 

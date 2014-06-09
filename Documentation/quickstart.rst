@@ -37,9 +37,12 @@ Setting up the Client
 
 * Install BuildPal on the Client machine.
 * Run the 'BuildPal Manager' shortcut.
-
-Running the distributed build can be accomplished in two ways. Neither requires
-changes to your project build system.
+    * This will start a new GUI window which keeps track of the distributed
+       build.
+* Run the 'Buildpal Console' shortcut.
+    * This opens a new command line window. From here you should start your
+      build. Any compiler processes started from this console will be
+      intercepted and distributed to farm.
 
 .. _compiler_substitution:
 

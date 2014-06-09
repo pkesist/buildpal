@@ -94,4 +94,7 @@ This includes:
     Visual C++ 2012 (11.0)
     Visual C++ 2013 (12.0)
 
+Further reading
+===============
+
 For more information [read the docs](http://buildpal.readthedocs.org).

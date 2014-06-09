@@ -52,6 +52,17 @@ class DistributedCompilation;
 typedef std::shared_ptr<DistributedCompilation> DistributedCompilationPtr;
 typedef std::map<HANDLE, DistributedCompilationPtr> DistributedCompilationInfo;
 
+struct Mutex
+{
+    CRITICAL_SECTION criticalSection_;
+
+    Mutex() { InitializeCriticalSection( &criticalSection_ ); }
+    ~Mutex() { DeleteCriticalSection( &criticalSection_ ); }
+
+    void lock() { EnterCriticalSection( &criticalSection_ ); }
+    void unlock() { LeaveCriticalSection( &criticalSection_ ); }
+};
+
 class HookProcessAPIHookDesc
 {
 private:
@@ -72,7 +83,7 @@ public:
         CompilerExecutables compilers;
         std::string portName;
         DistributedCompilationInfo distributedCompilationInfo;
-        std::recursive_mutex mutex;
+        Mutex mutex;
     };
 };
 
@@ -84,8 +95,7 @@ APIHookItem const HookProcessAPIHookDesc::items[] =
     { "CreateProcessW"    , (PROC)createProcessW     },
     { "GetExitCodeProcess", (PROC)getExitCodeProcess },
     { "CloseHandle"       , (PROC)closeHandle        },
-    { "TerminateProcess"  , (PROC)terminateProcess   },
-    { "ExitProcess"       , (PROC)exitProcess        }
+    { "TerminateProcess"  , (PROC)terminateProcess   }
 };
 
 unsigned int const HookProcessAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -347,7 +357,7 @@ private:
             cpParams_->startupInfo.hStdError
         );
         {
-            std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+            std::unique_lock<Mutex> lock( hookData.mutex );
             if ( !complete( (DWORD)result ) )
                 return 0;
         }
@@ -589,7 +599,7 @@ bool shortCircuit
 
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        std::unique_lock<Mutex> lock( hookData.mutex );
         hookData.distributedCompilationInfo.insert( std::make_pair( eventHandle, pDcp ) );
     }
 
@@ -739,7 +749,7 @@ BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( hProcess );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
         {
@@ -757,7 +767,7 @@ BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
             hookData.distributedCompilationInfo.erase( dcpIter );
@@ -770,7 +780,7 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
-        std::unique_lock<std::recursive_mutex> lock( hookData.mutex );
+        std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
         {
@@ -781,13 +791,4 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
         }
     }
     return TerminateProcess( handle, uExitCode );
-}
-
-VOID WINAPI HookProcessAPIHookDesc::exitProcess( UINT uExitCode )
-{
-    // Some processes are evil, and they call ExitProcess before any exit hooks
-    // (DLLMain, atexit, static destructors). After that, any CRT objects are
-    // invalid and must not be used.
-    HookProcessAPIHooks::disable();
-    return ExitProcess( uExitCode );
 }

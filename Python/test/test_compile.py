@@ -9,7 +9,7 @@ import signal
 import subprocess
 import threading
 
-from subprocess import list2cmdline, Popen
+from subprocess import list2cmdline, Popen, check_call
 
 sys.path.append('..')
 
@@ -187,6 +187,24 @@ int main() {}
     realmccoy = file_creator.create_file('xxx/imaheaderfile.hpp', '\n')
     bbb = file_creator.create_file('xxx/bbb.h', '#include "imaheaderfile.hpp"')
     assert buildpal_compile(['compiler', '/c', file]) == 0
+
+def test_lib_input(file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
+    file = file_creator.create_file('asdf.cpp', '''\
+#include <windows.h>
+
+int main() { RegCloseKey( (HKEY)0 ); }
+''')
+    args = ['cl', '/EHsc', file, 'advapi32.lib', '/link', '/SUBSYSTEM:CONSOLE']
+    assert buildpal_compile(args) == 0
+
+def test_exe_name(file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
+    file = file_creator.create_file('asdf.cpp', '''\
+int main() {}
+''')
+    args = ['cl', '/EHsc', file, '/Fexxee.exe', '/link', '/SUBSYSTEM:CONSOLE']
+    assert buildpal_compile(args) == 0
+    exe_path = file_creator.full_path('xxee.exe')
+    assert os.path.exists(exe_path)
 
 def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, buildpal_compile):
     file = file_creator.create_file('test.cpp', '#include <asdf.h>')

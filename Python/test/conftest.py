@@ -6,14 +6,11 @@ import subprocess
 
 @pytest.fixture(scope='module')
 def bp_cl():
-    curdir = os.path.dirname(os.path.realpath(__file__))
-    while True:
-        bp_cl = os.path.join(curdir, 'bp_cl.exe')
-        if os.path.exists(bp_cl):
-            return bp_cl
-        curdir = os.path.dirname(curdir)
-        if not curdir:
-            pytest.skip("Could not find 'bp_cl.exe'")
+    from buildpal.client.__main__ import find_bp_cl
+    try:
+        return find_bp_cl()
+    except EnvironmentError:
+        pytest.skip("Could not find 'bp_cl.exe'")
 
 def vcvarsall(version):
     dir = None

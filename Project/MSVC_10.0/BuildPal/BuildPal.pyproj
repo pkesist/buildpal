@@ -70,6 +70,8 @@
     <Compile Include="Python\buildpal\server\__main__.py" />
     <Compile Include="Python\buildpal\__init__.py" />
     <Compile Include="Python\buildpal\__main__.py" />
+    <Compile Include="Python\client_cmd_starter.py" />
+    <Compile Include="Python\client_starter.py" />
     <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\server_svc_config.py" />
     <Compile Include="Python\server_svc_handler.py" />
@@ -116,17 +118,17 @@
     <Content Include="Documentation\intro.rst" />
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />
-    <Content Include="Executables\Client\bp_cl.cpp" />
-    <Content Include="Executables\Client\hookProcess.cpp" />
-    <Content Include="Executables\Client\hookProcess.def" />
-    <Content Include="Executables\Client\hookProcess.hpp" />
-    <Content Include="Executables\Client\Jamroot.jam" />
     <Content Include="Extensions\ArgParser\argList_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.hpp" />
     <Content Include="Extensions\ArgParser\test.cpp" />
+    <Content Include="Extensions\Client\bp_cl.cpp" />
     <Content Include="Extensions\Client\client.cpp" />
     <Content Include="Extensions\Client\client.hpp" />
+    <Content Include="Extensions\Client\hookProcess.cpp" />
+    <Content Include="Extensions\Client\hookProcess.def" />
+    <Content Include="Extensions\Client\hookProcess.hpp" />
+    <Content Include="Extensions\Client\Jamroot.jam" />
     <Content Include="Extensions\Client\pythonBindings.cpp" />
     <Content Include="Extensions\Common\apiHooks.hpp" />
     <Content Include="Extensions\Common\createProcess.cpp" />
@@ -150,6 +152,7 @@
     <Content Include="Extensions\MapFiles\mapFiles.def" />
     <Content Include="Extensions\MapFiles\mapFiles.hpp" />
     <Content Include="Extensions\MapFiles\pydll.cpp" />
+    <Content Include="README.md" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
 </Project>

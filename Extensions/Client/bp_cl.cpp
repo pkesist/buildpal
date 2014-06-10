@@ -30,7 +30,7 @@ struct Timer
 
 int main()
 {
-    Timer t;
+    //Timer t;
     Environment env( GetEnvironmentStringsA(), false );
 
     std::string compilerExecutable;
@@ -43,7 +43,6 @@ int main()
     bool const disableFallback = !!env.get( "BP_DISABLE_FALLBACK" );
     llvm::Optional<std::string> const portNameVar( env.get( "BP_MANAGER_PORT" ) );
 
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
     return distributedCompile(
         "msvc",
         compilerExecutable.c_str(),

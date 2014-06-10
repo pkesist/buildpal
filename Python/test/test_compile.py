@@ -70,7 +70,7 @@ node[0]=localhost:{}:4
     manager_thread = threading.Thread(target=run_manager_thread)
     manager_thread.start()
     # Give it some time to set up.
-    sleep(0.5)
+    sleep(4)
     def teardown():
         shutil.rmtree(dir)
         terminator.stop()
@@ -205,6 +205,14 @@ int main() {}
     assert buildpal_compile(args) == 0
     exe_path = file_creator.full_path('xxee.exe')
     assert os.path.exists(exe_path)
+
+def test_pch(tmpdir, file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
+    pch_file = file_creator.create_file('pch.hpp', '')
+    cpp_file = file_creator.create_file('cpp.cpp', '#include "pch.hpp"\n')
+    assert buildpal_compile(['cl', '/c', '/EHsc', '/Zi', '/Ycpch.hpp', cpp_file]) == 0
+    assert buildpal_compile(['cl', '/EHsc', '/c', '/Zi', '/Yupch.hpp', '/Fppch.pch', cpp_file]) == 0
+    vcenv, cl = vcenv_and_cl
+
 
 def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, buildpal_compile):
     file = file_creator.create_file('test.cpp', '#include <asdf.h>')

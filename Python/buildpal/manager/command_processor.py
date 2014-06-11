@@ -178,7 +178,7 @@ class CommandProcessor:
             # No idea what the user wanted.
             self.client_conn.do_run_locally()
             return []
-        self.completed_tasks = set()
+        self.completed_tasks = {}
         self.tasks_with_sessions_done = set()
         return self.tasks
 
@@ -186,9 +186,9 @@ class CommandProcessor:
         assert task in self.tasks
         assert task not in self.completed_tasks
         self.update_task_ui(task)
-        self.completed_tasks.add(task)
-        if self.tasks == self.completed_tasks:
-            self.postprocess(result)
+        self.completed_tasks[task] = result
+        if self.tasks == self.completed_tasks.keys():
+            self.postprocess()
 
     def all_sessions_done(self, task):
         self.tasks_with_sessions_done.add(task)
@@ -198,11 +198,11 @@ class CommandProcessor:
     def should_invoke_linker(self):
         return self.__options.should_invoke_linker()
 
-    def postprocess(self, result):
+    def postprocess(self):
         exit_error_code = 0
         stdout = b''
         stderr = b''
-        for task in self.completed_tasks:
+        for task, result in self.completed_tasks.items():
             retcode, tmp_stdout, tmp_stderr = result
             if retcode != 0:
                 exit_error_code = retcode

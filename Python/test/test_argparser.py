@@ -86,7 +86,7 @@ def test_unrecognized_arg(option):
 ))
 def test_input_files(input, expected):
     options = MSVCCompiler.parse_options(input)
-    assert set(options.input_files()) == expected
+    assert set(options.source_files()) == expected
 
 @pytest.mark.parametrize(("input", "expected"), (
     (['/D_ASDF', '/D_FDSA'], {'_ASDF', '_FDSA'}),

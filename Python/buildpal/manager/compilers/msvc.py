@@ -39,6 +39,20 @@ class CompileOptions:
     def should_build_locally(self):
         return any((x in self.compiler.build_local_options() for x in self.value_dict))
 
+    def create_pch_cmd(self):
+        if self.compiler.create_pch_file_option() not in self.value_dict:
+            return None
+
+        result = []
+        for name, value in zip(self.option_names, self.arg_values):
+            if name == 'Zi':
+                # Disable generating PDB files when compiling cpp into obj.
+                # Store debug info in the obj file itself.
+                result.append('/Z7')
+            else:
+                result.extend(value)
+        return result
+
     def should_invoke_linker(self):
         return self.value_dict.get(self.compiler.compile_no_link_option()) is None
 
@@ -76,7 +90,10 @@ class CompileOptions:
                         # This is hardly an input file. Most likely a compiler
                         # option not recognized by Clang. We will consider it
                         # to be a flag.
-                        result.append(val)
+                        if val == '/FD':
+                            pass
+                        else:
+                            result.append(val)
             elif name not in exclude_opts:
                 result.extend(value)
         return result
@@ -167,6 +184,9 @@ class MSVCCompiler:
     def pch_file_option(cls): return 'Fp'
 
     @classmethod
+    def create_pch_file_option(cls): return 'Yc'
+
+    @classmethod
     def set_pch_file_option(cls): return '/Fp{}'
 
     @classmethod
@@ -175,7 +195,6 @@ class MSVCCompiler:
             'E', 'EP', 'P', # Preprocess
             'Zg', # Create prototype, do not compile
             'Zs', # Check syntax only
-            'Yc', # Create PCH
             'FA', 'Fa', # Create ASM listing
         ]
 
@@ -271,7 +290,6 @@ class MSVCCompiler:
     compiler_files = {
         b'14.00' : 
         [
-            b'msvcr90.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',
@@ -291,7 +309,6 @@ class MSVCCompiler:
             b'1033/vcomp80ui.dll'],
         b'15.00' : 
         [
-            b'msvcr90.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',

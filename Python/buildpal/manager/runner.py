@@ -74,6 +74,9 @@ class ClientProcessor(MessageProtocol):
             self.do_run_locally()
             return True
 
+        if self.command_processor.process_create_pch():
+            return True
+
         if executable in self.compiler_info:
             self.command_processor.set_compiler_info(
                 self.compiler_info[executable])

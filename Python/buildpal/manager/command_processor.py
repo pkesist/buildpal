@@ -124,6 +124,13 @@ class CommandProcessor:
     def build_local(self):
         return self.__options.should_build_locally()
 
+    def process_create_pch(self):
+        pch_cmd = self.__options.create_pch_cmd()
+        if not pch_cmd:
+            return False
+        self.client_conn.do_execute_and_exit(pch_cmd)
+        return True
+
     def compile_on_client(self, task):
         self.__client_task_compiler.append_task(self.compiler, self.__options, task)
 

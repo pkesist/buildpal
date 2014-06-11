@@ -37,7 +37,7 @@ def header_info(preprocessor, task):
     header_info, missing_headers = collect_headers(preprocessor, task['source'], task['includes'],
         task['sysincludes'], task['macros'])
     shared_file_list = []
-    for dir, data in header_info:
+    for dir, system, data in header_info:
         shared_files_in_dir = []
         # Headers which are relative to source file are not
         # considered as candidates for server cache, and are
@@ -45,7 +45,7 @@ def header_info(preprocessor, task):
         for file, relative, content, checksum in data:
             if not relative:
                 shared_files_in_dir.append((file, checksum))
-        shared_file_list.append((dir, shared_files_in_dir))
+        shared_file_list.append((dir, system, shared_files_in_dir))
     return header_info, tuple(shared_file_list), missing_headers
 
 

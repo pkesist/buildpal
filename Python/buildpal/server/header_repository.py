@@ -49,9 +49,9 @@ class HeaderRepository:
         """
         needed_files = {}
         out_list = set()
-        dirs = set()
-        for remote_dir, data in in_list:
-            dirs.add(remote_dir)
+        dirs = { False : list(), True : list() }
+        for remote_dir, is_system, data in in_list:
+            dirs[is_system].append(remote_dir)
             for name, checksum in data:
                 key = (remote_dir, name)
                 if self.checksums[machine_id].get(key) != checksum:
@@ -69,7 +69,7 @@ class HeaderRepository:
         We received files which we reported missing.
         """
         with self.session_lock:
-            needed_files, tmp_include_paths = self.session_data[session_id]
+            needed_files, include_dirs = self.session_data[session_id]
         del self.session_data[session_id]
 
         checksums = self.checksums[machine_id]
@@ -78,7 +78,9 @@ class HeaderRepository:
         self.tempdirs[session_id] = sandbox_dir
 
         include_paths = [sandbox_dir]
-        include_paths.extend(tmp_include_paths)
+        # First add user paths, then system paths
+        include_paths.extend(include_dirs[False])
+        include_paths.extend(include_dirs[True])
 
         temp_files = []
         # Update headers.

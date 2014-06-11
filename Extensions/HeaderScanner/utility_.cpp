@@ -60,34 +60,32 @@ llvm::MemoryBuffer * convertEncodingIfNeeded( llvm::MemoryBuffer * pMemoryBuffer
     if ( !bigEndian && !littleEndian )
         return NULL;
 
-    char * inputStart = const_cast<char *>( data.data() + 2 );
-    wchar_t * input = reinterpret_cast<wchar_t *>( inputStart );
-    std::size_t inputSize = ( data.size() - 2 ) / sizeof(wchar_t);
-
-    wchar_t const * end = reinterpret_cast<wchar_t const *>( input + inputSize );
+    wchar_t const * start = reinterpret_cast<wchar_t const *>( data.data() + 2 );
+    std::size_t const inputSize = ( data.size() - 2 ) / sizeof(wchar_t);
+    std::vector<wchar_t> input( start, start + inputSize );
 
     // This can be written more tersly, but exactly one of these branches
     // is redundant, so try to make it easy for the optimizer.
     if ( littleEndian )
     {
-        for ( wchar_t * stride = input; stride < end; ++stride )
+        for ( wchar_t & stride : input )
         {
-            char const * bytePtr = reinterpret_cast<char const *>( stride );
-            *stride = static_cast<wchar_t>( ( bytePtr[1] << 8) | bytePtr[0] );
+            char const * bytePtr = reinterpret_cast<char const *>( &stride );
+            stride = static_cast<wchar_t>( ( bytePtr[1] << 8 ) | bytePtr[0] );
         }
     }
     else
     {
-        for ( wchar_t * stride = input; stride < end; ++stride )
+        for ( wchar_t & stride : input )
         {
-            char const * bytePtr = reinterpret_cast<char const *>( stride );
-            *stride = static_cast<wchar_t>( ( bytePtr[0] << 8 ) | bytePtr[1] );
+            char const * bytePtr = reinterpret_cast<char const *>( &stride );
+            stride = static_cast<wchar_t>( ( bytePtr[0] << 8 ) | bytePtr[1] );
         }
     }
     std::wstring_convert<
         std::codecvt_utf8_utf16<wchar_t>
     > converter;
-    std::string utf8( converter.to_bytes( input, input + inputSize ) );
+    std::string utf8( converter.to_bytes( &input[0], &input[0] + input.size() ) );
     utf8.push_back('\0');
     return llvm::MemoryBuffer::getMemBufferCopy( utf8, "" );
 }

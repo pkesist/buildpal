@@ -187,30 +187,12 @@ class ServerSession:
         source_file = self.task.source
 
         result = []
-        # Iterate over
-        #
-        #    (dir1, [[a11, a12, ..., a1n], [b11, b12, ..., b1n], ..., [z11, z12, ..., z1n],]),
-        #    (dir2, [[a21, a22, ..., a2n], [b21, b22, ..., b2n], ..., [z21, z22, ..., z2n],]),
-        #    ...
-        #
-        # Like it was
-        #
-        #  (dir1, a11, a12, ..., a1n),
-        #  (dir1, b11, b12, ..., b1n),
-        #  ...
-        #  (dir1, z11, z12, ..., z1n),
-        #  (dir2, a21, a22, ..., a2n),
-        #  (dir2, b21, b22, ..., b2n),
-        #  ...
-        #  (dir2, z21, z22, ..., z2n),
-        #  ...
-        for dir, (file, relative, content, checksum) in ((dir, stuff) for
-            dir, data in header_info for stuff in data):
+        for dir, system, data in header_info:
             dir_bytes = dir.encode()
-            if not relative and not (dir, file) in in_filelist:
-                # Not needed.
-                continue
-            result.extend((dir_bytes, file.encode(), content))
+            for file, relative, content, checksum in data:
+                if not relative and not (dir, file) in in_filelist:
+                    continue
+                result.extend((dir_bytes, file.encode(), content))
 
         with open(source_file, 'rb') as src:
             result.extend((b'', source_file.encode(), src.read()))

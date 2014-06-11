@@ -362,13 +362,16 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
             return hs( dir.get() );
         }
     };
-    typedef std::unordered_map<Dir, PyObject *, HashDir> DirsAndHeaders;
+    typedef std::unordered_map<Dir, std::pair<bool, PyObject *>, HashDir> DirsAndHeaders;
     DirsAndHeaders dirsAndHeaders;
     for ( Header const & header : headers )
     {
         DirsAndHeaders::iterator iter( dirsAndHeaders.find( header.dir ) );
         if ( iter == dirsAndHeaders.end() )
-            iter = dirsAndHeaders.insert( std::make_pair( header.dir, PyList_New( 0 ) ) ).first;
+        {
+            bool const system = (header.loc == HeaderLocation::system);
+            iter = dirsAndHeaders.insert( std::make_pair( header.dir, std::make_pair( system, PyList_New( 0 ) ) ) ).first;
+        }
         PyObject * headerEntry = PyTuple_New( 4 );
         PyTuple_SET_ITEM( headerEntry, 0, PyUnicode_FromStringAndSize( header.name.get().data(), header.name.get().size() ) );
 
@@ -380,7 +383,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         std::size_t const size( header.buffer->getBufferSize() );
         PyTuple_SET_ITEM( headerEntry, 2, PyMemoryView_FromMemory( data, size, PyBUF_READ ) );
         PyTuple_SET_ITEM( headerEntry, 3, PyLong_FromSize_t( header.checksum ) );
-        PyList_Append( iter->second, headerEntry );
+        PyList_Append( iter->second.second, headerEntry );
         Py_DECREF( headerEntry );
     }
 
@@ -388,10 +391,14 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     std::size_t headerIndex( 0 );
     for ( DirsAndHeaders::value_type const & dirAndHeaders : dirsAndHeaders )
     {
-        PyObject * dirTuple = PyTuple_New( 2 );
-        PyObject * dir = PyUnicode_FromStringAndSize( dirAndHeaders.first.get().data(), dirAndHeaders.first.get().size() );
+        PyObject * dirTuple = PyTuple_New( 3 );
+        llvm::StringRef const dirStr( dirAndHeaders.first.get() );
+        PyObject * dir = PyUnicode_FromStringAndSize( dirStr.data(), dirStr.size() );
         PyTuple_SET_ITEM( dirTuple, 0, dir );
-        PyTuple_SET_ITEM( dirTuple, 1, dirAndHeaders.second );
+        PyObject * pyBool( dirAndHeaders.second.first ? Py_True : Py_False );
+        Py_INCREF( pyBool );
+        PyTuple_SET_ITEM( dirTuple, 1, pyBool );
+        PyTuple_SET_ITEM( dirTuple, 2, dirAndHeaders.second.second );
         PyTuple_SET_ITEM( headersTuple, headerIndex++, dirTuple );
     }
 

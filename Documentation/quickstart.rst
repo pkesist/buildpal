@@ -37,12 +37,11 @@ Setting up the Client
 
 * Install BuildPal on the Client machine.
 * Run the 'BuildPal Manager' shortcut.
-    * This will start a new GUI window which keeps track of the distributed
-    build.
+    * This will start a new GUI window which keeps track of the distributed build.
 * Run the 'Buildpal Console' shortcut.
     * This opens a new command line window. From here you should start your
-    build. Any compiler processes started from this console will be
-    intercepted and distributed to farm.
+      build. Any compiler processes started from this console will be
+      intercepted and distributed to farm.
 
 .. _compiler_substitution:
 

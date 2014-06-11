@@ -2,6 +2,7 @@
 #include "contentCache_.hpp"
 
 #include "headerCache_.hpp"
+#include "utility_.hpp"
 //------------------------------------------------------------------------------
 
 ContentCache ContentCache::singleton_;
@@ -79,7 +80,14 @@ ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::
         boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
         if ( cache )
             cache->invalidate( *contentEntry );
-        contentMap_[ uniqueID ] = ContentEntry( fm.getBufferForFile( file, 0, true ), file->getModificationTime() );
+        llvm::MemoryBuffer * memoryBuffer( fm.getBufferForFile( file, 0, true ) );
+        llvm::MemoryBuffer * converted = convertEncodingIfNeeded( memoryBuffer );
+        if ( converted )
+        {
+            delete memoryBuffer;
+            memoryBuffer = converted;
+        }
+        contentMap_[ uniqueID ] = ContentEntry( memoryBuffer, file->getModificationTime() );
         return contentMap_[ uniqueID ];
     }
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );

@@ -160,7 +160,7 @@ class Preprocessor
 public:
     explicit Preprocessor( Cache * cache );
 
-    void scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
+    bool scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
     void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 

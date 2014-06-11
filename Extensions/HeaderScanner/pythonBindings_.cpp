@@ -321,10 +321,11 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     Headers headers;
     HeaderList missing;
     PyThreadState * _save;
+    bool result;
     try
     {
         Py_UNBLOCK_THREADS
-        self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers, missing );
+        result = self->pp->scanHeaders( *ppContext->ppContext, PyUnicode_AsUTF8( filename ), headers, missing );
     }
     catch ( std::runtime_error const & error )
     {
@@ -346,6 +347,12 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
     Py_BLOCK_THREADS
     
+    if ( !result )
+    {
+        PyErr_SetString( PyExc_Exception, "Failed to preprocess file." );
+        return NULL;
+    }
+
     // Group result by dir.
     struct HashDir
     {

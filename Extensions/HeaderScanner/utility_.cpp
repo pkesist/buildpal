@@ -4,6 +4,8 @@
 #include <clang/Basic/FileManager.h>
 #include <clang/Lex/Preprocessor.h>
 
+#include <codecvt>
+
 llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocessor, llvm::StringRef const macroName, clang::MacroDirective const * def )
 {
     assert( def );
@@ -44,4 +46,48 @@ llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocesso
     }
     // Result starts with macro name, skip that.
     return llvm::StringRef( result.data() + macroName.size(), result.size() - macroName.size() );
+}
+
+static bool const systemIsLittleEndian = true;
+
+llvm::MemoryBuffer * convertEncodingIfNeeded( llvm::MemoryBuffer * pMemoryBuffer )
+{
+    // Clang supports UTF-8 only. We also want to support UTF-16.
+    llvm::StringRef const data = pMemoryBuffer->getBuffer();
+
+    bool const bigEndian( data.startswith("\xFE\xFF") );
+    bool const littleEndian( data.startswith("\xFF\xFE") );
+    if ( !bigEndian && !littleEndian )
+        return NULL;
+
+    char * inputStart = const_cast<char *>( data.data() + 2 );
+    wchar_t * input = reinterpret_cast<wchar_t *>( inputStart );
+    std::size_t inputSize = ( data.size() - 2 ) / sizeof(wchar_t);
+
+    wchar_t const * end = reinterpret_cast<wchar_t const *>( input + inputSize );
+
+    // This can be written more tersly, but exactly one of these branches
+    // is redundant, so try to make it easy for the optimizer.
+    if ( littleEndian )
+    {
+        for ( wchar_t * stride = input; stride < end; ++stride )
+        {
+            char const * bytePtr = reinterpret_cast<char const *>( stride );
+            *stride = static_cast<wchar_t>( ( bytePtr[1] << 8) | bytePtr[0] );
+        }
+    }
+    else
+    {
+        for ( wchar_t * stride = input; stride < end; ++stride )
+        {
+            char const * bytePtr = reinterpret_cast<char const *>( stride );
+            *stride = static_cast<wchar_t>( ( bytePtr[0] << 8 ) | bytePtr[1] );
+        }
+    }
+    std::wstring_convert<
+        std::codecvt_utf8_utf16<wchar_t>
+    > converter;
+    std::string utf8( converter.to_bytes( input, input + inputSize ) );
+    utf8.push_back('\0');
+    return llvm::MemoryBuffer::getMemBufferCopy( utf8, "" );
 }

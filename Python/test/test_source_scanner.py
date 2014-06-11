@@ -3,6 +3,7 @@ import pytest
 import threading
 import os
 from time import sleep
+import codecs
 
 def collect_headers(filename, includes=[], defines=[],
         sysincludes=[], use_cache=True):
@@ -29,7 +30,8 @@ class Environment:
         dirs = os.path.dirname(real_path)
         if not os.path.exists(dirs):
             os.makedirs(dirs, exist_ok=True)
-        with open(real_path, 'wt') as file:
+        openmode = 'wb' if type(content) == bytes else 'wt'
+        with open(real_path, openmode) as file:
             file.write(content)
 
     def run_worker(self, filename, includes=[], defines=[], use_cache=False):
@@ -212,3 +214,15 @@ def test_rel_include(env):
     env.make_file('xxx\\bbb.h', '''#include "dodo.h"''')
     env.make_file('testme.cpp', '''#include "xxx/bbb.h"''')
     assert env.run('testme.cpp') == {'xxx/dodo.h', 'xxx/bbb.h'}
+
+def test_uft16_le_src(env):
+    env.make_file('dodo.h')
+    env.make_file('ima_utf16le_file.cpp',
+        codecs.BOM_UTF16_LE + '#include "dodo.h"\n'.encode('utf-16-le'))
+    assert env.run('ima_utf16le_file.cpp') == {'dodo.h'}
+
+def test_uft16_be_src(env):
+    env.make_file('dodo.h')
+    env.make_file('ima_utf16be_file.cpp',
+        codecs.BOM_UTF16_BE + '#include "dodo.h"\n'.encode('utf-16-be'))
+    assert env.run('ima_utf16be_file.cpp') == {'dodo.h'}

@@ -1,6 +1,7 @@
 //------------------------------------------------------------------------------
 #include "headerScanner_.hpp"
 #include "headerTracker_.hpp"
+#include "utility_.hpp"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/DiagnosticOptions.h>
@@ -286,6 +287,16 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
         error.append( "'." );
         throw std::runtime_error( error );
     }
+
+    assert( !sourceManager().isFileOverridden( mainFileEntry ) );
+    llvm::MemoryBuffer * memoryBuffer( fileManager().getBufferForFile( mainFileEntry, 0, true ) );
+    llvm::MemoryBuffer * converted = convertEncodingIfNeeded( memoryBuffer );
+    if ( converted )
+    {
+        delete memoryBuffer;
+        memoryBuffer = converted;
+    }
+    sourceManager().overrideFileContents( mainFileEntry, memoryBuffer );
     sourceManager().createMainFileID( mainFileEntry );
 
     // Setup new preprocessor instance.
@@ -314,7 +325,7 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     return searchPathId;
 }
 
-void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
+bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
     std::size_t const searchPathId = setupPreprocessor( ppc, fileName );
     struct DiagnosticsSetup
@@ -345,7 +356,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
 
     preprocessor().EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )
-        return;
+        return false;
     while ( true )
     {
         clang::Token token;
@@ -354,6 +365,7 @@ void Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
             break;
     }
     preprocessor().EndSourceFile();
+    return true;
 }
 
 

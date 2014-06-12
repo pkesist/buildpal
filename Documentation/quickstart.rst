@@ -4,7 +4,7 @@ Quick Start
 Requirements
 ============
 
-1. A C/C++ project (duh) using a build system capable of running parallel
+1. A C/C++ project, using a build system capable of running parallel
    tasks.
 
 2. A client build machine connected to a Local-Area Network.
@@ -15,60 +15,66 @@ Requirements
     * Given that the only compiler currently supported is MSVC, this means that
       all slave machines need to run Windows.
 
-Setting up Server (slave) nodes
-===============================
+Setting up Server (slave) machines
+==================================
 
-On each slave on the network do the following:
+On each machine:
 
-* Install BuildPal. This will create 'BuildPal Server' shortcut on your desktop.
-* Run the shortcut.
+* Install BuildPal. This will create 'BuildPal' program group.
+* Run the 'BuildPal Server' shortcut.
 
-.. note:
-
-    There is no need to explicitly specify TCP port. Each server is
-    automatically discovered (via UDP multicast).
+That's it - the server will be automatically discovered via UDP multicast.
 
 .. note:
 
-    Slaves do not need to have compiler pre-installed.
+    Slaves do not need to have compiler pre-installed. However, C++
+    redistributable package the compiler uses should be installed.
+
 
 Setting up the Client
 =====================
 
-* Install BuildPal on the Client machine.
+* Install BuildPal. This will create 'BuildPal' program group.
 * Run the 'BuildPal Manager' shortcut.
-    * This will start a new GUI window which keeps track of the distributed build.
+    * The Manager is the mediator between a compilation request and the build
+      farm. It performs many tasks, including:
+        * Server detection.
+        * All network communication towards the farm.
+        * All (IPC) communication with the clients (i.e. compilation requests).
+        * Source file preprocessing.
+            * Needed in order to determine which files are  required for
+              successful remote compilation.
+        * Local filesystem information caching.
+            * Source file contents.
+            * Preprocessing results.
 * Run the 'Buildpal Console' shortcut.
     * This opens a new command line window. From here you should start your
       build. Any compiler processes started from this console will be
       intercepted and distributed to farm.
+    * When starting your build, increase the number of parallel jobs (typically
+      ``-jN`` option).
+
+BuildPal Console
+================
+
+BuildPal has who kinds of consoles. The difference between the two is the method
+how compilation request is distributed after being intercepted.
 
 .. _compiler_substitution:
 
-Compiler Substitution
----------------------
+Compiler Substitution (default)
+-------------------------------
 
-``BuildPal`` provides a drop-in compiler subtitute :file:`bp_cl.exe`. You can
-use ``BuildPal`` runner which will detect calls to compiler and replace them
-with a call to :file:`bp_cl.exe` on-the-fly. Additionally, you should also
-increase max number of paralell jobs.
-
-E.g. instead of calling::
-
-    ninja.exe target -j 4
-
-You should call::
-
-    buildpal_client --run ninja.exe target -j 128
-
-Any calls made to :file:`cl.exe` will be redirected to :file:`bp_cl.exe`.
-Note that :file:`bp_cl.exe` is small and relatively lightweight, so most modern
-hardware should not have any problems in running many concurrently.
+``BuildPal`` provides a drop-in compiler subtitute :file:`bp_cl.exe`. When
+buildpal detects that the compiler process is about to be created, it replaces the
+call to :file:`cl.exe` to :file:`bp_cl.exe`. Note that :file:`bp_cl.exe` is
+small and relatively lightweight, so most modern hardware should not have any
+problems in running many concurrently.
 
 .. _createprocess_hooking:
 
-CreateProcess Hooking
----------------------
+CreateProcess Hooking (experimental)
+------------------------------------
 
 There is a faster, albeit less general and less safe method.
 
@@ -81,10 +87,8 @@ This approach works for most build systems. It will not work if the build system
 attempts do to anything 'smart' with the (supposedly) created compiler process.
 For example, this technique will not work with *MSBuild*.
 
-Run the build as you would with :ref:`compiler_substitution`, but add an additional
-flag, ``--no-cp``::
+.. note:
 
-    buildpal_client --no-cp --run ninja.exe target -j 128
-
-Here you can go wild with the ``-j`` option - use as much as your build will allow.
-As there is no process creation there will be very little overhead.
+    With this method you can go wild with the ``-j`` option - use as much as
+    your build will allow. As there is no process creation there will be very
+    little overhead.

@@ -328,7 +328,6 @@ class MSVCCompiler:
             b'1033/vcomp90ui.dll'],
         b'16.00' :
         [
-            b'msvcr100.dll',
             b'c1.dll',
             b'c1xx.dll',
             b'c2.dll',
@@ -345,7 +344,6 @@ class MSVCCompiler:
             b'1033/vcomp100ui.dll'],
         b'17.00' :
         [
-            b'msvcr110.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',
@@ -365,7 +363,6 @@ class MSVCCompiler:
             b'1033/vcomp110ui.dll'],
         b'18.00' :
         [
-            b'msvcr120.dll',
             b'c1.dll',
             b'c1ast.dll',
             b'c1xx.dll',

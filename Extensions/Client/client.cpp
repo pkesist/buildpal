@@ -311,28 +311,20 @@ char * Environment::createEnvBlock() const
     return const_cast<char *>( envBlock_.c_str() );
 }
 
-PathList const & getPath( Environment const & env )
+void getPath( Environment const & env, PathList & result )
 {
-    static PathList result;
-    static bool initialized = false;
-    if ( !initialized )
+    llvm::Optional<std::string> path = env.get( "PATH" );
+    if ( !path )
+        return;
+    std::size_t last = 0;
+    for ( std::size_t iter( 0 ); iter != path->size(); ++iter )
     {
-        initialized = true;
-        llvm::Optional<std::string> path = env.get( "PATH" );
-        if ( !path )
-            return result;
-        std::size_t last = 0;
-        for ( std::size_t iter( 0 ); iter != path->size(); ++iter )
+        if ( ( (*path)[ iter ] == ';' ) && ( iter != last + 1 ) )
         {
-            if ( ( (*path)[ iter ] == ';' ) && ( iter != last + 1 ) )
-            {
-                result.push_back( std::string( path->c_str() + last, path->c_str() + iter ) );
-                last = iter + 1;
-            }
+            result.push_back( std::string( path->c_str() + last, path->c_str() + iter ) );
+            last = iter + 1;
         }
-        initialized = true;
     }
-    return result;
 }
 
 int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment const * env, wchar_t const * currentDirectory )
@@ -712,8 +704,7 @@ int distributedCompile(
             char const * const filename = PathFindFileName( compilerExecutable );
             assert( filename != compilerExecutable );
             pathList.push_back( std::string( compilerExecutable, filename - compilerExecutable ) );
-            PathList const & path( getPath( env ) );
-            std::copy( path.begin(), path.end(), std::back_inserter( pathList ) );
+            getPath( env, pathList );
 
             for ( std::size_t part = 1; part < receiver.parts(); ++part )
             {

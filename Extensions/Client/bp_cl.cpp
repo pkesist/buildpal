@@ -34,7 +34,9 @@ int main()
     Environment env( GetEnvironmentStringsA(), false );
 
     std::string compilerExecutable;
-    if ( !findOnPath( getPath( env ), "cl.exe", compilerExecutable ) )
+    PathList pathList;
+    getPath( env, pathList );
+    if ( !findOnPath( pathList, "cl.exe", compilerExecutable ) )
     {
         std::cerr << "Failed to locate executable 'cl.exe' on PATH.\n";
         return -1;

@@ -9,7 +9,6 @@
 #include <vector>
 #include <map>
 
-typedef std::vector<std::string> PathList;
 
 class Environment
 {
@@ -28,7 +27,8 @@ public:
     llvm::Optional<std::string> get( llvm::StringRef str ) const;
 };
 
-PathList const & getPath( Environment const & );
+typedef std::vector<std::string> PathList;
+void getPath( Environment const &, PathList & );
 
 bool findOnPath( PathList const & pathList, std::string const & file, std::string & result );
 

@@ -151,7 +151,7 @@ def test_cplusplus(file_creator, run_server, run_manager, buildpal_compile):
 ''')
     assert buildpal_compile(['compiler', '/c', file]) != 0
 
-def test_link_and_run(file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
+def test_link_and_run(file_creator, tmpdir, run_server, run_manager, buildpal_compile, vcenv_and_cl):
     file = file_creator.create_file('linkme.cpp', '''
 #include <iostream>
 int main()
@@ -170,7 +170,7 @@ int main()
     assert not os.path.exists(second_exe)
     env, cl = vcenv_and_cl
     with Popen([cl, '/EHsc', file, "/link", "/Ox", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
-            env=env) as proc:
+            env=env, cwd=str(tmpdir)) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(second_exe)
     with subprocess.Popen([first_exe], stdout=subprocess.PIPE) as proc:

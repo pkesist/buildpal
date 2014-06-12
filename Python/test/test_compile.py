@@ -219,3 +219,13 @@ def test_error_on_include_out_of_include_path(file_creator, run_server, run_mana
     file_creator.create_file('inc/dodo.h')
     file_creator.create_file('inc/1/2/3/4/5/asdf.h', '#include "../../../../../dodo.h"')
     assert buildpal_compile(['compiler', '/c', '/Iinc/1/2/3/4/5', file]) == 0
+
+def test_include_order(file_creator, run_server, run_manager, buildpal_compile):
+    rightfile = file_creator.create_file('right.h', '')
+    wrongfile = file_creator.create_file('wrong.h', '#error "You should not have included me!!!"')
+    first  = file_creator.create_file('first/include.h' , '#include "../right.h"\n')
+    second = file_creator.create_file('second/include.h', '#include "../wrong.h"\n')
+    third  = file_creator.create_file('third/include.h' , '#include "../wrong.h"\n')
+    fourth = file_creator.create_file('fourth/include.h', '#include "../wrong.h"\n')
+    file = file_creator.create_file('test.cpp', '#include "include.h"\n')
+    assert buildpal_compile(['compiler', '/c', '/Ifirst', '/Isecond', '/Ithird', '/Ifourth', file]) == 0

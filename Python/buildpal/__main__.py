@@ -53,6 +53,5 @@ def main(argv, terminator=None):
 
 if __name__ == '__main__':
     import sys
-    retcode = main(sys.argv) or 0
-    sys.exit(retcode)
+    sys.exit(main(sys.argv) or 0)
 

@@ -15,8 +15,8 @@ Requirements
     * Given that the only compiler currently supported is MSVC, this means that
       all slave machines need to run Windows.
 
-Setting up the Server (slave) nodes
-===================================
+Setting up Server (slave) nodes
+===============================
 
 On each slave on the network do the following:
 

@@ -70,9 +70,6 @@
     <Compile Include="Python\buildpal\server\__main__.py" />
     <Compile Include="Python\buildpal\__init__.py" />
     <Compile Include="Python\buildpal\__main__.py" />
-    <Compile Include="Python\client_cmd_starter.py" />
-    <Compile Include="Python\client_starter.py" />
-    <Compile Include="Python\manager_starter.py" />
     <Compile Include="Python\server_svc_config.py" />
     <Compile Include="Python\server_svc_handler.py" />
     <Compile Include="Python\starter.py" />
@@ -84,18 +81,15 @@
     <Compile Include="Python\test\test_message.py" />
     <Compile Include="Python\test\test_source_scanner.py" />
     <Compile Include="setup.py" />
-    <Compile Include="Python\server_starter.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Documentation\" />
     <Folder Include="BuildDeps\" />
-    <Folder Include="Executables\Client\" />
     <Folder Include="Extensions\" />
     <Folder Include="Extensions\ArgParser\" />
     <Folder Include="Extensions\Common\Loader\" />
     <Folder Include="Extensions\HeaderScanner\" />
     <Folder Include="Extensions\MapFiles\" />
-    <Folder Include="Executables\" />
     <Folder Include="Extensions\Client\" />
     <Folder Include="Extensions\Common" />
     <Folder Include="Python\" />

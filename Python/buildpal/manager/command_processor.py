@@ -128,6 +128,7 @@ class CommandProcessor:
         pch_cmd = self.__options.create_pch_cmd()
         if not pch_cmd:
             return False
+        logging.debug("Running PCH create '{}' locally.".format(pch_cmd))
         self.client_conn.do_execute_and_exit(pch_cmd)
         return True
 
@@ -149,13 +150,14 @@ class CommandProcessor:
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
-        def create_task(source, target):
+        def create_task(source, targets):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
             return Task(dict(
                 server_task_info=dict(
                     call=self.__options.create_server_call(),
                     pch_file=pch_file,
+                    pdb_file=targets.get('pdb_file')
                 ),
                 preprocess_task_info=dict(
                     source=source,
@@ -167,8 +169,8 @@ class CommandProcessor:
                     pch_header=pch_header
                 ),
                 command_processor=self,
-                client_conn=self.client_conn,
-                output=os.path.join(self.__cwd, target),
+                output=os.path.join(self.__cwd, targets['object_file']),
+                result_files=[os.path.join(self.__cwd, target) for target in targets['all']],
                 pch_file=pch_file,
                 source=source,
             ))

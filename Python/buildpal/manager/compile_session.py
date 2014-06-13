@@ -3,6 +3,7 @@ from buildpal.common import SimpleTimer, send_file, send_compressed_file
 from enum import Enum
 from io import BytesIO
 
+import asyncio
 import logging
 import os
 import pickle
@@ -22,7 +23,7 @@ class SessionResult(Enum):
 class ServerSession:
     STATE_START = 0
     STATE_WAIT_FOR_MISSING_FILES = 1
-    STATE_RECEIVE_RESULT_FILE = 2
+    STATE_RECEIVE_OBJECT_FILE = 2
     STATE_WAIT_FOR_SERVER_RESPONSE = 3
     STATE_FINISH = 4
 
@@ -34,14 +35,15 @@ class ServerSession:
         def send_msg(self, data):
             self._send_msg([self._session_id] + list(data))
 
-    def __init__(self, id, task, send_msg, node, async_call, compressor,
+    def __init__(self, id, task, send_msg, node, loop, executor, compressor,
                  completion_callback):
         self.state = self.STATE_START
         self.task = task
         self.node = node
         self.task.register_session(self)
         self.cancelled = False
-        self.async_call = async_call
+        self.loop = loop
+        self.executor = executor
         self.compressor = compressor
         self.result = None
         self.local_id = id
@@ -136,8 +138,8 @@ class ServerSession:
                     if self.retcode == 0:
                         self.sender.send_msg([b'SEND_CONFIRMATION', b'\x01'])
                         self.obj_desc = BytesIO()
-                        self.obj_decompressor = zlib.decompressobj()
-                        self.state = self.STATE_RECEIVE_RESULT_FILE
+                        self.state = self.STATE_RECEIVE_OBJECT_FILE
+                        self.result_futures = []
                         self.receive_result_time = SimpleTimer()
                     else:
                         self.__complete(SessionResult.success)
@@ -148,39 +150,55 @@ class ServerSession:
                     self.__complete(SessionResult.too_late)
                     return True
 
-        elif self.state == self.STATE_RECEIVE_RESULT_FILE:
+        elif self.state == self.STATE_RECEIVE_OBJECT_FILE:
             assert not self.cancelled
             more, data = msg
-            self.obj_desc.write(self.obj_decompressor.decompress(data.memory()))
+            self.obj_desc.write(data.memory())
             if more == b'\x00':
-                self.obj_desc.write(self.obj_decompressor.flush())
-
-                # Write to disk worker.
-                def write_to_disk(fileobj):
-                    fileobj.seek(0)
-                    with open(self.task.output, "wb") as obj:
-                        for data in iter(lambda : fileobj.read(256 * 1024), b''):
-                            obj.write(data)
-                    return self.task.output
-
-                # Completion for write to disk.
-                def complete_session(future):
-                    try:
-                        if self.state == self.STATE_FINISH:
-                            return
-                        self.output = future.result()
-                    except Exception:
-                        self.__complete(SessionResult.failure)
-                    else:
-                        self.__complete(SessionResult.success)
-                self.async_call(write_to_disk, self.obj_desc).add_done_callback(
-                    complete_session)
-                self.timer.add_time('download object file',
-                    self.receive_result_time.get())
-                return True
+                file_index = len(self.result_futures)
+                future = self.loop.run_in_executor(self.executor,
+                    self._decompress_to_disk, self.obj_desc,
+                    self.task.result_files[file_index])
+                self.result_futures.append(future)
+            
+                # Complete the session once all files are decompressed.
+                if len(self.result_futures) == len(self.task.result_files):
+                    self.timer.add_time('download result files',
+                        self.receive_result_time.get())
+                    asyncio.gather(*self.result_futures, loop=self.loop
+                        ).add_done_callback(self.complete_session)
+                    return True
+                else:
+                    # Prepare to receive another file.
+                    self.obj_desc = BytesIO()
         else:
             assert not "Invalid state"
         return False
+
+    @classmethod
+    def _decompress_to_disk(cls, fileobj, output):
+        fileobj.seek(0)
+        decompressor = zlib.decompressobj()
+        with open(output, "wb") as obj:
+            for data in iter(lambda : fileobj.read(256 * 1024), b''):
+                obj.write(decompressor.decompress(data))
+            obj.write(decompressor.flush())
+            logging.debug("Written {} bytes".format(obj.tell()))
+
+    def complete_session(self, future):
+        try:
+            # We might have been terminated.
+            if self.state == self.STATE_FINISH:
+                assert self.result == SessionResult.terminated
+                return
+            future_count = len(future.result())
+        except Exception as e:
+            logging.exception(e)
+            self.__complete(SessionResult.failure)
+        else:
+            assert future_count == len(self.task.result_files)
+            self.__complete(SessionResult.success)
+
 
     def task_files_bundle(self, in_filelist):
         header_info = self.task.header_info

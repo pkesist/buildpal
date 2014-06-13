@@ -117,7 +117,7 @@ class NodeManager:
             self.update_ui(GUIEvent.update_node_info, self.node_info)
 
         session = ServerSession(self.__generate_unique_id(), task,
-            protocol.send_msg, node, async_call, self.compressor,
+            protocol.send_msg, node, self.loop, self.executor, self.compressor,
             session_completed)
         self.tasks_running[node].append(task)
         self.sessions[session.local_id] = session

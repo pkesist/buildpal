@@ -1,11 +1,13 @@
 import parse_args
 
 from .utils import get_batch_file_environment_side_effects
+from collections import defaultdict
 
 import itertools
 import os
 import re
 import sys
+import logging
 import tempfile
 
 class CompileOptions:
@@ -15,12 +17,12 @@ class CompileOptions:
         self.option_names = arg_list.option_names()
         self.option_values = arg_list.option_values()
         self.arg_values = arg_list.arg_values()
-        self.value_dict = {}
-        self.arg_dict = {}
+        self.value_dict = defaultdict(list)
+        self.arg_dict = defaultdict(list)
         for x, y in zip(self.option_names, self.option_values):
-            self.value_dict.setdefault(x, []).append(y)
+            self.value_dict[x].extend(y)
         for x, y in zip(self.option_names, self.arg_values):
-            self.arg_dict.setdefault(x, []).append(y)
+            self.arg_dict[x].extend(y)
 
     def implicit_macros(self):
         macros = []
@@ -40,6 +42,9 @@ class CompileOptions:
         return any((x in self.compiler.build_local_options() for x in self.value_dict))
 
     def create_pch_cmd(self):
+        if self.use_pdb_file():
+            return self.arg_values
+
         if self.compiler.create_pch_file_option() not in self.value_dict:
             return None
 
@@ -49,6 +54,7 @@ class CompileOptions:
                 # Disable generating PDB files when compiling cpp into obj.
                 # Store debug info in the obj file itself.
                 result.append('/Z7')
+                result.append('/Yd')
             else:
                 result.extend(value)
         return result
@@ -58,32 +64,30 @@ class CompileOptions:
 
     def pch_header(self):
         opt = self.value_dict.get(self.compiler.use_pch_option())
-        if not opt:
-            return None
-        assert len(opt[-1]) == 1
-        return opt[-1][0]
+        return opt[-1] if opt else None
 
     def pch_file(self):
         opt = self.value_dict.get(self.compiler.pch_file_option())
-        if not opt:
-            return None
-        assert len(opt[-1]) == 1
-        return opt[-1][0]
+        return opt[-1] if opt else None
 
     def includes(self):
-        return list(itertools.chain(*self.value_dict.get(self.compiler.include_option(), [])))
+        return self.value_dict[self.compiler.include_option()]
 
     def defines(self):
-        return list(itertools.chain(*self.value_dict.get(self.compiler.define_option(), [])))
+        return self.value_dict[self.compiler.define_option()]
 
     def create_server_call(self):
         result = ['/c']
         exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc']
         for name, value in zip(self.option_names, self.arg_values):
-            if name == 'Zi':
+            if not self.use_pdb_file() and name == 'Zi':
                 # Disable generating PDB files when compiling cpp into obj.
                 # Store debug info in the obj file itself.
                 result.append('/Z7')
+            elif name == '/Fd':
+                # Ignore users .pdb file. We will either store debug symbols in
+                # object files themselves, or manually specify pdb filename.
+                pass
             elif name == '<input>':
                 for val in value:
                     if val[0] == '/':
@@ -91,6 +95,8 @@ class CompileOptions:
                         # option not recognized by Clang. We will consider it
                         # to be a flag.
                         if val == '/FD':
+                            # Never use this flag on a server call, causes
+                            # failure with an incomprehensive error message.
                             pass
                         else:
                             result.append(val)
@@ -100,16 +106,16 @@ class CompileOptions:
 
     def source_files(self):
         # All files explicitly set to C
-        for x in itertools.chain(*self.value_dict.get('Tc', [])):
+        for x in self.value_dict['Tc']:
             yield x
         # All files explicitly set to CPP
-        for x in itertools.chain(*self.value_dict.get('Tp', [])):
+        for x in self.value_dict['Tp']:
             yield x
 
         # Treat all files as X.
-        all_inputs_are_sources = 'TC' in self.option_names or \
-            'TP' in self.option_names
-        for x in itertools.chain(*self.value_dict.get('<input>', [])):
+        all_inputs_are_sources = any(x in self.option_names for x in
+            ('TC', 'TP'))
+        for x in self.value_dict['<input>']:
             # Probably a flag not recognized by Clang argument parser.
             if x[0] == '/':
                 continue
@@ -120,47 +126,66 @@ class CompileOptions:
 
     def input_files(self):
         source_files = set(self.source_files())
-        for x in itertools.chain(*self.value_dict.get('<input>', [])):
+        for x in self.value_dict['<input>']:
             if x[0] == '/':
                 continue
             if x not in source_files:
                 yield x
 
     def output_file(self):
-        result = self.value_dict.get(self.compiler.object_name_option())
-        if not result:
-            return None
-        assert len(result[-1]) == 1
-        return result[-1][0]
+        opt = self.value_dict.get(self.compiler.object_name_option())
+        return opt[-1] if opt else None
+
+    def use_pdb_file(self):
+        # At the moment we do not know how to merge PDB file.
+        # We could use one pdb per object, but embedding debug
+        # info in the object file is much more feasable.
+        return False
 
     def files(self):
         sources = list(self.source_files())
         output = self.output_file()
-        if output:
-            if output[-1] == os.path.sep or output[-1] == os.path.altsep:
-                outputs = [os.path.join(output, os.path.splitext(
-                    os.path.basename(src))[0] + '.obj') for src in sources]
-                return zip(sources, outputs)
-            else:
-                if len(sources) > 1:
-                    raise RuntimeError("Cannot specify output file " \
-                        "with multiple sources.")
-                return [(sources[0], output)]
-        return [(src, os.path.splitext(os.path.basename(src))[0] + '.obj')
-            for src in sources]
+
+        def get_output_files():
+            if output:
+                if output[-1] == os.path.sep or output[-1] == os.path.altsep:
+                    return [os.path.join(output, os.path.splitext(
+                        os.path.basename(src))[0] + '.obj') for src in sources]
+                else:
+                    if len(sources) > 1:
+                        raise RuntimeError("Cannot specify output file " \
+                            "with multiple sources.")
+                    return [output]
+            return [os.path.splitext(os.path.basename(src))[0] + '.obj' for
+                src in sources]
+
+        def make_target_dict(dest):
+            targets = dict(object_file=dest, all=[dest])
+            if self.use_pdb_file():
+                pdb_file = os.path.splitext(dest)[0] + '_buildpal.pdb'
+                targets['pdb_file'] = pdb_file
+                targets['all'].append(pdb_file)
+            return targets
+
+        outputs = get_output_files()
+        assert len(sources) == len(outputs)
+        return [(src, make_target_dict(dest)) for src, dest in zip(sources, outputs)]
 
     def link_options(self):
         options = []
-        options.extend(self.arg_dict.get('Fe', []))
-        options.extend(self.arg_dict.get(self.compiler.link_option(), []))
-        return itertools.chain(*options)
+        options.extend(self.arg_dict[self.compiler.executable_name_option()])
+        options.extend(self.arg_dict[self.compiler.link_option()])
+        return options
 
 class MSVCCompiler:
     @classmethod
     def object_name_option(cls): return 'Fo'
 
     @classmethod
-    def set_object_name_option(cls): return '/Fo{}'
+    def executable_name_option(cls): return 'Fe'
+
+    @classmethod
+    def set_object_name_option(cls, val): return '/Fo{}'.format(val)
 
     @classmethod
     def compile_no_link_option(cls): return 'c'
@@ -169,13 +194,13 @@ class MSVCCompiler:
     def include_option(cls): return 'I'
 
     @classmethod
-    def set_include_option(cls): return '/I{}'
+    def set_include_option(cls, val): return '/I{}'.format(val)
 
     @classmethod
     def define_option(cls): return 'D'
 
     @classmethod
-    def set_define_option(cls): return '/D{}'
+    def set_define_option(cls, val): return '/D{}'.format(val)
 
     @classmethod
     def use_pch_option(cls): return 'Yu'
@@ -187,7 +212,10 @@ class MSVCCompiler:
     def create_pch_file_option(cls): return 'Yc'
 
     @classmethod
-    def set_pch_file_option(cls): return '/Fp{}'
+    def set_pch_file_option(cls, val): return '/Fp{}'.format(val)
+
+    @classmethod
+    def set_pdb_file_option(cls, val): return '/Fd{}'.format(val)
 
     @classmethod
     def build_local_options(cls): 
@@ -278,12 +306,10 @@ class MSVCCompiler:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
         return dict(
+            toolset = 'msvc',
             executable = os.path.basename(executable),
             id = version,
             macros = macros,
-            set_object_name = self.set_object_name_option(),
-            set_pch_file = self.set_pch_file_option(),
-            set_include_option = self.set_include_option(),
         ), self.compiler_files[version[0][:5]]
 
 

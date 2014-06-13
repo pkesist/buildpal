@@ -62,7 +62,12 @@ class HeaderRepository:
         return out_list
 
     def tempdir(self, session_id):
-        return self.tempdirs[session_id]
+        result = self.tempdirs.get(session_id)
+        if result:
+            return result
+        sandbox_dir = tempfile.mkdtemp(dir=self.scratch_dir)
+        self.tempdirs[session_id] = sandbox_dir
+        return sandbox_dir
 
     def prepare_dir(self, machine_id, session_id, new_files):
         """
@@ -73,9 +78,7 @@ class HeaderRepository:
         del self.session_data[session_id]
 
         checksums = self.checksums[machine_id]
-
-        sandbox_dir = tempfile.mkdtemp(dir=self.scratch_dir)
-        self.tempdirs[session_id] = sandbox_dir
+        sandbox_dir = self.tempdir(session_id)
 
         include_paths = [sandbox_dir]
         # First add user paths, then system paths

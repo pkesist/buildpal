@@ -198,7 +198,7 @@ class CompileSession(Timer):
             assert tag == b'SEND_CONFIRMATION'
             if verdict == b'\x01':
                 session.change_state(CompileSession.StateUploadingFile)
-                session.send_object_file(session.object_file)
+                session.send_result()
             else:
                 session.session_done()
 
@@ -275,43 +275,42 @@ class CompileSession(Timer):
             return
         self.cancel_selfdestruct()
 
-        obj_handle, self.object_file = tempfile.mkstemp(
-            dir=self.runner.scratch_dir, suffix='.obj')
-        os.close(obj_handle)
+        # Find compiler options.
+        assert self.task['compiler_info']['toolset'] == 'msvc'
+        from buildpal.manager.compilers.msvc import MSVCCompiler
+        compiler_options = MSVCCompiler
 
-        compiler_info = self.task['compiler_info']
-        output = compiler_info['set_object_name'].format(self.object_file)
-        pch_switch = []
+        tempdir = self.runner.header_repository().tempdir(id(self))
+        obj_handle, self.object_file = tempfile.mkstemp(
+            dir=tempdir, suffix='.obj')
+        os.close(obj_handle)
+        output = compiler_options.set_object_name_option(self.object_file)
+
+        command = [self.compiler_exe(), output] + self.task['call']
         overrides = {}
+
+        if self.task['pdb_file']:
+            pdb_handle, self.pdb_file = tempfile.mkstemp(
+                dir=tempdir, suffix='.pdb')
+            os.close(pdb_handle)
+            overrides[self.task['pdb_file']] = self.pdb_file
+            command.append(compiler_options.set_pdb_file_option(
+                self.task['pdb_file']))
+
         if self.task['pch_file']:
             assert self.pch_file is not None
-            # TODO: MSVC specific, remove from here.
-            #if '/GL' in self.task['call']:
-            if True:
-                # Occasionally, PCH file is needed in link phase
-                # (e.g. when compiling with MSVC /GL compiler option).
-                # The problem we face is that PCH path on slave machine
-                # will not be the same as the client machine, and resulting
-                # .obj will contain a reference to non-existing file.
-                # To overcome this, we use map_files module which overrides
-                # CreateFile Windows API.
-                overrides[self.task['pch_file'][0]] = self.pch_file
-                self.pch_file = self.task['pch_file'][0]
-            else:
-                assert os.path.exists(self.pch_file)
-            pch_switch.append(compiler_info['set_pch_file'].format(
-                self.pch_file
-            ))
+            overrides[self.task['pch_file'][0]] = self.pch_file
+            self.pch_file = self.task['pch_file'][0]
+            command.append(compiler_options.set_pch_file_option(
+                self.pch_file))
 
         include_dirs, src_loc = self.include_dirs_future.result()
-        includes = [compiler_info['set_include_option'].format(incpath)
-            for incpath in include_dirs]
-        command = ([self.compiler_exe()] + self.task['call'] + pch_switch +
-            includes + [output, src_loc])
+        command.extend([compiler_options.set_include_option(incpath)
+            for incpath in include_dirs])
+        command.append(src_loc)
 
         self.note_time('ready for compile', 'prepare for compile')
-        cur_dir = self.runner.header_repository().tempdir(id(self))
-        self.runner.run_compiler(self, command, cur_dir, overrides,
+        self.runner.run_compiler(self, command, tempdir, overrides,
             self.__compile_completed)
 
     def __compile_completed(self, future):
@@ -371,22 +370,38 @@ class CompileSession(Timer):
             self.runner.scheduler().cancel(self.selfdestruct)
             del self.selfdestruct
 
-    def send_object_file(self, obj_file):
-        def compress_disk_file():
+    def send_result(self):
+        def compress_one(filename):
+            result = []
+            size = 0
+            with open(filename, 'rb') as file:
+                compressed_gen = compress_file(file)
+                for x in compressed_gen:
+                    result.append((b'\x01', x))
+                    size += len(x)
+                result.append((b'\x00', b''))
+                logging.debug("Sending '{}', size {}, raw {}.".format(filename, size, file.tell()))
+            return result
+
+        def compress_result():
             try:
-                with open(obj_file, 'rb') as file:
-                    return list(compress_file(file))
+                result = compress_one(self.object_file)
+                if self.task['pdb_file']:
+                    assert self.pdb_file
+                    result.extend(compress_one(self.pdb_file))
+                return result
             finally:
-                os.remove(obj_file)
+                os.remove(self.object_file)
+                if self.task['pdb_file']:
+                    os.remove(self.pdb_file)
 
         def send_compressed(future):
             for buffer in future.result():
-                self.sender.send_msg([b'\x01', buffer])
-            self.sender.send_msg([b'\x00', b''])
+                self.sender.send_msg(buffer)
             self.note_time('result sent', 'sending result')
             self.session_done()
 
-        self.runner.async_run(compress_disk_file).add_done_callback(
+        self.runner.async_run(compress_result).add_done_callback(
             send_compressed)
 
     def cancel_session(self):

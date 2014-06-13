@@ -96,7 +96,6 @@ class ClientProcessor(MessageProtocol):
             task.server_task_info['compiler_info'] = task.compiler_info
             task.preprocess_task_info['macros'].extend(
                 task.compiler_info['macros'])
-            task.pp_timer = SimpleTimer()
             self.task_created_func(task)
 
 class ManagerRunner:

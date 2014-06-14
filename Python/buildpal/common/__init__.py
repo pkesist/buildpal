@@ -9,3 +9,14 @@ class ServerTask:
         self.pch_file = pch_file
         self.pdb_file = pdb_file
         self.filelist = None
+
+class CompilerInfo:
+    def __init__(self, toolset, executable, id, macros):
+        self.toolset = toolset
+        self.executable = executable
+        self.id = id
+        self.macros = macros
+        self.files = None
+
+    def set_files(self, files):
+        self.files = files

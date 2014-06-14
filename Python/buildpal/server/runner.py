@@ -250,12 +250,12 @@ class CompileSession(Timer):
         self.__state.enter_state(self)
 
     def compiler_id(self):
-        return self.task.compiler_info['id']
+        return self.task.compiler_info.id
 
     def compiler_exe(self):
         return os.path.join(
             self.runner.compiler_repository().compiler_dir(self.compiler_id()),
-            self.task.compiler_info['executable'])
+            self.task.compiler_info.executable)
 
     def compile(self):
         self.change_state(self.StateRunningCompiler)
@@ -276,7 +276,7 @@ class CompileSession(Timer):
         self.cancel_selfdestruct()
 
         # Find compiler options.
-        assert self.task.compiler_info['toolset'] == 'msvc'
+        assert self.task.compiler_info.toolset == 'msvc'
         from buildpal.manager.compilers.msvc import MSVCCompiler
         compiler_options = MSVCCompiler
 

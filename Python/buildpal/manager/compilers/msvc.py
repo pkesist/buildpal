@@ -1,6 +1,9 @@
 import parse_args
 
 from .utils import get_batch_file_environment_side_effects
+
+from buildpal.common import CompilerInfo
+
 from collections import defaultdict
 
 import itertools
@@ -305,12 +308,8 @@ class MSVCCompiler:
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
         version = (m.group('ver'), m.group('plat'))
-        return dict(
-            toolset = 'msvc',
-            executable = os.path.basename(executable),
-            id = version,
-            macros = macros,
-        ), self.compiler_files[version[0][:5]]
+        return CompilerInfo('msvc', os.path.basename(executable), version,
+            macros), self.compiler_files[version[0][:5]]
 
 
     compiler_files = {

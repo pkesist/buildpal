@@ -21,10 +21,10 @@ from threading import Thread
 from time import time
 
 class ClientProcessor(MessageProtocol):
-    def __init__(self, compiler_info, task_created_func, database_inserter,
+    def __init__(self, compiler_info_cache, task_created_func, database_inserter,
             global_timer, update_ui):
         MessageProtocol.__init__(self)
-        self.compiler_info = compiler_info
+        self.compiler_info_cache = compiler_info_cache
         self.task_created_func = task_created_func
         self.global_timer = global_timer
         self.update_ui = update_ui
@@ -77,9 +77,9 @@ class ClientProcessor(MessageProtocol):
         if self.command_processor.process_create_pch():
             return True
 
-        if executable in self.compiler_info:
+        if executable in self.compiler_info_cache:
             self.command_processor.set_compiler_info(
-                self.compiler_info[executable])
+                self.compiler_info_cache[executable])
             self.__create_tasks()
         else:
             self.command_processor.request_compiler_info(
@@ -89,8 +89,8 @@ class ClientProcessor(MessageProtocol):
         # No more data will be read from the client.
         assert self.command_processor.state == \
             self.command_processor.STATE_READY
-        if not self.command_processor.executable in self.compiler_info:
-            self.compiler_info[self.command_processor.executable] = \
+        if not self.command_processor.executable in self.compiler_info_cache:
+            self.compiler_info_cache[self.command_processor.executable] = \
                 self.command_processor.compiler_info
         for task in self.command_processor.create_tasks(
                 self.command_processor.compiler_info):
@@ -112,7 +112,7 @@ class ManagerRunner:
                 self.ratio = self.hits / total
 
         self.port = port
-        self.compiler_info = {}
+        self.compiler_info_cache = {}
         self.timer = Timer()
         self.server = None
 
@@ -155,7 +155,7 @@ class ManagerRunner:
                 self.n_pp_threads) as source_scanner:
 
             def client_processor_factory():
-                return ClientProcessor(self.compiler_info, source_scanner.add_task,
+                return ClientProcessor(self.compiler_info_cache, source_scanner.add_task,
                     database_inserter, self.timer, self.update_ui)
 
             [self.client_server] = self.loop.run_until_complete(

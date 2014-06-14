@@ -112,8 +112,8 @@ class CommandProcessor:
                 self.state = self.STATE_WAIT_FOR_COMPILER_FILE_LIST
         elif self.state == self.STATE_WAIT_FOR_COMPILER_FILE_LIST:
             assert len(msg) == len(self.tmp_compiler_files)
-            self.compiler_info['files'] = list(zip([m.tobytes() for m in msg],
-                self.tmp_compiler_files))
+            self.compiler_info.set_files(list(zip([m.tobytes() for m in msg],
+                self.tmp_compiler_files)))
             self.state = self.STATE_READY
             self.got_compiler_info()
             self.__client_task_compiler.client_ready()
@@ -169,7 +169,7 @@ class CommandProcessor:
                 PreprocessTask(
                     source,
                     self.__options.implicit_macros() + self.__options.defines()
-                        + compiler_info['macros'],
+                        + compiler_info.macros,
                     [os.path.join(self.__cwd, rel_inc) for rel_inc in
                         self.__options.includes()],
                     self.__sysincludes,

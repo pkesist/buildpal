@@ -54,7 +54,7 @@ class ServerSession:
     def start(self):
         assert self.state == self.STATE_START
         self.send_msg([b'NEW_SESSION', self.local_id,
-            b'SERVER_TASK', pickle.dumps(self.task.server_task_info)])
+            b'SERVER_TASK', pickle.dumps(self.task.server_task)])
         self.state = self.STATE_WAIT_FOR_MISSING_FILES
         self.time_started = time()
 

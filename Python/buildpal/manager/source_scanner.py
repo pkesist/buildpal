@@ -8,7 +8,6 @@ import os
 from collections import defaultdict
 from multiprocessing import cpu_count
 from queue import Queue, Empty
-from socket import getfqdn
 from threading import Thread
 from time import time
 
@@ -62,7 +61,6 @@ class SourceScanner:
             self.threads.add(thread)
         for thread in self.threads:
             thread.start()
-        self.hostname = getfqdn()
 
     def get_cache_stats(self):
         hits, misses = self.cache.get_stats()
@@ -73,7 +71,6 @@ class SourceScanner:
 
     def add_task(self, task):
         task.note_time('queued for preprocessing')
-        task.server_task_info['fqdn'] = self.hostname
         self.in_queue.put(task)
 
     def completed_task(self):
@@ -89,7 +86,7 @@ class SourceScanner:
                 task = self.in_queue.get(timeout=1)
                 task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
                 try:
-                    task.header_info, task.server_task_info['filelist'], task.missing_headers = \
+                    task.header_info, task.server_task.filelist, task.missing_headers = \
                         header_info(preprocessor, task.preprocess_task_info)
                     task.note_time('preprocessed', 'preprocessing time')
                 except Exception as e:

@@ -92,10 +92,8 @@ class ClientProcessor(MessageProtocol):
         if not self.command_processor.executable in self.compiler_info:
             self.compiler_info[self.command_processor.executable] = \
                 self.command_processor.compiler_info
-        for task in self.command_processor.create_tasks():
-            task.server_task_info['compiler_info'] = task.compiler_info
-            task.preprocess_task_info['macros'].extend(
-                task.compiler_info['macros'])
+        for task in self.command_processor.create_tasks(
+                self.command_processor.compiler_info):
             self.task_created_func(task)
 
 class ManagerRunner:

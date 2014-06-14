@@ -1,4 +1,4 @@
-from buildpal.common import SimpleTimer, Timer, MessageProtocol, compress_file, Profiler
+from buildpal.common import SimpleTimer, Timer, MessageProtocol, compress_file
 
 import asyncio
 
@@ -81,18 +81,18 @@ class CompileSession(Timer):
             missing_files_timer = SimpleTimer()
             missing_files = \
                 session.runner.header_repository().missing_files(
-                session.task['fqdn'], id(session), session.task['filelist'])
+                session.task.fqdn, id(session), session.task.filelist)
             # Determine if we have this compiler
             session.compiler_required = session.runner.compiler_repository(
                 ).compiler_required(session.compiler_id())
 
             # Determine whether we need pch PCH file.
-            if session.task['pch_file'] is None:
+            if session.task.pch_file is None:
                 session.pch_required = False
             else:
                 session.pch_file, session.pch_required = \
                     session.runner.pch_repository().register_file(
-                        session.task['pch_file'])
+                        session.task.pch_file)
             session.sender.send_msg([session.local_id, b'MISSING_FILES',
                 pickle.dumps((missing_files, session.compiler_required,
                 session.pch_required))])
@@ -163,7 +163,7 @@ class CompileSession(Timer):
 
             def pch_completed(future):
                 session.note_time('received pch', 'downloading pch')
-                session.runner.pch_repository().file_completed(session.task['pch_file'])
+                session.runner.pch_repository().file_completed(session.task.pch_file)
                 session.compile()
 
             if more == b'\x00':
@@ -250,18 +250,18 @@ class CompileSession(Timer):
         self.__state.enter_state(self)
 
     def compiler_id(self):
-        return self.task['compiler_info']['id']
+        return self.task.compiler_info['id']
 
     def compiler_exe(self):
         return os.path.join(
             self.runner.compiler_repository().compiler_dir(self.compiler_id()),
-            self.task['compiler_info']['executable'])
+            self.task.compiler_info['executable'])
 
     def compile(self):
         self.change_state(self.StateRunningCompiler)
-        if self.task['pch_file']:
+        if self.task.pch_file:
             self.runner.pch_repository().when_pch_is_available(
-                    self.task['pch_file'], self.__check_compiler_files)
+                    self.task.pch_file, self.__check_compiler_files)
         else:
             self.__check_compiler_files()
 
@@ -276,7 +276,7 @@ class CompileSession(Timer):
         self.cancel_selfdestruct()
 
         # Find compiler options.
-        assert self.task['compiler_info']['toolset'] == 'msvc'
+        assert self.task.compiler_info['toolset'] == 'msvc'
         from buildpal.manager.compilers.msvc import MSVCCompiler
         compiler_options = MSVCCompiler
 
@@ -286,21 +286,21 @@ class CompileSession(Timer):
         os.close(obj_handle)
         output = compiler_options.set_object_name_option(self.object_file)
 
-        command = [self.compiler_exe(), output] + self.task['call']
+        command = [self.compiler_exe(), output] + self.task.call
         overrides = {}
 
-        if self.task['pdb_file']:
+        if self.task.pdb_file:
             pdb_handle, self.pdb_file = tempfile.mkstemp(
                 dir=tempdir, suffix='.pdb')
             os.close(pdb_handle)
-            overrides[self.task['pdb_file']] = self.pdb_file
+            overrides[self.task.pdb_file] = self.pdb_file
             command.append(compiler_options.set_pdb_file_option(
-                self.task['pdb_file']))
+                self.task.pdb_file))
 
-        if self.task['pch_file']:
+        if self.task.pch_file:
             assert self.pch_file is not None
-            overrides[self.task['pch_file'][0]] = self.pch_file
-            self.pch_file = self.task['pch_file'][0]
+            overrides[self.task.pch_file[0]] = self.pch_file
+            self.pch_file = self.task.pch_file[0]
             command.append(compiler_options.set_pch_file_option(
                 self.pch_file))
 
@@ -386,13 +386,13 @@ class CompileSession(Timer):
         def compress_result():
             try:
                 result = compress_one(self.object_file)
-                if self.task['pdb_file']:
+                if self.task.pdb_file:
                     assert self.pdb_file
                     result.extend(compress_one(self.pdb_file))
                 return result
             finally:
                 os.remove(self.object_file)
-                if self.task['pdb_file']:
+                if self.task.pdb_file:
                     os.remove(self.pdb_file)
 
         def send_compressed(future):
@@ -439,7 +439,7 @@ class CompileSession(Timer):
     @async
     def prepare_include_dirs(self, new_files):
         result = self.runner.header_repository().prepare_dir(
-            self.task['fqdn'], id(self), new_files)
+            self.task.fqdn, id(self), new_files)
         self.note_time('include dir ready', 'preparing include dir')
         return result
 
@@ -540,7 +540,7 @@ class ServerRunner(ProcessRunner):
                 file_map.map_file(virtual_file, real_file)
             file_maps.append(file_map)
         file_maps.extend(self.header_repository().get_mappings(
-            session.task['fqdn'], id(session)))
+            session.task.fqdn, id(session)))
         asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, file_maps),
             loop=self.loop).add_done_callback(done_callback)
 

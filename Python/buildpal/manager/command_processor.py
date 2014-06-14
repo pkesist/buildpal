@@ -2,10 +2,13 @@ from .compile_session import SessionResult
 from .task import Task
 from .gui_event import GUIEvent
 
+from buildpal.common import ServerTask
+
 import os
 import struct
 import logging
 from time import time
+from socket import getfqdn
 
 class ClientTaskCompiler:
     def __init__(self, client_conn):
@@ -53,6 +56,8 @@ class CommandProcessor:
     STATE_WAIT_FOR_COMPILER_INFO_OUTPUT = 0
     STATE_WAIT_FOR_COMPILER_FILE_LIST = 1
     STATE_READY = 2
+
+    hostname = getfqdn()
 
     def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
             command, database_inserter, global_timer, update_ui):
@@ -135,7 +140,7 @@ class CommandProcessor:
     def compile_on_client(self, task):
         self.__client_task_compiler.append_task(self.compiler, self.__options, task)
 
-    def create_tasks(self):
+    def create_tasks(self, compiler_info):
         pch_file = None
         pch_header = self.__options.pch_header()
         if pch_header:
@@ -154,15 +159,17 @@ class CommandProcessor:
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
             return Task(dict(
-                server_task_info=dict(
-                    call=self.__options.create_server_call(),
+                server_task=ServerTask(
+                    self.hostname,
+                    compiler_info,
+                    self.__options.create_server_call(),
                     pch_file=pch_file,
                     pdb_file=targets.get('pdb_file')
                 ),
                 preprocess_task_info=dict(
                     source=source,
                     macros=self.__options.implicit_macros() + 
-                        self.__options.defines(),
+                        self.__options.defines() + compiler_info['macros'],
                     includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
                         self.__options.includes()],
                     sysincludes=self.__sysincludes,
@@ -226,7 +233,7 @@ class CommandProcessor:
         for input in self.__options.source_files():
             output = input_to_output.get(input)
             if output:
-                call.append(output)
+                call.append(output['object_file'])
             else:
                 call.append(input)
 

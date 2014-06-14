@@ -522,28 +522,29 @@ int distributedCompile(
         msgSender.addPart( tmpCurrentPath );
     }
 
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    std::wstring const commandLineW( convert.from_bytes( commandLine ) );
-
-    int argc;
-    wchar_t * * argv = ::CommandLineToArgvW( commandLineW.c_str(), &argc );
     StringSaver saver;
+    typedef llvm::SmallVector<char const *, 32> ArgVector;
+    ArgVector argv;
+    llvm::cl::TokenizeWindowsCommandLine( commandLine, saver, argv );
 
-    llvm::SmallVector<char const *, 32> newArgv;
-    for ( int i( 1 ); i < argc; ++i )
-        newArgv.push_back( saver.SaveString( convert.to_bytes( argv[ i ] ).c_str() ) );
+    llvm::Optional<std::string> clEnvOpts = env.get( "CL" );
+    if ( clEnvOpts )
+    {
+        ArgVector envArgv;
+        llvm::cl::TokenizeWindowsCommandLine( *clEnvOpts, saver, envArgv );
+        // Environment arguments considered to be before than the real ones.
+        argv.insert( argv.begin() + 1, envArgv.begin(), envArgv.end() );
+    }
 
-    if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeWindowsCommandLine, newArgv ) )
+    if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeWindowsCommandLine, argv ) )
     {
         // ExpandResponseFiles always returns false, even on success.
         // Fixed in trunk, but did not make it to Clang 3.4.
         //return fallback.complete( "Failed to expand response files." );
     }
 
-    for ( unsigned int arg( 0 ); arg < newArgv.size(); ++arg )
-    {
-        msgSender.addPart( newArgv[ arg ] );
-    }
+    for ( ArgVector::const_iterator iter( argv.begin() ); iter != argv.end(); ++iter )
+        msgSender.addPart( *iter );
 
     boost::system::error_code writeError;
     msgSender.send( sock, writeError );

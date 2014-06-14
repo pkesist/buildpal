@@ -32,9 +32,10 @@ def dump_cache():
     print("Dumping cache.")
     cache.dump('cacheDump.txt')
 
-def header_info(preprocessor, task):
-    header_info, missing_headers = collect_headers(preprocessor, task['source'], task['includes'],
-        task['sysincludes'], task['macros'])
+def header_info(preprocessor, preprocess_task):
+    header_info, missing_headers = collect_headers(preprocessor,
+        preprocess_task.source, preprocess_task.includes,
+        preprocess_task.sysincludes, preprocess_task.macros)
     shared_file_list = []
     for dir, system, data in header_info:
         shared_files_in_dir = []
@@ -87,7 +88,7 @@ class SourceScanner:
                 task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
                 try:
                     task.header_info, task.server_task.filelist, task.missing_headers = \
-                        header_info(preprocessor, task.preprocess_task_info)
+                        header_info(preprocessor, task.preprocess_task)
                     task.note_time('preprocessed', 'preprocessing time')
                 except Exception as e:
                     notify(task, e)

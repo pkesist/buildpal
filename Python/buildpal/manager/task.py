@@ -4,10 +4,26 @@ from buildpal.common import Timer
 from time import time
 import logging
 
+class PreprocessTask:
+    def __init__(self, source, macros, includes, sysincludes, pch_header):
+        self.source = source
+        self.macros = macros
+        self.includes = includes
+        self.sysincludes = sysincludes
+        self.pch_header = pch_header
+
 class Task(Timer):
-    def __init__(self, task_dict):
+    def __init__(self, server_task, preprocess_task, command_processor, output,
+            result_files, pch_file, source):
         super().__init__()
-        self.__dict__.update(task_dict)
+        self.server_task = server_task
+        self.preprocess_task = preprocess_task
+        self.command_processor = command_processor
+        self.output = output
+        self.result_files = result_files
+        self.pch_file = pch_file
+        self.source = source
+
         self.sessions_running = set()
         self.sessions_finished = set()
         self.completed_by_session = None

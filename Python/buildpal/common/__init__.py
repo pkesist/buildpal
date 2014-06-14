@@ -8,3 +8,4 @@ class ServerTask:
         self.call = call
         self.pch_file = pch_file
         self.pdb_file = pdb_file
+        self.filelist = None

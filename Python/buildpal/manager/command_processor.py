@@ -1,5 +1,5 @@
 from .compile_session import SessionResult
-from .task import Task
+from .task import Task, PreprocessTask
 from .gui_event import GUIEvent
 
 from buildpal.common import ServerTask
@@ -158,29 +158,28 @@ class CommandProcessor:
         def create_task(source, targets):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
-            return Task(dict(
-                server_task=ServerTask(
+            return Task(
+                ServerTask(
                     self.hostname,
                     compiler_info,
                     self.__options.create_server_call(),
                     pch_file=pch_file,
                     pdb_file=targets.get('pdb_file')
                 ),
-                preprocess_task_info=dict(
-                    source=source,
-                    macros=self.__options.implicit_macros() + 
-                        self.__options.defines() + compiler_info['macros'],
-                    includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
+                PreprocessTask(
+                    source,
+                    self.__options.implicit_macros() + self.__options.defines()
+                        + compiler_info['macros'],
+                    [os.path.join(self.__cwd, rel_inc) for rel_inc in
                         self.__options.includes()],
-                    sysincludes=self.__sysincludes,
-                    pch_header=pch_header
+                    self.__sysincludes,
+                    pch_header
                 ),
-                command_processor=self,
-                output=os.path.join(self.__cwd, targets['object_file']),
-                result_files=[os.path.join(self.__cwd, target) for target in targets['all']],
-                pch_file=pch_file,
-                source=source,
-            ))
+                self,
+                os.path.join(self.__cwd, targets['object_file']),
+                [os.path.join(self.__cwd, target) for target in targets['all']],
+                pch_file,
+                source,)
         self.tasks = set(create_task(source, target) for source, target in
             self.__options.files())
         if not self.tasks:

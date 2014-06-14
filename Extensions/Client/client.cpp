@@ -543,7 +543,7 @@ int distributedCompile(
         //return fallback.complete( "Failed to expand response files." );
     }
 
-    for ( ArgVector::const_iterator iter( argv.begin() ); iter != argv.end(); ++iter )
+    for ( ArgVector::const_iterator iter( argv.begin() + 1 ); iter != argv.end(); ++iter )
         msgSender.addPart( *iter );
 
     boost::system::error_code writeError;

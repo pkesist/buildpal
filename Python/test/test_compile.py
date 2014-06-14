@@ -53,6 +53,20 @@ class Terminator:
             self.should_stop = True
 
 @pytest.fixture(scope='module')
+def run_server(request):
+    from buildpal.__main__ import main
+    terminator = Terminator()
+    def run_server_thread():
+        main(['buildpal', 'server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
+    server_thread = threading.Thread(target=run_server_thread)
+    server_thread.start()
+    def teardown():
+        terminator.stop()
+        server_thread.join()
+    request.addfinalizer(teardown)
+    return server_thread
+
+@pytest.fixture(scope='module')
 def run_manager(request):
     dir = tempfile.mkdtemp()
     ini_file = os.path.join(dir, 'test.ini')
@@ -116,20 +130,6 @@ def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
             args[0] = 'cl'
             return subprocess.call(call + args, env=env, cwd=str(tmpdir), shell=False)
         return func
-
-@pytest.fixture(scope='module')
-def run_server(request):
-    from buildpal.__main__ import main
-    terminator = Terminator()
-    def run_server_thread():
-        main(['buildpal', 'server', '--port={}'.format(SRV_PORT), '--silent'], terminator)
-    server_thread = threading.Thread(target=run_server_thread)
-    server_thread.start()
-    def teardown():
-        terminator.stop()
-        server_thread.join()
-    request.addfinalizer(teardown)
-    return server_thread
 
 def test_dummy(run_server, run_manager, buildpal_compile):
     assert buildpal_compile(['compiler', 'silly_option']) != 0

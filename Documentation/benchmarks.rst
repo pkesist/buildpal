@@ -3,18 +3,6 @@
 Benchmarks
 ==========
 
-Currently ``BuildPal`` is mainly tested by building :ref:`boost-libs`.
-Boost libraries make heavy use of preprocessor, and are thus ideal candidates
-for testing both speed and sanity.
-
-Building Boost was done with the following command, after modifying
-Boost.Build to use ``BuildPal``'s compiler instead of the native msvc
-compiler executable::
-
-    bjam stage --stagedir=. -a -j ##
-
-The host machine was not a part of farm.
-Tested Boost library version: 1.53.
 
 Environment.
     * 100Mbit/s Ethernet network.

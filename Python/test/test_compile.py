@@ -109,16 +109,18 @@ class CompilerSubstituteHook: pass
     CompilerSubstituteHook
 ))
 def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
-    env, cl = vcenv_and_cl
+    vcenv, cl = vcenv_and_cl
     if request.param == InternalCompile:
-        return lambda args : buildpal_client.compile("msvc", cl, env,
+        def func(args, env={}):
+            env.update(vcenv)
+            return buildpal_client.compile("msvc", cl, env,
             list2cmdline(args), str(MGR_PORT), str(tmpdir), fallback)
     elif request.param == CompilerSubstitute:
-        def func(args):
+        def func(args, env={}):
             env['BP_MANAGER_PORT'] = str(MGR_PORT)
             args[0] = bp_cl
+            env.update(vcenv)
             return subprocess.call(args, env=env, cwd=str(tmpdir))
-        return func
     else:
         assert request.param in (CreateProcessHook, CompilerSubstituteHook)
         from buildpal.__main__ import main
@@ -126,10 +128,11 @@ def buildpal_compile(request, vcenv_and_cl, bp_cl, tmpdir):
         if request.param == CreateProcessHook:
             call.append('--no-cp')
         call.append('--run')
-        def func(args):
+        def func(args, env={}):
             args[0] = 'cl'
+            env.update(vcenv)
             return subprocess.call(call + args, env=env, cwd=str(tmpdir), shell=False)
-        return func
+    return func
 
 def test_dummy(run_server, run_manager, buildpal_compile):
     assert buildpal_compile(['compiler', 'silly_option']) != 0
@@ -212,6 +215,15 @@ def test_pch(tmpdir, file_creator, run_server, run_manager, buildpal_compile, vc
     assert buildpal_compile(['cl', '/c', '/EHsc', '/Zi', '/Ycpch.hpp', cpp_file]) == 0
     assert buildpal_compile(['cl', '/EHsc', '/c', '/Zi', '/Yupch.hpp', '/Fppch.pch', cpp_file]) == 0
     vcenv, cl = vcenv_and_cl
+
+def test_env_cl_opts(tmpdir, file_creator, run_server, run_manager, buildpal_compile):
+    cpp_file = file_creator.create_file('cpp.cpp', '''
+#ifndef DEFINED_BY_ENV
+#error "DEFINED_BY_ENV not defined"
+#endif
+''')
+    assert buildpal_compile(['compiler', '/c', cpp_file]) != 0
+    assert buildpal_compile(['compiler', '/c', cpp_file], env={'CL': '/DDEFINED_BY_ENV'}) == 0
 
 
 def test_error_on_include_out_of_include_path(file_creator, run_server, run_manager, buildpal_compile):

@@ -162,14 +162,14 @@ int main()
 ''')
     first_exe = file_creator.full_path('a_dist.exe')
     assert not os.path.exists(first_exe)
-    assert buildpal_compile(['compiler', '/EHsc', file, '/link',
-        "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(first_exe)]) == 0
+    params = ['/EHsc', file, '/Ox', '/link', '/SUBSYSTEM:CONSOLE']
+    assert buildpal_compile(['compiler'] + params + ["/OUT:{}".format(first_exe)]) == 0
     assert os.path.exists(first_exe)
 
     second_exe = file_creator.full_path('a_local.exe')
     assert not os.path.exists(second_exe)
     env, cl = vcenv_and_cl
-    with Popen([cl, '/EHsc', file, "/link", "/Ox", "/SUBSYSTEM:CONSOLE", "/OUT:{}".format(second_exe)],
+    with Popen([cl] + params + ["/OUT:{}".format(second_exe)],
             env=env, cwd=str(tmpdir)) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(second_exe)

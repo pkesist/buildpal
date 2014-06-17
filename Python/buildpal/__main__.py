@@ -1,3 +1,4 @@
+import sys
 import argparse
 from multiprocessing import cpu_count
 
@@ -48,8 +49,9 @@ def main(argv, terminator=None):
         from buildpal.client.__main__ import main as client_main
         try:
             return client_main(opts)
-        except Exception:
-            client_parser.print_help()
+        except Exception as e:
+            print("ERROR: '{}'".format(e), file=sys.stderr)
+            return 1
 
 if __name__ == '__main__':
     import sys

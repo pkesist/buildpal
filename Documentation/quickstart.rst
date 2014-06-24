@@ -23,7 +23,8 @@ On each machine:
 * Install BuildPal. This will create 'BuildPal' program group.
 * Run the 'BuildPal Server' shortcut.
 
-That's it - the server will be automatically discovered via UDP multicast.
+That's it - the server will be automatically discovered by client machine via
+UDP multicast.
 
 .. note:
 
@@ -42,7 +43,7 @@ Setting up the Client
         * All network communication towards the farm.
         * All (IPC) communication with the clients (i.e. compilation requests).
         * Source file preprocessing.
-            * Needed in order to determine which files are  required for
+            * Needed in order to determine which files are required for
               successful remote compilation.
         * Local filesystem information caching.
             * Source file contents.
@@ -57,7 +58,10 @@ Setting up the Client
 BuildPal Console
 ================
 
-BuildPal has who kinds of consoles. The difference between the two is the method
+The console is used to run the build. It is a regular ``cmd`` console, with
+installed hooks which detect when a compiler process is created.
+
+BuildPal has who kinds of consoles. The difference between the two is in the method
 how compilation request is distributed after being intercepted.
 
 .. _compiler_substitution:

@@ -19,22 +19,28 @@ class build_boost(Command):
         ('build-base='     , None, 'base directory for Boost build'),
         ('boost-build-dir=', None, 'directory where to build Boost'),
         ('compiler='       , None, 'Compiler'),
+        ('complete-build'  , None, 'Build everything in all variants'),
+        ('jobs='           , None, 'Number of parallel jobs'),
         ('boost-libs='     , None, 'Boost libraries to build'),
         ('debug'           , None, 'compile in debug mode'),
+        ('force'           , None, 'force rebuild'),
         ('x86'             , None, 'compile for x86 arch'),
         ('x64'             , None, 'compile for x64 arch')
     ]
 
-    boolean_options = ['debug', 'x86', 'x64']
+    boolean_options = ['debug', 'force', 'complete_build', 'x86', 'x64']
 
     def initialize_options(self):
         self.debug = None
+        self.force = None
         self.x86 = None
         self.x64 = None
         self.build_base = None
+        self.jobs = None
         self.compiler = None
         self.boost_version = None
         self.boost_build_dir = None
+        self.complete_build = None
         self.boost_libs = ""
 
     def finalize_options(self):
@@ -42,7 +48,8 @@ class build_boost(Command):
             ('build_base', 'build_base'))
         self.set_undefined_options('build_ext',
             ('compiler', 'compiler'),
-            ('debug', 'debug'))
+            ('debug', 'debug'),
+            ('force', 'force'))
 
         if not self.x64 and not self.x86:
             self.x64 = sys.maxsize > 2**32
@@ -53,6 +60,9 @@ class build_boost(Command):
         else:
             self.boost_version = tuple(int(x) for x in
                 self.boost_version.split('.'))
+
+        if self.jobs is None:
+            self.jobs = cpu_count()
 
         if self.boost_libs:
             self.boost_libs = self.boost_libs.split(';')
@@ -85,12 +95,6 @@ class build_boost(Command):
             self.__build_boost(self.boost_version, toolset, self.boost_build_dir,
                 True, self.build_base)
         
-        #build_ext = self.get_finalized_command('build_ext')
-        #build_ext.include_dirs.append(os.path.join(self.boost_build_dir))
-        #build_ext.library_dirs.append(self.library_dir())
-        #if toolset == 'gcc':
-        #    build_ext.libraries.extend(self.libraries)
-
     def __build_boost(self, boost_version, toolset, build_dir, x64, cache_dir):
         url = "http://downloads.sourceforge.net/project/boost/boost/{0}.{1}.{2}/boost_{0}_{1}_{2}.zip".format(*boost_version)
 
@@ -104,18 +108,23 @@ class build_boost(Command):
             subprocess.check_call(['bootstrap.bat'], cwd=build_dir, shell=True)
             b2_exe = find_executable('b2', build_dir)
         
-        if not self.boost_libs:
+        if not self.complete_build and not self.boost_libs:
             return
 
-        build_call = [b2_exe, '-j{}'.format(cpu_count()), 'stage',
+        build_call = [b2_exe, '-j{}'.format(self.jobs), 'stage',
             '--stagedir={}'.format('x64' if x64 else '.'),
             'toolset={}'.format(toolset), 'link=static',
             'runtime-link=shared', 'threading=multi']
-        build_call.extend(('--with-{}'.format(lib) for lib in
-            self.boost_libs))
-        if x64:
-            build_call.append('address-model=64')
-        build_call.append('debug' if self.debug else 'release')
+        if self.complete_build:
+            build_call.append('--build-type=complete')
+        else:
+            build_call.extend(('--with-{}'.format(lib) for lib in
+                self.boost_libs))
+            if x64:
+                build_call.append('address-model=64')
+            build_call.append('debug' if self.debug else 'release')
+        if self.force:
+            build_call.append('-a')
         if toolset == 'gcc':
             # There is no auto-link on MinGW. We don't want to determine the
             # exact compiler version when linking, so keep the naming simple.

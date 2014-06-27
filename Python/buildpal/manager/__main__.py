@@ -12,7 +12,17 @@ import configparser
 from threading import Thread
 from time import sleep
 
-class FixedNodeList:
+class NodeInfoGetter:
+    """
+    Abstract NodeInfoGetter. This callable should return list of server nodes
+    which are currently available.
+    """
+    update_interval = 0
+
+    def __call__(self):
+        raise NotImplementedError()
+
+class FixedNodeList(NodeInfoGetter):
     def __init__(self, config, profile):
         nodes = FixedNodeList.get_nodes_from_ini_file(config, profile)
         self.node_info = [NodeInfo(node) for node in nodes]
@@ -52,19 +62,41 @@ class FixedNodeList:
                 done = True
         return nodes
 
-class NodeDetector:
+class NodeDetector(NodeInfoGetter):
+    """
+    When called, will try to discover nodes via UDP multicast.
+    
+    If a previously existing node fails to respond for more than
+    `allowed_missed_replies`, it will be removed from the list.
+    In that case, NodeInfo is kept, in case the node returns later on.
+    """
     multicast_group = '239.192.29.71'
     multicast_port = 51134
 
+    update_interval = 1
+    allowed_missed_replies = 2
+
     def __init__(self):
         self.all_node_infos = {}
+        self.current_working_set = {}
 
     def __call__(self):
         def get_node_info(node):
             node_id = '{}:{}'.format(node['hostname'], node['port'])
-            return self.all_node_infos.setdefault(node_id, NodeInfo(node))
+            node_info = self.all_node_infos.get(node_id)
+            if not node_info:
+                node_info = self.all_node_infos[node_id] = NodeInfo(node)
+            return node_info
         nodes = get_nodes_from_beacons(self.multicast_group, self.multicast_port)
-        return [get_node_info(node) for node in nodes]
+        for old_node in self.current_working_set:
+            if old_node not in nodes:
+                if self.current_working_set[old_node] > self.allowed_missed_replies:
+                    del self.current_working_set[old_node]
+                else:
+                    self.current_working_set[old_node] += 1
+        for node in nodes:
+            self.current_working_set[node] = 0
+        return [get_node_info(node) for node in self.current_working_set]
 
 def get_config(ini_file):
     config = configparser.SafeConfigParser(strict=False)
@@ -126,15 +158,6 @@ def main(opts, terminator=None):
             manager_runner.run(node_info_getter, silent=opts.ui == 'none')
         except KeyboardInterrupt:
             pass
-        #def run(runner):
-        #    runner.run(node_info_getter, silent=opts.ui == 'none')
-        #
-        #def wait():
-        #    try:
-        #        while not terminator or not terminator.should_stop():
-        #            sleep(1)
-        #    except KeyboardInterrupt:
-        #        pass
 
 
 if __name__ == '__main__':

@@ -12,7 +12,8 @@ from threading import Thread
 from .header_repository import MapFiles as HeaderRepository
 from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
-from .beacon import Beacon
+
+from buildpal.common.beacon import Beacon
 
 import map_files
 
@@ -214,7 +215,7 @@ class CompileSession(Timer):
 
     def __init__(self, runner, send_msg, remote_id):
         super().__init__()
-        self.local_id = runner.generate_unique_id()
+        self.local_id = runner.generate_session_id()
         self.sender = self.Sender(send_msg, remote_id)
         self.runner = runner
         self.completed = False
@@ -453,16 +454,20 @@ class ServerProtocol(MessageProtocol):
             self.transport.write_eof()
 
     def process_msg(self, msg):
+        session = None
         session_id, *msg = msg
         if session_id == b'NEW_SESSION':
             remote_id, *msg = msg
             session = CompileSession(self.runner, self.send_msg, remote_id.tobytes())
             self.runner.sessions[session.local_id] = session
+        elif session_id == b'RESET':
+            self.runner.finish(restart=True)
+        elif session_id == b'SHUTDOWN':
+            self.runner.finish()
         else:
             session = self.runner.sessions.get(session_id)
         if session:
             session.process_msg(msg)
-
 
 class ProcessRunner:
     def __init__(self, limit, loop):
@@ -495,33 +500,25 @@ class ProcessRunner:
             self.ready.set()
         return stdout, stderr, retcode
 
-class ServerRunner(ProcessRunner):
+class ServerRunner:
     def __init__(self, port, compile_slots):
-        self.loop = asyncio.ProactorEventLoop()
-        self.process_runner = ProcessRunner(compile_slots, self.loop)
-        self.__compile_slots = compile_slots
-        self.__port = port
+        self.compile_slots = compile_slots
+        self.port = port
         self.sessions = {}
+        self.reset = False
 
         dir = os.path.join(tempfile.gettempdir(), "BuildPal", "Temp")
         os.makedirs(dir, exist_ok=True)
         self.scratch_dir = tempfile.mkdtemp(dir=dir)
         self.counter = 0
 
-        # Data shared between sessions.
-        self.__misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
-        self.__header_repository = HeaderRepository(self.scratch_dir)
-        self.__pch_repository = PCHRepository(self.scratch_dir)
-        self.__compiler_repository = CompilerRepository()
-        self.__scheduler = sched.scheduler()
+    def scheduler(self): return self._scheduler
+    def misc_thread_pool(self): return self._misc_thread_pool
+    def header_repository(self): return self._header_repository
+    def pch_repository(self): return self._pch_repository
+    def compiler_repository(self): return self._compiler_repository
 
-    def scheduler(self): return self.__scheduler
-    def misc_thread_pool(self): return self.__misc_thread_pool
-    def header_repository(self): return self.__header_repository
-    def pch_repository(self): return self.__pch_repository
-    def compiler_repository(self): return self.__compiler_repository
-
-    def generate_unique_id(self):
+    def generate_session_id(self):
         self.counter += 1
         return struct.pack('!I', self.counter)
 
@@ -549,39 +546,55 @@ class ServerRunner(ProcessRunner):
         def print_stats():
             if not silent:
                 sys.stdout.write("Currently running {} tasks.\r".format(len(self.sessions)))
-            self.__scheduler.run(False)
+            self._scheduler.run(False)
             yield from asyncio.sleep(1, loop=self.loop)
             asyncio.async(print_stats(), loop=self.loop)
 
         asyncio.async(print_stats(), loop=self.loop)
         self.loop.run_forever()
 
+    def finish(self, restart=False):
+        self.keep_running = restart
+        self.loop.stop()
+
     def run(self, terminator=None, silent=False):
         def protocol_factory():
             return ServerProtocol(self)
-        self.server = self.loop.run_until_complete(self.loop.create_server(
-            protocol_factory, family=socket.AF_INET, port=self.__port))
-        if self.__port == 0:
-            self.__port = self.server.sockets[0].getsockname()[1]
 
-        beacon = Beacon(self.__compile_slots, self.__port)
-        beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
+        while True:
+            self.keep_running = False
+            self.loop = asyncio.ProactorEventLoop()
+            self.process_runner = ProcessRunner(self.compile_slots, self.loop)
 
-        if not silent:
-            print("Running server on 'localhost:{}'.".format(self.__port))
-            print("Using {} job slots.".format(self.__compile_slots))
+            # Data shared between sessions.
+            self._misc_thread_pool = ThreadPoolExecutor(max_workers=2 * cpu_count())
+            self._header_repository = HeaderRepository(self.scratch_dir)
+            self._pch_repository = PCHRepository(self.scratch_dir)
+            self._compiler_repository = CompilerRepository()
+            self._scheduler = sched.scheduler()
+            self.server = self.loop.run_until_complete(self.loop.create_server(
+                protocol_factory, family=socket.AF_INET, port=self.port))
+            if self.port == 0:
+                self.port = self.server.sockets[0].getsockname()[1]
 
-        try:
-            def stop():
+            beacon = Beacon(self.compile_slots, self.port)
+            beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
+
+            if not silent:
+                print("Running server on 'localhost:{}'.".format(self.port))
+                print("Using {} job slots.".format(self.compile_slots))
+
+            try:
+                def stop():
+                    self.loop.stop()
+                if terminator:
+                    terminator.initialize(stop)
+                self.run_event_loop(silent)
+            finally:
+                beacon.stop()
+                self.server.close()
                 self.loop.stop()
-            if terminator:
-                terminator.initialize(stop)
-            self.run_event_loop(silent)
-        finally:
-            beacon.stop()
-            self.server.close()
-            self.loop.stop()
-            self.loop.close()
-
-    def shutdown(self):
-        self.__misc_thread_pool.shutdown()
+                self.loop.close()
+                self.misc_thread_pool().shutdown()
+                if not self.keep_running:
+                    break

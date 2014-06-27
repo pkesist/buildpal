@@ -1,5 +1,5 @@
 from .utils import *
-from .message import MessageProtocol
+from .message import MessageProtocol, msg_to_bytes
 
 class ServerTask:
     def __init__(self, fqdn, compiler_info, call, pch_file, pdb_file=None):

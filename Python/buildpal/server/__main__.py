@@ -20,8 +20,4 @@ def main(opts, terminator=None):
     try:
         server_runner.run(terminator, opts.silent)
     except KeyboardInterrupt:
-        if not opts.silent:
-            print("\nShutting down...")
-        server_runner.shutdown()
-        if not opts.silent:
-            print("Done.")
+        pass

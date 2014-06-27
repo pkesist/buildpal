@@ -2,8 +2,6 @@ from .gui import BPManagerApp
 from .runner import ManagerRunner
 from .node_info import NodeInfo
 
-from buildpal.common import get_multicast_socket
-
 import os
 import sys
 import subprocess

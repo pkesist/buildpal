@@ -1,7 +1,6 @@
 import pytest
 import socket
 
-from buildpal.common import get_multicast_socket
 from buildpal.common.beacon import Beacon
 
 MULTICAST_ADDRESS = '239.192.29.71'

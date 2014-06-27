@@ -1,7 +1,7 @@
 import pytest
 import socket
 
-from buildpal.common.beacon import Beacon
+from buildpal.common.beacon import Beacon, get_nodes_from_beacons
 
 MULTICAST_ADDRESS = '239.192.29.71'
 MULTICAST_PORT = 53334
@@ -17,12 +17,17 @@ def run_beacon(request):
     return request.param[0], request.param[1]
 
 def test_beacon(run_beacon):
-    nodes = Beacon.get_nodes_from_multicast(MULTICAST_ADDRESS, MULTICAST_PORT)
+    nodes = []
+    count = 0
+    while not nodes and count < 5:
+        nodes = get_nodes_from_beacons(MULTICAST_ADDRESS, MULTICAST_PORT)
+        count += 1
 
     assert len(nodes) == 1
     assert nodes[0]['job_slots'] == run_beacon[0]
     assert nodes[0]['port'] == run_beacon[1]
     assert nodes[0]['hostname'] == socket.getfqdn()
-    assert nodes[0]['address'] in (x[4][0] for x in socket.getaddrinfo(family=socket.AF_INET, host='', port=0))
+    assert nodes[0]['address'] in (x[4][0] for x in socket.getaddrinfo(
+        family=socket.AF_INET, host='', port=0))
 
 

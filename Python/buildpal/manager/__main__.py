@@ -2,6 +2,8 @@ from .gui import BPManagerApp
 from .runner import ManagerRunner
 from .node_info import NodeInfo
 
+from buildpal.common.beacon import get_nodes_from_beacons
+
 import os
 import sys
 import subprocess
@@ -51,23 +53,18 @@ class FixedNodeList:
         return nodes
 
 class NodeDetector:
+    multicast_group = '239.192.29.71'
+    multicast_port = 51134
+
     def __init__(self):
         self.all_node_infos = {}
 
-    def _get_node_info(self, node):
-        node_id = '{}:{}'.format(node['hostname'], node['port'])
-        return self.all_node_infos.setdefault(node_id, NodeInfo(node))
-
     def __call__(self):
-        nodes = NodeDetector.get_nodes_from_beacon()
-        return [self._get_node_info(node) for node in nodes]
-
-    @staticmethod
-    def get_nodes_from_beacon():
-        multicast_group = '239.192.29.71'
-        multicast_port = 51134
-        from buildpal.common.beacon import Beacon
-        return Beacon.get_nodes_from_multicast(multicast_group, multicast_port)
+        def get_node_info(node):
+            node_id = '{}:{}'.format(node['hostname'], node['port'])
+            return self.all_node_infos.setdefault(node_id, NodeInfo(node))
+        nodes = get_nodes_from_beacons(self.multicast_group, self.multicast_port)
+        return [get_node_info(node) for node in nodes]
 
 def get_config(ini_file):
     config = configparser.SafeConfigParser(strict=False)

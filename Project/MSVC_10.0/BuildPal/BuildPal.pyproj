@@ -40,6 +40,7 @@
     <Compile Include="Documentation\conf.py" />
     <Compile Include="Python\buildpal\client\__init__.py" />
     <Compile Include="Python\buildpal\client\__main__.py" />
+    <Compile Include="Python\buildpal\common\beacon.py" />
     <Compile Include="Python\buildpal\common\message.py" />
     <Compile Include="Python\buildpal\common\utils.py" />
     <Compile Include="Python\buildpal\common\__init__.py" />
@@ -61,7 +62,6 @@
     <Compile Include="Python\buildpal\manager\timer.py" />
     <Compile Include="Python\buildpal\manager\__init__.py" />
     <Compile Include="Python\buildpal\manager\__main__.py" />
-    <Compile Include="Python\buildpal\server\beacon.py" />
     <Compile Include="Python\buildpal\server\compiler_repository.py" />
     <Compile Include="Python\buildpal\server\header_repository.py" />
     <Compile Include="Python\buildpal\server\pch_repository.py" />
@@ -75,10 +75,12 @@
     <Compile Include="Python\starter.py" />
     <Compile Include="Python\test\conftest.py" />
     <Compile Include="Python\test\test_argparser.py" />
+    <Compile Include="Python\test\test_beacon.py" />
     <Compile Include="Python\test\test_client.py" />
     <Compile Include="Python\test\test_compile.py" />
     <Compile Include="Python\test\test_database.py" />
     <Compile Include="Python\test\test_message.py" />
+    <Compile Include="Python\test\test_server.py" />
     <Compile Include="Python\test\test_source_scanner.py" />
     <Compile Include="setup.py" />
   </ItemGroup>

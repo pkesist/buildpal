@@ -3,7 +3,6 @@ import socket
 
 from buildpal.common.beacon import Beacon, get_nodes_from_beacons
 
-MULTICAST_ADDRESS = '239.192.29.71'
 MULTICAST_PORT = 53334
 
 @pytest.fixture(scope='module', params=(
@@ -12,7 +11,7 @@ MULTICAST_PORT = 53334
 ))
 def run_beacon(request):
     beacon = Beacon(request.param[0], request.param[1])
-    beacon.start(MULTICAST_ADDRESS, MULTICAST_PORT)
+    beacon.start(port=MULTICAST_PORT)
     request.addfinalizer(beacon.stop)
     return request.param[0], request.param[1]
 
@@ -20,7 +19,7 @@ def test_beacon(run_beacon):
     nodes = []
     count = 0
     while not nodes and count < 5:
-        nodes = get_nodes_from_beacons(MULTICAST_ADDRESS, MULTICAST_PORT)
+        nodes = get_nodes_from_beacons(multicast_port=MULTICAST_PORT)
         count += 1
 
     assert len(nodes) == 1

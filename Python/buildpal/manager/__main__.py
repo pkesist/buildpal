@@ -70,9 +70,6 @@ class NodeDetector(NodeInfoGetter):
     `allowed_missed_replies`, it will be removed from the list.
     In that case, NodeInfo is kept, in case the node returns later on.
     """
-    multicast_group = '239.192.29.71'
-    multicast_port = 51134
-
     update_interval = 1
     allowed_missed_replies = 2
 
@@ -87,7 +84,7 @@ class NodeDetector(NodeInfoGetter):
             if not node_info:
                 node_info = self.all_node_infos[node_id] = NodeInfo(node)
             return node_info
-        nodes = get_nodes_from_beacons(self.multicast_group, self.multicast_port)
+        nodes = get_nodes_from_beacons()
         for old_node in self.current_working_set:
             if old_node not in nodes:
                 if self.current_working_set[old_node] > self.allowed_missed_replies:

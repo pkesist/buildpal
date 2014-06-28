@@ -3,7 +3,10 @@ import struct
 
 from threading import Thread, Condition
 
-def _get_multicast_socket(multicast_address):
+BUILDPAL_MULTICAST_ADDRESS = '239.192.29.71'
+BUILDPAL_MULTICAST_PORT = 51134
+
+def _get_multicast_socket(multicast_address=BUILDPAL_MULTICAST_ADDRESS):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
@@ -22,14 +25,14 @@ class Beacon:
         self.running_cond = Condition()
         self.running = False
 
-    def start(self, multicast_address, multicast_port):
+    def start(self, multicast_address=BUILDPAL_MULTICAST_ADDRESS,
+            port=BUILDPAL_MULTICAST_PORT):
         """
         Starts beacon. Will block until the worker thread is actually started.
         """
         if self.running:
             raise Exception("Tried to start beacon twice.")
-        self.socket = _get_multicast_socket(multicast_address)
-        self.thread = Thread(target=self.__run_beacon, args=(multicast_port,))
+        self.thread = Thread(target=self.__run_beacon, args=(multicast_address, port,))
         self.thread.start()
         with self.running_cond:
             while not self.running:
@@ -42,7 +45,8 @@ class Beacon:
         self.socket.close()
         self.thread.join()
 
-    def __run_beacon(self, multicast_port):
+    def __run_beacon(self, multicast_address, multicast_port):
+        self.socket = _get_multicast_socket(multicast_address)
         self.socket.bind(('', multicast_port))
         with self.running_cond:
             self.running = True
@@ -75,22 +79,23 @@ def _parse_response(response, address):
             'hostname' : "<{}>".format(address),
             'job_slots' : job_slots}
 
-def get_nodes_from_beacons(multicast_address, multicast_port):
+def get_nodes_from_beacons(multicast_address=BUILDPAL_MULTICAST_ADDRESS,
+        multicast_port=BUILDPAL_MULTICAST_PORT):
     sock = _get_multicast_socket(multicast_address)
     sock.setblocking(False)
     sock.bind(('', 0))
-    nodes = {}
+    nodes = []
 
     with sock:
-        sock.sendto(b'BP_MGR_DISCOVER', (multicast_address, multicast_port))
+        sock.sendto(b'BP_MGR_DISCOVER', (multicast_address,
+            multicast_port))
         while True:
             sock.settimeout(0.1)
             try:
                 data, (address, port) = sock.recvfrom(256)
             except socket.timeout:
                 break
-            if (address, port) not in nodes:
-                result = _parse_response(data, address)
-                if result is not None:
-                    nodes[(address, port)] = result
-    return list(nodes.values())
+            result = _parse_response(data, address)
+            if result is not None:
+                nodes.append(result)
+    return nodes

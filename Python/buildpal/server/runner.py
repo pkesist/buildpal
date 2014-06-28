@@ -578,7 +578,7 @@ class ServerRunner:
                 self.port = self.server.sockets[0].getsockname()[1]
 
             beacon = Beacon(self.compile_slots, self.port)
-            beacon.start(multicast_address='239.192.29.71', multicast_port=51134)
+            beacon.start()
 
             if not silent:
                 print("Running server on 'localhost:{}'.".format(self.port))

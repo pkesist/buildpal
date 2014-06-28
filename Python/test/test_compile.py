@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import threading
+from conftest import Terminator
 
 from subprocess import list2cmdline, Popen, check_call
 
@@ -35,22 +36,6 @@ class FileCreator:
 @pytest.fixture(scope='function')
 def file_creator(tmpdir):
     return FileCreator(str(tmpdir))
-
-class Terminator:
-    def __init__(self):
-        self.stop_func = None
-        self.should_stop = False
-
-    def initialize(self, stop_func):
-        self.stop_func = stop_func
-        if self.should_stop:
-            self.stop()
-
-    def stop(self):
-        if self.stop_func:
-            self.stop_func()
-        else:
-            self.should_stop = True
 
 @pytest.fixture(scope='module')
 def run_server(request):
@@ -212,8 +197,9 @@ int main() {}
 def test_pch(tmpdir, file_creator, run_server, run_manager, buildpal_compile, vcenv_and_cl):
     pch_file = file_creator.create_file('pch.hpp', '')
     cpp_file = file_creator.create_file('cpp.cpp', '#include "pch.hpp"\n')
+    test_file = file_creator.create_file('test.cpp', '#include "pch.hpp"\n')
     assert buildpal_compile(['cl', '/c', '/EHsc', '/Zi', '/Ycpch.hpp', cpp_file]) == 0
-    assert buildpal_compile(['cl', '/EHsc', '/c', '/Zi', '/Yupch.hpp', '/Fppch.pch', cpp_file]) == 0
+    assert buildpal_compile(['cl', '/EHsc', '/c', '/Zi', '/Yupch.hpp', '/Fppch.pch', test_file]) == 0
     vcenv, cl = vcenv_and_cl
 
 def test_env_cl_opts(tmpdir, file_creator, run_server, run_manager, buildpal_compile):

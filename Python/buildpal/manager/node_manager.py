@@ -49,8 +49,10 @@ class NodeManager:
         for node in new_nodes:
             self.__find_work(node)
         self.update_ui(GUIEvent.update_node_info, self.node_info)
-        yield from asyncio.sleep(2, loop=self.loop)
-        self.update_node_info()
+        if self.node_info_getter.update_interval:
+            yield from asyncio.sleep(self.node_info_getter.update_interval,
+                loop=self.loop)
+            self.update_node_info()
 
     def task_preprocessed(self, task, exception=None):
         if exception:

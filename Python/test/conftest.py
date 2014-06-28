@@ -51,5 +51,20 @@ def vcenv_and_cl(request):
 
     return res, cl
 
+class Terminator:
+    def __init__(self):
+        self.stop_func = None
+        self.should_stop = False
+
+    def initialize(self, stop_func):
+        self.stop_func = stop_func
+        if self.should_stop:
+            self.stop()
+
+    def stop(self):
+        if self.stop_func:
+            self.stop_func()
+        else:
+            self.should_stop = True
 
 

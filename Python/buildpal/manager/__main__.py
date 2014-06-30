@@ -84,16 +84,19 @@ class NodeDetector(NodeInfoGetter):
             if not node_info:
                 node_info = self.all_node_infos[node_id] = NodeInfo(node)
             return node_info
-        nodes = get_nodes_from_beacons()
+        nodes = [get_node_info(node) for node in get_nodes_from_beacons()]
+        nodes_disappeared = []
         for old_node in self.current_working_set:
             if old_node not in nodes:
                 if self.current_working_set[old_node] > self.allowed_missed_replies:
-                    del self.current_working_set[old_node]
+                    nodes_disappeared.append(old_node)
                 else:
                     self.current_working_set[old_node] += 1
+        for node in nodes_disappeared:
+            del self.current_working_set[old_node]
         for node in nodes:
             self.current_working_set[node] = 0
-        return [get_node_info(node) for node in self.current_working_set]
+        return self.current_working_set.keys()
 
 def get_config(ini_file):
     config = configparser.SafeConfigParser(strict=False)

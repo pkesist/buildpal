@@ -12,8 +12,8 @@ def timeit(command):
     subprocess.check_call(command, cwd=buildpal_dir)
     times['regular'] = time.time() - start_time
 
-    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
-    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
+    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
+    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
     time.sleep(5)
     start_time = time.time()
     subprocess.check_call([sys.executable, '-m', 'buildpal', 'client', '--run'] + command + ['--jobs={}'.format(2*cpu_count())], cwd=buildpal_dir)
@@ -21,8 +21,8 @@ def timeit(command):
     server.terminate()
     manager.terminate()
 
-    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
-    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
+    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
+    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
     time.sleep(5)
     start_time = time.time()
     subprocess.check_call([sys.executable, '-m', 'buildpal', 'client', '--no-cp', '--run'] + command + ['--jobs={}'.format(2*cpu_count())], cwd=buildpal_dir)

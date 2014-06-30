@@ -538,6 +538,7 @@ class ServerRunner:
             file_maps.append(file_map)
         file_maps.extend(self.header_repository().get_mappings(
             session.task.fqdn, id(session)))
+        logging.debug("Running '{}'".format(args))
         asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, file_maps),
             loop=self.loop).add_done_callback(done_callback)
 

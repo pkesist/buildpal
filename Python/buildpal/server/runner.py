@@ -308,7 +308,7 @@ class CompileSession(Timer):
         include_dirs, src_loc = self.include_dirs_future.result()
         command.extend([compiler_options.set_include_option(incpath)
             for incpath in include_dirs])
-        command.append(src_loc)
+        command.append(self.task.src_decorator + src_loc)
 
         self.note_time('ready for compile', 'prepare for compile')
         self.runner.run_compiler(self, command, tempdir, overrides,

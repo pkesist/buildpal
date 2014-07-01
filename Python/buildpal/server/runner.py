@@ -308,7 +308,7 @@ class CompileSession(Timer):
         include_dirs, src_loc = self.include_dirs_future.result()
         command.extend([compiler_options.set_include_option(incpath)
             for incpath in include_dirs])
-        command.append(src_loc)
+        command.append(self.task.src_decorator + src_loc)
 
         self.note_time('ready for compile', 'prepare for compile')
         self.runner.run_compiler(self, command, tempdir, overrides,
@@ -538,6 +538,7 @@ class ServerRunner:
             file_maps.append(file_map)
         file_maps.extend(self.header_repository().get_mappings(
             session.task.fqdn, id(session)))
+        logging.debug("Running '{}'".format(args))
         asyncio.async(self.process_runner.subprocess_exec(session, args, cwd, file_maps),
             loop=self.loop).add_done_callback(done_callback)
 

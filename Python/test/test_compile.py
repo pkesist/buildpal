@@ -227,3 +227,8 @@ def test_include_order(file_creator, run_server, run_manager, buildpal_compile):
     fourth = file_creator.create_file('fourth/include.h', '#include "../wrong.h"\n')
     file = file_creator.create_file('test.cpp', '#include "include.h"\n')
     assert buildpal_compile(['compiler', '/c', '/Ifirst', '/Isecond', '/Ithird', '/Ifourth', file]) == 0
+
+@pytest.mark.parametrize('src_file_option', ('', '/Tp', '/Tc'))
+def test_src_file_option(file_creator, run_server, run_manager, buildpal_compile, src_file_option):
+    cpp_file = file_creator.create_file('test.cpp', '')
+    assert buildpal_compile(['compiler', '/c', '{}{}'.format(src_file_option, cpp_file), '/Foburek.obj']) == 0

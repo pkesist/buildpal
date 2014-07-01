@@ -81,7 +81,7 @@ class CompileOptions:
 
     def create_server_call(self):
         result = ['/c']
-        exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc']
+        exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc', 'Tc', 'Tp']
         for name, value in zip(self.option_names, self.arg_values):
             if not self.use_pdb_file() and name == 'Zi':
                 # Disable generating PDB files when compiling cpp into obj.
@@ -110,10 +110,10 @@ class CompileOptions:
     def source_files(self):
         # All files explicitly set to C
         for x in self.value_dict['Tc']:
-            yield x
+            yield x, '/Tc'
         # All files explicitly set to CPP
         for x in self.value_dict['Tp']:
-            yield x
+            yield x, '/Tp'
 
         # Treat all files as X.
         all_inputs_are_sources = any(x in self.option_names for x in
@@ -123,12 +123,12 @@ class CompileOptions:
             if x[0] == '/':
                 continue
             elif all_inputs_are_sources:
-                yield x
+                yield x, ''
             elif os.path.splitext(x)[1].lower() in ['.c', '.cc', '.cxx', '.cpp']:
-                yield x
+                yield x, ''
 
     def input_files(self):
-        source_files = set(self.source_files())
+        source_files = set(x[0] for x in self.source_files())
         for x in self.value_dict['<input>']:
             if x[0] == '/':
                 continue
@@ -153,14 +153,14 @@ class CompileOptions:
             if output:
                 if output[-1] == os.path.sep or output[-1] == os.path.altsep:
                     return [os.path.join(output, os.path.splitext(
-                        os.path.basename(src))[0] + '.obj') for src in sources]
+                        os.path.basename(src))[0] + '.obj') for src[0] in sources]
                 else:
                     if len(sources) > 1:
                         raise RuntimeError("Cannot specify output file " \
                             "with multiple sources.")
                     return [output]
             return [os.path.splitext(os.path.basename(src))[0] + '.obj' for
-                src in sources]
+                src[0] in sources]
 
         def make_target_dict(dest):
             targets = dict(object_file=dest, all=[dest])
@@ -172,7 +172,8 @@ class CompileOptions:
 
         outputs = get_output_files()
         assert len(sources) == len(outputs)
-        return [(src, make_target_dict(dest)) for src, dest in zip(sources, outputs)]
+        return [(src, decorator, make_target_dict(dest)) for (src, decorator), dest in
+            zip(sources, outputs)]
 
     def link_options(self):
         options = []

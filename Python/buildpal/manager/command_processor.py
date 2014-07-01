@@ -155,7 +155,7 @@ class CommandProcessor:
             pch_file_stat = os.stat(pch_file)
             pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
-        def create_task(source, targets):
+        def create_task(source, decorator, targets):
             if not os.path.isabs(source):
                 source = os.path.join(self.__cwd, source)
             return Task(
@@ -164,7 +164,8 @@ class CommandProcessor:
                     compiler_info,
                     self.__options.create_server_call(),
                     pch_file=pch_file,
-                    pdb_file=targets.get('pdb_file')
+                    pdb_file=targets.get('pdb_file'),
+                    src_decorator=decorator
                 ),
                 PreprocessTask(
                     source,
@@ -180,8 +181,8 @@ class CommandProcessor:
                 [os.path.join(self.__cwd, target) for target in targets['all']],
                 pch_file,
                 source,)
-        self.tasks = set(create_task(source, target) for source, target in
-            self.__options.files())
+        self.tasks = set(create_task(source, decorator, target) for source,
+            decorator, target in self.__options.files())
         if not self.tasks:
             # No idea what the user wanted.
             self.client_conn.do_run_locally()
@@ -243,7 +244,7 @@ class CommandProcessor:
     def get_info(self):
         assert self.tasks_with_sessions_done == self.tasks
         return {
-            'command' : ', '.join(self.__options.source_files()),
+            'command' : ', '.join([x[0] for x in self.__options.source_files()]),
             'tasks' : [task.get_info() for task in self.tasks]
         }
 

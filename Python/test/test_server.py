@@ -22,10 +22,10 @@ def run_server(request):
 
 def test_remote_reset(run_server):
     import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(('127.0.0.1', SRV_PORT))
-    for buffer in msg_to_bytes([b'RESET']):
-        sock.send(buffer)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect(('127.0.0.1', SRV_PORT))
+        for buffer in msg_to_bytes([b'RESET']):
+            sock.send(buffer)
     assert run_server.is_alive()
     run_server.join(1)
     assert run_server.is_alive()

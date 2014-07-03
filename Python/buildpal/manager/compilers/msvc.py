@@ -237,21 +237,21 @@ class MSVCCompiler:
     @classmethod
     def implicit_macros(cls):
         return {
-        'EH'        : ['_CPPUNWIND'],
-        'MD'        : ['_MT', '_DLL'],
-        'MT'        : ['_MT'],
-        'MDd'       : ['_MT', '_DLL', '_DEBUG'],
-        'MTd'       : ['_MT', '_DEBUG'],
-        'GR'        : ['_CPPRTTI'],
-        'GX'        : ['_CPPUNWIND'],
-        'RTC'       : ['__MSVC_RUNTIME_CHECKS'],
-        'clr'       : ['__cplusplus_cli=200406'],
-        'Zl'        : ['_VC_NODEFAULTLIB'],
-        'Zc:whar_t' : ['_NATIVE_WCHAR_T_DEFINED'],
-        'openmp'    : ['_OPENMP'],
-        'Wp64'      : ['_Wp64'],
-        'LDd'       : ['_DEBUG'],
-    }
+            'EH': ['_CPPUNWIND'],
+            'MD': ['_MT', '_DLL'],
+            'MT': ['_MT'],
+            'MDd': ['_MT', '_DLL', '_DEBUG'],
+            'MTd': ['_MT', '_DEBUG'],
+            'GR': ['_CPPRTTI'],
+            'GX': ['_CPPUNWIND'],
+            'RTC': ['__MSVC_RUNTIME_CHECKS'],
+            'clr': ['__cplusplus_cli=200406'],
+            'Zl': ['_VC_NODEFAULTLIB'],
+            'Zc:wchar_t': ['_NATIVE_WCHAR_T_DEFINED'],
+            'openmp': ['_OPENMP'],
+            'Wp64': ['_Wp64'],
+            'LDd': ['_DEBUG'],
+        }
 
     @classmethod
     def parse_options(cls, options):

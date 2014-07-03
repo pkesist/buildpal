@@ -1,4 +1,5 @@
 from .gui import BPManagerApp
+from .gui_event import GUIEvent
 from .runner import ManagerRunner
 from .node_info import NodeInfo
 

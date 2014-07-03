@@ -388,7 +388,6 @@ class BPManagerApp(Tk):
         Tk.__init__(self, None)
         self.node_info_getter = node_info_getter
         self.port = port
-        self.running = False
         self.initialize()
         self.events = collect_window_events(self)
         self.event_data_lock = Lock()
@@ -442,7 +441,4 @@ class BPManagerApp(Tk):
         self.command_browser.refresh()
 
     def _exception_in_run(self, exception):
-        assert self.running
-        self.thread.join()
-        self.set_running(False)
         msgbox.showerror("Startup failure", "{}".format(exception))

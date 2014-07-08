@@ -13,7 +13,9 @@
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
   
@@ -61,30 +63,57 @@ struct HeaderWithFileEntry
     clang::FileEntry const * file;
 };
 
-typedef std::vector<std::pair<MacroName, MacroValue> > UsedMacros;
+typedef std::pair<MacroName, MacroValue> Macro;
+typedef std::vector<Macro> UsedMacros;
 
-template <typename MacroValueGetter>
-void addUsedMacro( UsedMacros & macros, MacroName const macroName, MacroValueGetter const getter )
+struct GetName
 {
-    if ( std::find_if( macros.begin(), macros.end(),
-        [&]( UsedMacros::value_type const & oldMacro )
-        {
-            return oldMacro.first == macroName;
-        }) != macros.end() )
-        return;
-    macros.push_back( std::make_pair( macroName, getter( macroName ) ) );
-}
+    typedef MacroName result_type;
+    result_type operator()( Macro const & m ) const
+    {
+        return m.first;
+    }
+};
 
-inline void addUsedMacro( UsedMacros & macros, MacroName const macroName, MacroValue const macroValue )
+struct ByName {};
+struct IndexedUsedMacros : private boost::multi_index_container<
+    Macro,
+    boost::multi_index::indexed_by<
+        boost::multi_index::sequenced<>,
+        boost::multi_index::hashed_unique<
+            boost::multi_index::tag<ByName>,
+            GetName,
+            std::hash<MacroName>
+        >
+    >
+>
 {
-    if ( std::find_if( macros.begin(), macros.end(),
-        [&]( UsedMacros::value_type const & oldMacro )
-        {
-            return oldMacro.first == macroName;
-        }) != macros.end() )
-        return;
-    macros.push_back( std::make_pair( macroName, macroValue ) );
-}
+    template <typename MacroValueGetter>
+    void addMacro( MacroName const macroName, MacroValueGetter const getter )
+    {
+        typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
+        IndexByMacroName & usedMacrosByName( get<ByName>() );
+        if ( usedMacrosByName.find( macroName ) != usedMacrosByName.end() )
+            return;
+        push_back( std::make_pair( macroName, getter( macroName ) ) );
+    }
+
+    void addMacro( MacroName const macroName, MacroValue const macroValue )
+    {
+        typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
+        IndexByMacroName & usedMacrosByName( get<ByName>() );
+        if ( usedMacrosByName.find( macroName ) != usedMacrosByName.end() )
+            return;
+        push_back( std::make_pair( macroName, macroValue ) );
+    }
+    
+    UsedMacros getUsedMacros() const
+    {
+        UsedMacros result;
+        std::copy( begin(), end(), std::back_inserter( result ) );
+        return result;
+    }
+};
 
 typedef std::map<MacroName, MacroValue> MacroStateBase;
 struct MacroState : public MacroStateBase

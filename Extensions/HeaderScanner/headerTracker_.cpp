@@ -247,7 +247,7 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
     cacheHit_ = cache.addEntry(
         file->getUniqueID(),
         searchPathId,
-        std::move( usedHere_ ),
+        usedMacros(),
         std::move( definedHere_ ),
         std::move( undefinedHere_ ),
         std::move( includedHeaders_ )

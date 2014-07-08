@@ -132,7 +132,6 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     MacroName const pragmaOnceMacro = macroForPragmaOnce( entry->getUniqueID() );
     if ( currentHeaderCtx().getMacroValue( pragmaOnceMacro ) != undefinedMacroValue )
     {
-        currentHeaderCtx().macroUsed( pragmaOnceMacro );
         clang::FileEntry const * result( sourceManager().getFileManager().getVirtualFile( "__empty_file", 0, 0 ) );
         if ( !sourceManager().isFileOverridden( result ) )
             sourceManager().overrideFileContents( result, llvm::MemoryBuffer::getMemBuffer( "" ) );
@@ -172,17 +171,12 @@ void HeaderTracker::headerSkipped()
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
         clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
         assert( !headerInfo.ControllingMacroID );
-        MacroName macroName;
-        if ( headerInfo.isPragmaOnce )
-        {
-            macroName = macroForPragmaOnce( hwf.file->getUniqueID() );
-        }
-        else
+        currentHeaderCtx().macroUsed( macroForPragmaOnce( hwf.file->getUniqueID() ) );
+        if ( !headerInfo.isPragmaOnce )
         {
             assert( headerInfo.ControllingMacro );
-            macroName = MacroName( headerInfo.ControllingMacro->getName() );
+            currentHeaderCtx().macroUsed( MacroName( headerInfo.ControllingMacro->getName() ) );
         }
-        currentHeaderCtx().macroUsed( macroName );
     }
     currentHeaderCtx().addHeader( hwf.header );
 }
@@ -217,6 +211,8 @@ void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
     pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( replacement_, cacheHit_, preprocessor_ ) ) );
+    if ( !cacheHit_ )
+        currentHeaderCtx().macroUsed( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
     replacement_ = 0;
     cacheHit_.reset();
 }
@@ -301,6 +297,5 @@ void HeaderTracker::pragmaOnce()
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
     MacroName const pragmaOnceMacro( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
-    currentHeaderCtx().macroUsed( pragmaOnceMacro );
     currentHeaderCtx().macroDefined( pragmaOnceMacro, MacroValue( " 1" ) );
 }

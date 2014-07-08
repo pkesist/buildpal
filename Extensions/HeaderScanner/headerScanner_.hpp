@@ -65,7 +65,6 @@ struct Header
     llvm::MemoryBuffer const * buffer;
     std::size_t checksum;
     HeaderLocation::Enum loc;
-    bool hasPragmaOnce;
 };
 
 inline bool operator==( Header const & first, Header const & second )
@@ -81,23 +80,7 @@ inline bool operator<( Header const & first, Header const & second )
 
 void normalize( llvm::SmallString<512> & path );
 
-struct Headers : public std::set<Header>
-{
-    Headers() : std::set<Header>() {};
-    Headers( Headers && h ) :
-        std::set<Header>( std::move( h ) ) {};
-
-    Headers & operator=( Headers && h )
-    {
-        std::set<Header> tmp( std::move( h ) );
-        swap( tmp );
-        return *this;
-    }
-
-private:
-    Headers( Headers const & headers );
-    Headers & operator=( Headers const & headers );
-};
+typedef std::set<Header> Headers;
 
 typedef std::set<std::string> HeaderList;
 

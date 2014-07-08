@@ -41,7 +41,7 @@ private:
     HeaderCtx * parent_;
     CacheEntryPtr cacheHit_;
     MacroState definedHere_;
-    MacroState usedHere_;
+    UsedMacros usedHere_;
     MacroNames undefinedHere_;
     Headers includedHeaders_;
 
@@ -71,8 +71,8 @@ public:
         // Macro is marked as 'used' in this header only if it was not also
         // defined here.
         if ( definedHere_.find( macroName ) == definedHere_.end() )
-            usedHere_.insert( std::make_pair( macroName,
-            getMacroValue( macroName ) ) );
+            addUsedMacro( usedHere_, macroName, [this]( MacroName name )
+            { return getMacroValue( name ); } );
     }
 
     void macroDefined( MacroName macroName, MacroValue macroValue )
@@ -114,8 +114,17 @@ public:
         assert( parent_ );
         assert( !parent_->fromCache() );
 
-        for ( MacroState::value_type const & usedMacro : usedMacros() )
-            parent_->macroUsed( usedMacro.first, usedMacro.second );
+        if ( fromCache() )
+        {
+            UsedMacros const usedMacros( cacheHit()->usedMacros() );
+            for ( UsedMacros::value_type const & usedMacro : usedMacros )
+                parent_->macroUsed( usedMacro.first, usedMacro.second );
+        }
+        else
+        {
+            for ( UsedMacros::value_type const & usedMacro : usedHere_ )
+                parent_->macroUsed( usedMacro.first, usedMacro.second );
+        }
 
         for ( MacroName const & macroName : undefinedMacros() )
             parent_->macroUndefined( macroName );
@@ -137,8 +146,8 @@ public:
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
+    UsedMacros const & usedMacros() const { return usedHere_; }
     MacroNames const & undefinedMacros() const { return cacheHit_ ? cacheHit_->undefinedMacros() : undefinedHere_; }
-    MacroState const & usedMacros   () const { return cacheHit_ ? cacheHit_->usedMacros() : usedHere_; }
     MacroState const & definedMacros() const { return cacheHit_ ? cacheHit_->definedMacros() : definedHere_; }
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }
     Headers const & includedHeaders() const { return cacheHit_ ? cacheHit_->headers() : includedHeaders_; }
@@ -153,7 +162,7 @@ private:
         // Macro is marked as 'used' in this header only if it was not also
         // defined here.
         if ( definedHere_.find( macroName ) == definedHere_.end() )
-            usedHere_.insert( std::make_pair( macroName, macroValue ) );
+            addUsedMacro( usedHere_, macroName, macroValue );
     }
 };
 

@@ -28,10 +28,6 @@ def collect_headers(preprocessor, filename, includes, sysincludes, defines):
         ppc.add_macro(macro, value)
     return preprocessor.scan_headers(ppc, filename)
 
-def dump_cache():
-    print("Dumping cache.")
-    cache.dump('cacheDump.txt')
-
 def header_info(preprocessor, preprocess_task):
     header_info, missing_headers = collect_headers(preprocessor,
         preprocess_task.source, preprocess_task.includes,

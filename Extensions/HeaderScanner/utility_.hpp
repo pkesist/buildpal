@@ -169,7 +169,8 @@ struct Flyweight
     Flyweight( Flyweight const & other )
         : value_( other.value_ )
     {
-        value_->refCount.addRef();
+        if ( value_ )
+            value_->refCount.addRef();
     }
 
     ~Flyweight()
@@ -198,6 +199,13 @@ struct Flyweight
     T const & get() const { return value_->value; }
 
     operator T const & () const { return get(); }
+
+    typedef std::size_t (Flyweight<T, Tag>::* UnspecifiedBoolType)() const;
+
+    operator UnspecifiedBoolType() const
+    {
+        return value_ ? &Flyweight<T, Tag>::hash : 0;
+    }
 
     bool operator==( Flyweight<T, Tag> const & other ) const
     {

@@ -48,8 +48,6 @@ llvm::StringRef macroValueFromDirective( clang::Preprocessor const & preprocesso
     return llvm::StringRef( result.data() + macroName.size(), result.size() - macroName.size() );
 }
 
-static bool const systemIsLittleEndian = true;
-
 llvm::MemoryBuffer * convertEncodingIfNeeded( llvm::MemoryBuffer * pMemoryBuffer )
 {
     // Clang supports UTF-8 only. We also want to support UTF-16.

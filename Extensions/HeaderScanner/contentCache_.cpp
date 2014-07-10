@@ -90,6 +90,7 @@ ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::
         contentMap_[ uniqueID ] = ContentEntry( memoryBuffer, file->getModificationTime() );
         return contentMap_[ uniqueID ];
     }
+    llvm::OwningPtr<llvm::MemoryBuffer> buffer( fm.getBufferForFile( file, 0, true ) );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
     // Preform another search with upgrade ownership.
     ContentMap::const_iterator const iter( contentMap_.find( uniqueID ) );
@@ -98,7 +99,7 @@ ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
     std::pair<ContentMap::iterator, bool> const insertResult(
         contentMap_.insert( std::make_pair( uniqueID,
-        ContentEntry( fm.getBufferForFile( file, 0, true ), file->getModificationTime() ) ) ) );
+        ContentEntry( buffer.take(), file->getModificationTime() ) ) ) );
     return insertResult.first->second;
 }
 

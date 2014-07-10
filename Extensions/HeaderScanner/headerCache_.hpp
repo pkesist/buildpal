@@ -29,6 +29,8 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <fstream>
+#include <windows.h>
 
 struct HeaderCtx;
 
@@ -93,25 +95,21 @@ struct IndexedUsedMacros : private boost::multi_index_container<
     {
         typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
         IndexByMacroName & usedMacrosByName( get<ByName>() );
-        if ( usedMacrosByName.find( macroName ) != usedMacrosByName.end() )
+        IndexByMacroName::const_iterator const iter = usedMacrosByName.find( macroName );
+        if ( iter != usedMacrosByName.end() )
             return;
         push_back( std::make_pair( macroName, getter( macroName ) ) );
     }
 
     void addMacro( MacroName const macroName, MacroValue const macroValue )
     {
-        typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
-        IndexByMacroName & usedMacrosByName( get<ByName>() );
-        if ( usedMacrosByName.find( macroName ) != usedMacrosByName.end() )
-            return;
-        push_back( std::make_pair( macroName, macroValue ) );
+        return addMacro( macroName, [=]( MacroName ) -> MacroValue { return macroValue; } );
     }
-    
-    UsedMacros getUsedMacros() const
+
+    template <typename Predicate>
+    void forEachUsedMacro( Predicate pred ) const
     {
-        UsedMacros result;
-        std::copy( begin(), end(), std::back_inserter( result ) );
-        return result;
+        std::for_each( begin(), end(), pred );
     }
 };
 
@@ -184,6 +182,7 @@ void intrusive_ptr_release( CacheEntry * );
 
 typedef llvm::sys::fs::UniqueID FileId;
 
+class Cache;
 class CacheTree;
 
 class CacheEntry
@@ -191,8 +190,10 @@ class CacheEntry
 private:
     CacheEntry
     (
+        Cache & cache,    
         CacheTree & tree,
         std::string const & uniqueVirtualFileName,
+        UsedMacros && usedMacros,
         MacroState && definedMacros,
         MacroNames && undefinedMacros,
         Headers && headers,
@@ -202,8 +203,10 @@ private:
 public:
     static CacheEntryPtr create
     (
+        Cache & cache,    
         CacheTree & tree,
         std::string const & uniqueVirtualFileName,
+        UsedMacros && usedMacros,
         MacroState && definedMacros,
         MacroNames && undefinedMacros,
         Headers && headers,
@@ -211,6 +214,8 @@ public:
     );
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
     llvm::MemoryBuffer const * cachedContent();
+
+    ~CacheEntry();
 
     bool usesBuffer( llvm::MemoryBuffer const * buffer ) const
     {
@@ -224,12 +229,16 @@ public:
         ) != headers_.end();
     }
 
-    UsedMacros         usedMacros     () const;
+    template <typename Predicate>
+    void forEachUsedMacro( Predicate pred ) const
+    {
+        std::for_each( usedMacros_.begin(), usedMacros_.end(), pred );
+    }
+
     Headers    const & headers        () const { return headers_; }
     MacroNames const & undefinedMacros() const { return undefinedMacros_; }
     MacroState const & definedMacros  () const { return definedMacros_; }
 
-    void detach();
     std::size_t lastTimeHit() const { return lastTimeHit_; }
 
     void cacheHit( unsigned int currentTime )
@@ -264,8 +273,11 @@ private:
 
 private:
     mutable std::atomic<size_t> refCount_;
+
+    Cache & cache_;
     CacheTree & tree_;
     std::string fileName_;
+    UsedMacros usedMacros_;
     MacroNames undefinedMacros_;
     MacroState definedMacros_;
     Headers headers_;
@@ -273,6 +285,7 @@ private:
     std::atomic_flag contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
+    bool detached_;
 };
 
 
@@ -282,10 +295,7 @@ inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
 class CacheTree
 {
 public:
-    typedef std::map<MacroValue, CacheTree> Children;
-
-public:
-    CacheTree() : parent_( 0 ) {}
+    CacheTree() : entry_( 0 ), parent_( 0 ) {}
 
     CacheTree & getChild( UsedMacros const & usedMacros )
     {
@@ -293,6 +303,7 @@ public:
         for ( UsedMacros::value_type const & macro : usedMacros )
             currentTree = &currentTree->getChild( macro.first, macro.second );
         assert( currentTree->getPath() == usedMacros );
+        assert( currentTree->children_.empty() );
         return *currentTree;
     }
 
@@ -300,22 +311,26 @@ public:
 
     void detach()
     {
+        setEntry( 0 );
+
         if ( !parent_ )
             return;
 
-        CacheTree * const parent( parent_ );
-        parent_ = 0;
+        CacheTree * parent( 0 );
+        std::swap( parent_, parent );
+        assert( !parent->children_.empty() );
         parent->children_.erase( pos_ );
         if ( parent->children_.size() == 0 )
             parent->detach();
     }
 
-    void setEntry( CacheEntryPtr entry )
+    void setEntry( CacheEntry * entry )
     {
+        assert( !entry || children_.empty() );
         entry_ = entry;
     }
 
-    CacheEntryPtr getEntry() const
+    CacheEntry * getEntry() const
     {
         return entry_;
     }
@@ -334,6 +349,7 @@ public:
     }
 
 private:
+    typedef std::map<MacroValue, CacheTree> Children;
     void setParent( CacheTree & parent, Children::iterator const pos )
     {
         parent_ = &parent;
@@ -344,8 +360,25 @@ private:
     {
         if ( !macroName_ )
             macroName_ = name;
-        assert( macroName_ == name );
-
+#ifndef NDEBUG
+        if ( macroName_ != name )
+        {
+            {
+                std::ofstream stream( "tree_conflict.txt" );
+                stream << "Conflict - expected '" << macroName_.get().str().str() << "' got '" << name.get().str().str() << "'\n";
+                CacheTree * current = parent_;
+                MacroValue val = pos_->first;
+                while ( current )
+                {
+                    stream << current->macroName_.get().str().str() << ' ' << val.get().str().str() << '\n';
+                    if ( current->parent_ )
+                        val = current->pos_->first;
+                    current = current->parent_;
+                }
+            }
+        }
+#endif
+        assert( !getEntry() );
         std::pair<Children::iterator, bool> insertResult = children_.insert( std::make_pair( value, CacheTree() ) );
         CacheTree & result = insertResult.first->second;
         if ( insertResult.second )
@@ -355,7 +388,7 @@ private:
 
 private:
     MacroName macroName_;
-    CacheEntryPtr entry_;
+    CacheEntry * entry_;
 
     Children children_;
 
@@ -363,12 +396,7 @@ private:
     Children::iterator pos_;
 };
 
-inline UsedMacros CacheEntry::usedMacros() const
-{
-    return tree_.getPath();
-}
-
-inline void CacheEntry::detach()
+inline CacheEntry::~CacheEntry()
 {
     tree_.detach();
 }
@@ -400,6 +428,9 @@ public:
 
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
+
+private:
+    friend class CacheEntry;
 
 private:
     void maintenance();

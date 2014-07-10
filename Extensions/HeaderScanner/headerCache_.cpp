@@ -91,28 +91,35 @@ void CacheEntry::generateContent( std::string & buffer )
 
 CacheEntry::CacheEntry
 (
+    Cache & cache,
     CacheTree & tree,
     std::string const & uniqueVirtualFileName,
+    UsedMacros && usedMacros,
     MacroState && definedMacros,
     MacroNames && undefinedMacros,
     Headers && headers,
     std::size_t currentTime
 ) :
+    cache_( cache ),
     tree_( tree ),
     refCount_( 0 ),
     fileName_( uniqueVirtualFileName ),
+    usedMacros_( std::move( usedMacros ) ),
     undefinedMacros_( std::move( undefinedMacros ) ),
     definedMacros_( std::move( definedMacros ) ),
     headers_( std::move( headers ) ),
-    lastTimeHit_( currentTime )
+    lastTimeHit_( currentTime ),
+    detached_( false )
 {
     contentLock_.clear();
 }
 
 CacheEntryPtr CacheEntry::create
 (
+    Cache & cache,
     CacheTree & tree,
     std::string const & uniqueVirtualFileName,
+    UsedMacros && usedMacros,
     MacroState && definedMacros,
     MacroNames && undefinedMacros,
     Headers && headers,
@@ -123,8 +130,10 @@ CacheEntryPtr CacheEntry::create
     (
         new CacheEntry
         (
+            cache,
             tree,
             uniqueVirtualFileName,
+            std::move( usedMacros ),
             std::move( definedMacros ),
             std::move( undefinedMacros ),
             std::move( headers ),
@@ -144,15 +153,19 @@ CacheEntryPtr Cache::addEntry
     Headers && headers
 )
 {
-    boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
+    boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
     CacheTree & cacheTree(
         cacheContainer_[ std::make_pair( fileId, searchPathId ) ].getChild(
         usedMacros ) );
-    assert( !cacheTree.getEntry() );
-    CacheEntryPtr result = CacheEntry::create( cacheTree, uniqueFileName(),
-        std::move( definedMacros ), std::move( undefinedMacros ),
-        std::move( headers ), ( hits_ + misses_ ) / 2 );
-    cacheTree.setEntry( result );
+    CacheEntry * entry = cacheTree.getEntry();
+    if ( entry )
+        return CacheEntryPtr( entry );
+    boost::upgrade_to_unique_lock<boost::shared_mutex> lock( upgradeLock );
+    CacheEntryPtr result = CacheEntry::create( *this, cacheTree,
+        uniqueFileName(), std::move( usedMacros ), std::move( definedMacros ),
+        std::move( undefinedMacros ), std::move( headers ),
+        ( hits_ + misses_ ) / 2 );
+    cacheTree.setEntry( result.get() );
     cacheEntries_.insert( result );
     return result;
 }
@@ -174,37 +187,34 @@ void Cache::maintenance()
     unsigned int const historyLength = 4 * cacheCleanupPeriod;
     if ( ( currentTime > historyLength ) && !( currentTime % cacheCleanupPeriod ) )
     {
-        boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
+        std::vector<CacheEntryPtr const *> entriesToRemove;
+        boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
         typedef CacheEntries::index<ByLastTimeHit>::type IndexType;
         IndexType & index( cacheEntries_.get<ByLastTimeHit>() );
         // Remove everything what was not hit in the last cacheCleanupPeriod tries.
         IndexType::iterator const end = index.lower_bound( currentTime - historyLength );
-        std::for_each( index.begin(), end,
-            [&]( CacheEntryPtr const & entry )
-            {
-                entry->detach();
-            });
+        boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
         index.erase( index.begin(), end );
     }
 }
 
 void Cache::invalidate( ContentEntry const & contentEntry )
 {
-    boost::unique_lock<boost::shared_mutex> const lock( cacheMutex_ );
     std::vector<CacheEntryPtr const *> entriesToRemove;
+    boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
     std::for_each( cacheEntries_.begin(), cacheEntries_.end(),
         [&]( CacheEntryPtr const & entry )
         {
             if ( entry->usesBuffer( contentEntry.buffer.get() ) )
             {
-                entry->detach();
                 entriesToRemove.push_back( &entry );
             }
         });
+    if ( entriesToRemove.empty() )
+        return;
+    boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
     for ( CacheEntryPtr const * entry : entriesToRemove )
-    {
         cacheEntries_.erase( cacheEntries_.iterator_to( *entry ) );
-    }
 }
 
 CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId,

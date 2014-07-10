@@ -18,6 +18,10 @@
 #include <sstream>
 #include <windows.h>
 
+#ifndef NDEBUG
+std::ofstream logging_stream( "header_log.txt" );
+#endif
+
 namespace
 {
     template <typename T>
@@ -163,6 +167,12 @@ void HeaderTracker::headerSkipped()
     HeaderWithFileEntry const & hwf( fileStack_.back() );
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Header skipped: '" << std::string( fileStack_.back().file->getName() ) << "'\n";
+#endif
+
     assert( preprocessor().getHeaderSearchInfo().isFileMultipleIncludeGuarded( hwf.file ) );
     assert( !cacheHit_ );
 
@@ -203,6 +213,9 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     };
 
     fileStack_.push_back( hwf );
+#ifndef NDEBUG
+    logging_stream << "Entering source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
+#endif
 
     pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( 0, CacheEntryPtr(), preprocessor_ ) ) );
 }
@@ -210,6 +223,11 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Entering header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
+#endif
     pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( replacement_, cacheHit_, preprocessor_ ) ) );
     if ( !cacheHit_ )
         currentHeaderCtx().macroUsed( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
@@ -232,6 +250,11 @@ void HeaderTracker::leaveHeader()
     assert( !fileStack_.empty() );
     clang::FileEntry const * file( fileStack_.back().file );
 
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Leaving header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
+#endif
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
     if ( !cacheDisabled() && isViableForCache( currentHeaderCtx(), file ) )
@@ -244,10 +267,15 @@ void HeaderTracker::leaveHeader()
 void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file )
 {
     assert( !cacheHit_ );
+    UsedMacros usedMacros;
+    usedHere_.forEachUsedMacro( [&]( UsedMacros::value_type const & macro )
+    {
+        usedMacros.push_back( macro );
+    });
     cacheHit_ = cache.addEntry(
         file->getUniqueID(),
         searchPathId,
-        usedMacros(),
+        std::move( usedMacros ),
         std::move( definedHere_ ),
         std::move( undefinedHere_ ),
         std::move( includedHeaders_ )
@@ -256,6 +284,11 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
 
 void HeaderTracker::exitSourceFile( Headers & headers )
 {
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Leaving source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
+#endif
     headers = std::move( currentHeaderCtx().includedHeaders() );
     // Undo cache overrides in source manager.
     for ( UsedCacheEntries::value_type const & entry : usedCacheEntries_ )
@@ -268,10 +301,15 @@ void HeaderTracker::exitSourceFile( Headers & headers )
     popHeaderCtx();
 }
 
-void HeaderTracker::macroUsed( llvm::StringRef name, clang::MacroDirective const * )
+void HeaderTracker::macroUsed( llvm::StringRef name )
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Macro used: '" << name.str() << '\'' << std::endl;
+#endif
     currentHeaderCtx().macroUsed( MacroName( name ) );
 }
 
@@ -281,6 +319,11 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
         return;
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Macro defined: '" << name.str() << '\'' << std::endl;
+#endif
     llvm::StringRef const macroValue( macroValueFromDirective( preprocessor_, name, def ) );
     currentHeaderCtx().macroDefined( MacroName( name ), MacroValue( macroValue ) );
 }
@@ -289,6 +332,11 @@ void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective 
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
+#ifndef NDEBUG
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Macro undefined: '" << name.str() << '\'' << std::endl;
+#endif
     currentHeaderCtx().macroUndefined( MacroName( name ) );
 }
 

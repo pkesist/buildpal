@@ -68,11 +68,17 @@ public:
     void macroUsed( MacroName macroName )
     {
         assert( !fromCache() );
-        // Macro is marked as 'used' in this header only if it was not also
-        // defined here.
-        if ( definedHere_.find( macroName ) == definedHere_.end() )
+        // Macro is marked as 'used' in this header only if it was neither
+        // defined nor undefined here.
+        if
+        (
+            ( definedHere_.find( macroName ) == definedHere_.end() ) &&
+            ( undefinedHere_.find( macroName ) == undefinedHere_.end() )
+        )
             usedHere_.addMacro( macroName, [this]( MacroName name )
-            { return getMacroValue( name ); } );
+            {
+                return getMacroValue( name );
+            } );
     }
 
     void macroDefined( MacroName macroName, MacroValue macroValue )
@@ -86,8 +92,7 @@ public:
         assert( !fromCache() );
         if ( definedHere_.find( macroName ) != definedHere_.end() )
             definedHere_.undefineMacro( macroName );
-        else
-            undefinedHere_.insert( macroName );
+        undefinedHere_.insert( macroName );
     }
 
     MacroValue getMacroValue( MacroName name ) const
@@ -114,8 +119,13 @@ public:
         assert( parent_ );
         assert( !parent_->fromCache() );
 
-        for ( UsedMacros::value_type const & usedMacro : usedMacros() )
+        forEachUsedMacro( [=]( UsedMacros::value_type const & usedMacro )
+        {
             parent_->macroUsed( usedMacro.first, usedMacro.second );
+        });
+
+        for ( MacroName const & macroName : undefinedMacros() )
+            parent_->macroUndefined( macroName );
 
         parent_->definedHere_.merge( definedMacros() );
 
@@ -133,8 +143,17 @@ public:
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
 
+    template <typename Predicate>
+    void forEachUsedMacro( Predicate pred ) const
+    {
+        cacheHit_
+            ? cacheHit_->forEachUsedMacro( pred )
+            : usedHere_.forEachUsedMacro( pred )
+        ;
+    }
+
+
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
-    UsedMacros usedMacros() const { return cacheHit_ ? cacheHit_->usedMacros() : usedHere_.getUsedMacros(); }
     MacroNames const & undefinedMacros() const { return cacheHit_ ? cacheHit_->undefinedMacros() : undefinedHere_; }
     MacroState const & definedMacros() const { return cacheHit_ ? cacheHit_->definedMacros() : definedHere_; }
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }
@@ -147,9 +166,13 @@ private:
     void macroUsed( MacroName macroName, MacroValue macroValue )
     {
         assert( !fromCache() );
-        // Macro is marked as 'used' in this header only if it was not also
-        // defined here.
-        if ( definedHere_.find( macroName ) == definedHere_.end() )
+        // Macro is marked as 'used' in this header only if it was neither
+        // defined nor undefined here.
+        if
+        (
+            ( definedHere_.find( macroName ) == definedHere_.end() ) &&
+            ( undefinedHere_.find( macroName ) == undefinedHere_.end() )
+        )
             usedHere_.addMacro( macroName, macroValue );
     }
 };
@@ -194,7 +217,7 @@ public:
     void leaveHeader();
     void pragmaOnce();
 
-    void macroUsed( llvm::StringRef name, clang::MacroDirective const * def );
+    void macroUsed( llvm::StringRef name );
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 

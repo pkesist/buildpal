@@ -18,6 +18,7 @@
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
+#include <boost/thread/mutex.hpp>
   
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
@@ -187,10 +188,9 @@ class CacheTree;
 
 class CacheEntry
 {
-private:
+public:
     CacheEntry
     (
-        Cache & cache,    
         CacheTree & tree,
         std::string const & uniqueVirtualFileName,
         UsedMacros && usedMacros,
@@ -200,18 +200,6 @@ private:
         std::size_t currentTime
     );
 
-public:
-    static CacheEntryPtr create
-    (
-        Cache & cache,    
-        CacheTree & tree,
-        std::string const & uniqueVirtualFileName,
-        UsedMacros && usedMacros,
-        MacroState && definedMacros,
-        MacroNames && undefinedMacros,
-        Headers && headers,
-        std::size_t currentTime
-    );
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
     llvm::MemoryBuffer const * cachedContent();
 
@@ -241,9 +229,9 @@ public:
 
     std::size_t lastTimeHit() const { return lastTimeHit_; }
 
-    void cacheHit( unsigned int currentTime )
+    void setLastTimeHit( unsigned int lastTimeHit )
     {
-        lastTimeHit_ = currentTime;
+        lastTimeHit_ = lastTimeHit;
     }
 
     std::size_t getRef()
@@ -274,7 +262,6 @@ private:
 private:
     mutable std::atomic<size_t> refCount_;
 
-    Cache & cache_;
     CacheTree & tree_;
     std::string fileName_;
     UsedMacros usedMacros_;
@@ -319,7 +306,7 @@ public:
         CacheTree * parent( 0 );
         std::swap( parent_, parent );
         assert( !parent->children_.empty() );
-        parent->children_.erase( pos_ );
+        parent->children_.erase( macroValue_ );
         if ( parent->children_.size() == 0 )
             parent->detach();
     }
@@ -341,7 +328,7 @@ public:
         CacheTree const * current = this;
         while ( current->parent_ )
         {
-            result.push_back( std::make_pair( current->parent_->macroName_, current->pos_->first ) );
+            result.push_back( std::make_pair( current->parent_->macroName_, current->macroValue_ ) );
             current = current->parent_;
         }
         std::reverse( result.begin(), result.end() );
@@ -349,11 +336,11 @@ public:
     }
 
 private:
-    typedef std::map<MacroValue, CacheTree> Children;
-    void setParent( CacheTree & parent, Children::iterator const pos )
+    typedef std::unordered_map<MacroValue, CacheTree> Children;
+    void setParent( CacheTree & parent, MacroValue const macroValue )
     {
         parent_ = &parent;
-        pos_ = pos;
+        macroValue_ = macroValue;
     }
 
     CacheTree & getChild( MacroName name, MacroValue value )
@@ -367,12 +354,11 @@ private:
                 std::ofstream stream( "tree_conflict.txt" );
                 stream << "Conflict - expected '" << macroName_.get().str().str() << "' got '" << name.get().str().str() << "'\n";
                 CacheTree * current = parent_;
-                MacroValue val = pos_->first;
                 while ( current )
                 {
-                    stream << current->macroName_.get().str().str() << ' ' << val.get().str().str() << '\n';
+                    stream << current->macroName_.get().str().str() << ' ' << macroValue_.get().str().str() << '\n';
                     if ( current->parent_ )
-                        val = current->pos_->first;
+                        val = current->macroValue_;
                     current = current->parent_;
                 }
             }
@@ -382,7 +368,7 @@ private:
         std::pair<Children::iterator, bool> insertResult = children_.insert( std::make_pair( value, CacheTree() ) );
         CacheTree & result = insertResult.first->second;
         if ( insertResult.second )
-            result.setParent( *this, insertResult.first );
+            result.setParent( *this, value );
         return result;
     }
 
@@ -393,7 +379,7 @@ private:
     Children children_;
 
     CacheTree * parent_;
-    Children::iterator pos_;
+    MacroValue macroValue_;
 };
 
 inline CacheEntry::~CacheEntry()
@@ -486,6 +472,8 @@ private:
     CacheContainer cacheContainer_;
     CacheEntries cacheEntries_;
     boost::shared_mutex cacheMutex_;
+    boost::mutex tempLastTimeHitMutex_;
+    std::map<CacheEntryPtr, unsigned int> tempLastTimeHit_;
     std::atomic<std::size_t> counter_;
     std::size_t hits_;
     std::size_t misses_;

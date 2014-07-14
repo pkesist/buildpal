@@ -91,7 +91,6 @@ void CacheEntry::generateContent( std::string & buffer )
 
 CacheEntry::CacheEntry
 (
-    Cache & cache,
     CacheTree & tree,
     std::string const & uniqueVirtualFileName,
     UsedMacros && usedMacros,
@@ -100,7 +99,6 @@ CacheEntry::CacheEntry
     Headers && headers,
     std::size_t currentTime
 ) :
-    cache_( cache ),
     tree_( tree ),
     refCount_( 0 ),
     fileName_( uniqueVirtualFileName ),
@@ -113,35 +111,6 @@ CacheEntry::CacheEntry
 {
     contentLock_.clear();
 }
-
-CacheEntryPtr CacheEntry::create
-(
-    Cache & cache,
-    CacheTree & tree,
-    std::string const & uniqueVirtualFileName,
-    UsedMacros && usedMacros,
-    MacroState && definedMacros,
-    MacroNames && undefinedMacros,
-    Headers && headers,
-    std::size_t currentTime
-)
-{
-    return CacheEntryPtr
-    (
-        new CacheEntry
-        (
-            cache,
-            tree,
-            uniqueVirtualFileName,
-            std::move( usedMacros ),
-            std::move( definedMacros ),
-            std::move( undefinedMacros ),
-            std::move( headers ),
-            currentTime
-        )
-    );
-}
-
 
 CacheEntryPtr Cache::addEntry
 (
@@ -160,11 +129,20 @@ CacheEntryPtr Cache::addEntry
     CacheEntry * entry = cacheTree.getEntry();
     if ( entry )
         return CacheEntryPtr( entry );
+    CacheEntryPtr result = CacheEntryPtr
+    (
+        new CacheEntry
+        (
+            cacheTree,
+            uniqueFileName(),
+            std::move( usedMacros ),
+            std::move( definedMacros ),
+            std::move( undefinedMacros ),
+            std::move( headers ),
+            ( hits_ + misses_ ) / 2
+        )
+    );
     boost::upgrade_to_unique_lock<boost::shared_mutex> lock( upgradeLock );
-    CacheEntryPtr result = CacheEntry::create( *this, cacheTree,
-        uniqueFileName(), std::move( usedMacros ), std::move( definedMacros ),
-        std::move( undefinedMacros ), std::move( headers ),
-        ( hits_ + misses_ ) / 2 );
     cacheTree.setEntry( result.get() );
     cacheEntries_.insert( result );
     return result;
@@ -187,13 +165,27 @@ void Cache::maintenance()
     unsigned int const historyLength = 4 * cacheCleanupPeriod;
     if ( ( currentTime > historyLength ) && !( currentTime % cacheCleanupPeriod ) )
     {
+        boost::unique_lock<boost::shared_mutex> uniqueLock( cacheMutex_ );
+        {
+            boost::unique_lock<boost::mutex> tempLastTimeHitLock( tempLastTimeHitMutex_ );
+            std::for_each( tempLastTimeHit_.begin(), tempLastTimeHit_.end(), [this]( std::pair<CacheEntryPtr, unsigned int> const & entry )
+            {
+                typedef CacheEntries::index<ById>::type IndexByIdType;
+                // Note that we cannot use CacheContainer::iterator_to() to obtain
+                // the iterator to update. iterator_to() needs a reference to the
+                // actual value stored in the container, not a copy.
+                IndexByIdType & indexById( cacheEntries_.get<ById>() );
+                IndexByIdType::iterator const iter = indexById.find( entry.first.get() );
+                if ( iter != indexById.end() )
+                    indexById.modify( iter, [=]( CacheEntryPtr p ) { p->setLastTimeHit( entry.second ); } );
+            });
+            tempLastTimeHit_.clear();
+        }
         std::vector<CacheEntryPtr const *> entriesToRemove;
-        boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
         typedef CacheEntries::index<ByLastTimeHit>::type IndexType;
         IndexType & index( cacheEntries_.get<ByLastTimeHit>() );
         // Remove everything what was not hit in the last cacheCleanupPeriod tries.
         IndexType::iterator const end = index.lower_bound( currentTime - historyLength );
-        boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
         index.erase( index.begin(), end );
     }
 }
@@ -241,19 +233,8 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId,
     }
     if ( result )
     {
-        boost::upgrade_lock<boost::shared_mutex> upgradeLock( cacheMutex_ );
-        // Note that we cannot use CacheContainer::iterator_to() to obtain
-        // the iterator to update. iterator_to() needs a reference to the
-        // actual value stored in the container, not a copy.
-        typedef CacheEntries::index<ById>::type IndexByIdType;
-        IndexByIdType & indexById( cacheEntries_.get<ById>() );
-        IndexByIdType::iterator const iter = indexById.find( result.get() );
-        if ( iter != indexById.end() )
-        {
-            unsigned int const currentTime = hits_ + misses_;
-            boost::upgrade_to_unique_lock<boost::shared_mutex> const lock( upgradeLock );
-            indexById.modify( iter, [=]( CacheEntryPtr p ) { p->cacheHit( currentTime ); } );
-        }
+        boost::unique_lock<boost::mutex> tempLastTimeHitLock( tempLastTimeHitMutex_ );
+        tempLastTimeHit_[ result ] = hits_ + misses_;
         ++hits_;
     }
     else

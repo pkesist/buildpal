@@ -18,18 +18,6 @@
 #include <unordered_set>
 //------------------------------------------------------------------------------
 
-namespace clang
-{
-    class Preprocessor;
-    class MacroDirective;
-}
-
-llvm::StringRef macroValueFromDirective(
-    clang::Preprocessor const & preprocessor,
-    llvm::StringRef const macroName,
-    clang::MacroDirective const * def
-);
-
 class RefCount
 {
 private:
@@ -69,6 +57,12 @@ struct Value
     T value;
     RefCount refCount;
 };
+
+template <typename T>
+bool operator==( Value<T> const & lhs, Value<T> const & rhs )
+{
+    return lhs.value == rhs.value;
+}
 
 template<typename T>
 struct HashValue

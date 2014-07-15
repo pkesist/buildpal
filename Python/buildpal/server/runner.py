@@ -203,10 +203,14 @@ class CompileSession(Timer):
             else:
                 session.session_done()
 
+    class StateCancelled(SessionState):
+        @classmethod
+        def process_msg(cls, session, msg):
+            pass
+
     class StateUploadingFile(SessionState): pass
     class StateDone(SessionState): pass
     class StateFailed(SessionState): pass
-    class StateCancelled(SessionState): pass
 
     def async(func):
         def wrapper(self, runner, *args, **kwds):

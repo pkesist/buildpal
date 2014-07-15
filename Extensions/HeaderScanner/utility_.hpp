@@ -4,9 +4,6 @@
 #ifndef utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 #define utility_HPP__C365973E_280B_4A04_B419_EEE35B274D91
 //------------------------------------------------------------------------------
-#include <boost/multi_index_container.hpp>
-#include <boost/multi_index/hashed_index.hpp>
-#include <boost/multi_index/mem_fun.hpp>
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
 
@@ -18,7 +15,7 @@
 #include <atomic>
 #include <mutex>
 #include <ostream>
-#include <unordered_map>
+#include <unordered_set>
 //------------------------------------------------------------------------------
 
 namespace clang
@@ -73,6 +70,16 @@ struct Value
     RefCount refCount;
 };
 
+template<typename T>
+struct HashValue
+{
+    inline std::size_t operator()( Value<T> const & val ) const
+    {
+        llvm::StringRef const ref = val.str();
+        return boost::hash_range( ref.data(), ref.data() + ref.size() );
+    }
+};
+
 struct HashString
 {
     inline std::size_t operator()( llvm::StringRef ref ) const
@@ -82,19 +89,7 @@ struct HashString
 };
 
 template <typename T>
-struct Container : public boost::multi_index::multi_index_container
-<
-    Value<T>,
-    boost::multi_index::indexed_by
-    <
-        boost::multi_index::hashed_unique
-        <
-            boost::multi_index::const_mem_fun<Value<T>, llvm::StringRef, &Value<T>::str>,
-            HashString
-        >
-    >
->
-{};
+struct Container : public std::unordered_set<Value<T>, HashValue<T> > {};
 
 
 template <typename T, typename Tag=T>
@@ -115,27 +110,19 @@ public:
                 return &*result;
             }
         }
-        boost::upgrade_lock<boost::shared_mutex> upgradeLock( mutex_ );
-        typename Base::iterator const result = Base::find( s );
-        if ( result != Base::end() )
-        {
-            result->refCount.addRef();
-            return &*result;
-        }
-        boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
+        boost::unique_lock<boost::shared_mutex> uniqueLock( mutex_ );
         std::pair<typename Base::iterator, bool> const res = Base::insert( Value<T>( s ) );
-        assert( res.second );
         res.first->refCount.addRef();
         return &*res.first;
     }
 
-    void remove( Value<T> const * value )
+    void remove( Value<T> const & value )
     {
-        if ( value->refCount.decRef() )
+        if ( value.refCount.decRef() )
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex_ );
-            if ( value->refCount.decDel() )
-                Base::erase( Base::iterator_to( *value ) );
+            if ( value.refCount.decDel() )
+                Base::erase( value );
         }
     }
 
@@ -169,13 +156,14 @@ struct Flyweight
     Flyweight( Flyweight const & other )
         : value_( other.value_ )
     {
-        value_->refCount.addRef();
+        if ( value_ )
+            value_->refCount.addRef();
     }
 
     ~Flyweight()
     {
         if ( value_ )
-            Storage::get().remove( value_ );
+            Storage::get().remove( *value_ );
     }
 
     Flyweight & operator=( Flyweight && other )
@@ -188,7 +176,7 @@ struct Flyweight
     Flyweight & operator=( Flyweight const & other )
     {
         if ( value_ )
-            Storage::get().remove( value_ );
+            Storage::get().remove( *value_ );
         value_ = other.value_;
         if ( value_ )
             value_->refCount.addRef();
@@ -198,6 +186,13 @@ struct Flyweight
     T const & get() const { return value_->value; }
 
     operator T const & () const { return get(); }
+
+    typedef std::size_t (Flyweight<T, Tag>::* UnspecifiedBoolType)() const;
+
+    operator UnspecifiedBoolType() const
+    {
+        return value_ ? &Flyweight<T, Tag>::hash : 0;
+    }
 
     bool operator==( Flyweight<T, Tag> const & other ) const
     {

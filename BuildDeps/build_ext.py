@@ -28,7 +28,8 @@ class build_ext(_build_ext):
             distutils.msvc9compiler.VERSION = 11.0
             self.extra_compile_args.append('/EHsc')
             if self._debug:
-                self.extra_compile_args.extend(['/Zi', '/Od'])
+                self.extra_compile_args.extend(['/Zi'])
+                self.extra_compile_args.extend(['/Od'])
                 self.extra_link_args.extend(['/DEBUG'])
             else:
                 self.extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])

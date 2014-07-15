@@ -55,6 +55,10 @@ class NodeManager:
             self.update_node_info()
 
     def task_preprocessed(self, task, exception=None):
+        # Convenient for preprocessor profiling.
+        #if True:
+        #    task.task_completed(0, b'', b'')
+        #    return
         if exception:
             logging.exception(exception)
             def task_error():

@@ -13,19 +13,25 @@
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
+#include <boost/thread/mutex.hpp>
   
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <atomic>
 #include <list>
+#include <map>
 #include <set>
 #include <string>
 #include <tuple>
 #include <vector>
+#include <fstream>
+#include <windows.h>
 
 struct HeaderCtx;
 
@@ -58,6 +64,54 @@ struct HeaderWithFileEntry
 {
     Header header;
     clang::FileEntry const * file;
+};
+
+typedef std::pair<MacroName, MacroValue> Macro;
+typedef std::vector<Macro> UsedMacros;
+
+struct GetName
+{
+    typedef MacroName result_type;
+    result_type operator()( Macro const & m ) const
+    {
+        return m.first;
+    }
+};
+
+struct ByName {};
+struct IndexedUsedMacros : private boost::multi_index_container<
+    Macro,
+    boost::multi_index::indexed_by<
+        boost::multi_index::sequenced<>,
+        boost::multi_index::hashed_unique<
+            boost::multi_index::tag<ByName>,
+            GetName,
+            std::hash<MacroName>
+        >
+    >
+>
+{
+    template <typename MacroValueGetter>
+    void addMacro( MacroName const macroName, MacroValueGetter const getter )
+    {
+        typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
+        IndexByMacroName & usedMacrosByName( get<ByName>() );
+        IndexByMacroName::const_iterator const iter = usedMacrosByName.find( macroName );
+        if ( iter != usedMacrosByName.end() )
+            return;
+        push_back( std::make_pair( macroName, getter( macroName ) ) );
+    }
+
+    void addMacro( MacroName const macroName, MacroValue const macroValue )
+    {
+        return addMacro( macroName, [=]( MacroName ) -> MacroValue { return macroValue; } );
+    }
+
+    template <typename Predicate>
+    void forEachUsedMacro( Predicate pred ) const
+    {
+        std::for_each( begin(), end(), pred );
+    }
 };
 
 typedef std::map<MacroName, MacroValue> MacroStateBase;
@@ -129,63 +183,27 @@ void intrusive_ptr_release( CacheEntry * );
 
 typedef llvm::sys::fs::UniqueID FileId;
 
+class Cache;
+class CacheTree;
+
 class CacheEntry
 {
-private:
+public:
     CacheEntry
     (
-        FileId fileId,
-        std::size_t searchPathId,
+        CacheTree & tree,
         std::string const & uniqueVirtualFileName,
-        MacroState && usedMacros,
+        UsedMacros && usedMacros,
         MacroState && definedMacros,
         MacroNames && undefinedMacros,
         Headers && headers,
         std::size_t currentTime
-
-    ) :
-        refCount_( 0 ),
-        fileId_( fileId ),
-        searchPathId_( searchPathId ),
-        fileName_( uniqueVirtualFileName ),
-        usedMacros_( std::move( usedMacros ) ),
-        undefinedMacros_( std::move( undefinedMacros ) ),
-        definedMacros_( std::move( definedMacros ) ),
-        headers_( std::move( headers ) ),
-        lastTimeHit_( currentTime )
-    {
-        contentLock_.clear();
-    }
-
-public:
-    static CacheEntryPtr create
-    (
-        FileId fileId,
-        std::size_t searchPathId,
-        std::string const & uniqueVirtualFileName,
-        MacroState && usedMacros,
-        MacroState && definedMacros,
-        MacroNames && undefinedMacros,
-        Headers && headers,
-        unsigned currentTime
-    )
-    {
-        CacheEntry * result = new CacheEntry
-        (
-            fileId,
-            searchPathId,
-            uniqueVirtualFileName,
-            std::move( usedMacros ),
-            std::move( definedMacros ),
-            std::move( undefinedMacros ),
-            std::move( headers ),
-            currentTime
-        );
-        return CacheEntryPtr( result );
-    }
+    );
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
     llvm::MemoryBuffer const * cachedContent();
+
+    ~CacheEntry();
 
     bool usesBuffer( llvm::MemoryBuffer const * buffer ) const
     {
@@ -199,18 +217,21 @@ public:
         ) != headers_.end();
     }
 
-    MacroState const & usedMacros     () const { return usedMacros_; }
+    template <typename Predicate>
+    void forEachUsedMacro( Predicate pred ) const
+    {
+        std::for_each( usedMacros_.begin(), usedMacros_.end(), pred );
+    }
+
     Headers    const & headers        () const { return headers_; }
     MacroNames const & undefinedMacros() const { return undefinedMacros_; }
     MacroState const & definedMacros  () const { return definedMacros_; }
 
-    FileId fileId() const { return fileId_; }
-    std::size_t searchPathId() const { return searchPathId_; }
     std::size_t lastTimeHit() const { return lastTimeHit_; }
-    
-    void cacheHit( unsigned int currentTime )
+
+    void setLastTimeHit( unsigned int lastTimeHit )
     {
-        lastTimeHit_ = currentTime;
+        lastTimeHit_ = lastTimeHit;
     }
 
     std::size_t getRef()
@@ -240,10 +261,10 @@ private:
 
 private:
     mutable std::atomic<size_t> refCount_;
-    FileId fileId_;
-    std::size_t searchPathId_;
+
+    CacheTree & tree_;
     std::string fileName_;
-    MacroState usedMacros_;
+    UsedMacros usedMacros_;
     MacroNames undefinedMacros_;
     MacroState definedMacros_;
     Headers headers_;
@@ -251,11 +272,121 @@ private:
     std::atomic_flag contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
+    bool detached_;
 };
 
 
 inline void intrusive_ptr_add_ref( CacheEntry * c ) { c->addRef(); }
 inline void intrusive_ptr_release( CacheEntry * c ) { c->decRef(); }
+
+class CacheTree
+{
+public:
+    CacheTree() : entry_( 0 ), parent_( 0 ) {}
+
+    CacheTree & getChild( UsedMacros const & usedMacros )
+    {
+        CacheTree * currentTree = this;
+        for ( UsedMacros::value_type const & macro : usedMacros )
+            currentTree = &currentTree->getChild( macro.first, macro.second );
+        assert( currentTree->getPath() == usedMacros );
+        assert( currentTree->children_.empty() );
+        return *currentTree;
+    }
+
+    CacheEntryPtr find( HeaderCtx const & headerCtx ) const;
+
+    void detach()
+    {
+        setEntry( 0 );
+
+        if ( !parent_ )
+            return;
+
+        CacheTree * parent( 0 );
+        std::swap( parent_, parent );
+        assert( !parent->children_.empty() );
+        parent->children_.erase( macroValue_ );
+        if ( parent->children_.size() == 0 )
+            parent->detach();
+    }
+
+    void setEntry( CacheEntry * entry )
+    {
+        assert( !entry || children_.empty() );
+        entry_ = entry;
+    }
+
+    CacheEntry * getEntry() const
+    {
+        return entry_;
+    }
+
+    UsedMacros getPath() const
+    {
+        UsedMacros result;
+        CacheTree const * current = this;
+        while ( current->parent_ )
+        {
+            result.push_back( std::make_pair( current->parent_->macroName_, current->macroValue_ ) );
+            current = current->parent_;
+        }
+        std::reverse( result.begin(), result.end() );
+        return result;
+    }
+
+private:
+    typedef std::unordered_map<MacroValue, CacheTree> Children;
+    void setParent( CacheTree & parent, MacroValue const macroValue )
+    {
+        parent_ = &parent;
+        macroValue_ = macroValue;
+    }
+
+    CacheTree & getChild( MacroName name, MacroValue value )
+    {
+        if ( !macroName_ )
+            macroName_ = name;
+#ifndef NDEBUG
+        if ( macroName_ != name )
+        {
+            {
+                std::ofstream stream( "tree_conflict.txt" );
+                stream << "Conflict - expected '" << macroName_.get().str().str() << "' got '" << name.get().str().str() << "'\n";
+                CacheTree * current = parent_;
+                while ( current )
+                {
+                    stream << current->macroName_.get().str().str() << ' ' << macroValue_.get().str().str() << '\n';
+                    if ( current->parent_ )
+                        val = current->macroValue_;
+                    current = current->parent_;
+                }
+            }
+        }
+#endif
+        assert( !getEntry() );
+        std::pair<Children::iterator, bool> insertResult = children_.insert( std::make_pair( value, CacheTree() ) );
+        CacheTree & result = insertResult.first->second;
+        if ( insertResult.second )
+            result.setParent( *this, value );
+        return result;
+    }
+
+private:
+    MacroName macroName_;
+    CacheEntry * entry_;
+
+    Children children_;
+
+    CacheTree * parent_;
+    MacroValue macroValue_;
+};
+
+inline CacheEntry::~CacheEntry()
+{
+    tree_.detach();
+}
+
 
 class Cache
 {
@@ -264,9 +395,9 @@ public:
 
     CacheEntryPtr addEntry
     (
-        llvm::sys::fs::UniqueID const & id,
+        FileId const & id,
         std::size_t searchPathId,
-        MacroState && usedMacros,
+        UsedMacros && usedMacros,
         MacroState && definedMacros,
         MacroNames && undefinedMacros,
         Headers && headers
@@ -274,7 +405,7 @@ public:
 
     CacheEntryPtr findEntry
     (
-        llvm::sys::fs::UniqueID const & id,
+        FileId const & id,
         std::size_t searchPathId,
         HeaderCtx const &
     );
@@ -284,87 +415,22 @@ public:
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
 
-    void dumpEntry( CacheEntryPtr entry, std::ostream & ostream )
-    {
-        ostream << "    ----\n";
-        ostream << "    Key:\n";
-        ostream << "    ----\n";
-        if ( entry->usedMacros().empty() )
-            ostream << "    Empty key\n";
-        else
-        {
-            for ( MacroState::value_type const & macro : entry->usedMacros() )
-            {
-                ostream << "    " << macro.first << macro.second << '\n';
-            }
-        }
-        ostream << "    --------\n";
-        ostream << "    Headers:\n";
-        ostream << "    --------\n";
-        if ( entry->headers().empty() )
-            ostream << "    No headers\n";
-        else
-        {
-            for ( Header const & header : entry->headers() )
-            {
-                ostream << "    " << header.dir.get().str().str() << ' ' << header.name.get().str().str() << '\n';
-            }
-        }
-        ostream << "    --------\n";
-        ostream << "    Content:\n";
-        ostream << "    --------\n";
-        if ( entry->undefinedMacros().empty() && entry->definedMacros().empty() )
-            ostream << "    No content\n";
-        else
-        {
-            std::for_each(
-                entry->undefinedMacros().begin(),
-                entry->undefinedMacros().end  (),
-                [&]( MacroName macroName )
-                {
-                    ostream << "#undef " << macroName << '\n';
-                }
-            );
-            std::for_each(
-                entry->definedMacros().begin(),
-                entry->definedMacros().end  (),
-                [&]( MacroState::value_type const & macro )
-                {
-                    ostream << "#define " << macro.first << macro.second << '\n';
-                }
-            );
-        }
-    }
-
-    void dump( std::ostream & ostream )
-    {
-        for ( CacheContainer::value_type const & entry : cacheContainer_ )
-        {
-            dumpEntry( entry, ostream );
-        }
-    }
+private:
+    friend class CacheEntry;
 
 private:
     void maintenance();
-
     std::string uniqueFileName();
 
 private:
+    typedef std::map<std::pair<FileId, std::size_t>, CacheTree> CacheContainer;
+
     struct GetId
     {
         typedef CacheEntry * result_type;
         result_type operator()( CacheEntryPtr const & c ) const
         {
             return &*c;
-        }
-    };
-
-    struct GetFileId
-    {
-        typedef FileId result_type;
-        result_type operator()( CacheEntryPtr const & c ) const
-        {
-            return c->fileId();
         }
     };
 
@@ -377,38 +443,12 @@ private:
         }
     };
 
-    struct SearchPathId
-    {
-        typedef std::size_t result_type;
-        result_type operator()( CacheEntryPtr const & c ) const
-        {
-            return c->searchPathId();
-        }
-    };
-
     struct ById {};
     struct ByLastTimeHit {};
-    struct ByFileIdAndLastTimeHit {};
 
     typedef boost::multi_index_container<
         CacheEntryPtr,
         boost::multi_index::indexed_by<
-            // Index used when searching cache.
-            // Entries with recent hits are searched first.
-            boost::multi_index::ordered_non_unique<
-                boost::multi_index::tag<ByFileIdAndLastTimeHit>,
-                boost::multi_index::composite_key<
-                    CacheEntryPtr,
-                    GetFileId,
-                    SearchPathId,
-                    LastTimeHit
-                >,
-                boost::multi_index::composite_key_compare<
-                    std::less<FileId>,
-                    std::less<std::size_t>,
-                    std::greater<std::size_t>
-                >
-            >,
             // Index used when deleting from cache.
             // Entries with least hits will be removed.
             // Older entries are removed first, to prevent deleting recent
@@ -425,11 +465,15 @@ private:
                 GetId
             >
         >
-    > CacheContainer;
+    > CacheEntries;
+
 
 private:
     CacheContainer cacheContainer_;
+    CacheEntries cacheEntries_;
     boost::shared_mutex cacheMutex_;
+    boost::mutex tempLastTimeHitMutex_;
+    std::map<CacheEntryPtr, unsigned int> tempLastTimeHit_;
     std::atomic<std::size_t> counter_;
     std::size_t hits_;
     std::size_t misses_;

@@ -13,6 +13,7 @@
 #include <clang/Basic/FileManager.h>
 #include <clang/Lex/HeaderSearch.h>
 #include <clang/Lex/HeaderSearchOptions.h>
+#include <clang/Lex/LexDiagnostic.h>
 #include <clang/Lex/Preprocessor.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Rewrite/Frontend/Rewriters.h>
@@ -51,10 +52,10 @@ void normalize( llvm::SmallString<512> & path )
 
 namespace
 {
-    class HeaderScanner : public clang::PPCallbacks
+    class PreprocessorCallbacks : public clang::PPCallbacks
     {
     public:
-        explicit HeaderScanner
+        explicit PreprocessorCallbacks
         (
             HeaderTracker & headerTracker,
             llvm::StringRef filename,
@@ -71,7 +72,7 @@ namespace
         {
         }
 
-        virtual ~HeaderScanner() {}
+        virtual ~PreprocessorCallbacks() {}
 
         virtual void InclusionDirective(
             clang::SourceLocation hashLoc,
@@ -139,7 +140,7 @@ namespace
 
         virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
         }
 
         virtual void MacroDefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
@@ -154,17 +155,17 @@ namespace
 
         virtual void Defined( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
         }
 
         virtual void Ifdef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
         }
 
         virtual void Ifndef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName(), md ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
         }
 
         virtual void PragmaDirective( clang::SourceLocation Loc, clang::PragmaIntroducerKind introducer ) LLVM_OVERRIDE
@@ -182,25 +183,6 @@ namespace
         llvm::StringRef filename_;
         Headers & headers_;
         HeaderList & missingHeaders_;
-    };
-
-    class DiagnosticConsumer : public clang::DiagnosticConsumer
-    {
-        virtual void HandleDiagnostic(
-            clang::DiagnosticsEngine::Level level,
-            clang::Diagnostic const & info) 
-        {
-            clang::DiagnosticConsumer::HandleDiagnostic( level, info );
-            //llvm::SmallString<100> buffer;
-            //info.FormatDiagnostic( buffer );
-            //switch ( level )
-            //{
-            //    case clang::DiagnosticsEngine::Note: std::cout << "Note: " << buffer.str().str() << '\n'; break;
-            //    case clang::DiagnosticsEngine::Warning: std::cout << "Warning: " << buffer.str().str() << '\n'; break;
-            //    case clang::DiagnosticsEngine::Error: std::cout << "Error: " << buffer.str().str() << '\n'; break;
-            //    case clang::DiagnosticsEngine::Fatal: std::cout << "Fatal: " << buffer.str().str() << '\n'; break;
-            //}
-        }
     };
 
     struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
@@ -235,8 +217,7 @@ Preprocessor::Preprocessor( Cache * cache )
     hsOpts_    ( new clang::HeaderSearchOptions() ),
     cache_     ( cache )
 {
-    diagEng_->setClient( new DiagnosticConsumer() );
-   
+    diagEng_->setEnableAllWarnings( true );
     hsOpts_->UseBuiltinIncludes = false;
     hsOpts_->UseStandardSystemIncludes = false;
     hsOpts_->UseStandardCXXIncludes = false;
@@ -320,14 +301,44 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     for ( PreprocessingContext::Defines::value_type const & macro : ppc.defines() )
         macroBuilder.defineMacro( macro.first, macro.second );
     preprocessor().setPredefines( predefinesStream.str() );
-
     preprocessor().SetSuppressIncludeNotFoundError( true );
+    preprocessor().SetMacroExpansionOnlyInDirectives();
     return searchPathId;
 }
+
+namespace
+{
+    struct DiagnosticConsumer : clang::DiagnosticConsumer
+    {
+        HeaderTracker & headerTracker_;
+
+        explicit DiagnosticConsumer( HeaderTracker & headerTracker )
+            : headerTracker_( headerTracker )
+        {
+        }
+
+        virtual void HandleDiagnostic(
+            clang::DiagnosticsEngine::Level level,
+            clang::Diagnostic const & info) 
+        {
+            if ( info.getID() == clang::diag::warn_pp_undef_identifier )
+            {
+                // We need to get notifications for identifiers which did not get expanded
+                // in order to create consistent cache key paths.
+                clang::IdentifierInfo const * identifier( info.getArgIdentifier( 0 ) );
+                if ( identifier )
+                    headerTracker_.macroUsed( identifier->getName() );
+            }
+        }
+    };
+}
+
 
 bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
     std::size_t const searchPathId = setupPreprocessor( ppc, fileName );
+    HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
+    diagEng_->setClient( new DiagnosticConsumer( headerTracker ) );
     struct DiagnosticsSetup
     {
         DiagnosticsSetup( clang::DiagnosticConsumer & client,
@@ -348,12 +359,9 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         preprocessor()
     );
 
-    preprocessor().SetMacroExpansionOnlyInDirectives();
-
-    HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
-    preprocessor().addPPCallbacks( new HeaderScanner( headerTracker, fileName,
+    preprocessor().addPPCallbacks( new PreprocessorCallbacks( headerTracker, fileName,
         preprocessor(), headers, missingHeaders ) );
-
+    
     preprocessor().EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )
         return false;

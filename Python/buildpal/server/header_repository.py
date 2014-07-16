@@ -126,7 +126,7 @@ class HeaderRepository:
         if session_id in self.tempdirs:
             try:
                 shutil.rmtree(self.tempdirs[session_id])
-            except PermissionError:
+            except Exception:
                 pass
             finally:
                 del self.tempdirs[session_id]

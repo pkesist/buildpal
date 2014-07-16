@@ -26,6 +26,7 @@ class build_clang(Command):
         ('clang-github-user='  , None, 'Github Clang username'),
         ('clang-github-repo='  , None, 'Github Clang repository'),
         ('clang-github-branch=', None, 'Github Clang branch'),
+        ('jobs='               , None, 'Number of parallel jobs'),
         ('compiler='           , None, 'Compiler'),
         ('debug'               , None, 'compile in debug mode'),
         ('x86'                 , None, 'compile for x86 arch'),
@@ -51,6 +52,7 @@ class build_clang(Command):
         self.debug = None
         self.x86 = None
         self.x64 = None
+        self.jobs = None
         self.clang_src_dir = 'llvm_clang_src'
         self.clang_build_dir = 'llvm_clang_build'
         self.llvm_github_user = 'llvm-mirror'
@@ -72,6 +74,8 @@ class build_clang(Command):
             ('debug', 'debug'))
         self.clang_src_dir = os.path.join(self.build_base, self.clang_src_dir)
         self.clang_build_dir = os.path.join(self.build_base, self.clang_build_dir)
+        if self.jobs is None:
+            self.jobs = cpu_count()
 
     def get_build_dir_x86(self):
         result = self.clang_build_dir
@@ -136,7 +140,7 @@ class build_clang(Command):
             '-GNinja', os.path.abspath(clang_src_dir)],
             cwd=build_dir, env=os.environ)
 
-        subprocess.check_call([ninja_exe, '-j{}'.format(cpu_count())] + build_clang.__clang_libs, cwd=build_dir)
+        subprocess.check_call([ninja_exe, '-j{}'.format(self.jobs)] + build_clang.__clang_libs, cwd=build_dir)
 
     @staticmethod
     def __get_if_needed(project_info, target_dir, cache_dir):

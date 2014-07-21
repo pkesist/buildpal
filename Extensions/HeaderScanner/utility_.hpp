@@ -8,9 +8,10 @@
 #include <boost/thread/shared_mutex.hpp>
 
 #include <boost/functional/hash_fwd.hpp>
+#include <clang/Basic/FileManager.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
-#include "llvm/Support/MemoryBuffer.h"
+#include <llvm/Support/MemoryBuffer.h>
 
 #include <atomic>
 #include <mutex>
@@ -245,8 +246,7 @@ namespace std
     };
 }
 
-llvm::MemoryBuffer * convertEncodingIfNeeded( llvm::MemoryBuffer * );
-
+llvm::MemoryBuffer * prepareSourceFile( clang::FileManager &, clang::FileEntry const & );
 
 //------------------------------------------------------------------------------
 #endif

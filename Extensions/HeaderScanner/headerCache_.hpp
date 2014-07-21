@@ -299,16 +299,19 @@ public:
     void detach()
     {
         setEntry( 0 );
-
-        if ( !parent_ )
-            return;
-
         CacheTree * parent( 0 );
         std::swap( parent_, parent );
         assert( !parent->children_.empty() );
         parent->children_.erase( macroValue_ );
-        if ( parent->children_.size() == 0 )
-            parent->detach();
+
+        while ( parent->children_.empty() )
+        {
+            CacheTree * gp = parent->parent_;
+            if ( !gp )
+                return;
+            gp->children_.erase( parent->macroValue_ );
+            parent = gp;
+        }
     }
 
     void setEntry( CacheEntry * entry )
@@ -392,6 +395,13 @@ class Cache
 {
 public:
     Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
+    ~Cache()
+    {
+        // Clearing all cache entries will cause cache tree index
+        // to bedestroyed bottom-up, and will avoid (potentially)
+        // very long recursive call chain.
+        cacheEntries_.clear();
+    }
 
     CacheEntryPtr addEntry
     (

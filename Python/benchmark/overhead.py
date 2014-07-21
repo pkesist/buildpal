@@ -4,15 +4,18 @@ import subprocess
 import time
 from multiprocessing import cpu_count
 from collections import defaultdict
+from tempfile import mkstemp
 
-def timeit(command, times):
+SERVER_PORT = 33441
+
+def timeit(command, times, ini_file, profile):
     buildpal_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     start_time = time.time()
     subprocess.check_call(command, cwd=buildpal_dir)
     times['regular'].append(time.time() - start_time)
 
-    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
-    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
+    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none', '--ini={}'.format(ini_file), '--profile={}'.format(profile)])
+    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent', '--port={}'.format(SERVER_PORT)])
     time.sleep(5)
     start_time = time.time()
     subprocess.check_call([sys.executable, '-m', 'buildpal', 'client', '--run'] + command + ['--jobs={}'.format(2*cpu_count())], cwd=buildpal_dir)
@@ -20,8 +23,8 @@ def timeit(command, times):
     server.terminate()
     manager.terminate()
 
-    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none'])
-    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent'])
+    manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager', '--ui=none', '--ini={}'.format(ini_file), '--profile={}'.format(profile)])
+    server = subprocess.Popen([sys.executable, '-m', 'buildpal', 'server', '--silent', '--port={}'.format(SERVER_PORT)])
     time.sleep(5)
     start_time = time.time()
     subprocess.check_call([sys.executable, '-m', 'buildpal', 'client', '--no-cp', '--run'] + command + ['--jobs={}'.format(2*cpu_count())], cwd=buildpal_dir)
@@ -31,12 +34,19 @@ def timeit(command, times):
     return times
 
 
-repetitions = 1 if len(sys.argv) < 2 else int(sys.argv[1])
+
+ini_handle, ini_file = mkstemp(suffix='.ini')
+with os.fdopen(ini_handle, 'wt') as ini:
+    ini.write('[local]\n')
+    ini.write('node[{}]={}:{}:{}\n'.format(index, localhost,
+        33441, cpu_count()))
+
 times = defaultdict(list)
+repetitions = 1 if len(sys.argv) < 2 else int(sys.argv[1])
 for x in range(repetitions):
-    timeit([sys.executable, 'setup.py', 'build_boost', '--complete-build', '--force', '--compiler=msvc'], times)
+    timeit([sys.executable, 'setup.py', 'build_boost', '--complete-build', '--force', '--compiler=msvc'], times, ini_file, 'local')
 
 import statistics
-from pprint import pprint
 stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
+from pprint import pprint
 pprint(stats)

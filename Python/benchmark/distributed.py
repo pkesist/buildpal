@@ -10,6 +10,9 @@ import time
 from buildpal.common.beacon import get_nodes_from_beacons
 from buildpal.common import msg_to_bytes
 
+
+repetitions = 1 if len(sys.argv) < 2 else int(sys.argv[1])
+
 nodes = get_nodes_from_beacons()
 if not nodes:
     raise Exception("No nodes detected.")
@@ -33,7 +36,7 @@ command = [sys.executable, 'setup.py', 'build_boost', '--complete-build', '--for
 times = defaultdict(list)
 buildpal_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-for x in range(5):
+for x in range(repetitions):
     reset_nodes()
     manager = subprocess.Popen([sys.executable, '-m', 'buildpal', 'manager',
         '--ui=none', '--ini={}'.format(ini_file), '--profile=distributed'])
@@ -54,4 +57,10 @@ for x in range(5):
     times['buildpal_no_cp'].append(time.time() - start_time)
     manager.terminate()
 
-print(times)
+import statistics
+from pprint import pprint
+print("Nodes:")
+for node in nodes:
+    print("    {}:{}:{}".format(node['address'], node['port'], node['job_slots']))
+stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
+pprint(stats)

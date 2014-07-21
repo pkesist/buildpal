@@ -77,20 +77,14 @@ ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::
     {
         if ( contentEntry->modified == file->getModificationTime() )
             return *contentEntry;
-        boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
         if ( cache )
             cache->invalidate( *contentEntry );
-        llvm::MemoryBuffer * memoryBuffer( fm.getBufferForFile( file, 0, true ) );
-        llvm::MemoryBuffer * converted = convertEncodingIfNeeded( memoryBuffer );
-        if ( converted )
-        {
-            delete memoryBuffer;
-            memoryBuffer = converted;
-        }
+        llvm::MemoryBuffer * memoryBuffer( prepareSourceFile( fm, *file ) );
+        boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
         contentMap_[ uniqueID ] = ContentEntry( memoryBuffer, file->getModificationTime() );
         return contentMap_[ uniqueID ];
     }
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer( fm.getBufferForFile( file, 0, true ) );
+    llvm::OwningPtr<llvm::MemoryBuffer> buffer( prepareSourceFile( fm, *file ) );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
     // Preform another search with upgrade ownership.
     ContentMap::const_iterator const iter( contentMap_.find( uniqueID ) );

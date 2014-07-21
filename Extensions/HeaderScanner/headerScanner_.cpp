@@ -270,14 +270,8 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     }
 
     assert( !sourceManager().isFileOverridden( mainFileEntry ) );
-    llvm::MemoryBuffer * memoryBuffer( fileManager().getBufferForFile( mainFileEntry, 0, true ) );
-    llvm::MemoryBuffer * converted = convertEncodingIfNeeded( memoryBuffer );
-    if ( converted )
-    {
-        delete memoryBuffer;
-        memoryBuffer = converted;
-    }
-    sourceManager().overrideFileContents( mainFileEntry, memoryBuffer );
+    sourceManager().overrideFileContents( mainFileEntry,
+        prepareSourceFile( fileManager(), *mainFileEntry ) );
     sourceManager().createMainFileID( mainFileEntry );
 
     // Setup new preprocessor instance.

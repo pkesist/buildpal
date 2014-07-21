@@ -1,12 +1,19 @@
 import os
 import sys
+import statistics
 import subprocess
 import time
 from multiprocessing import cpu_count
 from collections import defaultdict
 from tempfile import mkstemp
+from pprint import pprint
 
 SERVER_PORT = 33441
+
+def print_stats(times):
+    pprint(times)
+    stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
+    pprint(stats)
 
 def timeit(command, times, ini_file, profile):
     buildpal_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -31,7 +38,8 @@ def timeit(command, times, ini_file, profile):
     times['buildpal_no_createproc'].append(time.time() - start_time)
     server.terminate()
     manager.terminate()
-    return times
+
+    print_stats(times)
 
 
 
@@ -45,8 +53,3 @@ times = defaultdict(list)
 repetitions = 1 if len(sys.argv) < 2 else int(sys.argv[1])
 for x in range(repetitions):
     timeit([sys.executable, 'setup.py', 'build_boost', '--complete-build', '--force', '--compiler=msvc'], times, ini_file, 'local')
-
-import statistics
-stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
-from pprint import pprint
-pprint(stats)

@@ -6,6 +6,8 @@ from tempfile import mkstemp
 from multiprocessing import cpu_count
 import socket
 import time
+import statistics
+from pprint import pprint
 
 from buildpal.common.beacon import get_nodes_from_beacons
 from buildpal.common import msg_to_bytes
@@ -30,6 +32,14 @@ def reset_nodes():
             sock.connect((node['address'], node['port']))
             for buffer in msg_to_bytes([b'RESET']):
                 sock.send(buffer)
+
+def print_stats(times, nodes):
+    print("Nodes:")
+    for node in nodes:
+        print("    {}:{}:{}".format(node['address'], node['port'], node['job_slots']))
+    pprint(times)
+    stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
+    pprint(stats)
 
 command = [sys.executable, 'setup.py', 'build_boost', '--complete-build', '--force', '--compiler=msvc']
 
@@ -57,10 +67,4 @@ for x in range(repetitions):
     times['buildpal_no_cp'].append(time.time() - start_time)
     manager.terminate()
 
-import statistics
-from pprint import pprint
-print("Nodes:")
-for node in nodes:
-    print("    {}:{}:{}".format(node['address'], node['port'], node['job_slots']))
-stats = dict((key, dict(mean=statistics.mean(data), stdev=statistics.pstdev(data))) for key, data in times.items())
-pprint(stats)
+    print_stats(times, nodes)

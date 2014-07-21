@@ -38,7 +38,7 @@ def timeit(command, times, ini_file, profile):
 ini_handle, ini_file = mkstemp(suffix='.ini')
 with os.fdopen(ini_handle, 'wt') as ini:
     ini.write('[local]\n')
-    ini.write('node[{}]={}:{}:{}\n'.format(0, localhost,
+    ini.write('node[{}]={}:{}:{}\n'.format(0, 'localhost',
         33441, cpu_count()))
 
 times = defaultdict(list)

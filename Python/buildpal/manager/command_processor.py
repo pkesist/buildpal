@@ -229,8 +229,8 @@ class CommandProcessor:
             return
 
         call = []
-        input_to_output = dict(x for x in self.__options.files())
-        for input in self.__options.source_files():
+        input_to_output = dict((x[0], x[2]) for x in self.__options.files())
+        for input, _ in self.__options.source_files():
             output = input_to_output.get(input)
             if output:
                 call.append(output['object_file'])

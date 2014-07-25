@@ -3,12 +3,17 @@
 Benchmarks
 ==========
 
-Environment.
-    * 100Mbit/s Ethernet network.
-    * Client machine: 4 core i3-M39, 2.67GHz, 8GB RAM
-    * Slave #1: 8 core Intel i7-2670QM, 2.20GHz, 6GB RAM
-    * Slave #2: 8 core AMD FX-8120, 3.10GHz, 4GB RAM
-    * Slave #3: 4 core Intel i5-2430M 2.40GHz, 6GB RAM
+Environment
+-----------
+
+* 100Mbit/s Ethernet network.
+* Client machine: 4 core i3-M39, 2.67GHz, 8GB RAM
+* Slave #1: 8 core Intel i7-2670QM, 2.20GHz, 6GB RAM
+* Slave #2: 8 core AMD FX-8120, 3.10GHz, 4GB RAM
+* Slave #3: 4 core Intel i5-2430M 2.40GHz, 6GB RAM
+
+The client machine is by far the weakest one. Build times are about 4-5 times
+longer than on #1.
 
 Benchmarks are done by compiling real code. As Boost and Clang are required for
 BuildPal itself, it was only natural to use these libraries for benchmarking.
@@ -37,3 +42,10 @@ the mean of 10 consecutive builds, along with standard deviation.
 
 * regular - regular project build, without BuildPal
 * local - BuildPal, with a single server running locally
+
+Clang
+-----
+
+.. todo::
+
+    Measure Clang build times.

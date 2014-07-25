@@ -308,8 +308,15 @@ class MSVCCompiler:
         m = re.search(b'C/C\+\+ Optimizing Compiler Version (?P<ver>.*) for (?P<plat>.*)\r\n', stderr)
         if not m:
             raise EnvironmentError("Failed to identify compiler - unexpected output.")
-        version = (m.group('ver'), m.group('plat'))
-        return CompilerInfo('msvc', os.path.basename(executable), version,
+        with open(executable, 'rb') as file:
+            # Compiler id is supposed to be the same regardless of the machine
+            # it comes from, so make sure it is calculated only from 'objective'
+            # data. Normally, version + platform id would be enough to identify
+            # compiler. But not with Microsoft - there are different
+            # (incompatible) compilers which yield the same platform and version
+            # information, so also add a (adler) checksum to compiler id.
+            compiler_id = (m.group('ver'), m.group('plat'), zlib.adler32(file.read()))
+        return CompilerInfo('msvc', os.path.basename(executable), compiler_id,
             macros), self.compiler_files[version[0][:5]]
 
 

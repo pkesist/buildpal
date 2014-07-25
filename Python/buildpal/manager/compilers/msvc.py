@@ -12,6 +12,7 @@ import re
 import sys
 import logging
 import tempfile
+import zlib
 
 class CompileOptions:
     def __init__(self, compiler_wrapper, options):
@@ -317,7 +318,7 @@ class MSVCCompiler:
             # information, so also add a (adler) checksum to compiler id.
             compiler_id = (m.group('ver'), m.group('plat'), zlib.adler32(file.read()))
         return CompilerInfo('msvc', os.path.basename(executable), compiler_id,
-            macros), self.compiler_files[version[0][:5]]
+            macros), self.compiler_files[compiler_id[0][:5]]
 
 
     compiler_files = {

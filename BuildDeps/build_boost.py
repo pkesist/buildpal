@@ -28,7 +28,7 @@ class build_boost(Command):
         ('x64'             , None, 'compile for x64 arch')
     ]
 
-    boolean_options = ['debug', 'force', 'complete_build', 'x86', 'x64']
+    boolean_options = ['debug', 'force', 'complete-build', 'x86', 'x64']
 
     def initialize_options(self):
         self.debug = None
@@ -115,13 +115,13 @@ class build_boost(Command):
             '--stagedir={}'.format('x64' if x64 else '.'),
             'toolset={}'.format(toolset), 'link=static',
             'runtime-link=shared', 'threading=multi']
+        if x64:
+            build_call.append('address-model=64')
         if self.complete_build:
             build_call.append('--build-type=complete')
         else:
             build_call.extend(('--with-{}'.format(lib) for lib in
                 self.boost_libs))
-            if x64:
-                build_call.append('address-model=64')
             build_call.append('debug' if self.debug else 'release')
         if self.force:
             build_call.append('-a')

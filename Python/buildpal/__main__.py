@@ -50,7 +50,7 @@ def main(argv, terminator=None):
         try:
             return client_main(opts)
         except Exception as e:
-            print("ERROR: '{}'".format(e), file=sys.stderr)
+            print("ERROR: {}".format(e), file=sys.stderr)
             return 1
 
 if __name__ == '__main__':

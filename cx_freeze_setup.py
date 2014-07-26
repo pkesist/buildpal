@@ -88,7 +88,7 @@ msi_data = dict(Directory=[
 )
 
 setup(name='BuildPal',
-    version='0.1',
+    version='0.2',
     description='BuildPal Distributed Compiler',
     options=dict(
         build_exe=dict(include_msvcr=True, include_files=include_files),

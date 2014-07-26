@@ -8,7 +8,7 @@ some common build systems:
 
 +--------------------------+-------------+--------+
 |                          |has -j option|supports|
-|  Build system            |has -j option|cp hook |
+|  Build system            |             |cp hook |
 +==========================+=============+========+
 | Boost.Build              | yes         | yes    |
 +--------------------------+-------------+--------+

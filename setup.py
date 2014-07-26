@@ -207,7 +207,8 @@ setup(name = 'buildpal',
         'buildpal.client',       
         'buildpal.common',       
         'buildpal.server',
-        'buildpal.manager'],
+        'buildpal.manager',
+        'buildpal.manager.compilers'],
     entry_points = {
         'console_scripts': ['buildpal = __main__']
     }

@@ -96,3 +96,23 @@ For example, this technique will not work with *MSBuild*.
     With this method you can go wild with the ``-j`` option - use as much as
     your build will allow. As there is no process creation there will be very
     little overhead.
+
+Using BuildPal as a Python package
+==================================
+
+Starting the server::
+
+    python -m buildpal server
+
+Starting the manager::
+
+    python -m buildpal manager
+
+Starting the build (compiler substitution)::
+
+    python -m buildpal client --run <build_command>
+
+Starting the build (CreateProcess hooking)::
+
+    python -m buildpal client --no-cp --run <build_command>
+

@@ -204,6 +204,7 @@ setup(name = 'buildpal',
     package_dir = {'': 'Python'},
     packages = [
         'buildpal',
+        'buildpal.client',       
         'buildpal.common',       
         'buildpal.server',
         'buildpal.manager'],

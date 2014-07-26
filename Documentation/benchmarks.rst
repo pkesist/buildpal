@@ -29,7 +29,7 @@ The numbers in the table are seconds it took to build the project. Each entry is
 the mean of 10 consecutive builds, along with standard deviation.
 
 +--------+-------------+------------+------------------+-------------------+-------------------+
-|        | regular     | local      | client + 1 slave | client + 2 slaves | client + 3 slaves |
+|        | regular [*]_| local [**]_| client + 1 slave | client + 2 slaves | client + 3 slaves |
 +========+=============+============+==================+===================+===================+
 | client |             |            |                                                          |
 +--------+-------------+------------+------------------+-----+-------------+-------------------+
@@ -40,8 +40,8 @@ the mean of 10 consecutive builds, along with standard deviation.
 |slave #3| 419.1±12.9  | 466.6±15.9 |   446.5±5.1      |#1+#2|  153.8±4.1  |                   |
 +--------+-------------+------------+------------------+-----+-------------+-------------------+
 
-* regular - regular project build, without BuildPal
-* local - BuildPal, with a single server running locally
+.. [*] regular project build, without BuildPal
+.. [**] BuildPal build with a single server running locally
 
 Clang
 -----

@@ -154,14 +154,14 @@ class CompileOptions:
             if output:
                 if output[-1] == os.path.sep or output[-1] == os.path.altsep:
                     return [os.path.join(output, os.path.splitext(
-                        os.path.basename(src))[0] + '.obj') for src[0] in sources]
+                        os.path.basename(src))[0] + '.obj') for src, _ in sources]
                 else:
                     if len(sources) > 1:
                         raise RuntimeError("Cannot specify output file " \
                             "with multiple sources.")
                     return [output]
             return [os.path.splitext(os.path.basename(src))[0] + '.obj' for
-                src[0] in sources]
+                src, _ in sources]
 
         def make_target_dict(dest):
             targets = dict(object_file=dest, all=[dest])

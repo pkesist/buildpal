@@ -72,19 +72,14 @@ void CacheEntry::generateContent( std::string & buffer )
 {
     llvm::raw_string_ostream defineStream( buffer );
     std::for_each(
-        undefinedMacros().begin(),
-        undefinedMacros().end  (),
-        [&]( MacroName macroName )
-        {
-            defineStream << "#undef " << macroName << '\n';
-        }
-    );
-    std::for_each(
-        definedMacros().begin(),
-        definedMacros().end  (),
+        macroState().begin(),
+        macroState().end  (),
         [&]( MacroState::value_type const & macro )
         {
-            defineStream << "#define " << macro.first << macro.second << '\n';
+            if ( macro.second == undefinedMacroValue )
+                defineStream << "#undef " << macro.first << '\n';
+            else
+                defineStream << "#define " << macro.first << macro.second << '\n';
         }
     );
 }
@@ -94,8 +89,7 @@ CacheEntry::CacheEntry
     CacheTree & tree,
     std::string const & uniqueVirtualFileName,
     UsedMacros && usedMacros,
-    MacroState && definedMacros,
-    MacroNames && undefinedMacros,
+    MacroState && macroState,
     Headers && headers,
     std::size_t currentTime
 ) :
@@ -103,8 +97,7 @@ CacheEntry::CacheEntry
     refCount_( 0 ),
     fileName_( uniqueVirtualFileName ),
     usedMacros_( std::move( usedMacros ) ),
-    undefinedMacros_( std::move( undefinedMacros ) ),
-    definedMacros_( std::move( definedMacros ) ),
+    macroState_( std::move( macroState ) ),
     headers_( std::move( headers ) ),
     lastTimeHit_( currentTime ),
     detached_( false )
@@ -117,8 +110,7 @@ CacheEntryPtr Cache::addEntry
     llvm::sys::fs::UniqueID const & fileId,
     std::size_t searchPathId,
     UsedMacros && usedMacros,
-    MacroState && definedMacros,
-    MacroNames && undefinedMacros,
+    MacroState && macroState,
     Headers && headers
 )
 {
@@ -136,8 +128,7 @@ CacheEntryPtr Cache::addEntry
             cacheTree,
             uniqueFileName(),
             std::move( usedMacros ),
-            std::move( definedMacros ),
-            std::move( undefinedMacros ),
+            std::move( macroState ),
             std::move( headers ),
             ( hits_ + misses_ ) / 2
         )

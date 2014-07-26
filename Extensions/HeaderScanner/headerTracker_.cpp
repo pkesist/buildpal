@@ -276,8 +276,7 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
         file->getUniqueID(),
         searchPathId,
         std::move( usedMacros ),
-        std::move( definedHere_ ),
-        std::move( undefinedHere_ ),
+        std::move( macroState_ ),
         std::move( includedHeaders_ )
     );
 }

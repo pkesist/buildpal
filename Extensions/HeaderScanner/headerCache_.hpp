@@ -46,20 +46,6 @@ struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 
-typedef std::set<MacroName> MacroNamesBase;
-struct MacroNames : public MacroNamesBase
-{
-public:
-    MacroNames() {}
-
-    MacroNames( MacroNames && mn ) :
-        MacroNamesBase( std::move( mn ) ) {}
-
-private:
-    MacroNames( MacroNames const & );
-    MacroNames & operator=( MacroNames const & );
-};
-
 struct HeaderWithFileEntry
 {
     Header header;
@@ -126,12 +112,6 @@ public:
     MacroState( MacroState && ms ) :
         MacroStateBase( std::move( ms ) ) {}
 
-    MacroValue macroValue( MacroName macroName ) const
-    {
-        MacroState::const_iterator const iter( find( macroName ) );
-        return iter == end() ? undefinedMacroValue : iter->second;
-    }
-
     void defineMacro( MacroName name, MacroValue value )
     {
         std::pair<iterator, bool> const insertResult(
@@ -142,7 +122,7 @@ public:
 
     void undefineMacro( MacroName name )
     {
-        erase( name );
+        defineMacro( name, undefinedMacroValue );
     }
 
     void merge( MacroState const & other )
@@ -194,8 +174,7 @@ public:
         CacheTree & tree,
         std::string const & uniqueVirtualFileName,
         UsedMacros && usedMacros,
-        MacroState && definedMacros,
-        MacroNames && undefinedMacros,
+        MacroState && macroState,
         Headers && headers,
         std::size_t currentTime
     );
@@ -223,9 +202,8 @@ public:
         std::for_each( usedMacros_.begin(), usedMacros_.end(), pred );
     }
 
-    Headers    const & headers        () const { return headers_; }
-    MacroNames const & undefinedMacros() const { return undefinedMacros_; }
-    MacroState const & definedMacros  () const { return definedMacros_; }
+    Headers    const & headers   () const { return headers_; }
+    MacroState const & macroState() const { return macroState_; }
 
     std::size_t lastTimeHit() const { return lastTimeHit_; }
 
@@ -265,8 +243,7 @@ private:
     CacheTree & tree_;
     std::string fileName_;
     UsedMacros usedMacros_;
-    MacroNames undefinedMacros_;
-    MacroState definedMacros_;
+    MacroState macroState_;
     Headers headers_;
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
@@ -408,8 +385,7 @@ public:
         FileId const & id,
         std::size_t searchPathId,
         UsedMacros && usedMacros,
-        MacroState && definedMacros,
-        MacroNames && undefinedMacros,
+        MacroState && macroState,
         Headers && headers
     );
 

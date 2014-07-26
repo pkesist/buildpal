@@ -40,9 +40,8 @@ private:
     clang::FileEntry const * replacement_;
     HeaderCtx * parent_;
     CacheEntryPtr cacheHit_;
-    MacroState definedHere_;
+    MacroState macroState_;
     IndexedUsedMacros usedHere_;
-    MacroNames undefinedHere_;
     Headers includedHeaders_;
 
 public:
@@ -70,11 +69,7 @@ public:
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was neither
         // defined nor undefined here.
-        if
-        (
-            ( definedHere_.find( macroName ) == definedHere_.end() ) &&
-            ( undefinedHere_.find( macroName ) == undefinedHere_.end() )
-        )
+        if ( macroState_.find( macroName ) == macroState_.end() )
             usedHere_.addMacro( macroName, [this]( MacroName name )
             {
                 return getMacroValue( name );
@@ -84,24 +79,20 @@ public:
     void macroDefined( MacroName macroName, MacroValue macroValue )
     {
         assert( !fromCache() );
-        definedHere_.defineMacro( macroName, macroValue );
+        macroState_.defineMacro( macroName, macroValue );
     }
 
     void macroUndefined( MacroName macroName )
     {
         assert( !fromCache() );
-        if ( definedHere_.find( macroName ) != definedHere_.end() )
-            definedHere_.undefineMacro( macroName );
-        undefinedHere_.insert( macroName );
+        macroState_.undefineMacro( macroName );
     }
 
     MacroValue getMacroValue( MacroName name ) const
     {
-        MacroState::const_iterator const stateIter( definedHere_.find( name ) );
-        if ( stateIter != definedHere_.end() )
+        MacroState::const_iterator const stateIter( macroState_.find( name ) );
+        if ( stateIter != macroState_.end() )
             return stateIter->second;
-        if ( undefinedHere_.find( name ) != undefinedHere_.end() )
-            return undefinedMacroValue;
         return parent_
             ? parent_->getMacroValue( name )
             : undefinedMacroValue
@@ -124,14 +115,9 @@ public:
             parent_->macroUsed( usedMacro.first, usedMacro.second );
         });
 
-        for ( MacroName const & macroName : undefinedMacros() )
-            parent_->macroUndefined( macroName );
+        
+        parent_->macroState_.merge( macroState() );
 
-        parent_->definedHere_.merge( definedMacros() );
-
-        // Sometimes we do not want to propagate headers upwards. Specifically,
-        // if we are in a PCH, headers it includes are not needed as
-        // their contents is a part of the compiled PCH.
         std::copy
         (
             includedHeaders().begin(),
@@ -154,8 +140,7 @@ public:
 
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
-    MacroNames const & undefinedMacros() const { return cacheHit_ ? cacheHit_->undefinedMacros() : undefinedHere_; }
-    MacroState const & definedMacros() const { return cacheHit_ ? cacheHit_->definedMacros() : definedHere_; }
+    MacroState const & macroState() const { return cacheHit_ ? cacheHit_->macroState() : macroState_; }
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }
     Headers const & includedHeaders() const { return cacheHit_ ? cacheHit_->headers() : includedHeaders_; }
 
@@ -168,11 +153,7 @@ private:
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was neither
         // defined nor undefined here.
-        if
-        (
-            ( definedHere_.find( macroName ) == definedHere_.end() ) &&
-            ( undefinedHere_.find( macroName ) == undefinedHere_.end() )
-        )
+        if ( macroState_.find( macroName ) == macroState_.end() )
             usedHere_.addMacro( macroName, macroValue );
     }
 };

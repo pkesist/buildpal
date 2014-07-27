@@ -15,9 +15,15 @@ PyObject * mapFiles_mapFile( PyObject* self, PyObject* args )
     if ( !PyArg_ParseTuple( args, "OO:mapFiles_mapFile", &virtualFile, &file ) )
         return NULL;
     if ( !PyUnicode_Check( virtualFile ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid first parmeter - should be str." );
         return NULL;
+    }
     if ( !PyUnicode_Check( file ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid second parmeter - should be str." );
         return NULL;
+    }
     if ( mapFileGlobalW( PyUnicode_AsUnicode( virtualFile ), PyUnicode_AsUnicode( file ) ) )
         Py_RETURN_TRUE;
     Py_RETURN_FALSE;
@@ -30,7 +36,10 @@ PyObject * mapFiles_unmapFile( PyObject* self, PyObject* args )
     if ( !PyArg_ParseTuple( args, "O:mapFiles_unmapFile", &virtualFile ) )
         return NULL;
     if ( !PyUnicode_Check( virtualFile ) )
+    {
+        PyErr_SetString( PyExc_Exception, "Invalid parmeter - should be str." );
         return NULL;
+    }
     if ( unmapFileGlobalW( PyUnicode_AsUnicode( virtualFile ) ) )
         Py_RETURN_TRUE;
     Py_RETURN_FALSE;
@@ -50,10 +59,10 @@ PyObject * mapFiles_disable( PyObject * self )
 
 
 static PyMethodDef mapFilesMethods[] = {
-    { "mapFile"      , mapFiles_mapFile             , METH_VARARGS, "Map a file to another one." },
-    { "unmapFile"    , mapFiles_unmapFile           , METH_VARARGS, "Unmap a file." },
-    { "enable"       , (PyCFunction)mapFiles_enable , METH_NOARGS , "Enable hooks." },
-    { "disable"      , (PyCFunction)mapFiles_disable, METH_NOARGS , "Disable hooks." },
+    { "map_file"  , mapFiles_mapFile             , METH_VARARGS, "Map a file to another one." },
+    { "unmap_file", mapFiles_unmapFile           , METH_VARARGS, "Unmap a file." },
+    { "enable"    , (PyCFunction)mapFiles_enable , METH_NOARGS , "Enable hooks." },
+    { "disable"   , (PyCFunction)mapFiles_disable, METH_NOARGS , "Disable hooks." },
     { NULL, NULL, 0, NULL }
 };
 

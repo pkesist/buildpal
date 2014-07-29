@@ -49,7 +49,7 @@ class build_dll(build_clib):
                        "a list of source filenames" % lib_name)
             sources = list(sources)
             target = os.path.join(self.build_clib, lib_name + ".dll")
-            if not any([newer(source, target) for source in sources]):
+            if not self.force and not any([newer(source, target) for source in sources]):
                 continue
 
             macros = build_info.get('macros')
@@ -61,11 +61,12 @@ class build_dll(build_clib):
                 debug=self.debug,
                 extra_postargs=self.compile_args)
 
-            link_args = self.link_args
+            link_args = self.link_args[:]
             link_args.append('/DEF:{}'.format(build_info['def_file']))
+            link_args.append('/pdb:{}.pdb'.format(lib_name))
             compiler.link_shared_lib(objects, lib_name,
                 output_dir=self.build_clib,
                 debug=self.debug,
                 libraries=self.link_libs,
-                extra_postargs=self.link_args)
+                extra_postargs=link_args)
 

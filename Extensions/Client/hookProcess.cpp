@@ -75,16 +75,6 @@ public:
     static char const moduleName[];
     static APIHookItem const items[]; 
     static unsigned int const itemsCount;
-
-    struct Data
-    {
-        Data() : portName( "default" ) {}
-
-        CompilerExecutables compilers;
-        std::string portName;
-        DistributedCompilationInfo distributedCompilationInfo;
-        Mutex mutex;
-    };
 };
 
 char const HookProcessAPIHookDesc::moduleName[] = "kernel32.dll";
@@ -100,7 +90,23 @@ APIHookItem const HookProcessAPIHookDesc::items[] =
 
 unsigned int const HookProcessAPIHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
 
-typedef APIHooks<HookProcessAPIHookDesc> HookProcessAPIHooks;
+struct HookProcessAPIHookData
+{
+    HookProcessAPIHookData() : portName( "default" ) {}
+
+    CompilerExecutables compilers;
+    std::string portName;
+    DistributedCompilationInfo distributedCompilationInfo;
+    Mutex mutex;
+};
+
+struct HookProcessAPIHooks : public APIHooks<HookProcessAPIHooks, HookProcessAPIHookData>
+{
+    HookProcessAPIHooks()
+    {
+        addAPIHook<HookProcessAPIHookDesc>();
+    }
+};
 
 template <typename CharType>
 class StringSaver
@@ -427,7 +433,7 @@ bool hookProcess( HANDLE processHandle )
     assert( result );
 
     
-    HookProcessAPIHookDesc::Data const & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHooks::Data const & hookData( HookProcessAPIHooks::getData() );
     CompilerExecutables::FileMap const & compilerFiles( hookData.compilers.files );
 
     for
@@ -464,7 +470,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     bool readingPortName = false;
     bool readingReplacement = false;
     bool done = false;
-    HookProcessAPIHookDesc::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
     while ( !done )
     {
         char buffer[ 1024 ];

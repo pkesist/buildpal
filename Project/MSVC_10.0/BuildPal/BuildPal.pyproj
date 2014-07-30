@@ -117,6 +117,7 @@
     <Content Include="Documentation\intro.rst" />
     <Content Include="Documentation\quickstart.rst" />
     <Content Include="Documentation\rants.rst" />
+    <Content Include="Documentation\todo.rst" />
     <Content Include="Extensions\ArgParser\argList_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.cpp" />
     <Content Include="Extensions\ArgParser\clangOpts_.hpp" />

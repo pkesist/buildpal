@@ -10,7 +10,7 @@ import subprocess
 import threading
 from conftest import Terminator
 
-from subprocess import list2cmdline, Popen, check_call
+from subprocess import list2cmdline, Popen
 
 sys.path.append('..')
 
@@ -161,7 +161,7 @@ int main()
             env=env, cwd=str(tmpdir)) as proc:
         assert proc.wait(3) == 0
     assert os.path.exists(second_exe)
-    with subprocess.Popen([first_exe], stdout=subprocess.PIPE) as proc:
+    with subprocess.Popen([first_exe], stdout=subprocess.PIPE, cwd=str(tmpdir)) as proc:
         stdout, _ = proc.communicate()
         assert stdout == b"I'm a little teapot"
     assert os.stat(first_exe).st_size == os.stat(second_exe).st_size

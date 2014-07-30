@@ -310,6 +310,9 @@ class CompileSession(Timer):
                 self.pch_file))
 
         include_dirs, src_loc = self.include_dirs_future.result()
+        logging.debug("Include dirs:")
+        for include in include_dirs:
+            logging.debug(include)
         command.extend([compiler_options.set_include_option(incpath)
             for incpath in include_dirs])
         command.append(self.task.src_decorator + src_loc)
@@ -444,7 +447,7 @@ class CompileSession(Timer):
     @async
     def prepare_include_dirs(self, new_files):
         result = self.runner.header_repository().prepare_dir(
-            self.task.fqdn, id(self), new_files)
+            self.task.fqdn, id(self), new_files, self.task.includes)
         self.note_time('include dir ready', 'preparing include dir')
         return result
 

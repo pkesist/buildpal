@@ -215,30 +215,34 @@ struct MapFilesAPIHook : APIHooks<MapFilesAPIHook, MapFilesAPIHookData>
 
 namespace
 {
-    std::size_t readDir( HANDLE readHandle, std::wstring & dirName )
+    bool readDir( HANDLE readHandle, std::wstring & dirName, std::size_t & entriesCount )
     {
         BOOL success;
         DWORD read;
         unsigned char entriesBuffer[4];
         success = ReadFile( readHandle, entriesBuffer, 4, &read, 0 );
-        assert( success );
+        if ( !success )
+            return false;
         assert( read == 4 );
         std::size_t const entries = ( entriesBuffer[3] << 24 ) | ( entriesBuffer[2] << 16 ) | ( entriesBuffer[1] << 8 ) | entriesBuffer[0];
         if ( entries )
         {
             unsigned char sizeBuff[2];
             success = ReadFile( readHandle, sizeBuff, 2, &read, 0 );
-            assert( success );
+            if ( !success )
+                return false;
             assert( read == 2 );
             std::size_t const size = ( sizeBuff[1] << 8 ) + sizeBuff[0];
             std::wstring str;
             str.resize( size );
             success = ReadFile( readHandle, &str[0], size * sizeof(wchar_t), &read, 0 );
-            assert( success );
+            if ( !success )
+                return false;
             assert( size * sizeof(wchar_t) );
             dirName.swap( str );
         }
-        return entries;
+        entriesCount = entries;
+        return true;
     }
 
     bool readMapping( HANDLE readHandle, std::wstring & f, std::wstring & s )
@@ -247,26 +251,29 @@ namespace
         DWORD read;
         unsigned char sizes[4];
         success = ReadFile( readHandle, sizes, 4, &read, 0 );
-        assert( success );
+        if ( !success )
+            return false;
         assert( read == 4 );
         std::size_t const firstSize = ( sizes[1] << 8 ) + sizes[0];
         std::size_t const secondSize = ( sizes[3] << 8 ) + sizes[2];
         std::wstring first;
         first.resize( firstSize );
         success = ReadFile( readHandle, &first[0], firstSize * sizeof(wchar_t), &read, 0 );
-        assert( success );
+        if ( !success )
+            return false;
         assert( read == firstSize * sizeof(std::wstring::value_type) );
         std::wstring second;
         second.resize( secondSize );
         success = ReadFile( readHandle, &second[0], secondSize * sizeof(wchar_t), &read, 0 );
-        assert( success );
+        if ( !success )
+            return false;
         assert( read == secondSize * sizeof(wchar_t) );
         f.swap( first );
         s.swap( second );
         return true;
     }
 
-    void writeDir( HANDLE writeHandle, std::wstring const & dirName, std::size_t entries )
+    bool writeDir( HANDLE writeHandle, std::wstring const & dirName, std::size_t entries )
     {
         DWORD written;
         BOOL result;
@@ -277,7 +284,8 @@ namespace
         entriesBuffer[2] = ( entries >> 16 ) & 0xFF;
         entriesBuffer[3] = ( entries >> 24 ) & 0xFF;
         result = WriteFile( writeHandle, entriesBuffer, 4, &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == 4 );
 
         assert( dirName.size() < 0xFFFF );
@@ -285,15 +293,18 @@ namespace
         sizeBuffer[0] = dirName.size() & 0xFF;
         sizeBuffer[1] = dirName.size() >> 8;
         result = WriteFile( writeHandle, sizeBuffer, 2, &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == 2 );
 
         result = WriteFile( writeHandle, dirName.c_str(), dirName.size() * sizeof(wchar_t), &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == dirName.size() * sizeof(wchar_t) );
+        return true;
     }
 
-    void writeMapping( HANDLE writeHandle, std::wstring const & first, std::wstring const & second )
+    bool writeMapping( HANDLE writeHandle, std::wstring const & first, std::wstring const & second )
     {
         assert( first.size() < 0xFFFF );
         assert( second.size() < 0xFFFF );
@@ -305,24 +316,28 @@ namespace
         DWORD written;
         BOOL result;
         result = WriteFile( writeHandle, sizes, 4, &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == 4 );
         result = WriteFile( writeHandle, first.data(), first.size() * sizeof(wchar_t), &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == first.size() * sizeof(std::wstring::value_type) );
         result = WriteFile( writeHandle, second.data(), second.size() * sizeof(wchar_t), &written, 0 );
-        assert( result );
+        if ( !result )
+            return false;
         assert( written == second.size() * sizeof(wchar_t) );
+        return true;
     };
 
-    void writeEnd( HANDLE writeHandle )
+    bool writeEnd( HANDLE writeHandle )
     {
         char end[4] = { 0 };
         DWORD written;
         BOOL result;
         result = WriteFile( writeHandle, end, 4, &written, 0 );
-        assert( result );
-        assert( written == 4 );
+        assert( !result || ( written == 4 ) );
+        return result != 0;
     }
 
     struct InitArgs
@@ -332,7 +347,7 @@ namespace
         HANDLE writeHandle;
     };
 
-    void writeMappings( void * vpInitArgs )
+    DWORD writeMappings( void * vpInitArgs )
     {
         InitArgs const * initArgs( static_cast<InitArgs *>( vpInitArgs ) );
         
@@ -341,12 +356,15 @@ namespace
             FileMapping const & fileMap = (*initArgs->mappings[ mappingIndex ]);
             for ( FileMapping::DirMap::value_type const & dirEntry : fileMap.getDirs() )
             {
-                writeDir( initArgs->writeHandle, dirEntry.first, dirEntry.second.size() );
+                if ( !writeDir( initArgs->writeHandle, dirEntry.first, dirEntry.second.size() ) )
+                    return (DWORD)-1;
                 for ( FileMapping::FileList::value_type const & fileEntry : dirEntry.second )
-                    writeMapping( initArgs->writeHandle, fileEntry.first, fileEntry.second );
+                    if ( !writeMapping( initArgs->writeHandle, fileEntry.first, fileEntry.second ) )
+                        return (DWORD)-1;
             }
         }
-        writeEnd( initArgs->writeHandle );
+        return writeEnd( initArgs->writeHandle ) ? 0 : (DWORD)-1;
+
     }
 
     bool hookProcess( HANDLE processHandle, FileMapping const * const * fileMapping, DWORD fileMappingCount )
@@ -613,18 +631,21 @@ DWORD WINAPI unhookWinAPIs()
 DWORD WINAPI Initialize( HANDLE readHandle )
 {
     std::wstring dirName;
-    for
-    (
-        std::size_t numEntries = readDir( readHandle, dirName );
-        numEntries;
-        numEntries = readDir( readHandle, dirName )
-    )
+    std::size_t numEntries;
+    for ( ; ; )
     {
+        if ( !readDir( readHandle, dirName, numEntries ) )
+            return (DWORD)-1;
+
+        if ( numEntries == 0 )
+            break;
+
         for ( std::size_t entry( 0 ); entry < numEntries; ++entry )
         {
             std::wstring fileName;
             std::wstring realFile;
-            readMapping( readHandle, fileName, realFile );
+            if ( !readMapping( readHandle, fileName, realFile ) )
+                return (DWORD)-2;
             MapFilesAPIHook::getData().globalMapping.addFile( dirName, fileName, realFile );
         }
     }

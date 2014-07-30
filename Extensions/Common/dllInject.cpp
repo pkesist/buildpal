@@ -187,16 +187,31 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
         HANDLE const remoteThreadHandle = CreateRemoteThread( processHandle,
             NULL, 0, (LPTHREAD_START_ROUTINE)funcData.get(), params.get(), 0,
             NULL );
+        
+        DWORD localInitSuccess = 1;
         if ( localInitFunc )
         {
-            localInitFunc( localInitArgs );
+            localInitSuccess = localInitFunc( localInitArgs );
         };
 
-        DWORD remoteThreadExitCode;
-        ::WaitForSingleObject( remoteThreadHandle, INFINITE );
-        ::GetExitCodeThread( remoteThreadHandle, &remoteThreadExitCode );
-        ::CloseHandle( remoteThreadHandle );
-        return remoteThreadExitCode == 0;
+        if ( localInitSuccess )
+        {
+            DWORD remoteThreadExitCode;
+            ::WaitForSingleObject( remoteThreadHandle, INFINITE );
+            ::GetExitCodeThread( remoteThreadHandle, &remoteThreadExitCode );
+            ::CloseHandle( remoteThreadHandle );
+            return remoteThreadExitCode == 0;
+        }
+        else
+        {
+            DWORD result = ::WaitForSingleObject( remoteThreadHandle, 500 );
+            if ( result == WAIT_TIMEOUT )
+            {
+                TerminateThread( remoteThreadHandle, (DWORD)-1 );
+            }
+            CloseHandle( remoteThreadHandle );
+            return false;
+        }
     }
     catch ( std::bad_alloc const & ) { return false; }
     catch ( std::exception const & ) { return false; }

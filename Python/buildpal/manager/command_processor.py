@@ -65,7 +65,7 @@ class CommandProcessor:
         self.compiler = compiler
         self.executable = executable
         self.compiler_info = None
-        self.__sysincludes = sysincludes.split(os.path.pathsep)
+        self.__sysincludes = [x for x in sysincludes.split(os.path.pathsep) if x]
         self.__cwd = cwd
         self.__command = command
         self.__options = compiler.parse_options(command)
@@ -165,6 +165,8 @@ class CommandProcessor:
                     self.__options.create_server_call(),
                     pch_file=pch_file,
                     pdb_file=targets.get('pdb_file'),
+                    includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
+                        self.__options.includes()] + self.__sysincludes,
                     src_decorator=decorator
                 ),
                 PreprocessTask(

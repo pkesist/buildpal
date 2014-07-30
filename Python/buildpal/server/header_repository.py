@@ -49,16 +49,14 @@ class HeaderRepository:
         """
         needed_files = {}
         out_list = set()
-        dirs = { False : list(), True : list() }
         for remote_dir, is_system, data in in_list:
-            dirs[is_system].append(remote_dir)
             for name, checksum in data:
                 key = (remote_dir, name)
                 if self.checksums[machine_id].get(key) != checksum:
                     needed_files[key] = checksum
                     out_list.add(key)
         with self.session_lock:
-            self.session_data[session_id] = needed_files, dirs
+            self.session_data[session_id] = needed_files
         return out_list
 
     def tempdir(self, session_id):
@@ -69,21 +67,15 @@ class HeaderRepository:
         self.tempdirs[session_id] = sandbox_dir
         return sandbox_dir
 
-    def prepare_dir(self, machine_id, session_id, new_files):
+    def prepare_dir(self, machine_id, session_id, new_files, includes):
         """
         We received files which we reported missing.
         """
         with self.session_lock:
-            needed_files, include_dirs = self.session_data[session_id]
-        del self.session_data[session_id]
+            needed_files = self.session_data.pop(session_id)
 
         checksums = self.checksums[machine_id]
         sandbox_dir = self.tempdir(session_id)
-
-        include_paths = [sandbox_dir]
-        # First add user paths, then system paths
-        include_paths.extend(include_dirs[False])
-        include_paths.extend(include_dirs[True])
 
         temp_files = []
         # Update headers.
@@ -97,7 +89,10 @@ class HeaderRepository:
                 # If not a part of needed_files, extract it directly to
                 # sandbox_dir and do not store it.
         src_file = self.process_temp_files(session_id, temp_files)
-        return include_paths, src_file
+        return self.map_includes(includes), src_file
+
+    def map_includes(self, includes):
+        return includes
 
     def create_shared(self, machine_id, session_id, remote_dir, name, checksum, content):
         create_shared = False
@@ -243,6 +238,9 @@ class MapIncludeDirs(HeaderRepository):
         shared_dir = self.map_dir(machine_id, remote_dir)
         return MapIncludeDirs.create_file_in_dir(shared_dir, name, os.path.join(
             remote_dir, name), content)
+
+    def map_includes(self, includes):
+        return list(map_dir(inc) for inc in includes)
 
     def process_temp_files(self, session_id, temp_files):
         relative_includes = {}

@@ -8,7 +8,7 @@
 #define NOMINMAX
 #include <Windows.h>
 
-typedef void (*InitFunc)( void * );
+typedef DWORD (*InitFunc)( void * );
 
 bool injectLibrary(
     // process handle where to inject library
@@ -29,7 +29,7 @@ bool injectLibrary(
     //     via VirtualAllocEx().
     void * initArgs = 0,
     // local function to call after the remote thread has been spawned, but
-    // before it is joined.
+    // before it is joined. Zero return signals success.
     InitFunc localInitFunc = 0,
     // arguments for local function
     void * localInitArgs = 0

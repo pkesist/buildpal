@@ -349,7 +349,7 @@ private:
         std::string const commandLine( converter.to_bytes( cpParams_->lpCommandLine ) );
         std::string const currentPath( converter.to_bytes( cpParams_->lpCurrentDirectory ) );
 
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
         int result = ::distributedCompile(
             compilerToolset_,
             compilerExecutable_,
@@ -360,7 +360,8 @@ private:
             fallbackFunction,
             this,
             cpParams_->startupInfo.hStdOutput,
-            cpParams_->startupInfo.hStdError
+            cpParams_->startupInfo.hStdError,
+            HookProcessAPIHooks::original( (PROC)createProcessA )
         );
         {
             std::unique_lock<Mutex> lock( hookData.mutex );
@@ -433,7 +434,7 @@ bool hookProcess( HANDLE processHandle )
     assert( result );
 
     
-    HookProcessAPIHooks::Data const & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookData const & hookData( HookProcessAPIHooks::getData() );
     CompilerExecutables::FileMap const & compilerFiles( hookData.compilers.files );
 
     for
@@ -470,7 +471,7 @@ DWORD WINAPI Initialize( HANDLE pipeHandle )
     bool readingPortName = false;
     bool readingReplacement = false;
     bool done = false;
-    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
     while ( !done )
     {
         char buffer[ 1024 ];
@@ -558,7 +559,7 @@ CompilerDescription const * isCompiler( wchar_t const * appName, wchar_t const *
         return false;
 
     CompilerDescription * compilerDesc = NULL;
-    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
     CompilerExecutables::FileMap::const_iterator const end = hookData.compilers.files.end();
     for
     (
@@ -604,7 +605,7 @@ bool shortCircuit
     );
 
     {
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<Mutex> lock( hookData.mutex );
         hookData.distributedCompilationInfo.insert( std::make_pair( eventHandle, pDcp ) );
     }
@@ -615,13 +616,13 @@ bool shortCircuit
 
 void registerCompiler( char const * compilerPath, char const * replacement )
 {
-    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
     hookData.compilers.registerFile( compilerPath, replacement );
 }
 
 void setPortName( char const * portName )
 {
-    HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+    HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
     hookData.portName = portName;
 }
 
@@ -768,7 +769,7 @@ BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD
 
     if ( HookProcessAPIHooks::isActive() )
     {
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( hProcess );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
@@ -788,7 +789,7 @@ BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
 
     if ( HookProcessAPIHooks::isActive() )
     {
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::const_iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
@@ -803,7 +804,7 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
 
     if ( HookProcessAPIHooks::isActive() )
     {
-        HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
+        HookProcessAPIHookData & hookData( HookProcessAPIHooks::getData() );
         std::unique_lock<Mutex> lock( hookData.mutex );
         DistributedCompilationInfo::iterator const dcpIter = hookData.distributedCompilationInfo.find( handle );
         if ( dcpIter != hookData.distributedCompilationInfo.end() )

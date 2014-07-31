@@ -25,7 +25,7 @@ struct FileMapping
     void addFile( std::wstring const & virtualAbsPath, std::wstring const & realFile )
     {
         std::pair<std::wstring, std::wstring> dirAndFile( decomposePath( virtualAbsPath ) );
-        addFile( dirAndFile.first, dirAndFile.second, realFile );
+        addFile( dirAndFile.first, dirAndFile.second, L"\\??\\" + realFile );
     }
 
     void addFile( std::wstring const & virtualDir, std::wstring const & virtualFile, std::wstring const & realFile )
@@ -39,16 +39,23 @@ struct FileMapping
         dirMap_[ dirAndFile.first ].erase( dirAndFile.second );
     }
 
-    std::wstring const * realFile( std::wstring const & virtualFile ) const
+    bool realFile( wchar_t const * virtualFile, std::size_t len, PUNICODE_STRING str )
+    {
+        return realFile( std::wstring( virtualFile, len ), str );
+    }
+
+    bool realFile( std::wstring const & virtualFile, PUNICODE_STRING str )
     {
         std::pair<std::wstring, std::wstring> dirAndFile( decomposePath( virtualFile ) );
-        DirMap::const_iterator iter( dirMap_.find( dirAndFile.first ) );
+        DirMap::iterator iter( dirMap_.find( dirAndFile.first ) );
         if ( iter == dirMap_.end() )
-            return 0;
-        FileList::const_iterator fileIter( iter->second.find( dirAndFile.second ) );
+            return false;
+        FileList::iterator fileIter( iter->second.find( dirAndFile.second ) );
         if ( fileIter == iter->second.end() )
-            return 0;
-        return &fileIter->second;
+            return false;
+        str->Buffer = &fileIter->second[0];
+        str->Length = str->MaximumLength = fileIter->second.size() * sizeof(wchar_t);
+        return true;
     }
 
     DirMap const & getDirs() const { return dirMap_; }
@@ -58,12 +65,15 @@ protected:
     {
         std::wstring::iterator const end = path.end();
         for ( std::wstring::iterator iter = path.begin(); iter != end; ++iter )
+        {
             if ( *iter == L'/' )
                 *iter = L'\\';
+            else
+                *iter = (wchar_t)CharLowerW( (wchar_t *)*iter );
+        }
         wchar_t buffer[MAX_PATH];
         BOOL result = PathCanonicalizeW( buffer, path.c_str() );
-        assert( result );
-        return CharLowerW( buffer );
+        return buffer;
     }
 
     static std::pair<std::wstring, std::wstring> decomposePath( std::wstring const & path )
@@ -82,6 +92,11 @@ private:
 class GlobalFileMapping : public FileMapping
 {
 public:
+    bool getDir( wchar_t const * virtualFile, std::size_t len, HANDLE & h )
+    {
+        return getDir( std::wstring( virtualFile, len ), h );
+    }
+
     bool getDir( std::wstring const & path, HANDLE & h ) const
     {
         std::wstring normalizedPath( normalizePath( path ) );
@@ -109,10 +124,6 @@ typedef std::map<DWORD, FileMapping> FileMappings;
 
 decltype(CreateProcessA) createProcessA;
 decltype(CreateProcessW) createProcessW;
-decltype(GetFileAttributesA) getFileAttributesA;
-decltype(GetFileAttributesW) getFileAttributesW;
-decltype(GetFileAttributesExA) getFileAttributesExA;
-decltype(GetFileAttributesExW) getFileAttributesExW;
 decltype(NtCreateFile) ntCreateFile;
 decltype(NtClose) ntClose;
 
@@ -130,6 +141,22 @@ NTSTATUS NTAPI ntQueryDirectoryFile(
   _In_      BOOLEAN restartScan
 );
 
+typedef struct _FILE_NETWORK_OPEN_INFORMATION {
+  LARGE_INTEGER CreationTime;
+  LARGE_INTEGER LastAccessTime;
+  LARGE_INTEGER LastWriteTime;
+  LARGE_INTEGER ChangeTime;
+  LARGE_INTEGER AllocationSize;
+  LARGE_INTEGER EndOfFile;
+  ULONG         FileAttributes;
+} FILE_NETWORK_OPEN_INFORMATION, *PFILE_NETWORK_OPEN_INFORMATION;
+
+NTSTATUS NTAPI ntQueryFullAttributesFile(
+  _In_   POBJECT_ATTRIBUTES ObjectAttributes,
+  _Out_  PFILE_NETWORK_OPEN_INFORMATION FileInformation
+);
+
+
 struct Kernel32ApiHookDesc
 {
     static char const moduleName[];
@@ -142,11 +169,7 @@ char const Kernel32ApiHookDesc::moduleName[] = "kernel32.dll";
 APIHookItem const Kernel32ApiHookDesc::items[] = 
 {
     { "CreateProcessA", (PROC)createProcessA },
-    { "CreateProcessW", (PROC)createProcessW },
-    { "GetFileAttributesA", (PROC)getFileAttributesA },
-    { "GetFileAttributesW", (PROC)getFileAttributesW },
-    { "GetFileAttributesExA", (PROC)getFileAttributesExA },
-    { "GetFileAttributesExW", (PROC)getFileAttributesExW }
+    { "CreateProcessW", (PROC)createProcessW }
 };
 
 unsigned int const Kernel32ApiHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -164,7 +187,8 @@ APIHookItem const NtDllHookDesc::items[] =
 {
     { "NtClose", (PROC)ntClose },
     { "NtCreateFile", (PROC)ntCreateFile },
-    { "NtQueryDirectoryFile", (PROC)ntQueryDirectoryFile }
+    { "NtQueryDirectoryFile", (PROC)ntQueryDirectoryFile },
+    { "NtQueryFullAttributesFile", (PROC)ntQueryFullAttributesFile }
 };
 
 unsigned int const NtDllHookDesc::itemsCount = sizeof(items) / sizeof(items[0]);
@@ -182,13 +206,10 @@ struct MapFilesAPIHookData
 
 decltype(&createProcessA) origCreateProcessA;
 decltype(&createProcessW) origCreateProcessW;
-decltype(&getFileAttributesA) origGetFileAttributesA;
-decltype(&getFileAttributesW) origGetFileAttributesW;
-decltype(&getFileAttributesExA) origGetFileAttributesExA;
-decltype(&getFileAttributesExW) origGetFileAttributesExW;
 decltype(&ntClose) origNtClose;
 decltype(&ntCreateFile) origNtCreateFile;
 decltype(&ntQueryDirectoryFile) origNtQueryDirectoryFile;
+decltype(&ntQueryFullAttributesFile) origNtQueryFullAttributesFile;
 
 struct MapFilesAPIHook : APIHooks<MapFilesAPIHook, MapFilesAPIHookData>
 {
@@ -204,15 +225,12 @@ struct MapFilesAPIHook : APIHooks<MapFilesAPIHook, MapFilesAPIHookData>
         addAPIHook<Kernel32ApiHookDesc>();
         addAPIHook<NtDllHookDesc>();
 
-        origCreateProcessA       = getOriginal( &createProcessA       );
-        origCreateProcessW       = getOriginal( &createProcessW       );
-        origGetFileAttributesA   = getOriginal( &getFileAttributesA   );
-        origGetFileAttributesW   = getOriginal( &getFileAttributesW   );
-        origGetFileAttributesExA = getOriginal( &getFileAttributesExA );
-        origGetFileAttributesExW = getOriginal( &getFileAttributesExW );
-        origNtClose              = getOriginal( &ntClose              );
-        origNtCreateFile         = getOriginal( &ntCreateFile         );
-        origNtQueryDirectoryFile = getOriginal( &ntQueryDirectoryFile );
+        origCreateProcessA            = getOriginal( &createProcessA            );
+        origCreateProcessW            = getOriginal( &createProcessW            );
+        origNtClose                   = getOriginal( &ntClose                   );
+        origNtCreateFile              = getOriginal( &ntCreateFile              );
+        origNtQueryDirectoryFile      = getOriginal( &ntQueryDirectoryFile      );
+        origNtQueryFullAttributesFile = getOriginal( &ntQueryFullAttributesFile );
     }
 };
 
@@ -423,35 +441,25 @@ NTSTATUS NTAPI ntCreateFile(
             ( str->Buffer[3] == '\\' )
         )
         {
-            std::wstring const searchFor( str->Buffer + 4, ( str->Length / sizeof(wchar_t) ) - 4 );
+            wchar_t * fileName = str->Buffer + 4;
+            std::size_t fileNameLength = ( str->Length / sizeof(wchar_t) ) - 4;
             MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
             
-            if ( data.globalMapping.getDir( searchFor, *fileHandle ) )
+            if ( data.globalMapping.getDir( fileName, fileNameLength, *fileHandle ) )
             {
                 ioStatusBlock->Information = FILE_EXISTS;
                 return 0;
             }
 
-            std::wstring const * realFile( data.globalMapping.realFile( searchFor ) );
-            if ( realFile )
+            UNICODE_STRING tmpStr;
+            if ( data.globalMapping.realFile( fileName, fileNameLength, &tmpStr ) )
             {
-                std::size_t const size( realFile->size() + 4 + 1 );
-                wchar_t * buffer = (wchar_t *)alloca( size * sizeof(wchar_t) );
-                buffer[0] = L'\\';
-                buffer[1] = L'?';
-                buffer[2] = L'?';
-                buffer[3] = L'\\';
-                std::memcpy( buffer + 4, realFile->c_str(), ( size - 4 ) * sizeof(wchar_t) );
-                UNICODE_STRING uc;
-                uc.Buffer = buffer;
-                uc.MaximumLength = size * sizeof(wchar_t);
-                uc.Length = ( size - 1 ) * sizeof(wchar_t);
-                PUNICODE_STRING old = objectAttributes->ObjectName;
-                objectAttributes->ObjectName = &uc;
+                PUNICODE_STRING tmp = &tmpStr;
+                std::swap( tmp, objectAttributes->ObjectName );
                 NTSTATUS result = origNtCreateFile( fileHandle, desiredAccess, objectAttributes,
                     ioStatusBlock, allocationSize, fileAttributes, shareAccess,
                     createDisposition, createOptions, eaBuffer, eaLength );
-                objectAttributes->ObjectName = str;
+                objectAttributes->ObjectName = tmp;
                 return result;
             }
         }
@@ -496,54 +504,53 @@ NTSTATUS WINAPI ntClose(
     return origNtClose( handle );
 }
 
-DWORD WINAPI getFileAttributesA( char const * lpFileName )
-{
-    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    std::wstring const * realFile( data.globalMapping.realFile(
-        convert.from_bytes( lpFileName ) ) );
-    if ( realFile )
-        return origGetFileAttributesW( realFile->c_str() );
-    return origGetFileAttributesA( lpFileName );
-}
-
-DWORD WINAPI getFileAttributesW( wchar_t const * lpFileName )
-{
-    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
-    std::wstring const * realFile( data.globalMapping.realFile(
-        lpFileName ) );
-    if ( realFile )
-        return origGetFileAttributesW( realFile->c_str() );
-    return origGetFileAttributesW( lpFileName );
-}
-
-BOOL WINAPI getFileAttributesExA(
-  _In_   char const * lpFileName,
-  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
-  _Out_  LPVOID lpFileInformation
+NTSTATUS NTAPI ntQueryFullAttributesFile(
+  _In_   POBJECT_ATTRIBUTES objectAttributes,
+  _Out_  PFILE_NETWORK_OPEN_INFORMATION fileInformation
 )
 {
-    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-    std::wstring const * realFile( data.globalMapping.realFile(
-        convert.from_bytes( lpFileName ) ) );
-    if ( realFile )
-        return origGetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
-    return origGetFileAttributesExA( lpFileName, fInfoLevelId, lpFileInformation );
+    if ( objectAttributes )
+    {
+        PUNICODE_STRING str = objectAttributes->ObjectName;
+        if
+        (
+            ( str->Length > 4 ) && ( str->Buffer[0] == '\\' ) &&
+            ( str->Buffer[1] == '?' ) && ( str->Buffer[2] == '?' ) &&
+            ( str->Buffer[3] == '\\' )
+        )
+        {
+            wchar_t * fileName = str->Buffer + 4;
+            std::size_t fileNameLength = ( str->Length / sizeof(wchar_t) ) - 4;
+            MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
+            
+            HANDLE fileHandle;
+            if ( data.globalMapping.getDir( fileName, fileNameLength, fileHandle ) )
+            {
+                fileInformation->CreationTime.QuadPart   = 0;
+                fileInformation->LastAccessTime.QuadPart = 0;
+                fileInformation->LastWriteTime.QuadPart  = 0;
+                fileInformation->ChangeTime.QuadPart     = 0;
+                fileInformation->AllocationSize.QuadPart = 0;
+                fileInformation->EndOfFile.QuadPart      = 0;
+                fileInformation->FileAttributes = FILE_ATTRIBUTE_DIRECTORY;
+                return 0;
+            }
+
+            UNICODE_STRING tmpStr;
+            if ( data.globalMapping.realFile( fileName, fileNameLength, &tmpStr ) )
+            {
+                PUNICODE_STRING tmp = &tmpStr;
+                std::swap( tmp, objectAttributes->ObjectName );
+                NTSTATUS result = origNtQueryFullAttributesFile(
+                    objectAttributes, fileInformation );
+                objectAttributes->ObjectName = tmp;
+                return result;
+            }
+        }
+    }
+    return origNtQueryFullAttributesFile( objectAttributes, fileInformation );
 }
-BOOL WINAPI getFileAttributesExW(
-  _In_   wchar_t const * lpFileName,
-  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
-  _Out_  LPVOID lpFileInformation
-)
-{
-    MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
-    std::wstring const * realFile( data.globalMapping.realFile(
-        lpFileName ) );
-    if ( realFile )
-        return origGetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
-    return origGetFileAttributesExW( lpFileName, fInfoLevelId, lpFileInformation );
-}
+
 
 namespace
 {

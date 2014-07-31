@@ -31,3 +31,6 @@ Used by all C++ parts of the project.
 
 `cx_Freeze <http://cx-freeze.sourceforge.net>`_
 -----------------------------------------------
+
+`MinHook <https://github.com/TsudaKageyu/minhook>`_
+---------------------------------------------------

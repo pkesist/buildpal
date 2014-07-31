@@ -327,70 +327,83 @@ void getPath( Environment const & env, PathList & result )
     }
 }
 
-int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment const * env, wchar_t const * currentDirectory )
+namespace
 {
-    STARTUPINFOW startupInfo = { sizeof(startupInfo) };
-    PROCESS_INFORMATION processInfo;
-
-    BOOL const apiResult = CreateProcessW(
-        appName,
-        commandLine,
-        NULL,
-        NULL,
-        FALSE,
-        0,
-        env ? env->createEnvBlock() : 0,
-        currentDirectory,
-        &startupInfo,
-        &processInfo
-    );
-
-    if ( apiResult )
+    int createProcess( decltype(&CreateProcessW) createProcessW, wchar_t const * appName, wchar_t * commandLine, Environment const * env, wchar_t const * curDir )
     {
-        ::WaitForSingleObject( processInfo.hProcess, INFINITE );
-        int result;
-        GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-        CloseHandle( processInfo.hProcess );
-        CloseHandle( processInfo.hThread );
-        return result;
+        STARTUPINFOW startupInfo = { sizeof(startupInfo) };
+        PROCESS_INFORMATION processInfo;
+
+        BOOL const apiResult = createProcessW(
+            appName,
+            commandLine,
+            NULL,
+            NULL,
+            FALSE,
+            0,
+            env ? env->createEnvBlock() : 0,
+            curDir,
+            &startupInfo,
+            &processInfo
+        );
+
+        if ( apiResult )
+        {
+            ::WaitForSingleObject( processInfo.hProcess, INFINITE );
+            int result;
+            GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
+            CloseHandle( processInfo.hProcess );
+            CloseHandle( processInfo.hThread );
+            return result;
+        }
+        else
+        {
+            return -1;
+        }
     }
-    else
+
+    int createProcess( decltype(&CreateProcessA) createProcessA, char const * appName, char * commandLine, Environment const * env, char const * curDir )
     {
-        return -1;
+        STARTUPINFO startupInfo = { sizeof(startupInfo) };
+        PROCESS_INFORMATION processInfo;
+
+        BOOL const apiResult = createProcessA(
+            appName,
+            commandLine,
+            NULL,
+            NULL,
+            FALSE,
+            0,
+            env ? env->createEnvBlock() : 0,
+            curDir,
+            &startupInfo,
+            &processInfo
+        );
+
+        if ( apiResult )
+        {
+            ::WaitForSingleObject( processInfo.hProcess, INFINITE );
+            int result;
+            GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
+            CloseHandle( processInfo.hProcess );
+            CloseHandle( processInfo.hThread );
+            return result;
+        }
+        else
+        {
+            return -1;
+        }
     }
 }
 
-int createProcess( char const * appName, char * commandLine, Environment const * env, char const * currentDirectory )
+int createProcess( char const * appName, char * commandLine, Environment const * env, char const * curDir )
 {
-    STARTUPINFO startupInfo = { sizeof(startupInfo) };
-    PROCESS_INFORMATION processInfo;
+    return createProcess( ::CreateProcessA, appName, commandLine, env, curDir );
+}
 
-    BOOL const apiResult = CreateProcessA(
-        appName,
-        commandLine,
-        NULL,
-        NULL,
-        FALSE,
-        0,
-        env ? env->createEnvBlock() : 0,
-        currentDirectory,
-        &startupInfo,
-        &processInfo
-    );
-
-    if ( apiResult )
-    {
-        ::WaitForSingleObject( processInfo.hProcess, INFINITE );
-        int result;
-        GetExitCodeProcess( processInfo.hProcess, reinterpret_cast<LPDWORD>( &result ) );
-        CloseHandle( processInfo.hProcess );
-        CloseHandle( processInfo.hThread );
-        return result;
-    }
-    else
-    {
-        return -1;
-    }
+int createProcess( wchar_t const * appName, wchar_t * commandLine, Environment const * env, wchar_t const * curDir )
+{
+    return createProcess( ::CreateProcessW, appName, commandLine, env, curDir );
 }
 
 bool findOnPath( PathList const & pathList, std::string const & file, std::string & result )
@@ -418,13 +431,19 @@ int distributedCompile(
     FallbackFunction fallbackFunc,
     void * fallbackParam,
     HANDLE stdOutHandle,
-    HANDLE stdErrHandle
+    HANDLE stdErrHandle,
+    PROC createProcessProcA
 )
 {
     if ( !stdOutHandle )
         stdOutHandle = GetStdHandle( STD_OUTPUT_HANDLE );
     if ( !stdErrHandle )
         stdErrHandle = GetStdHandle( STD_ERROR_HANDLE );
+
+    decltype(&CreateProcessA) createProcessA = createProcessProcA
+        ? reinterpret_cast<decltype(&CreateProcessA)>( createProcessProcA )
+        : CreateProcessA
+    ;
 
     Fallback const fallback( fallbackFunc, fallbackParam );
     env.remove( "VS_UNICODE_OUTPUT" );
@@ -574,7 +593,7 @@ int distributedCompile(
 
         if ( request == "RUN_LOCALLY" )
         {
-            return createProcess( compilerExecutable, const_cast<char *>( commandLine ), &env, currentPath );
+            return createProcess( createProcessA, compilerExecutable, const_cast<char *>( commandLine ), &env, currentPath );
         }
         else if ( request == "EXECUTE_AND_EXIT" )
         {
@@ -589,7 +608,7 @@ int distributedCompile(
             std::memcpy( buffer + sizeof(compiler), commandLine.data(), commandLine.size() );
             buffer[ sizeof(compiler) + commandLine.size() ] = 0;
 
-            return createProcess( compilerExecutable, buffer, &env, currentPath );
+            return createProcess( createProcessA, compilerExecutable, buffer, &env, currentPath );
         }
         else if ( request == "EXECUTE_GET_OUTPUT" )
         {
@@ -627,7 +646,7 @@ int distributedCompile(
 
             PROCESS_INFORMATION processInfo;
 
-            BOOL const apiResult = CreateProcessA(
+            BOOL const apiResult = createProcessA(
                 compilerExecutable,
                 buffer,
                 NULL,

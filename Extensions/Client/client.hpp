@@ -9,6 +9,9 @@
 #include <vector>
 #include <map>
 
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 class Environment
 {
@@ -59,7 +62,8 @@ int distributedCompile(
     FallbackFunction fallbackFunc,
     void * fallbackParam,
     HANDLE stdOut = 0,
-    HANDLE stdErr = 0
+    HANDLE stdErr = 0,
+    PROC createProcessA = 0
 );
 
 

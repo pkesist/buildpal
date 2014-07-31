@@ -26,10 +26,17 @@ def vcvarsall(version):
             pass
     pytest.skip("Visual Studio {} not found.".format(version))
 
-@pytest.fixture(scope='module', params=['9.0', '10.0', '11.0', '12.0'])
+
+@pytest.fixture(scope='module', params=(
+    ('9.0' , 'x86'), ('9.0' , 'amd64'), ('9.0' , 'x86_amd64'), ('9.0', 'x86_ia64'),
+    ('10.0', 'x86'), ('10.0', 'amd64'), ('10.0', 'x86_amd64'),
+    ('11.0', 'x86'), ('11.0', 'amd64'), ('11.0', 'x86_amd64'),
+    ('12.0', 'x86'), ('12.0', 'amd64'), ('12.0', 'x86_amd64'),
+    )
+)
 def vcenv_and_cl(request):
-    vcvars = vcvarsall(request.param)
-    with subprocess.Popen('{} >NUL && set'.format(vcvars),
+    vcvars = vcvarsall(request.param[0])
+    with subprocess.Popen('"{}" {}>NUL && set'.format(vcvars, request.param[1]),
             stdout=subprocess.PIPE) as proc:
         stdout, _ = proc.communicate()
     vars = stdout.decode()
@@ -47,8 +54,8 @@ def vcenv_and_cl(request):
         if os.path.exists(tmp):
             cl = tmp
             break
-    assert cl
-
+    if not cl:
+        pytest.skip("Skipped test due to missing cl.exe.")
     return res, cl
 
 class Terminator:

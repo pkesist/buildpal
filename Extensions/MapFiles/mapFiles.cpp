@@ -420,7 +420,7 @@ NTSTATUS NTAPI ntCreateFile(
             ( str->Buffer[3] == '\\' )
         )
         {
-            std::wstring const searchFor( str->Buffer + 4, str->Length - 4 );
+            std::wstring const searchFor( str->Buffer + 4, ( str->Length / sizeof(wchar_t) ) - 4 );
             MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
             
             HANDLE fakeHandle;

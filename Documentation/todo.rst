@@ -2,3 +2,11 @@
     * Instead, make sure that header list being sent is in the correct order.
 
 * Include order test does not work.
+
+* Clean up manager timers.
+    * Current names are cryptic.
+    * Should not be given so much GUI exposure.
+
+* Server task counter.
+    * Server task counter is sometimes out of sync.
+

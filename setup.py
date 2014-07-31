@@ -173,7 +173,7 @@ class build_ext(_build_ext):
         super().run()
 
 setup(name = 'buildpal',
-    version = '0.1',
+    version = '0.1.1',
     description = 'BuildPal package',
     ext_modules = [
         Extension('preprocessing',

@@ -54,12 +54,8 @@ class CompileOptions:
 
         result = []
         for name, value in zip(self.option_names, self.arg_values):
-            if name == 'Zi':
-                # Disable generating PDB files when compiling cpp into obj.
-                # Store debug info in the obj file itself.
-                result.append('/Z7')
-                result.append('/Yd')
-            else:
+            # Debug symbols database with PCH is currently not supported.
+            if name != 'Zi':
                 result.extend(value)
         return result
 

@@ -188,6 +188,7 @@ APIHookItem const NtDllHookDesc::items[] =
     { "NtClose", (PROC)ntClose },
     { "NtCreateFile", (PROC)ntCreateFile },
     { "NtQueryDirectoryFile", (PROC)ntQueryDirectoryFile },
+    { "NtQueryAttributesFile", (PROC)ntQueryFullAttributesFile },
     { "NtQueryFullAttributesFile", (PROC)ntQueryFullAttributesFile }
 };
 

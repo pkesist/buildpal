@@ -35,7 +35,7 @@ bool injectLibrary(
     void * localInitArgs = 0
 );
 
-DWORD hookWinAPI( PROC const * original, PROC const * replacement, unsigned int procCount );
+DWORD hookWinAPI( PROC * original, PROC * replacement, PROC * * trampoline, unsigned int procCount );
 
 
 //----------------------------------------------------------------------------

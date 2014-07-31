@@ -107,6 +107,8 @@ alias bp_cli_inj
     hookProcess.cpp
     boost-stuff
     clang-stuff
+    [ glob $(COMMON)/MinHook/src/*.c ]
+    [ glob $(COMMON)/MinHook/src/HDE/*.c ]
 :
 :
 :
@@ -117,6 +119,7 @@ alias bp_cli_inj
     <toolset>msvc:<library>shlwapi
     <include>$(MAP_FILES)
     <include>$(TMP_INCLUDE_DIR)
+    <include>$(COMMON)/MinHook/include
 ;
 
 lib bp_cli_inj32 : bp_cli_inj : <address-model>32 <def-file>hookProcess.def ;

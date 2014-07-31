@@ -6,6 +6,7 @@
 //----------------------------------------------------------------------------
 #include "dllInject.hpp"
 
+#include <MinHook.h>
 #include <vector>
 
 struct APIHookItem
@@ -13,16 +14,6 @@ struct APIHookItem
     char const * const name;
     PROC replacement;
 };
-
-template <typename T>
-struct Helper { typedef void type; };
-
-template <typename T, typename _ = typename Helper<T>::type>
-struct GetDataType { struct type {}; };
-
-template <typename T>
-struct GetDataType<T, typename Helper<typename T::Data>::type>
-{ typedef typename T::Data type; };
 
 // struct APIHookDescription
 // {
@@ -36,9 +27,15 @@ struct GetDataType<T, typename Helper<typename T::Data>::type>
 
 struct APIHookHelper
 {
-    typedef std::vector<PROC> ProcVector;
-    ProcVector originals_;
-    ProcVector replacements_;
+    struct HookEntry
+    {
+        PROC replacement;
+        PROC newOriginal;
+    };
+    typedef std::vector<HookEntry> HookList;
+
+    HookList hookList_;
+
     // Implementation note:
     //   Ideally we wouldn't track whether hooks are active or not. When
     // inactive, our function pointers are removed from import tables and
@@ -49,7 +46,12 @@ struct APIHookHelper
     // action if called when not active.
     bool active_;
 
-    APIHookHelper() : active_( false ) {}
+    APIHookHelper()
+        :
+        active_( false )
+    {
+        MH_Initialize();
+    }
 
     template <typename APIHookDescription>
     void addAPIHook()
@@ -57,45 +59,40 @@ struct APIHookHelper
         HMODULE const module = GetModuleHandle( APIHookDescription::moduleName );
         for ( unsigned int index( 0 ); index < APIHookDescription::itemsCount; ++index )
         {
-            originals_.push_back( GetProcAddress( module, APIHookDescription::items[ index ].name ) );
-            replacements_.push_back( APIHookDescription::items[ index ].replacement );
+            PROC original = GetProcAddress( module, APIHookDescription::items[ index ].name );
+            PROC replacement = APIHookDescription::items[ index ].replacement;
+            PROC newOriginal;
+            MH_CreateHook( original, replacement, reinterpret_cast<void * *>( &newOriginal ) );
+            HookEntry hookEntry = { replacement, newOriginal };
+            hookList_.push_back( hookEntry );
         }
     }
 
     ~APIHookHelper()
     {
-        if ( active_ )
-            removeHooks();
+        MH_Uninitialize();
     }
 
     DWORD installHooks()
     {
         active_ = true;
-        return hookWinAPI( originals_.data(), replacements_.data(), originals_.size() );
+        MH_EnableHook(MH_ALL_HOOKS);
+        return 0;
     }
 
     DWORD removeHooks()
     {
         active_ = false;
-        return hookWinAPI( replacements_.data(), originals_.data(), originals_.size() );
+        MH_DisableHook(MH_ALL_HOOKS);
+        return 0;
     }
 
     PROC originalProc( PROC proc ) const
     {
-        for ( unsigned int index( 0 ); index < originals_.size(); ++index )
+        for ( unsigned int index( 0 ); index < hookList_.size(); ++index )
         {
-            if ( proc == replacements_[ index ] )
-                return originals_[ index ];
-        }
-        return proc;
-    }
-
-    PROC translateProc( PROC proc ) const
-    {
-        for ( unsigned int index( 0 ); index < originals_.size(); ++index )
-        {
-            if ( proc == originals_[ index ] )
-                return replacements_[ index ];
+            if ( proc == hookList_[ index ].replacement )
+                return hookList_[ index ].newOriginal;
         }
         return proc;
     }
@@ -110,32 +107,9 @@ public:
     typedef Data Data;
     typedef Derived Singleton;
 
-private:
-    struct LoadLibraryHooks
-    {
-        static HMODULE WINAPI loadLibraryA( char * lpFileName );
-        static HMODULE WINAPI loadLibraryW( wchar_t * lpFileName );
-        static HMODULE WINAPI loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags );
-        static HMODULE WINAPI loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags );
-        static PROC WINAPI getProcAddress( HMODULE, LPCSTR lpProcName );
-
-        static char const moduleName[];
-        static APIHookItem const items[]; 
-        static unsigned int const itemsCount;
-    };
-
 protected:
-    APIHooks()
-    {
-        addAPIHook<LoadLibraryHooks>();
-    }
-
-private:
     Data data;
     static Singleton singleton;
-
-private:
-    static PROC translate( PROC proc ) { return singleton.translateProc( proc ); }
 
 public:
     static PROC original( PROC proc ) { return singleton.originalProc( proc ); }
@@ -146,66 +120,7 @@ public:
 };
 
 template <typename APIHookDescription, typename Data>
-char const APIHooks<APIHookDescription, Data>::LoadLibraryHooks::moduleName[] = "kernel32.dll";
-
-template <typename APIHookDescription, typename Data>
-APIHookItem const APIHooks<APIHookDescription, Data>::LoadLibraryHooks::items[] = 
-{
-    { "LoadLibraryA"  , (PROC)loadLibraryA   },
-    { "LoadLibraryW"  , (PROC)loadLibraryW   },
-    { "LoadLibraryExA", (PROC)loadLibraryExA },
-    { "LoadLibraryExW", (PROC)loadLibraryExW },
-    { "GetProcAddress", (PROC)getProcAddress }
-};
-
-template <typename APIHookDescription, typename Data>
 typename APIHooks<APIHookDescription, Data>::Singleton APIHooks<APIHookDescription, Data>::singleton;
-
-template <typename APIHookDescription, typename Data>
-unsigned int const APIHooks<APIHookDescription, Data>::LoadLibraryHooks::itemsCount = sizeof(items) / sizeof(items[0]);
-
-template <typename APIHookDescription, typename Data>
-HMODULE WINAPI APIHooks<APIHookDescription, Data>::LoadLibraryHooks::loadLibraryA( char * lpFileName )
-{
-    HMODULE result = LoadLibraryA( lpFileName );
-    if ( isActive() )
-        APIHooks<APIHookDescription, Data>::enable();
-    return result;
-}
-
-template <typename APIHookDescription, typename Data>
-HMODULE WINAPI APIHooks<APIHookDescription, Data>::LoadLibraryHooks::loadLibraryW( wchar_t * lpFileName )
-{
-    HMODULE result = LoadLibraryW( lpFileName );
-    if ( isActive() )
-        APIHooks<APIHookDescription, Data>::enable();
-    return result;
-}
-
-template <typename APIHookDescription, typename Data>
-HMODULE WINAPI APIHooks<APIHookDescription, Data>::LoadLibraryHooks::loadLibraryExA( char * lpFileName, HANDLE hFile, DWORD dwFlags )
-{
-    HMODULE result = LoadLibraryExA( lpFileName, hFile, dwFlags );
-    if ( isActive() )
-        APIHooks<APIHookDescription, Data>::enable();
-    return result;
-}
-
-template <typename APIHookDescription, typename Data>
-HMODULE WINAPI APIHooks<APIHookDescription, Data>::LoadLibraryHooks::loadLibraryExW( wchar_t * lpFileName, HANDLE hFile, DWORD dwFlags )
-{
-    HMODULE result = LoadLibraryExW( lpFileName, hFile, dwFlags );
-    if ( isActive() )
-        APIHooks<APIHookDescription, Data>::enable();
-    return result;
-}
-
-template <typename APIHookDescription, typename Data>
-PROC WINAPI APIHooks<APIHookDescription, Data>::LoadLibraryHooks::getProcAddress( HMODULE hModule, LPCSTR lpProcName )
-{
-    PROC proc = GetProcAddress( hModule, lpProcName );
-    return isActive() ? APIHooks<APIHookDescription, Data>::translate( proc ) : proc; 
-}
 
 
 //----------------------------------------------------------------------------

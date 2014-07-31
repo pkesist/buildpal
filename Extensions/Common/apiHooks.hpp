@@ -36,14 +36,6 @@ struct APIHookHelper
 
     HookList hookList_;
 
-    // Implementation note:
-    //   Ideally we wouldn't track whether hooks are active or not. When
-    // inactive, our function pointers are removed from import tables and
-    // shouldn't be called at all. However, a module can store a pointer
-    // obtained by GetProcAddress() and call it whenever it wants.
-    
-    // Additionally, hook functions should be written to merely do the original
-    // action if called when not active.
     bool active_;
 
     APIHookHelper()

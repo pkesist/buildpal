@@ -9,7 +9,7 @@ from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
 
-from .header_repository import MapFiles as HeaderRepository
+from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
 from .compiler_repository import CompilerRepository
 

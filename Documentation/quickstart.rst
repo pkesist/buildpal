@@ -61,7 +61,7 @@ BuildPal Console
 The console is used to run the build. It is a regular ``cmd`` console, with
 installed hooks which detect when a compiler process is created.
 
-BuildPal has who kinds of consoles. The difference between the two is in the method
+BuildPal has two kinds of consoles. The difference between the two is in the method
 how compilation request is distributed after being intercepted.
 
 .. _compiler_substitution:

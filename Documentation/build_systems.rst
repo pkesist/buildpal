@@ -1,7 +1,7 @@
 ``BuildPal`` and some build systems
 ===================================
 
-BuildPal works best with build systems which support `-j` option.
+``BuildPal`` works best with build systems which support ``-j`` option.
 Although every build system will work with *compiler substition* hook,
 *createprocess* hook will work better. Here is the current state of affairs
 some common build systems:

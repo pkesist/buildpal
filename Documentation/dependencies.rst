@@ -6,8 +6,6 @@ Dependencies
     *"Theft from a single author is plagiarism. Theft from two is comparative study.
     Theft from three or more is research."*
 
-    -- Anonymous
-
 `Python <http://www.python.org>`_
 ---------------------------------
 
@@ -20,7 +18,7 @@ Dependencies
 -------------------------------
 
 Used by all C++ parts of the project.
-    * *Boost.ASIO* for Client's (:file:`bp_cl.exe`) IPC.
+    * *Boost.ASIO* for Client library IPC.
     * *Boost.MultiIndex* for Managers header cache.
     * *Boost.Spirit* as an alternative to ``atoi``/``itoa``/etc.
     * *Boost.Thread* for read-write mutexes.

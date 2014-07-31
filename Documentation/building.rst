@@ -23,7 +23,7 @@ Get the sources from `BuildPal GitHub repository <https://github.com/pkesist/bui
 Building
 --------
 
-`BuildPal` uses distutils and setuptools. Just use any of the usual setuptools
+``BuildPal`` uses distutils and setuptools. Just use any of the usual setuptools
 targets::
 
     python setup.py build
@@ -35,11 +35,9 @@ See ``python setup.py --help``
 
 .. note::
 
-    First time build will take a while. BuildPal will download, unpack and build
+    First time build will take a while. The script will download, unpack and build
     several chubby libraries (`Boost` and `LLVM/Clang`). Subsequent builds will be
     much faster.
-
-.. _cx-freeze::
 
 Creating standalone packages with ``cx_Freeze``
 -----------------------------------------------

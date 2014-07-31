@@ -625,8 +625,18 @@ void setPortName( char const * portName )
     hookData.portName = portName;
 }
 
+
+template <typename FuncType>
+FuncType getOriginal( FuncType func )
+{
+    return reinterpret_cast<FuncType>( HookProcessAPIHooks::original(
+        reinterpret_cast<PROC>( func ) ) );
+}
+
 BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
 {
+    static auto origCreateProcessA = getOriginal( createProcessA );
+
     CompilerDescription const * compilerDesc( isCompiler(
         lpApplicationName,
         lpCommandLine )
@@ -650,7 +660,7 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
         }
         else
         {
-            return CreateProcessA( 
+            return origCreateProcessA( 
                 compilerDesc->replacement.c_str(),
                 lpCommandLine,
                 lpProcessAttributes,
@@ -666,7 +676,7 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
     }
     
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-    BOOL result = CreateProcessA( 
+    BOOL result = origCreateProcessA( 
         lpApplicationName,
         lpCommandLine,
         lpProcessAttributes,
@@ -689,6 +699,8 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
 
 BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
 {
+    static auto origCreateProcessW = getOriginal( createProcessW );
+
     CompilerDescription const * compilerDesc( isCompiler(
         lpApplicationName,
         lpCommandLine )
@@ -713,7 +725,7 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
         else
         {
             std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> convert;
-            return CreateProcessW( 
+            return origCreateProcessW( 
                 convert.from_bytes( compilerDesc->replacement ).c_str(),
                 lpCommandLine,
                 lpProcessAttributes,
@@ -729,7 +741,7 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
     }
     
     bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-    BOOL result = CreateProcessW( 
+    BOOL result = origCreateProcessW( 
         lpApplicationName,
         lpCommandLine,
         lpProcessAttributes,
@@ -752,6 +764,8 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
 
 BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
 {
+    static auto origGetExitCodeProcess = getOriginal( HookProcessAPIHookDesc::getExitCodeProcess );
+
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
@@ -765,11 +779,13 @@ BOOL WINAPI HookProcessAPIHookDesc::getExitCodeProcess( HANDLE hProcess, LPDWORD
             return TRUE;
         }
     }
-    return GetExitCodeProcess( hProcess, lpExitCode );
+    return origGetExitCodeProcess( hProcess, lpExitCode );
 }
 
 BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
 {
+    static auto origCloseHandle = getOriginal( HookProcessAPIHookDesc::closeHandle );
+
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
@@ -778,11 +794,13 @@ BOOL WINAPI HookProcessAPIHookDesc::closeHandle( HANDLE handle )
         if ( dcpIter != hookData.distributedCompilationInfo.end() )
             hookData.distributedCompilationInfo.erase( dcpIter );
     }
-    return CloseHandle( handle );
+    return origCloseHandle( handle );
 }
 
 BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitCode )
 {
+    static auto origTerminateProcess = getOriginal( HookProcessAPIHookDesc::terminateProcess );
+
     if ( HookProcessAPIHooks::isActive() )
     {
         HookProcessAPIHooks::Data & hookData( HookProcessAPIHooks::getData() );
@@ -796,5 +814,5 @@ BOOL WINAPI HookProcessAPIHookDesc::terminateProcess( HANDLE handle, UINT uExitC
             return TRUE;
         }
     }
-    return TerminateProcess( handle, uExitCode );
+    return origTerminateProcess( handle, uExitCode );
 }

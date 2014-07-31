@@ -107,34 +107,14 @@ HANDLE GlobalFileMapping::fakeHandle_ = reinterpret_cast<HANDLE>( 0xFAB0BEEF );
 
 typedef std::map<DWORD, FileMapping> FileMappings;
 
-BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA );
-BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW );
-
-DWORD WINAPI getFileAttributesA( _In_ char const * lpFileName );
-DWORD WINAPI getFileAttributesW( _In_ wchar_t const * lpFileName );
-BOOL WINAPI getFileAttributesExA(
-  _In_   char const * lpFileName,
-  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
-  _Out_  LPVOID lpFileInformation
-);
-BOOL WINAPI getFileAttributesExW(
-  _In_   wchar_t const * lpFileName,
-  _In_   GET_FILEEX_INFO_LEVELS fInfoLevelId,
-  _Out_  LPVOID lpFileInformation
-);
-NTSTATUS NTAPI ntCreateFile(
-  _Out_     PHANDLE FileHandle,
-  _In_      ACCESS_MASK DesiredAccess,
-  _In_      POBJECT_ATTRIBUTES ObjectAttributes,
-  _Out_     PIO_STATUS_BLOCK IoStatusBlock,
-  _In_opt_  PLARGE_INTEGER AllocationSize,
-  _In_      ULONG FileAttributes,
-  _In_      ULONG ShareAccess,
-  _In_      ULONG CreateDisposition,
-  _In_      ULONG CreateOptions,
-  _In_      PVOID EaBuffer,
-  _In_      ULONG EaLength
-);
+decltype(CreateProcessA) createProcessA;
+decltype(CreateProcessW) createProcessW;
+decltype(GetFileAttributesA) getFileAttributesA;
+decltype(GetFileAttributesW) getFileAttributesW;
+decltype(GetFileAttributesExA) getFileAttributesExA;
+decltype(GetFileAttributesExW) getFileAttributesExW;
+decltype(NtCreateFile) ntCreateFile;
+decltype(NtClose) ntClose;
 
 NTSTATUS NTAPI ntQueryDirectoryFile(
   _In_      HANDLE fileHandle,
@@ -148,10 +128,6 @@ NTSTATUS NTAPI ntQueryDirectoryFile(
   _In_      BOOLEAN returnSingleEntry,
   _In_opt_  PUNICODE_STRING fileName,
   _In_      BOOLEAN restartScan
-);
-
-NTSTATUS WINAPI ntClose(
-  _In_  HANDLE Handle
 );
 
 struct Kernel32ApiHookDesc
@@ -204,12 +180,39 @@ struct MapFilesAPIHookData
     unsigned int counter;
 };
 
+decltype(&createProcessA) origCreateProcessA;
+decltype(&createProcessW) origCreateProcessW;
+decltype(&getFileAttributesA) origGetFileAttributesA;
+decltype(&getFileAttributesW) origGetFileAttributesW;
+decltype(&getFileAttributesExA) origGetFileAttributesExA;
+decltype(&getFileAttributesExW) origGetFileAttributesExW;
+decltype(&ntClose) origNtClose;
+decltype(&ntCreateFile) origNtCreateFile;
+decltype(&ntQueryDirectoryFile) origNtQueryDirectoryFile;
+
 struct MapFilesAPIHook : APIHooks<MapFilesAPIHook, MapFilesAPIHookData>
 {
+    template <typename FuncType>
+    FuncType getOriginal( FuncType func )
+    {
+        return reinterpret_cast<FuncType>( originalProc(
+            reinterpret_cast<PROC>( func ) ) );
+    }
+
     MapFilesAPIHook()
     {
         addAPIHook<Kernel32ApiHookDesc>();
         addAPIHook<NtDllHookDesc>();
+
+        origCreateProcessA       = getOriginal( &createProcessA       );
+        origCreateProcessW       = getOriginal( &createProcessW       );
+        origGetFileAttributesA   = getOriginal( &getFileAttributesA   );
+        origGetFileAttributesW   = getOriginal( &getFileAttributesW   );
+        origGetFileAttributesExA = getOriginal( &getFileAttributesExA );
+        origGetFileAttributesExW = getOriginal( &getFileAttributesExW );
+        origNtClose              = getOriginal( &ntClose              );
+        origNtCreateFile         = getOriginal( &ntCreateFile         );
+        origNtQueryDirectoryFile = getOriginal( &ntQueryDirectoryFile );
     }
 };
 
@@ -423,12 +426,9 @@ NTSTATUS NTAPI ntCreateFile(
             std::wstring const searchFor( str->Buffer + 4, ( str->Length / sizeof(wchar_t) ) - 4 );
             MapFilesAPIHook::Data & data( MapFilesAPIHook::getData() );
             
-            HANDLE fakeHandle;
-            if ( data.globalMapping.getDir( searchFor, fakeHandle ) )
+            if ( data.globalMapping.getDir( searchFor, *fileHandle ) )
             {
-                *fileHandle = fakeHandle;
-                ioStatusBlock->Status = FILE_EXISTS;
-                ioStatusBlock->Information = 0;
+                ioStatusBlock->Information = FILE_EXISTS;
                 return 0;
             }
 
@@ -448,7 +448,7 @@ NTSTATUS NTAPI ntCreateFile(
                 uc.Length = ( size - 1 ) * sizeof(wchar_t);
                 PUNICODE_STRING old = objectAttributes->ObjectName;
                 objectAttributes->ObjectName = &uc;
-                NTSTATUS result = NtCreateFile( fileHandle, desiredAccess, objectAttributes,
+                NTSTATUS result = origNtCreateFile( fileHandle, desiredAccess, objectAttributes,
                     ioStatusBlock, allocationSize, fileAttributes, shareAccess,
                     createDisposition, createOptions, eaBuffer, eaLength );
                 objectAttributes->ObjectName = str;
@@ -456,25 +456,10 @@ NTSTATUS NTAPI ntCreateFile(
             }
         }
     }
-    return NtCreateFile( fileHandle, desiredAccess, objectAttributes,
+    return origNtCreateFile( fileHandle, desiredAccess, objectAttributes,
         ioStatusBlock, allocationSize, fileAttributes, shareAccess,
         createDisposition, createOptions, eaBuffer, eaLength );
 }
-
-typedef NTSTATUS (NTAPI * NtQueryDirectoryFile)(
-  _In_      HANDLE fileHandle,
-  _In_opt_  HANDLE event,
-  _In_opt_  PVOID apcRoutine,
-  _In_opt_  PVOID apcContext,
-  _Out_     PVOID ioStatusBlock,
-  _Out_     PVOID fileInformation,
-  _In_      ULONG length,
-  _In_      int fileInformationClass,
-  _In_      BOOLEAN returnSingleEntry,
-  _In_opt_  PUNICODE_STRING fileName,
-  _In_      BOOLEAN restartScan
-);
-
 
 NTSTATUS NTAPI ntQueryDirectoryFile(
   _In_      HANDLE fileHandle,
@@ -490,14 +475,13 @@ NTSTATUS NTAPI ntQueryDirectoryFile(
   _In_      BOOLEAN restartScan
 )
 {
-    static NtQueryDirectoryFile original = (NtQueryDirectoryFile)MapFilesAPIHook::original( (PROC)ntQueryDirectoryFile );
     if ( MapFilesAPIHook::getData().globalMapping.isFake( fileHandle ) )
     {
         // Compiler is trying to query our virtual directory.
         // Everybody look busy!
         return ((NTSTATUS)0x80000011L); // STATUS_DEVICE_BUSY
     }
-    NTSTATUS result = original( fileHandle, event, apcRoutine, apcContext, ioStatusBlock,
+    NTSTATUS result = origNtQueryDirectoryFile( fileHandle, event, apcRoutine, apcContext, ioStatusBlock,
         fileInformation, length, fileInformationClass, returnSingleEntry,
         fileName, restartScan );
     return result;
@@ -509,7 +493,7 @@ NTSTATUS WINAPI ntClose(
 {
     if ( MapFilesAPIHook::getData().globalMapping.isFake( handle ) )
         return 0;
-    return NtClose( handle );
+    return origNtClose( handle );
 }
 
 DWORD WINAPI getFileAttributesA( char const * lpFileName )
@@ -519,8 +503,8 @@ DWORD WINAPI getFileAttributesA( char const * lpFileName )
     std::wstring const * realFile( data.globalMapping.realFile(
         convert.from_bytes( lpFileName ) ) );
     if ( realFile )
-        return GetFileAttributesW( realFile->c_str() );
-    return GetFileAttributesA( lpFileName );
+        return origGetFileAttributesW( realFile->c_str() );
+    return origGetFileAttributesA( lpFileName );
 }
 
 DWORD WINAPI getFileAttributesW( wchar_t const * lpFileName )
@@ -529,8 +513,8 @@ DWORD WINAPI getFileAttributesW( wchar_t const * lpFileName )
     std::wstring const * realFile( data.globalMapping.realFile(
         lpFileName ) );
     if ( realFile )
-        return GetFileAttributesW( realFile->c_str() );
-    return GetFileAttributesW( lpFileName );
+        return origGetFileAttributesW( realFile->c_str() );
+    return origGetFileAttributesW( lpFileName );
 }
 
 BOOL WINAPI getFileAttributesExA(
@@ -544,8 +528,8 @@ BOOL WINAPI getFileAttributesExA(
     std::wstring const * realFile( data.globalMapping.realFile(
         convert.from_bytes( lpFileName ) ) );
     if ( realFile )
-        return GetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
-    return GetFileAttributesExA( lpFileName, fInfoLevelId, lpFileInformation );
+        return origGetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
+    return origGetFileAttributesExA( lpFileName, fInfoLevelId, lpFileInformation );
 }
 BOOL WINAPI getFileAttributesExW(
   _In_   wchar_t const * lpFileName,
@@ -557,8 +541,8 @@ BOOL WINAPI getFileAttributesExW(
     std::wstring const * realFile( data.globalMapping.realFile(
         lpFileName ) );
     if ( realFile )
-        return GetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
-    return GetFileAttributesExW( lpFileName, fInfoLevelId, lpFileInformation );
+        return origGetFileAttributesExW( realFile->c_str(), fInfoLevelId, lpFileInformation );
+    return origGetFileAttributesExW( lpFileName, fInfoLevelId, lpFileInformation );
 }
 
 namespace
@@ -570,7 +554,7 @@ namespace
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-        BOOL result = CreateProcessA( lpApplicationName, lpCommandLine,
+        BOOL result = origCreateProcessA( lpApplicationName, lpCommandLine,
             lpProcessAttributes, lpThreadAttributes,bInheritHandles,
             dwCreationFlags | CREATE_SUSPENDED,lpEnvironment,lpCurrentDirectory,
             lpStartupInfo, lpProcessInformation);
@@ -591,7 +575,7 @@ namespace
     )
     {
         bool const shouldResume = (dwCreationFlags & CREATE_SUSPENDED) == 0;
-        BOOL result = CreateProcessW( lpApplicationName, lpCommandLine,
+        BOOL result = origCreateProcessW( lpApplicationName, lpCommandLine,
             lpProcessAttributes, lpThreadAttributes,bInheritHandles,
             dwCreationFlags | CREATE_SUSPENDED,lpEnvironment,lpCurrentDirectory,
             lpStartupInfo, lpProcessInformation);

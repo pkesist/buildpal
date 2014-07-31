@@ -116,16 +116,28 @@ class build_ext(_build_ext):
         build_dll.libraries = [
             ('map_files_inj32', dict(
                 sources=['Extensions/Common/dllInject.cpp',
-                    'Extensions/MapFiles/mapFiles.cpp'],
+                    'Extensions/MapFiles/mapFiles.cpp',
+                    'Extensions/Common/MinHook/src/buffer.c',
+                    'Extensions/Common/MinHook/src/hook.c',
+                    'Extensions/Common/MinHook/src/trampoline.c',
+                    'Extensions/Common/MinHook/src/HDE/hde32.c',
+                    'Extensions/Common/MinHook/src/HDE/hde64.c'],
                 def_file='Extensions/MapFiles/mapFiles.def',
-                include_dirs=[os.path.dirname(self.asm_inc_dir)],
+                include_dirs=[os.path.dirname(self.asm_inc_dir),
+                    'Extensions/Common/MinHook/include'],
                 plat='win32')
             ),
             ('map_files_inj64', dict(
                 sources=['Extensions/Common/dllInject.cpp',
-                    'Extensions/MapFiles/mapFiles.cpp'],
+                    'Extensions/MapFiles/mapFiles.cpp',
+                    'Extensions/Common/MinHook/src/buffer.c',
+                    'Extensions/Common/MinHook/src/hook.c',
+                    'Extensions/Common/MinHook/src/trampoline.c',
+                    'Extensions/Common/MinHook/src/HDE/hde32.c',
+                    'Extensions/Common/MinHook/src/HDE/hde64.c'],
                 def_file='Extensions/MapFiles/mapFiles.def',
-                include_dirs=[os.path.dirname(self.asm_inc_dir)],
+                include_dirs=[os.path.dirname(self.asm_inc_dir),
+                    'Extensions/Common/MinHook/include'],
                 plat='win-amd64')
             )
         ]

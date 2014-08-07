@@ -32,21 +32,30 @@ def main(argv, terminator=None):
 
     client_parser = subparsers.add_parser('client', aliases=['cli', 'c'])
     client_parser.add_argument('--connect', type=str, default='default',
-        help='Manager port to connect to.')
+        metavar='PORT', help='manager port to connect to')
     client_parser.add_argument('--no-cp', dest='no_cp', action='store_true',
-        default=False, help='Do not create compile processes locally.')
+        default=False, help='Do not create compile processes locally')
+    client_parser.add_argument('--register-compiler', type=str, default=None,
+        dest='register_compiler', nargs='+', metavar='EXE',
+        help='Register additional compiler executable (persistent)');
+    client_parser.add_argument('--unregister-compiler', type=str, default=None,
+        dest='unregister_compiler', nargs='+', metavar='EXE',
+        help='Unregister additional compiler executable (persistent)');
+    client_parser.add_argument('--list-compilers', action='store_true',
+        default=False, dest='list_compilers',
+        help='List recognized compilers');
     client_parser.add_argument('--run', nargs=argparse.REMAINDER,
-        help='Trailing arguments specify command to run.')
+        help='Trailing arguments specify command to run')
 
     opts = parser.parse_args(argv[1:])
     if opts.which and opts.which[0] == 's':
-        from buildpal.server.__main__ import main as server_main
+        from buildpal.server import main as server_main
         return server_main(opts, terminator)
     elif opts.which and opts.which[0] == 'm':
-        from buildpal.manager.__main__ import main as manager_main
+        from buildpal.manager import main as manager_main
         return manager_main(opts, terminator)
     elif opts.which and opts.which[0] == 'c':
-        from buildpal.client.__main__ import main as client_main
+        from buildpal.client import main as client_main
         try:
             return client_main(opts)
         except Exception as e:

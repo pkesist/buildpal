@@ -6,7 +6,7 @@ import subprocess
 
 @pytest.fixture(scope='module')
 def bp_cl():
-    from buildpal.client.__main__ import find_bp_cl
+    from buildpal.client import find_bp_cl
     try:
         return find_bp_cl()
     except EnvironmentError:

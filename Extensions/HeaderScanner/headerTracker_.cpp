@@ -60,15 +60,15 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // yet - allowed me to disable opening the file in the first place.
     // Make sure this file is loaded through globalContentCache, so that it
     // can be shared between different SourceManager instances.
-    ContentEntry const & contentEntry = ContentCache::singleton().getOrCreate(
+    ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate(
         preprocessor().getFileManager(), entry, cacheDisabled() ? 0 : &cache() );
     if ( !sourceManager().isFileOverridden( entry ) )
     {
-        sourceManager().overrideFileContents( entry, contentEntry.buffer.get(), true );
+        sourceManager().overrideFileContents( entry, contentEntry->buffer.get(), true );
     }
     else
     {
-        assert( sourceManager().getMemoryBufferForFile( entry, 0 ) == contentEntry.buffer.get() );
+        assert( sourceManager().getMemoryBufferForFile( entry, 0 ) == contentEntry->buffer.get() );
     }
 
     bool const relativeToParent( !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath ) );
@@ -116,8 +116,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         {
             dir,
             headerName,
-            contentEntry.buffer.get(),
-            contentEntry.checksum,
+            contentEntry,
             headerLocation
         },
         entry
@@ -205,8 +204,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
         {
             Dir( mainFileEntry->getDir()->getName() ),
             HeaderName( llvm::sys::path::filename( fileName ) ),
-            0,
-            0,
+            ContentEntryPtr(),
             HeaderLocation::relative
         },
         mainFileEntry

@@ -207,10 +207,10 @@ class ServerSession:
         result = []
         for dir, system, data in header_info:
             dir_bytes = dir.encode()
-            for file, relative, content, checksum in data:
+            for file, relative, content_entry in data:
                 if not relative and not (dir, file) in in_filelist:
                     continue
-                result.extend((dir_bytes, file.encode(), content))
+                result.extend((dir_bytes, file.encode(), content_entry.buffer()))
 
         with open(source_file, 'rb') as src:
             result.extend((b'', source_file.encode(), src.read()))

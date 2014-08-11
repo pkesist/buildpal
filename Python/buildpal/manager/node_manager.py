@@ -69,7 +69,7 @@ class NodeManager:
         logging.debug("Headers for file '%s':", task.source)
         for dir, system, data in task.header_info:
             logging.debug(dir)
-            for file, relative, content, checksum in data:
+            for file, relative, content_entry in data:
                 logging.debug("    %s %s", file, "[relative to source]" if relative else "")
 
         if task.missing_headers:

@@ -179,6 +179,7 @@ setup(name = 'buildpal',
         Extension('preprocessing',
             sources = [
                 'Extensions/HeaderScanner/contentCache_.cpp',
+                'Extensions/HeaderScanner/contentEntry_.cpp',
                 'Extensions/HeaderScanner/headerCache_.cpp',
                 'Extensions/HeaderScanner/headerScanner_.cpp',
                 'Extensions/HeaderScanner/headerTracker_.cpp',

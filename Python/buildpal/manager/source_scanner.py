@@ -38,9 +38,9 @@ def header_info(preprocessor, preprocess_task):
         # Headers which are relative to source file are not
         # considered as candidates for server cache, and are
         # always sent together with the source file.
-        for file, relative, content, checksum in data:
+        for file, relative, content_entry in data:
             if not relative:
-                shared_files_in_dir.append((file, checksum))
+                shared_files_in_dir.append((file, content_entry.checksum()))
         shared_file_list.append((dir, system, shared_files_in_dir))
     return header_info, tuple(shared_file_list), missing_headers
 

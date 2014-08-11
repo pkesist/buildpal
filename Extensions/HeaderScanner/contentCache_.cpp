@@ -7,94 +7,57 @@
 
 ContentCache ContentCache::singleton_;
 
-namespace
-{
-    #define BASE 65521UL
-    #define NMAX 5552
-
-    #define DO1(buf, i) { sum1 += (buf)[i]; sum2 += sum1; }
-    #define DO2(buf, i) DO1(buf, i); DO1(buf, i + 1);
-    #define DO4(buf, i) DO2(buf, i); DO2(buf, i + 2);
-    #define DO8(buf, i) DO4(buf, i); DO4(buf, i + 4);
-    #define DO16(buf) DO8(buf, 0); DO8(buf, 8);
-    #define MOD(a) a %= BASE
-
-    std::size_t bsc_adler32( char const * data, std::size_t size )
-    {
-        unsigned int sum1 = 1;
-        unsigned int sum2 = 0;
-
-        while (size >= NMAX)
-        {
-            for (int i = 0; i < NMAX / 16; ++i)
-            {
-                DO16(data); data += 16;
-            }
-            MOD(sum1); MOD(sum2); size -= NMAX;
-        }
-
-        while (size >= 16)
-        {
-            DO16(data); data += 16; size -= 16;
-        }
-
-        while (size > 0)
-        {
-            DO1(data, 0); data += 1; size -= 1;
-        }
-
-        MOD(sum1); MOD(sum2);
-
-        return sum1 | (sum2 << 16);
-    }
-
-
-    ////////////////////////////////////////////////////////////////////////////
-    //
-    // adler32()
-    // ---------
-    //
-    ////////////////////////////////////////////////////////////////////////////
-
-    std::size_t adler32( llvm::MemoryBuffer const * buffer )
-    {
-        return bsc_adler32( buffer->getBufferStart(), buffer->getBufferSize() );
-    }
-}
-
-
-ContentEntry::ContentEntry( llvm::MemoryBuffer * b, time_t const mod )
-    :
-    buffer( b ), checksum( adler32( b ) ), modified( mod )
-{
-}
-
-ContentEntry const & ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache * cache )
+ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache * cache )
 {
     llvm::sys::fs::UniqueID const uniqueID = file->getUniqueID();
-    ContentEntry const * contentEntry( get( uniqueID ) );
-    if ( contentEntry )
+    typedef Content::index<ByFileId>::type ContentByFileId;
     {
-        if ( contentEntry->modified == file->getModificationTime() )
-            return *contentEntry;
-        if ( cache )
-            cache->invalidate( *contentEntry );
-        llvm::MemoryBuffer * memoryBuffer( prepareSourceFile( fm, *file ) );
-        boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-        contentMap_[ uniqueID ] = ContentEntry( memoryBuffer, file->getModificationTime() );
-        return contentMap_[ uniqueID ];
+        boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
+        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
+        ContentByFileId::const_iterator const iter( contentByFileId.find( uniqueID ) );
+        if ( iter != contentByFileId.end() )
+        {
+            ContentEntryPtr contentEntryPtr = *iter;
+            readLock.unlock();
+            if ( contentEntryPtr->modified == file->getModificationTime() )
+            {
+                boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
+                Content::iterator listIter = content_.project<0>( iter );
+                content_.splice( content_.begin(), content_, listIter );
+                return *iter;
+            }
+            if ( cache )
+                cache->invalidate( *contentEntryPtr );
+            llvm::MemoryBuffer * memoryBuffer( prepareSourceFile( fm, *file ) );
+            boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
+            ContentEntryPtr newPtr( new ContentEntry( uniqueID, memoryBuffer,
+                file->getModificationTime() ) );
+            contentByFileId.erase( iter );
+            content_.push_front( newPtr );
+            return newPtr;
+        }
     }
     llvm::OwningPtr<llvm::MemoryBuffer> buffer( prepareSourceFile( fm, *file ) );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
-    // Preform another search with upgrade ownership.
-    ContentMap::const_iterator const iter( contentMap_.find( uniqueID ) );
-    if ( iter != contentMap_.end() )
-        return iter->second;
+    {
+        // Preform another search with upgrade ownership.
+        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
+        ContentByFileId::const_iterator const iter( contentByFileId.find( uniqueID ) );
+        if ( iter != contentByFileId.end() )
+            return *iter;
+    }
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-    std::pair<ContentMap::iterator, bool> const insertResult(
-        contentMap_.insert( std::make_pair( uniqueID,
-        ContentEntry( buffer.take(), file->getModificationTime() ) ) ) );
-    return insertResult.first->second;
+    ContentEntryPtr newPtr( ContentEntryPtr( new ContentEntry( uniqueID, buffer.take(),
+        file->getModificationTime() ) ) );
+    content_.push_front( newPtr );
+    unsigned int const contentLength = 1024;
+    if ( content_.size() > contentLength )
+    {
+        Content::iterator iter = content_.begin();
+        std::advance( iter, contentLength );
+        content_.erase( iter, content_.end() );
+    }
+    return newPtr;
 }
 
 

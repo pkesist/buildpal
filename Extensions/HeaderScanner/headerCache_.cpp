@@ -151,34 +151,39 @@ std::string Cache::uniqueFileName()
 
 void Cache::maintenance()
 {
-    unsigned int const currentTime = hits_ + misses_;
     unsigned int const cacheCleanupPeriod = 1024 * 5;
-    unsigned int const historyLength = 4 * cacheCleanupPeriod;
-    if ( ( currentTime > historyLength ) && !( currentTime % cacheCleanupPeriod ) )
+    unsigned int const currentTime = hits_ + misses_;
+    if ( currentTime % cacheCleanupPeriod )
+        return;
+
+    // Update hit counts.
+    boost::unique_lock<boost::shared_mutex> uniqueLock( cacheMutex_ );
     {
-        boost::unique_lock<boost::shared_mutex> uniqueLock( cacheMutex_ );
+        boost::unique_lock<boost::mutex> tempLastTimeHitLock( tempLastTimeHitMutex_ );
+        std::for_each( tempLastTimeHit_.begin(), tempLastTimeHit_.end(), [this]( std::pair<CacheEntryPtr, unsigned int> const & entry )
         {
-            boost::unique_lock<boost::mutex> tempLastTimeHitLock( tempLastTimeHitMutex_ );
-            std::for_each( tempLastTimeHit_.begin(), tempLastTimeHit_.end(), [this]( std::pair<CacheEntryPtr, unsigned int> const & entry )
-            {
-                typedef CacheEntries::index<ById>::type IndexByIdType;
-                // Note that we cannot use CacheContainer::iterator_to() to obtain
-                // the iterator to update. iterator_to() needs a reference to the
-                // actual value stored in the container, not a copy.
-                IndexByIdType & indexById( cacheEntries_.get<ById>() );
-                IndexByIdType::iterator const iter = indexById.find( entry.first.get() );
-                if ( iter != indexById.end() )
-                    indexById.modify( iter, [=]( CacheEntryPtr p ) { p->setLastTimeHit( entry.second ); } );
-            });
-            tempLastTimeHit_.clear();
-        }
-        std::vector<CacheEntryPtr const *> entriesToRemove;
-        typedef CacheEntries::index<ByLastTimeHit>::type IndexType;
-        IndexType & index( cacheEntries_.get<ByLastTimeHit>() );
-        // Remove everything what was not hit in the last cacheCleanupPeriod tries.
-        IndexType::iterator const end = index.lower_bound( currentTime - historyLength );
-        index.erase( index.begin(), end );
+            typedef CacheEntries::index<ById>::type IndexByIdType;
+            // Note that we cannot use CacheContainer::iterator_to() to obtain
+            // the iterator to update. iterator_to() needs a reference to the
+            // actual value stored in the container, not a copy.
+            IndexByIdType & indexById( cacheEntries_.get<ById>() );
+            IndexByIdType::iterator const iter = indexById.find( entry.first.get() );
+            if ( iter != indexById.end() )
+                indexById.modify( iter, [=]( CacheEntryPtr p ) { p->setLastTimeHit( entry.second ); } );
+        });
+        tempLastTimeHit_.clear();
     }
+
+    typedef CacheEntries::index<ByLastTimeHit>::type IndexType;
+    IndexType & index( cacheEntries_.get<ByLastTimeHit>() );
+    unsigned int const historyLength = 4 * cacheCleanupPeriod;
+    unsigned int const cutoffTime(
+        currentTime > historyLength
+            ? currentTime - historyLength
+            : currentTime / 5
+    );
+    // Remove everything what was not hit since cutoffTime.
+    index.erase( index.begin(), index.lower_bound( cutoffTime ) );
 }
 
 void Cache::invalidate( ContentEntry const & contentEntry )

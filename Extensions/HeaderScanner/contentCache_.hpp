@@ -4,9 +4,14 @@
 #ifndef contentCache_HPP__C53BAD49_7ABA_46DF_A686_C4D7B839AAA0
 #define contentCache_HPP__C53BAD49_7ABA_46DF_A686_C4D7B839AAA0
 //------------------------------------------------------------------------------
+#include "contentEntry_.hpp"
+
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
 
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
 #include <clang/Basic/FileManager.h>
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/SmallString.h>
@@ -14,6 +19,7 @@
 #include <llvm/Support/MemoryBuffer.h>
 
 #include <unordered_map>
+#include <memory>
 
 struct HashUniqueFileId
 {
@@ -29,53 +35,35 @@ struct HashUniqueFileId
 
 class Cache;
 
-class ContentEntry
+struct GetFileId
 {
-private:
-    ContentEntry( ContentEntry const & ); // = delete;
-    ContentEntry & operator=( ContentEntry const & ); // = delete;
-
-public:
-    ContentEntry() : checksum( 0 ), modified( 0 ) {};
-
-    ContentEntry( llvm::MemoryBuffer * buffer, time_t const modified );
-
-    ContentEntry( ContentEntry && other )
-        :
-        buffer( other.buffer.take() ),
-        checksum( other.checksum ),
-        modified( other.modified )
+    typedef llvm::sys::fs::UniqueID result_type;
+    result_type operator()( ContentEntryPtr p ) const
     {
+        return p->id_;
     }
-
-    ContentEntry & operator=( ContentEntry && other )
-    {
-        buffer.reset( other.buffer.take() );
-        checksum = other.checksum;
-        modified = other.modified;
-        return *this;
-    }
-
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer;
-    std::size_t checksum;
-    std::time_t modified;
 };
+
+struct ByFileId {};
 
 class ContentCache
 {
 public:
-    typedef std::unordered_map<llvm::sys::fs::UniqueID, ContentEntry, HashUniqueFileId> ContentMap;
-    
-    ContentEntry const * get( llvm::sys::fs::UniqueID const & id ) const
-    {
-        boost::shared_lock<boost::shared_mutex> const readLock( contentMutex_ );
-        ContentMap::const_iterator const iter( contentMap_.find( id ) );
-        return iter != contentMap_.end() ? &iter->second : 0;
-    }
+    typedef boost::multi_index_container<
+        ContentEntryPtr,
+        boost::multi_index::indexed_by<
+            boost::multi_index::sequenced<>,
+            boost::multi_index::hashed_unique<
+                boost::multi_index::tag<ByFileId>,
+                GetFileId,
+                HashUniqueFileId
+            >
+        >
+    > Content;
 
-    ContentEntry const & getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache * );
+    ContentEntryPtr getOrCreate( clang::FileManager &, clang::FileEntry const *, Cache * );
 
-    void clear() { contentMap_.clear(); }
+    void clear() { content_.clear(); }
 
 public:
     static ContentCache & singleton() { return singleton_; }
@@ -85,7 +73,7 @@ private:
 
 private:
     mutable boost::shared_mutex contentMutex_;
-    ContentMap contentMap_;
+    Content content_;
 };
 
 

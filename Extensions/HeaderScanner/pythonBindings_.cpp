@@ -126,6 +126,103 @@ PyTypeObject PyPreprocessingContextType = {
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+// --------------
+// PyContentEntry
+// --------------
+//
+////////////////////////////////////////////////////////////////////////////////
+
+typedef struct {
+    PyObject_HEAD
+    ContentEntry * ptr;
+} PyContentEntry;
+
+void PyContentEntry_dealloc( PyContentEntry * self )
+{
+    if ( self->ptr )
+        intrusive_ptr_release( self->ptr );
+    Py_TYPE(self)->tp_free( (PyObject *)self );
+}
+
+PyObject * PyContentEntry_new( PyTypeObject * type, PyObject * args, PyObject * kwds )
+{
+    PyContentEntry * self;
+    self = (PyContentEntry *)type->tp_alloc( type, 0 );
+    return (PyObject *)self;
+}
+
+int PyContentEntry_init( PyContentEntry * self, PyObject * args, PyObject * kwds )
+{
+    return 0;
+}
+
+PyObject * PyContentEntry_getBuffer( PyContentEntry * contentEntry, PyObject * args )
+{
+    char * const data( const_cast<char *>( contentEntry->ptr->buffer->getBufferStart() ) );
+    std::size_t const size( contentEntry->ptr->buffer->getBufferSize() );
+    return PyMemoryView_FromMemory( data, size, PyBUF_READ );
+}
+
+PyObject * PyContentEntry_getChecksum( PyContentEntry * contentEntry, PyObject * args )
+{
+    return PyLong_FromSize_t( contentEntry->ptr->checksum );
+}
+
+PyMethodDef PyContentEntry_methods[] =
+{
+    {"buffer", (PyCFunction)PyContentEntry_getBuffer, METH_NOARGS, "Get content entry buffer."},
+    {"checksum", (PyCFunction)PyContentEntry_getChecksum, METH_NOARGS, "Get content entry checksum."},
+    {NULL}
+};
+
+static PyTypeObject PyContentEntryType = {
+    PyObject_HEAD_INIT(NULL)
+    "ContentEntry",         /* tp_name*/
+    sizeof(PyContentEntry), /* tp_basicsize*/
+    0,                      /* tp_itemsize*/
+    (destructor)
+    PyContentEntry_dealloc, /* tp_dealloc */
+    0,                      /* tp_print*/
+    0,                      /* tp_getattr*/
+    0,                      /* tp_setattr*/
+    0,                      /* tp_compare*/
+    0,                      /* tp_repr*/
+    0,                      /* tp_as_number*/
+    0,                      /* tp_as_sequence*/
+    0,                      /* tp_as_mapping*/
+    0,                      /* tp_hash */
+    0,                      /* tp_call*/
+    0,                      /* tp_str*/
+    0,                      /* tp_getattro*/
+    0,                      /* tp_setattro*/
+    0,                      /* tp_as_buffer*/
+    Py_TPFLAGS_DEFAULT,     /* tp_flags*/
+    "ContentEntry object",  /* tp_doc */
+    0,                      /* tp_traverse */
+    0,                      /* tp_clear */
+    0,                      /* tp_richcompare */
+    0,                      /* tp_weaklistoffset */
+    0,                      /* tp_iter */
+    0,                      /* tp_iternext */
+    PyContentEntry_methods, /* tp_methods */
+    0,                      /* tp_members */
+    0,                      /* tp_getset */
+    0,                      /* tp_base */
+    0,                      /* tp_dict */
+    0,                      /* tp_descr_get */
+    0,                      /* tp_descr_set */
+    0,                      /* tp_dictoffset */
+    (initproc)
+    PyContentEntry_init,    /* tp_init */
+    0,                      /* tp_alloc */
+    PyContentEntry_new,     /* tp_new */
+};
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+//
 // -------
 // PyCache
 // -------
@@ -357,17 +454,18 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
             bool const system = (header.loc == HeaderLocation::system);
             iter = dirsAndHeaders.insert( std::make_pair( header.dir, std::make_pair( system, PyList_New( 0 ) ) ) ).first;
         }
-        PyObject * headerEntry = PyTuple_New( 4 );
+        PyObject * headerEntry = PyTuple_New( 3 );
         PyTuple_SET_ITEM( headerEntry, 0, PyUnicode_FromStringAndSize( header.name.get().data(), header.name.get().size() ) );
 
         PyObject * const isRelative( header.loc == HeaderLocation::relative ? Py_True : Py_False );
         Py_INCREF( isRelative );
         PyTuple_SET_ITEM( headerEntry, 1, isRelative );
+        
+        PyContentEntry * contentEntry( (PyContentEntry *)_PyObject_New( &PyContentEntryType ) );
+        contentEntry->ptr = header.contentEntry.get();
+        intrusive_ptr_add_ref( contentEntry->ptr );
 
-        char * const data( const_cast<char *>( header.buffer->getBufferStart() ) );
-        std::size_t const size( header.buffer->getBufferSize() );
-        PyTuple_SET_ITEM( headerEntry, 2, PyMemoryView_FromMemory( data, size, PyBUF_READ ) );
-        PyTuple_SET_ITEM( headerEntry, 3, PyLong_FromSize_t( header.checksum ) );
+        PyTuple_SET_ITEM( headerEntry, 2, (PyObject *)contentEntry );
         PyList_Append( iter->second.second, headerEntry );
         Py_DECREF( headerEntry );
     }
@@ -509,6 +607,8 @@ PyMODINIT_FUNC PyInit_preprocessing(void)
     PyObject * m;
 
     if ( PyType_Ready( &PyPreprocessingContextType ) < 0 )
+        return NULL;
+    if ( PyType_Ready( &PyContentEntryType ) < 0 )
         return NULL;
     if ( PyType_Ready( &PyCacheType ) < 0 )
         return NULL;

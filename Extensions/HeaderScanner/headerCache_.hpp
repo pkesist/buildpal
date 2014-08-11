@@ -191,7 +191,7 @@ public:
             headers_.end(),
             [=]( Header const & header )
             {
-                return header.buffer == buffer;
+                return header.contentEntry->buffer.get() == buffer;
             }
         ) != headers_.end();
     }
@@ -375,7 +375,7 @@ public:
     ~Cache()
     {
         // Clearing all cache entries will cause cache tree index
-        // to bedestroyed bottom-up, and will avoid (potentially)
+        // to be destroyed bottom-up, and will avoid (potentially)
         // very long recursive call chain.
         cacheEntries_.clear();
     }

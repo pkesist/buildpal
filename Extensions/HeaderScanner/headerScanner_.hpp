@@ -4,6 +4,8 @@
 //------------------------------------------------------------------------------
 #include "utility_.hpp"
 
+#include "contentEntry_.hpp"
+
 #include <clang/Basic/TargetInfo.h>
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/DiagnosticIDs.h>
@@ -62,8 +64,7 @@ struct Header
 {
     Dir dir;
     HeaderName name;
-    llvm::MemoryBuffer const * buffer;
-    std::size_t checksum;
+    ContentEntryPtr contentEntry;
     HeaderLocation::Enum loc;
 };
 

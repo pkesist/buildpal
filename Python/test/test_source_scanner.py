@@ -5,22 +5,6 @@ import os
 from time import sleep
 import codecs
 
-def collect_headers(filename, includes=[], defines=[],
-        sysincludes=[], use_cache=True):
-    preprocessor = preprocessing.Preprocessor(preprocessing.Cache() if use_cache else None)
-    ppc = preprocessing.PreprocessingContext()
-    for path in includes:
-        ppc.add_include_path(path, False)
-    for path in sysincludes:
-        ppc.add_include_path(path, True)
-    for define in defines:
-        define = define.split('=')
-        assert len(define) == 1 or len(define) == 2
-        macro = define[0]
-        value = define[1] if len(define) == 2 else ""
-        ppc.add_macro(macro, value)
-    return preprocessor.scan_headers(ppc, filename)
-
 class Environment:
     def __init__(self, dir):
         self.dir = str(dir)
@@ -34,8 +18,25 @@ class Environment:
         with open(real_path, openmode) as file:
             file.write(content)
 
+    @staticmethod
+    def collect_headers(filename, includes=[], defines=[],
+            sysincludes=[], use_cache=True):
+        preprocessor = preprocessing.Preprocessor(preprocessing.Cache() if use_cache else None)
+        ppc = preprocessing.PreprocessingContext()
+        for path in includes:
+            ppc.add_include_path(path, False)
+        for path in sysincludes:
+            ppc.add_include_path(path, True)
+        for define in defines:
+            define = define.split('=')
+            assert len(define) == 1 or len(define) == 2
+            macro = define[0]
+            value = define[1] if len(define) == 2 else ""
+            ppc.add_macro(macro, value)
+        return preprocessor.scan_headers(ppc, filename)
+
     def run_worker(self, filename, includes=[], defines=[], use_cache=False):
-        header_data, missing_headers = collect_headers(
+        header_data, missing_headers = Environment.collect_headers(
             os.path.join(self.dir, filename),
             includes=[os.path.join(self.dir, i) for i in includes],
             defines=defines, use_cache=use_cache)

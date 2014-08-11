@@ -176,6 +176,7 @@ class CommandProcessor:
                     [os.path.join(self.__cwd, rel_inc) for rel_inc in
                         self.__options.includes()],
                     self.__sysincludes,
+                    self.__options.forced_includes(),
                     pch_header
                 ),
                 self,

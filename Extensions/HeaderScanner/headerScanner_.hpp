@@ -125,18 +125,25 @@ public:
         defines_.push_back( std::make_pair( name, value ) );
     }
 
+    void addForcedInclude( llvm::StringRef include )
+    {
+        forcedIncludes_.push_back( include );
+    }
+
     typedef std::vector<llvm::SmallString<512> > SearchPath;
     typedef std::vector<std::pair<std::string, std::string> > Defines;
+    typedef std::vector<std::string> Includes;
 
     SearchPath const & userSearchPath  () const { return userSearchPath_; }
     SearchPath const & systemSearchPath() const { return systemSearchPath_; }
     Defines    const & defines         () const { return defines_; }
+    Includes   const & forcedIncludes  () const { return forcedIncludes_; }
 
 private:
     SearchPath userSearchPath_;
     SearchPath systemSearchPath_;
     Defines defines_;
-    HeaderList ignoredHeaders_;
+    Includes forcedIncludes_;
 };
 
 class Preprocessor

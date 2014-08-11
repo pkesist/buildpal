@@ -75,10 +75,27 @@ PyObject * PyPreprocessingContext_add_macro( PyPreprocessingContext * self, PyOb
     Py_RETURN_NONE;
 }
 
+PyObject * PyPreprocessingContext_add_forced_include( PyPreprocessingContext * self, PyObject * args, PyObject * kwds )
+{
+    static char * kwlist[] = { "include", NULL };
+
+    char const * include = 0;
+
+    if ( !PyArg_ParseTupleAndKeywords( args, kwds, "s", kwlist, &include ) )
+        return NULL;
+
+    if ( !self->ppContext )
+        return NULL;
+
+    self->ppContext->addForcedInclude( include );
+    Py_RETURN_NONE;
+}
+
 PyMethodDef PyPreprocessingContext_methods[] =
 {
     { "add_include_path"  , (PyCFunction)PyPreprocessingContext_add_include_path, METH_VARARGS | METH_KEYWORDS, "Add a search path." },
     { "add_macro", (PyCFunction)PyPreprocessingContext_add_macro, METH_VARARGS | METH_KEYWORDS, "Add a macro." },
+    { "add_forced_include", (PyCFunction)PyPreprocessingContext_add_forced_include, METH_VARARGS | METH_KEYWORDS, "Add a forced include." },
     {NULL}
 };
 

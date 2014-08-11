@@ -294,6 +294,8 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
     clang::MacroBuilder macroBuilder( predefinesStream );
     for ( PreprocessingContext::Defines::value_type const & macro : ppc.defines() )
         macroBuilder.defineMacro( macro.first, macro.second );
+    for ( PreprocessingContext::Includes::value_type const & include : ppc.forcedIncludes() )
+        macroBuilder.append( llvm::Twine( "#include \"" ) + include + "\"" );
     preprocessor().setPredefines( predefinesStream.str() );
     preprocessor().SetSuppressIncludeNotFoundError( true );
     preprocessor().SetMacroExpansionOnlyInDirectives();

@@ -42,6 +42,9 @@ class CompileOptions:
             macros.append('_MSC_EXTENSIONS=1')
         return macros
 
+    def forced_includes(self):
+        return self.value_dict.get('FI', [])
+
     def should_build_locally(self):
         return any((x in self.compiler.build_local_options() for x in self.value_dict))
 

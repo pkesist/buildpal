@@ -5,11 +5,13 @@ from time import time
 import logging
 
 class PreprocessTask:
-    def __init__(self, source, macros, includes, sysincludes, pch_header):
+    def __init__(self, source, macros, includes, sysincludes, forced_includes,
+            pch_header):
         self.source = source
         self.macros = macros
         self.includes = includes
         self.sysincludes = sysincludes
+        self.forced_includes = forced_includes
         self.pch_header = pch_header
 
 class Task(Timer):

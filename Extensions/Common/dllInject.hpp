@@ -19,7 +19,7 @@ bool injectLibrary(
     char const * dllNames[2],
     // initialization function to call in the DLL
     // signature must be DWORD (*)( void * );
-    char const * initFunc = 0,
+    char const * initFunc,
     // arguments to pass to the initialization function
     // note that this data must be available in the target
     // process:
@@ -27,15 +27,15 @@ bool injectLibrary(
     //     via DuplicateHandle().
     //     if it is memory, it should be allocated in the target process
     //     via VirtualAllocEx().
-    void * initArgs = 0,
+    void * initArgs,
     // local function to call after the remote thread has been spawned, but
     // before it is joined. Zero return signals success.
-    InitFunc localInitFunc = 0,
+    InitFunc localInitFunc,
     // arguments for local function
-    void * localInitArgs = 0
+    void * localInitArgs,
+    HANDLE mainThread,
+    bool shouldResume
 );
-
-DWORD hookWinAPI( PROC * original, PROC * replacement, PROC * * trampoline, unsigned int procCount );
 
 
 //----------------------------------------------------------------------------

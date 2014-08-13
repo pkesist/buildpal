@@ -389,7 +389,7 @@ namespace
 
     }
 
-    bool hookProcess( HANDLE processHandle, FileMapping const * const * fileMapping, DWORD fileMappingCount )
+    bool hookProcess( HANDLE processHandle, FileMapping const * const * fileMapping, DWORD fileMappingCount, HANDLE thread, bool shouldResume )
     {
         HANDLE pipeRead;
         HANDLE pipeWrite;
@@ -413,8 +413,8 @@ namespace
             fileMappingCount,
             pipeWrite
         };
-        return injectLibrary( processHandle, dllNames,
-            initFunc, targetRead, writeMappings, &writeMappingsArgs  );
+        return injectLibrary( processHandle, dllNames, initFunc, targetRead,
+            writeMappings, &writeMappingsArgs, thread, shouldResume );
     }
 }
 
@@ -569,9 +569,7 @@ namespace
         if ( result )
         {
             hookProcess( lpProcessInformation->hProcess, fileMapping,
-                fileMappingCount );
-            if ( shouldResume )
-                ResumeThread( lpProcessInformation->hThread );
+                fileMappingCount, lpProcessInformation->hThread, shouldResume );
         }
         return result;
     }
@@ -590,9 +588,7 @@ namespace
         if ( result )
         {
             hookProcess( lpProcessInformation->hProcess, fileMapping,
-                fileMappingCount );
-            if ( shouldResume )
-                ResumeThread( lpProcessInformation->hThread );
+                fileMappingCount, lpProcessInformation->hThread, shouldResume );
         }
         return result;
     }

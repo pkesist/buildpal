@@ -81,7 +81,7 @@ exe bp_cl
     <threading>multi
 
     # Windows settings.
-    <target-os>windows:<define>_WIN32_WINNT=0x0501
+    <target-os>windows:<define>_WIN32_WINNT=0x0600
 
     # MSVC settings
     <toolset>msvc,<optimization>speed:<cxxflags>"/Ox /GF /GL /GS /GT /GR /WL"
@@ -112,7 +112,7 @@ alias bp_cli_inj
 :
 :
 :
-    <target-os>windows:<define>_WIN32_WINNT=0x0501
+    <target-os>windows:<define>_WIN32_WINNT=0x0600
     # MSVC settings
     <toolset>msvc,<optimization>speed:<cxxflags>"/Ox /GF /GL /GS /GT /GR /WL"
     <toolset>msvc,<optimization>speed:<linkflags>"/OPT:REF /OPT:ICF /LTCG"

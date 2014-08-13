@@ -74,13 +74,15 @@ struct RunDllParams
     char const * dllPath;
     char const * initFunc;
     void * initArgs;
+    DWORD (__stdcall *chainFunc)( void * );
+    void * chainArgs;
 };
 
 typedef HMODULE (WINAPI * LOADLIBRARYA)( char const * );
 typedef FARPROC (WINAPI * GETPROCADDRESS)( HMODULE, char const * );
 typedef DWORD   (WINAPI * INITFUNC)( void * );
 
-DWORD runDLL( void * vpparams )
+DWORD __stdcall runDLL( void * vpparams )
 {
     RunDllParams * params = (RunDllParams *)vpparams;
 #ifdef _WIN64
@@ -144,8 +146,11 @@ DWORD runDLL( void * vpparams )
         INITFUNC initFunc = (INITFUNC)getProcAddress( mydll, params->initFunc );
         if ( !initFunc )
             return -5;
-        return initFunc( params->initArgs );
+        if ( initFunc( params->initArgs ) != 0 )
+            return -6;
     }
+    if ( params->chainFunc )
+        return params->chainFunc( params->chainArgs );
     return 0;
 }
 

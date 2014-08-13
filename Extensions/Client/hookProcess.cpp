@@ -420,7 +420,7 @@ public:
     }
 };
 
-bool hookProcess( HANDLE processHandle )
+bool hookProcess( HANDLE processHandle, HANDLE mainThread, bool resume )
 {
     HANDLE pipeRead;
     HANDLE pipeWrite;
@@ -463,7 +463,7 @@ bool hookProcess( HANDLE processHandle )
     };
     char const initFunc[] = "Initialize";
 
-    return injectLibrary( processHandle, dllNames, initFunc, targetRead );
+    return injectLibrary( processHandle, dllNames, initFunc, targetRead, NULL, NULL, mainThread, resume );
 }
 
 DWORD WINAPI Initialize( HANDLE pipeHandle )
@@ -690,11 +690,8 @@ BOOL WINAPI createProcessA( CREATE_PROCESS_PARAMSA )
         lpProcessInformation
     );
     if ( result )
-    {
-        hookProcess( lpProcessInformation->hProcess );
-        if ( shouldResume )
-            ResumeThread( lpProcessInformation->hThread );
-    }
+        hookProcess( lpProcessInformation->hProcess,
+            lpProcessInformation->hThread, shouldResume );
     return result;
 }
 
@@ -756,9 +753,8 @@ BOOL WINAPI createProcessW( CREATE_PROCESS_PARAMSW )
     );
     if ( result )
     {
-        hookProcess( lpProcessInformation->hProcess );
-        if ( shouldResume )
-            ResumeThread( lpProcessInformation->hThread );
+        hookProcess( lpProcessInformation->hProcess,
+            lpProcessInformation->hThread, shouldResume );
     }
     return result;
 }

@@ -50,7 +50,7 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
     ContentEntryPtr newPtr( ContentEntryPtr( new ContentEntry( uniqueID, buffer.take(),
         file->getModificationTime() ) ) );
     content_.push_front( newPtr );
-    unsigned int const contentLength = 1024;
+    unsigned int const contentLength = 2 * 1024;
     if ( content_.size() > contentLength )
     {
         Content::iterator iter = content_.begin();

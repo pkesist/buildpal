@@ -139,13 +139,9 @@ public:
             }
             else if ( firstIter->first > secondIter->first )
             {
-                const_iterator const tmpEnd = other.upper_bound( firstIter->first );
-                iterator insertHint = firstIter;
+                const_iterator const tmpEnd = other.lower_bound( firstIter->first );
                 for ( ; secondIter != tmpEnd; ++secondIter )
-                {
-                    insertHint = insert( insertHint, *secondIter );
-                    ++insertHint;
-                }
+                    insert( firstIter, *secondIter );
             }
             else
             {

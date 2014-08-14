@@ -115,7 +115,6 @@ public:
             parent_->macroUsed( usedMacro.first, usedMacro.second );
         });
 
-        
         parent_->macroState_.merge( macroState() );
 
         std::copy
@@ -129,12 +128,12 @@ public:
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
 
-    template <typename Predicate>
-    void forEachUsedMacro( Predicate pred ) const
+    template <typename Func>
+    void forEachUsedMacro( Func f ) const
     {
         cacheHit_
-            ? cacheHit_->forEachUsedMacro( pred )
-            : usedHere_.forEachUsedMacro( pred )
+            ? cacheHit_->forEachUsedMacro( f )
+            : usedHere_.forEachUsedMacro( f )
         ;
     }
 

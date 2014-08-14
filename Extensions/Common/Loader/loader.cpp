@@ -68,19 +68,29 @@ __forceinline bool isGetProcAddress( char const * x )
         lower(x[13]) == 's';
 }
 
-
 struct RunDllParams
 {
+    // DLL to load.
     char const * dllPath;
+    // Name of the intialization function to call in the DLL.
     char const * initFunc;
+    // Args for the initFunc.
     void * initArgs;
+    // Tail function to call.
     DWORD (__stdcall *chainFunc)( void * );
+    // Args for chainFunc.
     void * chainArgs;
+    // Whether we should suspend current thread before calling chainFunc.
+    // Note that this is forwarded to the initFunc and initFunc must
+    // respect this flag and call SuspendThread when it is done.
+    // Even though it would be more correct to do the suspending in this
+    // function, it is already quite large and messy.
+    BOOL suspend;
 };
 
 typedef HMODULE (WINAPI * LOADLIBRARYA)( char const * );
 typedef FARPROC (WINAPI * GETPROCADDRESS)( HMODULE, char const * );
-typedef DWORD   (WINAPI * INITFUNC)( void * );
+typedef DWORD   (WINAPI * INITFUNC)( void *, BOOL );
 
 DWORD __stdcall runDLL( void * vpparams )
 {
@@ -146,7 +156,7 @@ DWORD __stdcall runDLL( void * vpparams )
         INITFUNC initFunc = (INITFUNC)getProcAddress( mydll, params->initFunc );
         if ( !initFunc )
             return -5;
-        if ( initFunc( params->initArgs ) != 0 )
+        if ( initFunc( params->initArgs, params->suspend ) != 0 )
             return -6;
     }
     if ( params->chainFunc )

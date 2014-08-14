@@ -69,17 +69,17 @@ struct AllocProcessMemory
 
     void const * get_ptr() const { return &mem_; }
 
-    bool write( void const * data, DWORD len )
+    void * write( void const * data, DWORD len )
     {
         if ( offset_ + len > len_ )
-            return false;
+            return 0;
         SIZE_T written;
         if ( WriteProcessMemory( p_, mem_ + offset_, data, len, &written ) && ( written == len ) )
         {
             offset_ += len;
-            return true;
+            return mem_ + offset_ - len;
         }
-        return false;
+        return 0;
     }
 
     bool skip( DWORD len )
@@ -160,13 +160,7 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
 
     try
     {
-        AllocProcessMemory dllName( processHandle, moduleNameSize );
-        FAIL_IF_NOT( dllName.write( moduleToLoad, moduleNameSize ) );
-
         DWORD const initFuncLen = strlen(initFunc);
-        AllocProcessMemory dllInit( processHandle, initFuncLen );
-        FAIL_IF_NOT( dllInit.write( initFunc, initFuncLen ) );
-
         unsigned char const * loaderCode;
         unsigned int loaderCodeLength;
         if ( targetProcessIs64Bit )
@@ -180,14 +174,24 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
             loaderCodeLength = sizeof(load32);
         }
 
-        // Prepare the function
-        AllocProcessMemory funcData( processHandle, loaderCodeLength, PAGE_EXECUTE_READWRITE );
-        FAIL_IF_NOT( funcData.write( loaderCode, loaderCodeLength ) );
+        AllocProcessMemory memoryBlock( processHandle,
+            moduleNameSize + 1 +
+            initFuncLen + 1 +
+            loaderCodeLength,
+            PAGE_EXECUTE_READWRITE
+        );
+        void * dllName( memoryBlock.write( moduleToLoad, moduleNameSize + 1 ) );
+        FAIL_IF_NOT( dllName );
+
+        void * dllInit( memoryBlock.write( initFunc, initFuncLen + 1 ) );
+        FAIL_IF_NOT( dllInit );
+
+        void * funcData( memoryBlock.write( loaderCode, loaderCodeLength ) );
+        FAIL_IF_NOT( funcData );
 
         // Prepare the parameters
         std::size_t const ptrSize( targetProcessIs64Bit ? 8 : 4 );
-
-        AllocProcessMemory params( processHandle, 5 * ptrSize );
+        AllocProcessMemory params( processHandle, 6 * ptrSize );
 
 #ifdef _WIN64
 #define GetThreadContext32 Wow64GetThreadContext
@@ -206,140 +210,89 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
 #endif
         void * chainFunc = 0;
         void * chainParams = 0;
-        // We can inject DLL using main thread if either:
-        // 1. The user did not create main thread suspended.
-        // 2. There is no init function for the DLL.
-        // In case init function exists, then it probably needs to send
-        // data to the target process DLL function. We have to do that
-        // straight away.
-        // This can be improved, but I don't need it ATM, so I don't care.
-        bool const injectUsingMainThread = shouldResume || !localInitFunc;
+        BOOL const suspend = shouldResume ? 0 : 1;
 
-        if ( injectUsingMainThread )
+        if ( !targetProcessIs64Bit )
         {
-            if ( !targetProcessIs64Bit )
-            {
-                CONTEXT32 ctx;
-                ctx.ContextFlags = CONTEXT_FULL;
-                GetThreadContext32( mainThread, &ctx );
-                chainFunc = (void *)ctx.Eax;
-                chainParams = (void *)ctx.Ebx;
-                // TODO: We leak these in the target process.
-                // No big deal, but clean it up anyway.
-                dllName.release();
-                dllInit.release();
-                ctx.Eax = (DWORD)funcData.release();
-                ctx.Ebx = (DWORD)params.release();
-                SetThreadContext32( mainThread, &ctx );
-            }
-#ifdef _WIN64
-            else
-            {
-                CONTEXT64 ctx;
-                ctx.ContextFlags = CONTEXT_FULL;
-                GetThreadContext64( mainThread, &ctx );
-                chainFunc = (void *)ctx.Rcx;
-                chainParams = (void *)ctx.Rdx;
-                // TODO: We leak these in the target process.
-                // No big deal, but clean it up anyway.
-                dllName.release();
-                dllInit.release();
-                ctx.Rcx = (DWORD)funcData.release();
-                ctx.Rdx = (DWORD)params.release();
-                SetThreadContext64( mainThread, &ctx );
-            }
-#endif
+            CONTEXT32 ctx;
+            ctx.ContextFlags = CONTEXT_FULL;
+            GetThreadContext32( mainThread, &ctx );
+            chainFunc = (void *)ctx.Eax;
+            chainParams = (void *)ctx.Ebx;
+            // TODO: We leak these in the target process.
+            // No big deal, but clean it up anyway.
+            memoryBlock.release();
+            ctx.Eax = (DWORD)funcData;
+            ctx.Ebx = (DWORD)params.release();
+            SetThreadContext32( mainThread, &ctx );
         }
+#ifdef _WIN64
+        else
+        {
+            CONTEXT64 ctx;
+            ctx.ContextFlags = CONTEXT_FULL;
+            GetThreadContext64( mainThread, &ctx );
+            chainFunc = (void *)ctx.Rcx;
+            chainParams = (void *)ctx.Rdx;
+            // TODO: We leak these in the target process.
+            // No big deal, but clean it up anyway.
+            memoryBlock.release();
+            ctx.Rcx = (DWORD)funcData;
+            ctx.Rdx = (DWORD)params.release();
+            SetThreadContext64( mainThread, &ctx );
+        }
+#endif
 
     #ifdef _WIN64
         if ( targetProcessIs64Bit )
         {
-            FAIL_IF_NOT( params.write( dllName.get_ptr(), 8 ) );
-            FAIL_IF_NOT( params.write( dllInit.get_ptr(), 8 ) );
-            FAIL_IF_NOT( params.write( &initArgs        , 8 ) );
-            FAIL_IF_NOT( params.write( &chainFunc       , 8 ) );
-            FAIL_IF_NOT( params.write( &chainParams     , 8 ) );
+            FAIL_IF_NOT( params.write( &dllName    , 8 ) );
+            FAIL_IF_NOT( params.write( &dllInit    , 8 ) );
+            FAIL_IF_NOT( params.write( &initArgs   , 8 ) );
+            FAIL_IF_NOT( params.write( &chainFunc  , 8 ) );
+            FAIL_IF_NOT( params.write( &chainParams, 8 ) );
+            FAIL_IF_NOT( params.write( &suspend    , 8 ) );
         }
         else
         {
             // --------------------
             // Should never happen.
             // --------------------
-            FAIL_IF( ((UINT_PTR)dllName.get_ptr() & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)dllInit.get_ptr() & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)initArgs          & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)chainFunc         & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)chainParams       & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)dllName     & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)dllInit     & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)initArgs    & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)chainFunc   & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)chainParams & 0xFFFFFFFF00000000) );
+            FAIL_IF( ((UINT_PTR)suspend     & 0xFFFFFFFF00000000) );
             // --------------------
-            FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
-            FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
-            FAIL_IF_NOT( params.write( &initArgs        , 4 ) );
-            FAIL_IF_NOT( params.write( &chainFunc       , 4 ) );
-            FAIL_IF_NOT( params.write( &chainParams     , 4 ) );
+            FAIL_IF_NOT( params.write( &dllName    , 4 ) );
+            FAIL_IF_NOT( params.write( &dllInit    , 4 ) );
+            FAIL_IF_NOT( params.write( &initArgs   , 4 ) );
+            FAIL_IF_NOT( params.write( &chainFunc  , 4 ) );
+            FAIL_IF_NOT( params.write( &chainParams, 4 ) );
+            FAIL_IF_NOT( params.write( &suspend    , 4 ) );
         }
     #else
         FAIL_IF( targetProcessIs64Bit );
-        FAIL_IF_NOT( params.write( dllName.get_ptr(), 4 ) );
-        FAIL_IF_NOT( params.write( dllInit.get_ptr(), 4 ) );
-        FAIL_IF_NOT( params.write( &initArgs        , 4 ) );
-        FAIL_IF_NOT( params.write( &chainFunc       , 4 ) );
-        FAIL_IF_NOT( params.write( &chainParams     , 4 ) );
+        FAIL_IF_NOT( params.write( &dllName    , 4 ) );
+        FAIL_IF_NOT( params.write( &dllInit    , 4 ) );
+        FAIL_IF_NOT( params.write( &initArgs   , 4 ) );
+        FAIL_IF_NOT( params.write( &chainFunc  , 4 ) );
+        FAIL_IF_NOT( params.write( &chainParams, 4 ) );
+        FAIL_IF_NOT( params.write( &suspend    , 4 ) );
     #endif
 
     #undef FAIL_IF
     #undef FAIL_IF_NOT
 
-
-        if ( injectUsingMainThread )
-        {
-            ResumeThread( mainThread );
-            DWORD localInitSuccess = 1;
-            if ( localInitFunc )
-            {
-                localInitSuccess = localInitFunc( localInitArgs );
-            };
-            return localInitSuccess != 0;
-        }
-        else
-        {
-            // Call the function.
-            HANDLE const remoteThreadHandle = createRemoteThread( processHandle,
-                (LPTHREAD_START_ROUTINE)funcData.get(), params.get() );
-            CONTEXT32 ctx;
-            ctx.ContextFlags = CONTEXT_FULL;
-            GetThreadContext32( remoteThreadHandle, &ctx );
-            ResumeThread( remoteThreadHandle );
-        
-            DWORD localInitSuccess = 1;
-            if ( localInitFunc )
-            {
-                localInitSuccess = localInitFunc( localInitArgs );
-            };
-
-            if ( localInitSuccess )
-            {
-                DWORD remoteThreadExitCode;
-                ::WaitForSingleObject( remoteThreadHandle, INFINITE );
-                ::GetExitCodeThread( remoteThreadHandle, &remoteThreadExitCode );
-                ::CloseHandle( remoteThreadHandle );
-                if ( ( remoteThreadExitCode == 0 ) && shouldResume )
-                {
-                    ResumeThread( mainThread );
-                    return true;
-                }
-                return remoteThreadExitCode == 0;
-            }
-            else
-            {
-                DWORD result = ::WaitForSingleObject( remoteThreadHandle, 500 );
-                if ( result == WAIT_TIMEOUT )
-                {
-                    TerminateThread( remoteThreadHandle, (DWORD)-1 );
-                }
-                CloseHandle( remoteThreadHandle );
-                return false;
-            }
-        }
+        // Resume the main thread. It will suspend itself if needeed when it is
+        // done with DLL initialization (if the initialization function respects
+        // the suspended flag).
+        // Note that theoretically there is race condition here. It is possible that
+        // the user will ResumeThread on the resulting handle before it gets
+        // suspended by the initialization function.
+        ResumeThread( mainThread );
+        return !localInitFunc || localInitFunc( localInitArgs ) == 0;
     }
     catch ( std::bad_alloc const & ) { return false; }
     catch ( std::exception const & ) { return false; }

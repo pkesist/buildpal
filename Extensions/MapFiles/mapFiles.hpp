@@ -47,7 +47,7 @@ BOOL WINAPI createProcessWithMappingW(
   _In_         DWORD fileMapsCount
 );
 
-DWORD WINAPI Initialize( HANDLE readHandle );
+DWORD WINAPI Initialize( HANDLE readHandle, BOOL suspend );
 
 //------------------------------------------------------------------------------
 #endif

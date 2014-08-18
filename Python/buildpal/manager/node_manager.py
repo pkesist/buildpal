@@ -72,7 +72,8 @@ class NodeManager:
             for file, relative, content_entry in data:
                 logging.debug("    %s %s", file, "[relative to source]" if relative else "")
 
-        if task.missing_headers:
+        if task.missing_headers and not (len(task.missing_headers) == 1 and
+                task.missing_headers[0] == task.preprocess_task.pch_header):
             error = "BUILDPAL ERROR: Cannot compile '{}' due to missing headers:\n".format(
                 task.source)
             missing_headers = str()

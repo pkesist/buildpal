@@ -33,7 +33,7 @@
 #include <fstream>
 #include <windows.h>
 
-struct HeaderCtx;
+class HeaderCtx;
 
 namespace clang
 {

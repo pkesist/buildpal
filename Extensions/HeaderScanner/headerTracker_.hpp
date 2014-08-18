@@ -29,7 +29,7 @@ namespace clang
     class HeaderSearch;
 }
 
-struct HeaderCtx
+class HeaderCtx
 {
 private:
     HeaderCtx( HeaderCtx const & );

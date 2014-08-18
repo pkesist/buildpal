@@ -137,11 +137,10 @@ public:
             {
                 firstIter = lower_bound( secondIter->first );
             }
-            else if ( firstIter->first > secondIter->first )
+            else if ( secondIter->first < firstIter->first )
             {
-                const_iterator const tmpEnd = other.lower_bound( firstIter->first );
-                for ( ; secondIter != tmpEnd; ++secondIter )
-                    insert( firstIter, *secondIter );
+                while ( ( secondIter != secondEnd ) && ( secondIter->first < firstIter->first ) )
+                    insert( firstIter, *secondIter++ );
             }
             else
             {

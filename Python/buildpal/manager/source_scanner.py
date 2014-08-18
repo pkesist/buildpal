@@ -50,11 +50,12 @@ def header_info(preprocessor, preprocess_task):
 
 
 class SourceScanner:
+    class ShutdownThread: pass
+
     def __init__(self, notify, update_ui, thread_count=cpu_count() + 1):
         preprocessing.clear_content_cache()
         self.cache = preprocessing.Cache()
         self.in_queue = Queue()
-        self.out_queue = Queue()
         self.closing = False
         self.threads = set()
         for i in range(thread_count):
@@ -74,30 +75,22 @@ class SourceScanner:
         task.note_time('queued for preprocessing')
         self.in_queue.put(task)
 
-    def completed_task(self):
-        try:
-            return self.out_queue.get(block=False)
-        except Empty:
-            return None
-
     def __process_task_worker(self, notify, update_ui):
         preprocessor = preprocessing.Preprocessor(self.cache)
         while True:
+            task = self.in_queue.get()
+            if task is self.ShutdownThread:
+                return
+            task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
             try:
-                task = self.in_queue.get(timeout=1)
-                task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
-                try:
-                    task.header_info, task.server_task.filelist, task.missing_headers = \
-                        header_info(preprocessor, task.preprocess_task)
-                    task.note_time('preprocessed', 'preprocessing time')
-                except Exception as e:
-                    notify(task, e)
-                else:
-                    update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
-                    notify(task)
-            except Empty:
-                if self.closing:
-                    return
+                task.header_info, task.server_task.filelist, task.missing_headers = \
+                    header_info(preprocessor, task.preprocess_task)
+                task.note_time('preprocessed', 'preprocessing time')
+            except Exception as e:
+                notify(task, e)
+            else:
+                update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
+                notify(task)
 
     def __enter__(self):
         return self
@@ -106,6 +99,8 @@ class SourceScanner:
         self.close()
 
     def close(self):
-        self.closing = True
+        for thread in self.threads:
+            self.in_queue.put(self.ShutdownThread)
+
         for thread in self.threads:
             thread.join()

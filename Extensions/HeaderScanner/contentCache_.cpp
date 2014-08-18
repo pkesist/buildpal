@@ -34,6 +34,7 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
                 file->getModificationTime() ) );
             contentByFileId.erase( iter );
             content_.push_front( newPtr );
+            contentSize_ += newPtr->size() - contentEntryPtr->size();
             return newPtr;
         }
     }
@@ -50,12 +51,12 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
     ContentEntryPtr newPtr( ContentEntryPtr( new ContentEntry( uniqueID, buffer.take(),
         file->getModificationTime() ) ) );
     content_.push_front( newPtr );
-    unsigned int const contentLength = 2 * 1024;
-    if ( content_.size() > contentLength )
+    contentSize_ += newPtr->size();
+    unsigned int const maxContentCacheSize = 100 * 1024 * 1024;
+    while ( contentSize_ > maxContentCacheSize )
     {
-        Content::iterator iter = content_.begin();
-        std::advance( iter, contentLength );
-        content_.erase( iter, content_.end() );
+        contentSize_ -= content_.back()->size();
+        content_.pop_back();
     }
     return newPtr;
 }

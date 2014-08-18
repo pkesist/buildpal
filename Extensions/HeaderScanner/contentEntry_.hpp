@@ -41,6 +41,8 @@ public:
         return *this;
     }
 
+    std::size_t const size() const { return buffer->getBufferSize(); }
+
     llvm::sys::fs::UniqueID id_;
     llvm::OwningPtr<llvm::MemoryBuffer> buffer;
     std::size_t checksum;

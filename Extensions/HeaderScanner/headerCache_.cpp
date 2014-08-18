@@ -151,7 +151,7 @@ std::string Cache::uniqueFileName()
 
 void Cache::maintenance()
 {
-    unsigned int const cacheCleanupPeriod = 1024 * 5;
+    unsigned int const cacheCleanupPeriod = 1024 * 2;
     unsigned int const currentTime = hits_ + misses_;
     if ( currentTime % cacheCleanupPeriod )
         return;
@@ -176,7 +176,7 @@ void Cache::maintenance()
 
     typedef CacheEntries::index<ByLastTimeHit>::type IndexType;
     IndexType & index( cacheEntries_.get<ByLastTimeHit>() );
-    unsigned int const historyLength = 4 * cacheCleanupPeriod;
+    unsigned int const historyLength = 8 * cacheCleanupPeriod;
     unsigned int const cutoffTime(
         currentTime > historyLength
             ? currentTime - historyLength

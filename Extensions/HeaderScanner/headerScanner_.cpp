@@ -1,4 +1,5 @@
 //------------------------------------------------------------------------------
+#include "contentCache_.hpp"
 #include "headerScanner_.hpp"
 #include "headerTracker_.hpp"
 #include "utility_.hpp"
@@ -228,7 +229,7 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
 {
     // Initialize file manager.
     fileManager_.reset( new clang::FileManager( fsOpts_ ) );
-    fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
+    fileManager().addStatCache( new StatCache( ContentCache::singleton().prevStatCalls() ) );
 
     // Initialize source manager.
     sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );

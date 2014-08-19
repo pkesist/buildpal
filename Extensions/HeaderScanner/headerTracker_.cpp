@@ -273,7 +273,7 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
 
     MacroState changedMacros;
     for ( MacroName const & macroName : changedHere_ )
-        changedMacros.insert( std::make_pair( macroName, getMacroValue( macroName ) ) );
+        changedMacros.defineMacro( macroName, getMacroValue( macroName ) );
 
     cacheHit_ = cache.addEntry(
         file->getUniqueID(),

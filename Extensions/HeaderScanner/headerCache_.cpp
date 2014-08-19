@@ -71,10 +71,8 @@ llvm::MemoryBuffer const * CacheEntry::cachedContent()
 void CacheEntry::generateContent( std::string & buffer )
 {
     llvm::raw_string_ostream defineStream( buffer );
-    std::for_each(
-        macroState().begin(),
-        macroState().end  (),
-        [&]( MacroState::value_type const & macro )
+    macroState().forEachMacro(
+        [&]( Macro const & macro )
         {
             if ( macro.second == undefinedMacroValue )
                 defineStream << "#undef " << macro.first << '\n';

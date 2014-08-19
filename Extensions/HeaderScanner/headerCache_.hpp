@@ -100,9 +100,14 @@ struct IndexedUsedMacros : private boost::multi_index_container<
     }
 };
 
-typedef std::unordered_map<MacroName, MacroValue> MacroStateBase;
-struct MacroState : public MacroStateBase
+struct MacroState
 {
+private:
+    typedef std::unordered_map<MacroName, MacroValue> MacroValueMap;
+
+private:
+    MacroValueMap macroValueMap_;
+
 private:
     MacroState( MacroState const & ms );
     MacroState & operator=( MacroState const & ms );
@@ -110,12 +115,12 @@ private:
 public:
     MacroState() {}
     MacroState( MacroState && ms ) :
-        MacroStateBase( std::move( ms ) ) {}
+        macroValueMap_( std::move( ms.macroValueMap_ ) ) {}
 
     void defineMacro( MacroName const & name, MacroValue const & value )
     {
-        std::pair<iterator, bool> const insertResult(
-            insert( std::make_pair( name, value ) ) );
+        std::pair<MacroValueMap::iterator, bool> const insertResult(
+            macroValueMap_.insert( std::make_pair( name, value ) ) );
         if ( !insertResult.second )
             insertResult.first->second = value;
     }
@@ -127,11 +132,17 @@ public:
 
     bool getMacroValue( MacroName const & name, MacroValue & value ) const
     {
-        const_iterator const result = find( name );
-        if ( result == end() )
+        MacroValueMap::const_iterator const result = macroValueMap_.find( name );
+        if ( result == macroValueMap_.end() )
             return false;
         value = result->second;
         return true;
+    }
+
+    template <typename F>
+    void forEachMacro( F f ) const
+    {
+        std::for_each( macroValueMap_.begin(), macroValueMap_.end(), f );
     }
 };
 

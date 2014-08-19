@@ -47,19 +47,15 @@ private:
 public:
     HeaderCtx( clang::FileEntry const * replacement,
         CacheEntryPtr const & cacheHit,
+        HeaderCtx * parent,
         clang::Preprocessor const & preprocessor
     )
         :
         preprocessor_( preprocessor ),
         replacement_( replacement ),
-        parent_( 0 ),
+        parent_( parent ),
         cacheHit_( cacheHit )
     {
-    }
-
-    void setParent( HeaderCtx * parent )
-    {
-        parent_ = parent;
     }
 
     HeaderCtx * parent() const { return parent_; }
@@ -202,17 +198,15 @@ public:
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
 private:
-    void pushHeaderCtx( std::unique_ptr<HeaderCtx> headerCtx )
+    void pushHeaderCtx( clang::FileEntry const * replacement, CacheEntryPtr cacheHit )
     {
-        headerCtx->setParent( pCurrentCtx_ );
-        pCurrentCtx_ = headerCtx.release();
+        pCurrentCtx_ = new HeaderCtx( replacement, cacheHit, pCurrentCtx_, preprocessor_ );
     }
 
     void popHeaderCtx()
     {
         HeaderCtx * result = pCurrentCtx_;
         pCurrentCtx_ = pCurrentCtx_->parent();
-        result->setParent( 0 );
         delete result;
     }
 

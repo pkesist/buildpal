@@ -215,7 +215,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     logging_stream << "Entering source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
 
-    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( 0, CacheEntryPtr(), preprocessor_ ) ) );
+    pushHeaderCtx( 0, CacheEntryPtr() );
 }
 
 void HeaderTracker::enterHeader()
@@ -226,7 +226,7 @@ void HeaderTracker::enterHeader()
         logging_stream << "    ";
     logging_stream << "Entering header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
-    pushHeaderCtx( std::unique_ptr<HeaderCtx>( new HeaderCtx( replacement_, cacheHit_, preprocessor_ ) ) );
+    pushHeaderCtx( replacement_, cacheHit_ );
     if ( !cacheHit_ )
         currentHeaderCtx().macroUsed( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
     replacement_ = 0;

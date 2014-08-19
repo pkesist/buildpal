@@ -29,6 +29,8 @@ namespace clang
     class HeaderSearch;
 }
 
+typedef std::unordered_set<MacroName> MacroSet;
+
 class HeaderCtx
 {
 private:
@@ -40,12 +42,15 @@ private:
     clang::FileEntry const * replacement_;
     HeaderCtx * parent_;
     CacheEntryPtr cacheHit_;
-    MacroState macroState_;
+    MacroState & macroState_;
     IndexedUsedMacros usedHere_;
+    MacroSet changedHere_;
     Headers includedHeaders_;
 
 public:
-    HeaderCtx( clang::FileEntry const * replacement,
+    HeaderCtx(
+        MacroState & macroState,
+        clang::FileEntry const * replacement,
         CacheEntryPtr const & cacheHit,
         HeaderCtx * parent,
         clang::Preprocessor const & preprocessor
@@ -54,7 +59,8 @@ public:
         preprocessor_( preprocessor ),
         replacement_( replacement ),
         parent_( parent ),
-        cacheHit_( cacheHit )
+        cacheHit_( cacheHit ),
+        macroState_( macroState )
     {
     }
 
@@ -63,9 +69,9 @@ public:
     void macroUsed( MacroName macroName )
     {
         assert( !fromCache() );
-        // Macro is marked as 'used' in this header only if it was neither
-        // defined nor undefined here.
-        if ( macroState_.find( macroName ) == macroState_.end() )
+        // Macro is marked as 'used' in this header only if it was not changed
+        // here
+        if ( changedHere_.find( macroName ) == changedHere_.end() )
             usedHere_.addMacro( macroName, [this]( MacroName name )
             {
                 return getMacroValue( name );
@@ -76,23 +82,20 @@ public:
     {
         assert( !fromCache() );
         macroState_.defineMacro( macroName, macroValue );
+        changedHere_.insert( macroName );
     }
 
     void macroUndefined( MacroName macroName )
     {
         assert( !fromCache() );
         macroState_.undefineMacro( macroName );
+        changedHere_.insert( macroName );
     }
 
     MacroValue getMacroValue( MacroName name ) const
     {
-        MacroState::const_iterator const stateIter( macroState_.find( name ) );
-        if ( stateIter != macroState_.end() )
-            return stateIter->second;
-        return parent_
-            ? parent_->getMacroValue( name )
-            : undefinedMacroValue
-        ;
+        MacroValue value;
+        return macroState_.getMacroValue( name, value ) ? value : undefinedMacroValue;
     }
 
     void addHeader( Header const & header )
@@ -111,7 +114,18 @@ public:
             parent_->macroUsed( usedMacro.first, usedMacro.second );
         });
 
-        parent_->macroState_.merge( macroState() );
+        if ( fromCache() )
+        {
+            for ( Macro const & macro : cacheHit_->macroState() )
+            {
+                parent_->changedHere_.insert( macro.first );
+                macroState_.defineMacro( macro.first, macro.second );
+            }
+        }
+        else
+        {
+            parent_->changedHere_.insert( changedHere_.begin(), changedHere_.end() );
+        }
 
         std::copy
         (
@@ -135,7 +149,6 @@ public:
 
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
-    MacroState const & macroState() const { return cacheHit_ ? cacheHit_->macroState() : macroState_; }
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }
     Headers const & includedHeaders() const { return cacheHit_ ? cacheHit_->headers() : includedHeaders_; }
 
@@ -146,9 +159,9 @@ private:
     void macroUsed( MacroName macroName, MacroValue macroValue )
     {
         assert( !fromCache() );
-        // Macro is marked as 'used' in this header only if it was neither
-        // defined nor undefined here.
-        if ( macroState_.find( macroName ) == macroState_.end() )
+        // Macro is marked as 'used' in this header only if it was not changed
+        // here.
+        if ( changedHere_.find( macroName ) == changedHere_.end() )
             usedHere_.addMacro( macroName, macroValue );
     }
 };
@@ -166,6 +179,7 @@ private:
     Cache * cache_;
     CacheEntryPtr cacheHit_;
     IncludeStack fileStack_;
+    MacroState macroState_;
     UsedCacheEntries usedCacheEntries_;
 
 public:
@@ -200,7 +214,7 @@ public:
 private:
     void pushHeaderCtx( clang::FileEntry const * replacement, CacheEntryPtr cacheHit )
     {
-        pCurrentCtx_ = new HeaderCtx( replacement, cacheHit, pCurrentCtx_, preprocessor_ );
+        pCurrentCtx_ = new HeaderCtx( macroState_, replacement, cacheHit, pCurrentCtx_, preprocessor_ );
     }
 
     void popHeaderCtx()

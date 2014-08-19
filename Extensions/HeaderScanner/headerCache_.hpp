@@ -100,7 +100,7 @@ struct IndexedUsedMacros : private boost::multi_index_container<
     }
 };
 
-typedef std::map<MacroName, MacroValue> MacroStateBase;
+typedef std::unordered_map<MacroName, MacroValue> MacroStateBase;
 struct MacroState : public MacroStateBase
 {
 private:
@@ -125,31 +125,13 @@ public:
         defineMacro( name, undefinedMacroValue );
     }
 
-    void merge( MacroState const & other )
+    bool getMacroValue( MacroName name, MacroValue & value ) const
     {
-        iterator firstIter = begin();
-        iterator const firstEnd = end();
-        const_iterator secondIter = other.begin();
-        const_iterator const secondEnd = other.end();
-        while ( ( firstIter != firstEnd ) && ( secondIter != secondEnd ) )
-        {
-            if ( firstIter->first < secondIter->first )
-            {
-                firstIter = lower_bound( secondIter->first );
-            }
-            else if ( secondIter->first < firstIter->first )
-            {
-                while ( ( secondIter != secondEnd ) && ( secondIter->first < firstIter->first ) )
-                    insert( firstIter, *secondIter++ );
-            }
-            else
-            {
-                firstIter->second = secondIter->second;
-                ++firstIter;
-                ++secondIter;
-            }
-        }
-        insert( secondIter, secondEnd );
+        const_iterator const result = find( name );
+        if ( result == end() )
+            return false;
+        value = result->second;
+        return true;
     }
 };
 
@@ -329,14 +311,16 @@ private:
                 std::ofstream stream( "tree_conflict.txt" );
                 stream << "Conflict - expected '" << macroName_.get().str().str() << "' got '" << name.get().str().str() << "'\n";
                 CacheTree * current = parent_;
+                MacroValue val = macroValue_;
                 while ( current )
                 {
-                    stream << current->macroName_.get().str().str() << ' ' << macroValue_.get().str().str() << '\n';
+                    stream << current->macroName_.get().str().str() << ' ' << val.get().str().str() << '\n';
                     if ( current->parent_ )
                         val = current->macroValue_;
                     current = current->parent_;
                 }
             }
+            DebugBreak();
         }
 #endif
         assert( !getEntry() );

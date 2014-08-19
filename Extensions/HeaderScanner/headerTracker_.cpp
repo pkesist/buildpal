@@ -270,11 +270,16 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
     {
         usedMacros.push_back( macro );
     });
+
+    MacroState changedMacros;
+    for ( MacroName macroName : changedHere_ )
+        changedMacros.insert( std::make_pair( macroName, getMacroValue( macroName ) ) );
+
     cacheHit_ = cache.addEntry(
         file->getUniqueID(),
         searchPathId,
         std::move( usedMacros ),
-        std::move( macroState_ ),
+        std::move( changedMacros ),
         std::move( includedHeaders_ )
     );
 }

@@ -88,9 +88,9 @@ struct IndexedUsedMacros : private boost::multi_index_container<
         push_back( std::make_pair( macroName, getter( macroName ) ) );
     }
 
-    void addMacro( MacroName const macroName, MacroValue const macroValue )
+    void addMacro( MacroName const & macroName, MacroValue const & macroValue )
     {
-        return addMacro( macroName, [=]( MacroName ) -> MacroValue { return macroValue; } );
+        return addMacro( macroName, [&]( MacroName const & ) -> MacroValue { return macroValue; } );
     }
 
     template <typename Predicate>
@@ -112,7 +112,7 @@ public:
     MacroState( MacroState && ms ) :
         MacroStateBase( std::move( ms ) ) {}
 
-    void defineMacro( MacroName name, MacroValue value )
+    void defineMacro( MacroName const & name, MacroValue const & value )
     {
         std::pair<iterator, bool> const insertResult(
             insert( std::make_pair( name, value ) ) );
@@ -120,12 +120,12 @@ public:
             insertResult.first->second = value;
     }
 
-    void undefineMacro( MacroName name )
+    void undefineMacro( MacroName const & name )
     {
         defineMacro( name, undefinedMacroValue );
     }
 
-    bool getMacroValue( MacroName name, MacroValue & value ) const
+    bool getMacroValue( MacroName const & name, MacroValue & value ) const
     {
         const_iterator const result = find( name );
         if ( result == end() )
@@ -300,7 +300,7 @@ private:
         macroValue_ = macroValue;
     }
 
-    CacheTree & getChild( MacroName name, MacroValue value )
+    CacheTree & getChild( MacroName const & name, MacroValue const & value )
     {
         if ( !macroName_ )
             macroName_ = name;

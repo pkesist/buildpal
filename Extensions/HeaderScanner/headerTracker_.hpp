@@ -66,33 +66,33 @@ public:
 
     HeaderCtx * parent() const { return parent_; }
 
-    void macroUsed( MacroName macroName )
+    void macroUsed( MacroName const & macroName )
     {
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was not changed
         // here
         if ( changedHere_.find( macroName ) == changedHere_.end() )
-            usedHere_.addMacro( macroName, [this]( MacroName name )
+            usedHere_.addMacro( macroName, [this]( MacroName const & name )
             {
                 return getMacroValue( name );
             } );
     }
 
-    void macroDefined( MacroName macroName, MacroValue macroValue )
+    void macroDefined( MacroName const & macroName, MacroValue const & macroValue )
     {
         assert( !fromCache() );
         macroState_.defineMacro( macroName, macroValue );
         changedHere_.insert( macroName );
     }
 
-    void macroUndefined( MacroName macroName )
+    void macroUndefined( MacroName const & macroName )
     {
         assert( !fromCache() );
         macroState_.undefineMacro( macroName );
         changedHere_.insert( macroName );
     }
 
-    MacroValue getMacroValue( MacroName name ) const
+    MacroValue getMacroValue( MacroName const & name ) const
     {
         MacroValue value;
         return macroState_.getMacroValue( name, value ) ? value : undefinedMacroValue;
@@ -156,7 +156,7 @@ public:
     clang::FileEntry const * replacement() const { return replacement_; }
 
 private:
-    void macroUsed( MacroName macroName, MacroValue macroValue )
+    void macroUsed( MacroName const & macroName, MacroValue const & macroValue )
     {
         assert( !fromCache() );
         // Macro is marked as 'used' in this header only if it was not changed
@@ -212,7 +212,7 @@ public:
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
 private:
-    void pushHeaderCtx( clang::FileEntry const * replacement, CacheEntryPtr cacheHit )
+    void pushHeaderCtx( clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit )
     {
         pCurrentCtx_ = new HeaderCtx( macroState_, replacement, cacheHit, pCurrentCtx_, preprocessor_ );
     }

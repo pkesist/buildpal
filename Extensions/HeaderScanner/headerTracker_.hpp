@@ -116,11 +116,11 @@ public:
 
         if ( fromCache() )
         {
-            for ( Macro const & macro : cacheHit_->macroState() )
+            cacheHit_->macroState().forEachMacro([this]( Macro const & macro )
             {
                 parent_->changedHere_.insert( macro.first );
                 macroState_.defineMacro( macro.first, macro.second );
-            }
+            });
         }
         else
         {

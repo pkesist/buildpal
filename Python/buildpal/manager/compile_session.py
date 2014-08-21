@@ -205,7 +205,7 @@ class ServerSession:
         source_file = self.task.source
 
         result = []
-        for dir, system, data in header_info:
+        for dir, data in header_info:
             dir_bytes = dir.encode()
             for file, relative, content_entry in data:
                 if not relative and not (dir, file) in in_filelist:

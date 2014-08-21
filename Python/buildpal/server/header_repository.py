@@ -52,7 +52,7 @@ class HeaderRepository:
         """
         needed_files = {}
         out_list = set()
-        for remote_dir, is_system, data in in_list:
+        for remote_dir, data in in_list:
             for name, checksum in data:
                 key = (remote_dir, name)
                 if self.checksums[machine_id].get(key) != checksum:

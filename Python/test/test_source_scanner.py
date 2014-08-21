@@ -40,7 +40,7 @@ class Environment:
             os.path.join(self.dir, filename),
             includes=[os.path.join(self.dir, i) for i in includes],
             defines=defines, use_cache=use_cache)
-        return set(x[0] for dir, system, headers in header_data for x in headers)
+        return set(x[0] for dir, headers in header_data for x in headers)
 
     def run_nocache(self, filename, includes=[], defines=[]):
         return self.run_worker(filename, includes, defines, use_cache=False)

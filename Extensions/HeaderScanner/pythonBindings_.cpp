@@ -444,62 +444,50 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
         PyErr_SetString( PyExc_Exception, "Unhandled exception" );
         return NULL;
     }
-    Py_BLOCK_THREADS
     
     if ( !result )
     {
+        Py_BLOCK_THREADS
         PyErr_SetString( PyExc_Exception, "Failed to preprocess file." );
         return NULL;
     }
 
     // Group result by dir.
-    struct HashDir
-    {
-        std::size_t operator()( Dir const & dir ) const
-        {
-            HashString hs;
-            return hs( dir.get() );
-        }
-    };
-    typedef std::unordered_map<Dir, std::pair<bool, PyObject *>, HashDir> DirsAndHeaders;
+    typedef std::vector<Header const *> HeaderPtrList;
+    typedef std::unordered_map<Dir, HeaderPtrList> DirsAndHeaders;
     DirsAndHeaders dirsAndHeaders;
     for ( Header const & header : headers )
-    {
-        DirsAndHeaders::iterator iter( dirsAndHeaders.find( header.dir ) );
-        if ( iter == dirsAndHeaders.end() )
-        {
-            bool const system = (header.loc == HeaderLocation::system);
-            iter = dirsAndHeaders.insert( std::make_pair( header.dir, std::make_pair( system, PyList_New( 0 ) ) ) ).first;
-        }
-        PyObject * headerEntry = PyTuple_New( 3 );
-        PyTuple_SET_ITEM( headerEntry, 0, PyUnicode_FromStringAndSize( header.name.get().data(), header.name.get().size() ) );
+        dirsAndHeaders[ header.dir ].push_back( &header );
 
-        PyObject * const isRelative( header.loc == HeaderLocation::relative ? Py_True : Py_False );
-        Py_INCREF( isRelative );
-        PyTuple_SET_ITEM( headerEntry, 1, isRelative );
-        
-        PyContentEntry * contentEntry( (PyContentEntry *)_PyObject_New( &PyContentEntryType ) );
-        contentEntry->ptr = header.contentEntry.get();
-        intrusive_ptr_add_ref( contentEntry->ptr );
-
-        PyTuple_SET_ITEM( headerEntry, 2, (PyObject *)contentEntry );
-        PyList_Append( iter->second.second, headerEntry );
-        Py_DECREF( headerEntry );
-    }
-
-    PyObject * headersTuple = PyTuple_New( dirsAndHeaders.size() );
-    std::size_t headerIndex( 0 );
+    Py_BLOCK_THREADS
+    PyObject * dirsTuple = PyTuple_New( dirsAndHeaders.size() );
+    std::size_t dirIndex( 0 );
     for ( DirsAndHeaders::value_type const & dirAndHeaders : dirsAndHeaders )
     {
-        PyObject * dirTuple = PyTuple_New( 3 );
+        PyObject * headersInDirTuple = PyTuple_New( dirAndHeaders.second.size() );
+        std::size_t headersInDirTupleIndex( 0 );
+        for ( Header const * header : dirAndHeaders.second )
+        {
+            PyObject * headerEntry = PyTuple_New( 3 );
+            PyTuple_SET_ITEM( headerEntry, 0, PyUnicode_FromStringAndSize( header->name.get().data(), header->name.get().size() ) );
+
+            PyObject * const isRelative( header->loc == HeaderLocation::relative ? Py_True : Py_False );
+            Py_INCREF( isRelative );
+            PyTuple_SET_ITEM( headerEntry, 1, isRelative );
+        
+            PyContentEntry * contentEntry( (PyContentEntry *)_PyObject_New( &PyContentEntryType ) );
+            contentEntry->ptr = header->contentEntry.get();
+            intrusive_ptr_add_ref( contentEntry->ptr );
+
+            PyTuple_SET_ITEM( headerEntry, 2, (PyObject *)contentEntry );
+            PyTuple_SET_ITEM( headersInDirTuple, headersInDirTupleIndex++, headerEntry );
+        }
+        PyObject * dirTuple = PyTuple_New( 2 );
         llvm::StringRef const dirStr( dirAndHeaders.first.get() );
         PyObject * dir = PyUnicode_FromStringAndSize( dirStr.data(), dirStr.size() );
         PyTuple_SET_ITEM( dirTuple, 0, dir );
-        PyObject * pyBool( dirAndHeaders.second.first ? Py_True : Py_False );
-        Py_INCREF( pyBool );
-        PyTuple_SET_ITEM( dirTuple, 1, pyBool );
-        PyTuple_SET_ITEM( dirTuple, 2, dirAndHeaders.second.second );
-        PyTuple_SET_ITEM( headersTuple, headerIndex++, dirTuple );
+        PyTuple_SET_ITEM( dirTuple, 1, headersInDirTuple );
+        PyTuple_SET_ITEM( dirsTuple, dirIndex++, dirTuple );
     }
 
     PyObject * missingHeadersTuple = PyTuple_New( missing.size() );
@@ -511,7 +499,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
     }
     
     PyObject * resultTuple = PyTuple_New( 2 );
-    PyTuple_SET_ITEM( resultTuple, 0, headersTuple );
+    PyTuple_SET_ITEM( resultTuple, 0, dirsTuple );
     PyTuple_SET_ITEM( resultTuple, 1, missingHeadersTuple );
     return resultTuple;
 }

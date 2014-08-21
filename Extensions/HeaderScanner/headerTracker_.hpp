@@ -109,7 +109,7 @@ public:
         assert( parent_ );
         assert( !parent_->fromCache() );
 
-        forEachUsedMacro( [=]( UsedMacros::value_type const & usedMacro )
+        forEachUsedMacro( [this]( UsedMacros::value_type const & usedMacro )
         {
             parent_->macroUsed( usedMacro.first, usedMacro.second );
         });
@@ -134,6 +134,18 @@ public:
             std::inserter( parent_->includedHeaders(),
                 parent_->includedHeaders().begin() )
         );
+    }
+
+    bool isViableForCache() const
+    {
+        // Headers which have overridden content are poor candidates for caching.
+        // Currently these are cache-generated headers themselves, and empty
+        // header used to implement #pragma once support.
+        if ( replacement_ != 0 )
+            return false;
+        // Only cache headers which use a *sane* amount of macros.
+        return usedHere_.size() < 1024;
+
     }
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
@@ -236,8 +248,6 @@ private:
 
     Cache const & cache() const { return *cache_; }
     Cache       & cache()       { return *cache_; }
-
-    bool isViableForCache( HeaderCtx const &, clang::FileEntry const * ) const;
 
 public:
     clang::Preprocessor & preprocessor() const { return preprocessor_; }

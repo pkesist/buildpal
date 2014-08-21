@@ -65,7 +65,7 @@ struct GetName
 };
 
 struct ByName {};
-struct IndexedUsedMacros : private boost::multi_index_container<
+struct IndexedUsedMacros : public boost::multi_index_container<
     Macro,
     boost::multi_index::indexed_by<
         boost::multi_index::sequenced<>,
@@ -119,10 +119,7 @@ public:
 
     void defineMacro( MacroName const & name, MacroValue const & value )
     {
-        std::pair<MacroValueMap::iterator, bool> const insertResult(
-            macroValueMap_.insert( std::make_pair( name, value ) ) );
-        if ( !insertResult.second )
-            insertResult.first->second = value;
+        macroValueMap_[ name ] = value;
     }
 
     void undefineMacro( MacroName const & name )
@@ -144,6 +141,8 @@ public:
     {
         std::for_each( macroValueMap_.begin(), macroValueMap_.end(), f );
     }
+
+    std::size_t size() const { return macroValueMap_.size(); }
 };
 
 void intrusive_ptr_add_ref( CacheEntry * );

@@ -233,14 +233,6 @@ void HeaderTracker::enterHeader()
     cacheHit_.reset();
 }
 
-bool HeaderTracker::isViableForCache( HeaderCtx const & headerCtx, clang::FileEntry const * file ) const
-{
-    // Headers which have overridden content are poor candidates for caching.
-    // Currently these are cache-generated headers themselves, and empty
-    // header used to implement #pragma once support.
-    return headerCtx.replacement() == 0;
-}
-
 void HeaderTracker::leaveHeader()
 {
     assert( currentHeaderCtx().parent() );
@@ -255,7 +247,7 @@ void HeaderTracker::leaveHeader()
 #endif
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
-    if ( !cacheDisabled() && isViableForCache( currentHeaderCtx(), file ) )
+    if ( !cacheDisabled() && currentHeaderCtx().isViableForCache() )
         currentHeaderCtx().addToCache( cache(), searchPathId_, file );
     currentHeaderCtx().propagateToParent();
     popHeaderCtx();

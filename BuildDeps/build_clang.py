@@ -136,7 +136,7 @@ class build_clang(Command):
             '-DCMAKE_C_COMPILER:PATH={}'.format(compiler_exe),
             '-DCMAKE_CXX_COMPILER:PATH={}'.format(compiler_cxx_exe),
             '-DPYTHON_EXECUTABLE:PATH={}'.format(sys.executable),
-            '-DCMAKE_BUILD_TYPE={}'.format('Debug' if self.debug else 'Release'),
+            '-DCMAKE_BUILD_TYPE={}'.format('Debug' if self.debug else 'RelWithDebInfo'),
             '-GNinja', os.path.abspath(clang_src_dir)],
             cwd=build_dir, env=os.environ)
 

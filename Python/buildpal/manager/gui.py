@@ -297,9 +297,15 @@ class CommandInfo(Frame):
         for task in command_info['tasks']:
             task_id = self.task_list.insert('', 'end', text=task_string(task), open=True)
             times = self.task_list.insert(task_id, 'end', text='Times', open=True)
+            last = None
             for time_entry in task['times']:
+                if last:
+                    value = '+{}s'.format(round(time_entry['time_point'] - last, 2))
+                else:
+                    value = format_time(time_entry['time_point'])
+                last = time_entry['time_point']
                 self.task_list.insert(times, 'end', text=time_entry['time_point_name'],
-                    values=(format_time(time_entry['time_point']),))
+                    values=(value,))
             sessions = self.task_list.insert(task_id, 'end', text='Sessions', open=True)
             for session in task['sessions']:
                 text, value = session_string(session)

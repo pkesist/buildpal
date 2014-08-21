@@ -84,7 +84,7 @@ class build_ext(_build_ext):
         # Build Client executable
         call = [b2,
             'toolset={}'.format('msvc-11.0' if self.compiler == 'msvc' else 'gcc'),
-            '-sBOOST_BUILD_PATH="{}"'.format(os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build', 'v2'))),
+            '-sBOOST_BUILD_PATH="{}"'.format(os.path.abspath(os.path.join(boost_build_dir, 'tools', 'build'))),
             '-sBOOST_PATH="{}"'.format(os.path.abspath(boost_build_dir)),
             '-sBOOST_LIBS={}'.format(" ".join(self.__boost_libs)),
             '-sCLANG_BUILD_ROOT_X86="{}"'.format(os.path.abspath(build_clang.get_build_dir_x86())),

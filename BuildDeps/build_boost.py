@@ -56,7 +56,7 @@ class build_boost(Command):
             self.x86 = not self.x64
 
         if self.boost_version is None:
-            self.boost_version = (1, 55, 0)
+            self.boost_version = (1, 56, 0)
         else:
             self.boost_version = tuple(int(x) for x in
                 self.boost_version.split('.'))

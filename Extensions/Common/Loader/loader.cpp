@@ -80,17 +80,14 @@ struct RunDllParams
     DWORD (__stdcall *chainFunc)( void * );
     // Args for chainFunc.
     void * chainArgs;
-    // Whether we should suspend current thread before calling chainFunc.
-    // Note that this is forwarded to the initFunc and initFunc must
-    // respect this flag and call SuspendThread when it is done.
-    // Even though it would be more correct to do the suspending in this
-    // function, it is already quite large and messy.
-    BOOL suspend;
+    // Event handle to set once initialization is done.
+    // Can be NULL.
+    HANDLE initDone;
 };
 
 typedef HMODULE (WINAPI * LOADLIBRARYA)( char const * );
 typedef FARPROC (WINAPI * GETPROCADDRESS)( HMODULE, char const * );
-typedef DWORD   (WINAPI * INITFUNC)( void *, BOOL );
+typedef DWORD   (WINAPI * INITFUNC)( void *, HANDLE );
 
 DWORD __stdcall runDLL( void * vpparams )
 {
@@ -156,7 +153,7 @@ DWORD __stdcall runDLL( void * vpparams )
         INITFUNC initFunc = (INITFUNC)getProcAddress( mydll, params->initFunc );
         if ( !initFunc )
             return -5;
-        if ( initFunc( params->initArgs, params->suspend ) != 0 )
+        if ( initFunc( params->initArgs, params->initDone ) != 0 )
             return -6;
     }
     if ( params->chainFunc )

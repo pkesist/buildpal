@@ -99,7 +99,7 @@ struct AllocProcessMemory
 
 bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
     char const * initFunc, void * initArgs, InitFunc localInitFunc,
-    void * localInitArgs, HANDLE mainThread, bool shouldResume )
+    void * localInitArgs, HANDLE mainThread, bool resumeAfterInitialization )
 {
     HMODULE currentLoaded;
     BOOL result = GetModuleHandleEx( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -208,91 +208,78 @@ bool injectLibrary( HANDLE const processHandle, char const * dllNames[2],
 #define SuspendThread32 SuspendThread
 #define CONTEXT32 CONTEXT
 #endif
-        void * chainFunc = 0;
-        void * chainParams = 0;
-        BOOL const suspend = shouldResume ? 0 : 1;
-
-        if ( !targetProcessIs64Bit )
+        HANDLE initDoneEvent = NULL;
+        HANDLE initDoneCopy = NULL;
+        
+        if ( !resumeAfterInitialization )
         {
-            CONTEXT32 ctx;
-            ctx.ContextFlags = CONTEXT_FULL;
-            GetThreadContext32( mainThread, &ctx );
-            chainFunc = (void *)ctx.Eax;
-            chainParams = (void *)ctx.Ebx;
-            // TODO: We leak these in the target process.
-            // No big deal, but clean it up anyway.
-            memoryBlock.release();
-            ctx.Eax = (DWORD)funcData;
-            ctx.Ebx = (DWORD)params.release();
-            SetThreadContext32( mainThread, &ctx );
+            initDoneEvent = CreateEvent( NULL, TRUE, FALSE, NULL );
+            DuplicateHandle( GetCurrentProcess(), initDoneEvent,
+                processHandle, &initDoneCopy, 0, FALSE,
+                DUPLICATE_SAME_ACCESS );
         }
-#ifdef _WIN64
-        else
+
+        if ( targetProcessIs64Bit )
         {
+#ifdef _WIN64
             CONTEXT64 ctx;
             ctx.ContextFlags = CONTEXT_FULL;
             GetThreadContext64( mainThread, &ctx );
-            chainFunc = (void *)ctx.Rcx;
-            chainParams = (void *)ctx.Rdx;
-            // TODO: We leak these in the target process.
-            // No big deal, but clean it up anyway.
+            void * chainFunc = (void *)ctx.Rcx;
+            void * chainParams = (void *)ctx.Rdx;
             memoryBlock.release();
             ctx.Rcx = (DWORD)funcData;
             ctx.Rdx = (DWORD)params.release();
             SetThreadContext64( mainThread, &ctx );
-        }
-#endif
 
-    #ifdef _WIN64
-        if ( targetProcessIs64Bit )
-        {
-            FAIL_IF_NOT( params.write( &dllName    , 8 ) );
-            FAIL_IF_NOT( params.write( &dllInit    , 8 ) );
-            FAIL_IF_NOT( params.write( &initArgs   , 8 ) );
-            FAIL_IF_NOT( params.write( &chainFunc  , 8 ) );
-            FAIL_IF_NOT( params.write( &chainParams, 8 ) );
-            FAIL_IF_NOT( params.write( &suspend    , 8 ) );
+            FAIL_IF_NOT( params.write( &dllName     , 8 ) );
+            FAIL_IF_NOT( params.write( &dllInit     , 8 ) );
+            FAIL_IF_NOT( params.write( &initArgs    , 8 ) );
+            FAIL_IF_NOT( params.write( &chainFunc   , 8 ) );
+            FAIL_IF_NOT( params.write( &chainParams , 8 ) );
+            FAIL_IF_NOT( params.write( &initDoneCopy, 8 ) );
+#else
+            return false;
+#endif
         }
         else
         {
-            // --------------------
-            // Should never happen.
-            // --------------------
-            FAIL_IF( ((UINT_PTR)dllName     & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)dllInit     & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)initArgs    & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)chainFunc   & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)chainParams & 0xFFFFFFFF00000000) );
-            FAIL_IF( ((UINT_PTR)suspend     & 0xFFFFFFFF00000000) );
-            // --------------------
-            FAIL_IF_NOT( params.write( &dllName    , 4 ) );
-            FAIL_IF_NOT( params.write( &dllInit    , 4 ) );
-            FAIL_IF_NOT( params.write( &initArgs   , 4 ) );
-            FAIL_IF_NOT( params.write( &chainFunc  , 4 ) );
-            FAIL_IF_NOT( params.write( &chainParams, 4 ) );
-            FAIL_IF_NOT( params.write( &suspend    , 4 ) );
+            CONTEXT32 ctx;
+            ctx.ContextFlags = CONTEXT_FULL;
+            GetThreadContext32( mainThread, &ctx );
+            void * chainFunc = (void *)ctx.Eax;
+            void * chainParams = (void *)ctx.Ebx;
+            memoryBlock.release();
+            ctx.Eax = (DWORD)funcData;
+            ctx.Ebx = (DWORD)params.release();
+            SetThreadContext32( mainThread, &ctx );
+            // Works for both 32 and 64 bit arch (LE).
+            FAIL_IF_NOT( params.write( &dllName     , 4 ) );
+            FAIL_IF_NOT( params.write( &dllInit     , 4 ) );
+            FAIL_IF_NOT( params.write( &initArgs    , 4 ) );
+            FAIL_IF_NOT( params.write( &chainFunc   , 4 ) );
+            FAIL_IF_NOT( params.write( &chainParams , 4 ) );
+            FAIL_IF_NOT( params.write( &initDoneCopy, 4 ) );
         }
-    #else
-        FAIL_IF( targetProcessIs64Bit );
-        FAIL_IF_NOT( params.write( &dllName    , 4 ) );
-        FAIL_IF_NOT( params.write( &dllInit    , 4 ) );
-        FAIL_IF_NOT( params.write( &initArgs   , 4 ) );
-        FAIL_IF_NOT( params.write( &chainFunc  , 4 ) );
-        FAIL_IF_NOT( params.write( &chainParams, 4 ) );
-        FAIL_IF_NOT( params.write( &suspend    , 4 ) );
-    #endif
 
-    #undef FAIL_IF
-    #undef FAIL_IF_NOT
+#undef FAIL_IF
+#undef FAIL_IF_NOT
 
         // Resume the main thread. It will suspend itself if needeed when it is
         // done with DLL initialization (if the initialization function respects
         // the suspended flag).
-        // Note that theoretically there is race condition here. It is possible that
-        // the user will ResumeThread on the resulting handle before it gets
-        // suspended by the initialization function.
         ResumeThread( mainThread );
-        return !localInitFunc || localInitFunc( localInitArgs ) == 0;
+        bool localInitResult = true;
+        if ( localInitFunc )
+            localInitResult = localInitFunc( localInitArgs ) == 0;
+        if ( initDoneEvent )
+        {
+            WaitForSingleObject( initDoneEvent, INFINITE );
+            SuspendThread( mainThread );
+            SetEvent( initDoneEvent );
+            CloseHandle( initDoneEvent );
+        }
+        return localInitResult;
     }
     catch ( std::bad_alloc const & ) { return false; }
     catch ( std::exception const & ) { return false; }

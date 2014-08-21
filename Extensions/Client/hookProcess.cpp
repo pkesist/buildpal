@@ -466,7 +466,7 @@ bool hookProcess( HANDLE processHandle, HANDLE mainThread, bool resume )
     return injectLibrary( processHandle, dllNames, initFunc, targetRead, NULL, NULL, mainThread, resume );
 }
 
-DWORD WINAPI Initialize( HANDLE pipeHandle, BOOL suspend )
+DWORD WINAPI Initialize( HANDLE pipeHandle, HANDLE initDone )
 {
     bool readingPortName = false;
     bool readingReplacement = false;
@@ -515,9 +515,14 @@ DWORD WINAPI Initialize( HANDLE pipeHandle, BOOL suspend )
         }
         remainder += std::string( buffer + last, read - last );
     }
+    CloseHandle( pipeHandle );
     HookProcessAPIHooks::enable();
-    if ( suspend )
-        SuspendThread( GetCurrentThread() );
+    if ( initDone )
+    {
+        SetEvent( initDone );
+        WaitForSingleObject( initDone, INFINITE );
+        CloseHandle( initDone );
+    }
     return 0;
 }
 

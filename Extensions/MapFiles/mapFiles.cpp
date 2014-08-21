@@ -616,7 +616,7 @@ DWORD WINAPI unhookWinAPIs()
     return MapFilesAPIHook::disable();
 }
 
-DWORD WINAPI Initialize( HANDLE readHandle, BOOL suspend )
+DWORD WINAPI Initialize( HANDLE readHandle, HANDLE initDone )
 {
     std::wstring dirName;
     std::size_t numEntries;
@@ -637,9 +637,14 @@ DWORD WINAPI Initialize( HANDLE readHandle, BOOL suspend )
             MapFilesAPIHook::getData().globalMapping.addFile( dirName, fileName, realFile );
         }
     }
+    CloseHandle( readHandle );
     hookWinAPIs();
-    if ( suspend )
-        SuspendThread( GetCurrentThread() );
+    if ( initDone )
+    {
+        SetEvent( initDone );
+        WaitForSingleObject( initDone, INFINITE );
+        CloseHandle( initDone );
+    }
     return 0;
 }
 

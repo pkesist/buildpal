@@ -153,6 +153,8 @@
     <Content Include="Extensions\Common\Loader\loader.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\contentCache_.hpp" />
+    <Content Include="Extensions\HeaderScanner\contentEntry_.cpp" />
+    <Content Include="Extensions\HeaderScanner\contentEntry_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerCache_.cpp" />
     <Content Include="Extensions\HeaderScanner\headerCache_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerScanner_.cpp" />

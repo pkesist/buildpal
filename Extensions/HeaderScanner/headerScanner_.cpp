@@ -229,7 +229,7 @@ std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, l
 {
     // Initialize file manager.
     fileManager_.reset( new clang::FileManager( fsOpts_ ) );
-    fileManager().addStatCache( new StatCache( ContentCache::singleton().prevStatCalls() ) );
+    fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 
     // Initialize source manager.
     sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );

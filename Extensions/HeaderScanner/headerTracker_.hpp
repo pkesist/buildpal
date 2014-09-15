@@ -39,6 +39,7 @@ private:
 
 private:
     clang::Preprocessor const & preprocessor_;
+    clang::FileEntry const * original_;
     clang::FileEntry const * replacement_;
     HeaderCtx * parent_;
     CacheEntryPtr cacheHit_;
@@ -50,6 +51,7 @@ private:
 public:
     HeaderCtx(
         MacroState & macroState,
+        clang::FileEntry const * original,
         clang::FileEntry const * replacement,
         CacheEntryPtr const & cacheHit,
         HeaderCtx * parent,
@@ -57,6 +59,7 @@ public:
     )
         :
         preprocessor_( preprocessor ),
+        original_( original ),
         replacement_( replacement ),
         parent_( parent ),
         cacheHit_( cacheHit ),
@@ -145,7 +148,6 @@ public:
             return false;
         // Only cache headers which use a *sane* amount of macros.
         return usedHere_.size() < 1024;
-
     }
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
@@ -224,9 +226,9 @@ public:
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
 private:
-    void pushHeaderCtx( clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit )
+    void pushHeaderCtx( clang::FileEntry const * original, clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit )
     {
-        pCurrentCtx_ = new HeaderCtx( macroState_, replacement, cacheHit, pCurrentCtx_, preprocessor_ );
+        pCurrentCtx_ = new HeaderCtx( macroState_, original, replacement, cacheHit, pCurrentCtx_, preprocessor_ );
     }
 
     void popHeaderCtx()
@@ -252,9 +254,6 @@ private:
 public:
     clang::Preprocessor & preprocessor() const { return preprocessor_; }
     clang::SourceManager & sourceManager() const;
-
-private:
-    MacroName macroForPragmaOnce( llvm::sys::fs::UniqueID const & );
 };
 
 

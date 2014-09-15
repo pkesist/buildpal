@@ -93,10 +93,10 @@ struct IndexedUsedMacros : public boost::multi_index_container<
         return addMacro( macroName, [&]( MacroName const & ) -> MacroValue { return macroValue; } );
     }
 
-    template <typename Predicate>
-    void forEachUsedMacro( Predicate pred ) const
+    template <typename F>
+    void forEachUsedMacro( F & f ) const
     {
-        std::for_each( begin(), end(), pred );
+        std::for_each( begin(), end(), f );
     }
 };
 
@@ -183,10 +183,10 @@ public:
         ) != headers_.end();
     }
 
-    template <typename Predicate>
-    void forEachUsedMacro( Predicate pred ) const
+    template <typename F>
+    void forEachUsedMacro( F & f ) const
     {
-        std::for_each( usedMacros_.begin(), usedMacros_.end(), pred );
+        std::for_each( usedMacros_.begin(), usedMacros_.end(), f );
     }
 
     Headers    const & headers   () const { return headers_; }
@@ -251,7 +251,7 @@ public:
     CacheTree & getChild( UsedMacros const & usedMacros )
     {
         CacheTree * currentTree = this;
-        for ( UsedMacros::value_type const & macro : usedMacros )
+        for ( Macro const & macro : usedMacros )
             currentTree = &currentTree->getChild( macro.first, macro.second );
         assert( currentTree->getPath() == usedMacros );
         assert( currentTree->children_.empty() );

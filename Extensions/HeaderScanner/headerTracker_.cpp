@@ -19,6 +19,10 @@
 #include <windows.h>
 
 #ifndef NDEBUG
+#define DEBUG_HEADERS 1
+#endif
+
+#ifdef DEBUG_HEADERS
 std::ofstream logging_stream( "header_log.txt" );
 #endif
 
@@ -34,13 +38,14 @@ namespace
     };
 }
 
-MacroName HeaderTracker::macroForPragmaOnce( llvm::sys::fs::UniqueID const & val )
+MacroName macroForPragmaOnce( clang::FileEntry const & entry )
 {
+    llvm::sys::fs::UniqueID const & fileId = entry.getUniqueID();
     std::string result;
     using namespace boost::spirit::karma;
     generate( std::back_inserter( result ),
         lit( "____pragma_once__" ) << ulong_long << lit("_") << ulong_long,
-        val.getDevice(), val.getFile() );
+        fileId.getDevice(), fileId.getFile() );
     return MacroName( result );
 }
 
@@ -132,8 +137,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     // empty file.
     // TODO: Try avoiding calling (expensive) macroForPragmaOnce() on every
     // (non-skipped) include directive.
-    MacroName const pragmaOnceMacro = macroForPragmaOnce( entry->getUniqueID() );
-    if ( currentHeaderCtx().getMacroValue( pragmaOnceMacro ) != undefinedMacroValue )
+    if ( currentHeaderCtx().getMacroValue( macroForPragmaOnce( *entry ) ) != undefinedMacroValue )
     {
         clang::FileEntry const * result( sourceManager().getFileManager().getVirtualFile( "__empty_file", 0, 0 ) );
         if ( !sourceManager().isFileOverridden( result ) )
@@ -150,6 +154,29 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
             currentHeaderCtx() ) )
     )
     {
+#ifdef DEBUG_HEADERS
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Found cache hit.\n";
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "UsedMacros:\n";
+    cacheHit_->forEachUsedMacro( [&]( Macro const & macro )
+    {
+        for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+            logging_stream << "    ";
+        logging_stream << macro.first.get().str().str() << ' ' << macro.second.get().str().str() << '\n';
+    });
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "ChangedMacros:\n";
+    cacheHit_->macroState().forEachMacro( [&]( Macro const & macro )
+    {
+        for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+            logging_stream << "    ";
+        logging_stream << macro.first.get().str().str() << ' ' << macro.second.get().str().str() << '\n';
+    });
+#endif
         // There is a hit in cache!
         entry = cacheHit_->getFileEntry( sourceManager() );
         replacement_ = entry;
@@ -166,7 +193,7 @@ void HeaderTracker::headerSkipped()
     HeaderWithFileEntry const & hwf( fileStack_.back() );
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Header skipped: '" << std::string( fileStack_.back().file->getName() ) << "'\n";
@@ -180,7 +207,7 @@ void HeaderTracker::headerSkipped()
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
         clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
         assert( !headerInfo.ControllingMacroID );
-        currentHeaderCtx().macroUsed( macroForPragmaOnce( hwf.file->getUniqueID() ) );
+        currentHeaderCtx().macroUsed( macroForPragmaOnce( *hwf.file ) );
         if ( !headerInfo.isPragmaOnce )
         {
             assert( headerInfo.ControllingMacro );
@@ -211,24 +238,24 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     };
 
     fileStack_.push_back( hwf );
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     logging_stream << "Entering source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
 
-    pushHeaderCtx( 0, CacheEntryPtr() );
+    pushHeaderCtx( fileStack_.back().file, 0, CacheEntryPtr() );
 }
 
 void HeaderTracker::enterHeader()
 {
     assert( !fileStack_.empty() );
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Entering header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
-    pushHeaderCtx( replacement_, cacheHit_ );
+    pushHeaderCtx( fileStack_.back().file, replacement_, cacheHit_ );
     if ( !cacheHit_ )
-        currentHeaderCtx().macroUsed( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
+        currentHeaderCtx().macroUsed( macroForPragmaOnce( *fileStack_.back().file ) );
     replacement_ = 0;
     cacheHit_.reset();
 }
@@ -240,7 +267,7 @@ void HeaderTracker::leaveHeader()
     assert( !fileStack_.empty() );
     clang::FileEntry const * file( fileStack_.back().file );
 
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Leaving header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
@@ -278,7 +305,7 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
 
 void HeaderTracker::exitSourceFile( Headers & headers )
 {
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Leaving source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
@@ -299,7 +326,7 @@ void HeaderTracker::macroUsed( llvm::StringRef name )
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Macro used: '" << name.str() << '\'' << std::endl;
@@ -358,7 +385,7 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
         return;
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Macro defined: '" << name.str() << '\'' << std::endl;
@@ -370,7 +397,7 @@ void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective 
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
     logging_stream << "Macro undefined: '" << name.str() << '\'' << std::endl;
@@ -382,6 +409,5 @@ void HeaderTracker::pragmaOnce()
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
-    MacroName const pragmaOnceMacro( macroForPragmaOnce( fileStack_.back().file->getUniqueID() ) );
-    currentHeaderCtx().macroDefined( pragmaOnceMacro, MacroValue( " 1" ) );
+    currentHeaderCtx().macroDefined( macroForPragmaOnce( *fileStack_.back().file ), MacroValue( " 1" ) );
 }

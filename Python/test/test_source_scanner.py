@@ -227,3 +227,29 @@ def test_uft16_be_src(env):
     env.make_file('ima_utf16be_file.cpp',
         codecs.BOM_UTF16_BE + '#include "dodo.h"\n'.encode('utf-16-be'))
     assert env.run('ima_utf16be_file.cpp') == {'dodo.h'}
+
+
+def test_macro_def_change_in_child(env):
+    env.make_file('all_good.hpp')
+    env.make_file('second.hpp', '''\
+#ifdef X 
+#define A 1
+#undef X
+#else
+#define A 2
+#endif
+''')
+    env.make_file('first.hpp', '''\
+#include "second.hpp"
+''')
+
+    env.make_file('test.cpp', '''\
+#define X 5
+#include "first.hpp"
+#include "first.hpp"
+#if A == 2
+#include "all_good.hpp"
+#endif
+''')
+
+    assert 'all_good.hpp' in env.run('test.cpp')

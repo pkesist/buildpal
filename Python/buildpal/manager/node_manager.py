@@ -55,10 +55,6 @@ class NodeManager:
             self.update_node_info()
 
     def task_preprocessed(self, task, exception=None):
-        # Convenient for preprocessor profiling.
-        #if True:
-        #    task.task_completed(0, b'', b'')
-        #    return
         if exception:
             logging.exception(exception)
             def task_error():
@@ -71,6 +67,11 @@ class NodeManager:
             logging.debug(dir)
             for file, relative, content_entry in data:
                 logging.debug("    %s %s", file, "[relative to source]" if relative else "")
+
+        # Convenient for preprocessor profiling.
+        #if True:
+        #    task.task_completed(0, b'', b'')
+        #    return
 
         if task.missing_headers and not (len(task.missing_headers) == 1 and
                 task.missing_headers[0] == task.preprocess_task.pch_header):

@@ -178,6 +178,22 @@ namespace
             }
         }
 
+        virtual void If( clang::SourceLocation, clang::SourceRange conditionRange, bool ) LLVM_OVERRIDE
+        {
+        }
+
+        virtual void Elif( clang::SourceLocation, clang::SourceRange conditionRange, bool, clang::SourceLocation ) LLVM_OVERRIDE
+        {
+        }
+
+        virtual void Else( clang::SourceLocation, clang::SourceLocation ) LLVM_OVERRIDE
+        {
+        }
+
+        virtual void Endif( clang::SourceLocation, clang::SourceLocation ) LLVM_OVERRIDE
+        {
+        }
+
     private:
         HeaderTracker & headerTracker_;
         clang::Preprocessor & preprocessor_;

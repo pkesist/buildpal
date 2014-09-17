@@ -182,29 +182,29 @@ struct Flyweight
 
     operator T const & () const { return get(); }
 
-    typedef std::size_t (Flyweight<T, Tag>::* UnspecifiedBoolType)() const;
+    typedef std::size_t (Flyweight::* UnspecifiedBoolType)() const;
 
     operator UnspecifiedBoolType() const
     {
-        return value_ ? &Flyweight<T, Tag>::hash : 0;
+        return value_ ? &Flyweight::hash : 0;
     }
 
-    bool operator==( Flyweight<T, Tag> const & other ) const
+    bool operator==( Flyweight const & other ) const
     {
         return value_ == other.value_;
     }
 
-    bool operator!=( Flyweight<T, Tag> const & other ) const
+    bool operator!=( Flyweight const & other ) const
     {
         return value_ != other.value_;
     }
 
-    bool operator<( Flyweight<T, Tag> const & other ) const
+    bool operator<( Flyweight const & other ) const
     {
         return value_ < other.value_;
     }
 
-    bool operator>( Flyweight<T, Tag> const & other ) const
+    bool operator>( Flyweight const & other ) const
     {
         return value_ > other.value_;
     }

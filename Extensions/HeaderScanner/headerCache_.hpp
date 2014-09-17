@@ -55,48 +55,44 @@ struct HeaderWithFileEntry
 typedef std::pair<MacroName, MacroValue> Macro;
 typedef std::vector<Macro> UsedMacros;
 
-struct GetName
-{
-    typedef MacroName result_type;
-    result_type operator()( Macro const & m ) const
-    {
-        return m.first;
-    }
-};
+////////////////////////////////////////////////////////////////////////////////
+//
+// IndexedUsedMacros
+// -----------------
+//
+//   A list of macros without duplicates. Uses double indexing to implement
+// constant time insert operation.
+//
+////////////////////////////////////////////////////////////////////////////////
 
-struct ByName {};
-struct IndexedUsedMacros : public boost::multi_index_container<
+typedef boost::multi_index_container<
     Macro,
     boost::multi_index::indexed_by<
         boost::multi_index::sequenced<>,
         boost::multi_index::hashed_unique<
-            boost::multi_index::tag<ByName>,
-            GetName,
+            boost::multi_index::member<Macro, MacroName, &Macro::first>,
             std::hash<MacroName>
         >
     >
->
+> IndexedUsedMacrosBase;
+
+struct IndexedUsedMacros : public IndexedUsedMacrosBase
 {
     template <typename MacroValueGetter>
-    void addMacro( MacroName const macroName, MacroValueGetter const getter )
+    bool addMacro( MacroName const & macroName, MacroValueGetter const getter )
     {
-        typedef IndexedUsedMacros::index<ByName>::type IndexByMacroName;
-        IndexByMacroName & usedMacrosByName( get<ByName>() );
+        typedef IndexedUsedMacrosBase::nth_index<1>::type IndexByMacroName;
+        IndexByMacroName & usedMacrosByName( get<1>() );
         IndexByMacroName::const_iterator const iter = usedMacrosByName.find( macroName );
         if ( iter != usedMacrosByName.end() )
-            return;
+            return false;
         push_back( std::make_pair( macroName, getter( macroName ) ) );
+        return true;
     }
 
-    void addMacro( MacroName const & macroName, MacroValue const & macroValue )
+    bool addMacro( MacroName const & macroName, MacroValue const & macroValue )
     {
         return addMacro( macroName, [&]( MacroName const & ) -> MacroValue { return macroValue; } );
-    }
-
-    template <typename F>
-    void forEachUsedMacro( F & f ) const
-    {
-        std::for_each( begin(), end(), f );
     }
 };
 
@@ -136,6 +132,12 @@ public:
         return true;
     }
 
+    MacroValue getMacroValue( MacroName const & name ) const
+    {
+        MacroValue value;
+        return getMacroValue( name, value ) ? value : undefinedMacroValue;
+    }
+
     template <typename F>
     void forEachMacro( F f ) const
     {
@@ -160,7 +162,6 @@ public:
     (
         CacheTree & tree,
         std::string const & uniqueVirtualFileName,
-        UsedMacros && usedMacros,
         MacroState && macroState,
         Headers && headers,
         std::size_t currentTime
@@ -186,7 +187,8 @@ public:
     template <typename F>
     void forEachUsedMacro( F & f ) const
     {
-        std::for_each( usedMacros_.begin(), usedMacros_.end(), f );
+        UsedMacros usedMacros( tree_.getPath() );
+        std::for_each( usedMacros.begin(), usedMacros.end(), f );
     }
 
     Headers    const & headers   () const { return headers_; }
@@ -229,14 +231,12 @@ private:
 
     CacheTree & tree_;
     std::string fileName_;
-    UsedMacros usedMacros_;
     MacroState macroState_;
     Headers headers_;
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
     std::string buffer_;
     llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
-    bool detached_;
 };
 
 
@@ -248,7 +248,8 @@ class CacheTree
 public:
     CacheTree() : entry_( 0 ), parent_( 0 ) {}
 
-    CacheTree & getChild( UsedMacros const & usedMacros )
+    template <typename MacroList>
+    CacheTree & getChild( MacroList const & usedMacros )
     {
         CacheTree * currentTree = this;
         for ( Macro const & macro : usedMacros )
@@ -258,7 +259,7 @@ public:
         return *currentTree;
     }
 
-    CacheEntryPtr find( HeaderCtx const & headerCtx ) const;
+    CacheEntryPtr find( MacroState const & ) const;
 
     void detach()
     {
@@ -304,7 +305,7 @@ public:
 
 private:
     typedef std::unordered_map<MacroValue, CacheTree> Children;
-    void setParent( CacheTree & parent, MacroValue const macroValue )
+    void setParent( CacheTree & parent, MacroValue const & macroValue )
     {
         parent_ = &parent;
         macroValue_ = macroValue;
@@ -373,7 +374,7 @@ public:
     (
         FileId const & id,
         std::size_t searchPathId,
-        UsedMacros && usedMacros,
+        IndexedUsedMacros const & usedMacros,
         MacroState && macroState,
         Headers && headers
     );
@@ -382,7 +383,7 @@ public:
     (
         FileId const & id,
         std::size_t searchPathId,
-        HeaderCtx const &
+        MacroState const &
     );
 
     void invalidate( ContentEntry const & );

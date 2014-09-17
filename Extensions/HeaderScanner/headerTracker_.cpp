@@ -151,7 +151,7 @@ void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
     (
         !cacheDisabled() &&
         ( cacheHit_ = cache().findEntry( entry->getUniqueID(), searchPathId_,
-            currentHeaderCtx() ) )
+            macroState_ ) )
     )
     {
 #ifdef DEBUG_HEADERS
@@ -265,7 +265,6 @@ void HeaderTracker::leaveHeader()
     assert( currentHeaderCtx().parent() );
 
     assert( !fileStack_.empty() );
-    clang::FileEntry const * file( fileStack_.back().file );
 
 #ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
@@ -275,7 +274,7 @@ void HeaderTracker::leaveHeader()
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
     if ( !cacheDisabled() && currentHeaderCtx().isViableForCache() )
-        currentHeaderCtx().addToCache( cache(), searchPathId_, file );
+        currentHeaderCtx().addToCache( cache(), searchPathId_, fileStack_.back().file );
     currentHeaderCtx().propagateToParent();
     popHeaderCtx();
     currentHeaderCtx().addHeader( fileStack_.back().header );
@@ -284,11 +283,6 @@ void HeaderTracker::leaveHeader()
 void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file )
 {
     assert( !cacheHit_ );
-    UsedMacros usedMacros;
-    usedHere_.forEachUsedMacro( [&]( UsedMacros::value_type const & macro )
-    {
-        usedMacros.push_back( macro );
-    });
 
     MacroState changedMacros;
     for ( MacroName const & macroName : changedHere_ )
@@ -297,7 +291,7 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
     cacheHit_ = cache.addEntry(
         file->getUniqueID(),
         searchPathId,
-        std::move( usedMacros ),
+        usedHere_,
         std::move( changedMacros ),
         std::move( includedHeaders_ )
     );

@@ -25,6 +25,7 @@ public:
 
     ContentEntry( ContentEntry && other )
         :
+        refCount_( 0 ),
         id_( other.id_ ),
         buffer( other.buffer.take() ),
         checksum( other.checksum ),

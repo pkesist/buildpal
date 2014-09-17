@@ -112,13 +112,13 @@ public:
         assert( parent_ );
         assert( !parent_->fromCache() );
 
-        forEachUsedMacro( [this]( UsedMacros::value_type const & usedMacro )
-        {
-            parent_->macroUsed( usedMacro.first, usedMacro.second );
-        });
-
         if ( fromCache() )
         {
+            cacheHit_->forEachUsedMacro( [this]( Macro const & macro )
+            {
+                parent_->macroUsed( macro.first, macro.second );
+            });
+
             cacheHit_->macroState().forEachMacro([this]( Macro const & macro )
             {
                 parent_->changedHere_.insert( macro.first );
@@ -127,6 +127,10 @@ public:
         }
         else
         {
+            for ( Macro const & macro : usedHere_ )
+            {
+                parent_->macroUsed( macro.first, macro.second );
+            }
             parent_->changedHere_.insert( changedHere_.begin(), changedHere_.end() );
         }
 
@@ -151,16 +155,6 @@ public:
     }
 
     void addToCache( Cache &, std::size_t const searchPathId, clang::FileEntry const * );
-
-    template <typename Func>
-    void forEachUsedMacro( Func f ) const
-    {
-        cacheHit_
-            ? cacheHit_->forEachUsedMacro( f )
-            : usedHere_.forEachUsedMacro( f )
-        ;
-    }
-
 
     CacheEntryPtr const & cacheHit() const { return cacheHit_; }
     Headers       & includedHeaders()       { assert( !fromCache() ); return includedHeaders_; }

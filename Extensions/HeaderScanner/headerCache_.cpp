@@ -21,7 +21,7 @@ clang::FileEntry const * CacheEntry::getFileEntry(
     return result;
 }
 
-CacheEntryPtr CacheTree::find( HeaderCtx const & headerCtx ) const
+CacheEntryPtr CacheTree::find( MacroState const & macroState ) const
 {
     CacheTree const * currentTree = this;
     while ( currentTree )
@@ -29,7 +29,7 @@ CacheEntryPtr CacheTree::find( HeaderCtx const & headerCtx ) const
         if ( currentTree->entry_ )
             return currentTree->entry_;
         CacheTree::Children::const_iterator const iter = currentTree->children_.find(
-            headerCtx.getMacroValue( currentTree->macroName_ ) );
+            macroState.getMacroValue( currentTree->macroName_ ) );
         if ( iter == currentTree->children_.end() )
             return CacheEntryPtr();
         currentTree = &iter->second;
@@ -86,7 +86,6 @@ CacheEntry::CacheEntry
 (
     CacheTree & tree,
     std::string const & uniqueVirtualFileName,
-    UsedMacros && usedMacros,
     MacroState && macroState,
     Headers && headers,
     std::size_t currentTime
@@ -94,11 +93,9 @@ CacheEntry::CacheEntry
     tree_( tree ),
     refCount_( 0 ),
     fileName_( uniqueVirtualFileName ),
-    usedMacros_( std::move( usedMacros ) ),
     macroState_( std::move( macroState ) ),
     headers_( std::move( headers ) ),
-    lastTimeHit_( currentTime ),
-    detached_( false )
+    lastTimeHit_( currentTime )
 {
     contentLock_.clear();
 }
@@ -107,7 +104,7 @@ CacheEntryPtr Cache::addEntry
 (
     llvm::sys::fs::UniqueID const & fileId,
     std::size_t searchPathId,
-    UsedMacros && usedMacros,
+    IndexedUsedMacros const & usedMacros,
     MacroState && macroState,
     Headers && headers
 )
@@ -125,7 +122,6 @@ CacheEntryPtr Cache::addEntry
         (
             cacheTree,
             uniqueFileName(),
-            std::move( usedMacros ),
             std::move( macroState ),
             std::move( headers ),
             ( hits_ + misses_ ) / 2
@@ -204,7 +200,7 @@ void Cache::invalidate( ContentEntry const & contentEntry )
 }
 
 CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId,
-    std::size_t searchPathId, HeaderCtx const & headerCtx )
+    std::size_t searchPathId, MacroState const & macroState )
 {
     struct CacheMaintenance
     {
@@ -223,7 +219,7 @@ CacheEntryPtr Cache::findEntry( llvm::sys::fs::UniqueID const & fileId,
             ++misses_;
             return CacheEntryPtr();
         }
-        result = iter->second.find( headerCtx );
+        result = iter->second.find( macroState );
     }
     if ( result )
     {

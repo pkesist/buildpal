@@ -28,6 +28,8 @@
 #include <unordered_set>
 #include <vector>
 
+//#define DEBUG_HEADERS 1
+
 namespace clang
 {
     class HeaderSearch;

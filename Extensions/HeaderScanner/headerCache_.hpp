@@ -254,7 +254,10 @@ public:
         CacheTree * currentTree = this;
         for ( Macro const & macro : usedMacros )
             currentTree = &currentTree->getChild( macro.first, macro.second );
-        assert( currentTree->getPath() == usedMacros );
+#ifndef NDEBUG
+        UsedMacros path = currentTree->getPath();
+        assert( std::equal( usedMacros.begin(), usedMacros.end(), path.begin() ) );
+#endif
         assert( currentTree->children_.empty() );
         return *currentTree;
     }
@@ -315,7 +318,7 @@ private:
     {
         if ( !macroName_ )
             macroName_ = name;
-#ifndef NDEBUG
+#ifdef DEBUG_HEADERS
         if ( macroName_ != name )
         {
             {

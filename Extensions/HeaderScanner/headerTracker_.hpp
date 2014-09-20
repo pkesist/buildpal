@@ -174,6 +174,75 @@ private:
     }
 };
 
+#ifdef DEBUG_HEADERS
+extern std::ofstream logging_stream;
+#endif
+
+class ConditionStack
+{
+private:
+    typedef std::vector<llvm::StringRef> Macros;
+
+    struct Condition
+    {
+        Macros macros;
+        clang::SourceLocation lastLocation;
+        bool lastBranchTaken;
+        bool anyBranchTaken;
+
+        explicit Condition( clang::SourceLocation loc )
+            : lastLocation( loc ), lastBranchTaken( false ),
+              anyBranchTaken( false )
+        {}
+    };
+
+    typedef std::list<Condition> Conditions;
+
+    Macros macros;
+    Conditions conditions;
+    clang::Preprocessor & preprocessor_;
+    std::function<void (llvm::StringRef)> macroUsedCallback_;
+    mutable llvm::SmallString<1024> tmpBuf_;
+    
+public:
+    template <typename F>
+    ConditionStack( clang::Preprocessor & preprocessor, F & macroUsedCallback )
+        :
+        preprocessor_( preprocessor ),
+        macroUsedCallback_( macroUsedCallback )
+    {
+    }
+
+    void addMacro( llvm::StringRef name )
+    {
+        macros.push_back( name );
+    }
+
+    void commit()
+    {
+        for ( Condition & condition : conditions )
+        {
+            std::for_each( condition.macros.begin(), condition.macros.end(), macroUsedCallback_ );
+        }
+        conditions.clear();
+
+        std::for_each( macros.begin(), macros.end(), macroUsedCallback_ );
+        macros.clear();
+    }
+
+    void ifDirective( clang::SourceLocation, bool taken );
+    void elifDirective( clang::SourceLocation, bool taken );
+    void elseDirective( clang::SourceLocation );
+    void endifDirective( clang::SourceLocation );
+
+private:
+    bool skippable( clang::SourceLocation startLoc, clang::SourceLocation endLoc ) const;
+    bool hasCondition() const { return !conditions.empty(); }
+    Condition & condition() { return conditions.back(); }
+
+    bool lastConditionSkippable( clang::SourceLocation loc );
+};
+
 class HeaderTracker
 {
 private:
@@ -189,17 +258,11 @@ private:
     IncludeStack fileStack_;
     MacroState macroState_;
     UsedCacheEntries usedCacheEntries_;
+    std::vector<llvm::StringRef> currentUsedMacros_;
+    ConditionStack conditionStack_;
 
 public:
-    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::size_t searchPathId, Cache * cache )
-        :
-        preprocessor_( preprocessor ),
-        searchPathId_( searchPathId ),
-        pCurrentCtx_( 0 ),
-        replacement_( 0 ),
-        cache_( cache )
-    {
-    }
+    explicit HeaderTracker( clang::Preprocessor & preprocessor, std::size_t searchPathId, Cache * cache );
 
     void enterSourceFile( clang::FileEntry const *, llvm::StringRef fileName );
     void exitSourceFile( Headers & );
@@ -215,11 +278,36 @@ public:
     void leaveHeader();
     void pragmaOnce();
 
+    void ifDirective( clang::SourceLocation loc, bool taken )
+    {
+        conditionStack_.ifDirective( loc, taken );
+    }
+
+    void elifDirective( clang::SourceLocation loc, bool taken )
+    {
+        conditionStack_.elifDirective( loc, taken );
+    }
+
+    void elseDirective( clang::SourceLocation loc )
+    {
+        conditionStack_.elseDirective( loc );
+    }
+
+    void endifDirective( clang::SourceLocation loc )
+    {
+        conditionStack_.endifDirective( loc );
+    }
+
     void macroUsed( llvm::StringRef name );
     void macroDefined( llvm::StringRef name, clang::MacroDirective const * def );
     void macroUndefined( llvm::StringRef name, clang::MacroDirective const * def );
 
 private:
+    void commitMacros()
+    {
+        conditionStack_.commit();
+    }
+
     void pushHeaderCtx( clang::FileEntry const * original, clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit )
     {
         pCurrentCtx_ = new HeaderCtx( macroState_, original, replacement, cacheHit, pCurrentCtx_, preprocessor_ );

@@ -18,10 +18,6 @@
 #include <sstream>
 #include <windows.h>
 
-#ifndef NDEBUG
-#define DEBUG_HEADERS 1
-#endif
-
 #ifdef DEBUG_HEADERS
 std::ofstream logging_stream( "header_log.txt" );
 #endif
@@ -51,6 +47,7 @@ MacroName macroForPragmaOnce( clang::FileEntry const & entry )
 
 void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::StringRef relativePath, llvm::StringRef fileName, bool isAngled, clang::FileEntry const * entry )
 {
+    commitMacros();
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
     HeaderLocation::Enum const parentLocation( parentHeader.loc );
@@ -297,6 +294,25 @@ void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang
     );
 }
 
+HeaderTracker::HeaderTracker( clang::Preprocessor & preprocessor, std::size_t searchPathId, Cache * cache )
+    :
+    preprocessor_( preprocessor ),
+    searchPathId_( searchPathId ),
+    pCurrentCtx_( 0 ),
+    replacement_( 0 ),
+    cache_( cache ),
+    conditionStack_( preprocessor, [this]( llvm::StringRef str )
+    {
+#ifdef DEBUG_HEADERS
+    for ( unsigned int x = 0; x < fileStack_.size(); ++x )
+        logging_stream << "    ";
+    logging_stream << "Macro used: '" << str.str() << '\'' << std::endl;
+#endif
+        currentHeaderCtx().macroUsed( MacroName( str ) );
+    })
+{
+}
+
 void HeaderTracker::exitSourceFile( Headers & headers )
 {
 #ifdef DEBUG_HEADERS
@@ -323,9 +339,9 @@ void HeaderTracker::macroUsed( llvm::StringRef name )
 #ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
-    logging_stream << "Macro used: '" << name.str() << '\'' << std::endl;
+    logging_stream << "Macro possibly used: '" << name.str() << '\'' << std::endl;
 #endif
-    currentHeaderCtx().macroUsed( MacroName( name ) );
+    conditionStack_.addMacro( name );
 }
 
 namespace
@@ -379,6 +395,7 @@ void HeaderTracker::macroDefined( llvm::StringRef name, clang::MacroDirective co
         return;
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
+    commitMacros();
 #ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
@@ -391,6 +408,7 @@ void HeaderTracker::macroUndefined( llvm::StringRef name, clang::MacroDirective 
 {
     if ( !hasCurrentHeaderCtx() || cacheDisabled() || currentHeaderCtx().fromCache() )
         return;
+    commitMacros();
 #ifdef DEBUG_HEADERS
     for ( unsigned int x = 0; x < fileStack_.size(); ++x )
         logging_stream << "    ";
@@ -405,3 +423,133 @@ void HeaderTracker::pragmaOnce()
         return;
     currentHeaderCtx().macroDefined( macroForPragmaOnce( *fileStack_.back().file ), MacroValue( " 1" ) );
 }
+
+void ConditionStack::ifDirective( clang::SourceLocation loc, bool taken )
+{
+#ifdef DEBUG_HEADERS
+    logging_stream << "#if directive (" << ( taken ? "taken)" : "not taken)" ) << std::endl;
+#endif
+    conditions.push_back( Condition( loc ) );
+    condition().macros.swap( macros );
+    condition().lastBranchTaken = taken;
+    if ( taken )
+        condition().anyBranchTaken = true;
+}
+
+void ConditionStack::elifDirective( clang::SourceLocation loc, bool taken )
+{
+#ifdef DEBUG_HEADERS
+    logging_stream << "#elif directive (" << (taken ? "taken)" : "not taken)" ) << std::endl;
+#endif
+    if ( !hasCondition() )
+    {
+        assert( macros.empty() );
+        return;
+    }
+
+    condition().macros.insert( condition().macros.end(), macros.begin(), macros.end() );
+    macros.clear();
+    if ( taken )
+        condition().anyBranchTaken = true;
+    if ( lastConditionSkippable( loc ) )
+        condition().lastBranchTaken = taken;
+}
+
+void ConditionStack::elseDirective( clang::SourceLocation loc )
+{
+#ifdef DEBUG_HEADERS
+    logging_stream << "#else directive" << std::endl;
+#endif
+    if ( !hasCondition() )
+    {
+        assert( macros.empty() );
+        return;
+    }
+
+    if ( !macros.empty() )
+    {
+        condition().macros.insert( condition().macros.end(), macros.begin(), macros.end() );
+        macros.clear();
+        // This was most likely caused by Clang not reporting an #elif
+        // directive. Mark the whole #if-#elif-#else block as not-taken
+        // so that it can be re-scanned.
+        condition().lastBranchTaken = false;
+    }
+
+    if ( lastConditionSkippable( loc ) )
+        condition().lastBranchTaken = !condition().anyBranchTaken;
+}
+
+void ConditionStack::endifDirective( clang::SourceLocation loc )
+{
+#ifdef DEBUG_HEADERS
+    logging_stream << "#endif directive" << std::endl;
+#endif
+    if ( !hasCondition() )
+    {
+        assert( macros.empty() );
+        return;
+    }
+
+    if ( !macros.empty() )
+    {
+        condition().macros.insert( condition().macros.end(), macros.begin(), macros.end() );
+        macros.clear();
+        // See above.
+        condition().lastBranchTaken = false;
+    }
+
+    if ( lastConditionSkippable( loc ) )
+    {
+#ifdef DEBUG_HEADERS
+        for ( llvm::StringRef str : condition().macros )
+            logging_stream << "popping " << str.str() << std::endl;
+#endif
+        conditions.pop_back();
+    }
+#ifdef DEBUG_HEADERS
+    else
+    {
+        logging_stream << "Block not skippable" << std::endl;
+    }
+#endif
+}
+
+bool ConditionStack::lastConditionSkippable( clang::SourceLocation loc )
+{
+    clang::SourceLocation begin = condition().lastLocation;
+    condition().lastLocation = loc;
+    if ( condition().lastBranchTaken || skippable( begin, loc ) )
+        return true;
+    commit();
+    return false;
+}
+
+bool ConditionStack::skippable( clang::SourceLocation startLoc, clang::SourceLocation endLoc ) const
+{
+    char const * begin = preprocessor_.getSourceManager().getCharacterData( startLoc );
+    char const * end = preprocessor_.getSourceManager().getCharacterData( endLoc );
+    std::size_t const contentSize( end - begin );
+    tmpBuf_.reserve( contentSize + 1 );
+    std::memcpy( tmpBuf_.data(), begin, contentSize );
+    tmpBuf_.data()[ contentSize ] = '\0';
+
+    // see if there are any #define or #include directives in the #if/#endif
+    clang::Lexer lexer( startLoc, preprocessor_.getLangOpts(), tmpBuf_.data(), tmpBuf_.data(), tmpBuf_.data() + contentSize );
+    clang::Token tok;
+    while ( !lexer.LexFromRawLexer( tok ) )
+    {
+        if ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() )
+            continue;
+        if ( lexer.LexFromRawLexer( tok ) )
+            return true;
+        if ( tok.isNot( clang::tok::raw_identifier ) )
+            continue;
+
+        llvm::StringRef const identifier( tok.getRawIdentifierData(), tok.getLength() );
+        if ( ( identifier == "define" ) || ( identifier == "undef" ) || ( identifier == "include" ) )
+            return false;
+    }
+    return true;
+}
+

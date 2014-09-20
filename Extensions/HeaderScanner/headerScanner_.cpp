@@ -159,17 +159,19 @@ namespace
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
         }
 
-        virtual void Ifdef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void Ifdef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.ifDirective( loc, md != NULL );
         }
 
-        virtual void Ifndef(clang::SourceLocation Loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void Ifndef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.ifDirective( loc, md == 0 );
         }
 
-        virtual void PragmaDirective( clang::SourceLocation Loc, clang::PragmaIntroducerKind introducer ) LLVM_OVERRIDE
+        virtual void PragmaDirective( clang::SourceLocation loc, clang::PragmaIntroducerKind introducer ) LLVM_OVERRIDE
         {
             clang::Token const token( preprocessor_.LookAhead( 0 ) );
             if ( token.is( clang::tok::identifier ) && token.getIdentifierInfo()->getName() == "once" )
@@ -178,20 +180,24 @@ namespace
             }
         }
 
-        virtual void If( clang::SourceLocation, clang::SourceRange conditionRange, bool ) LLVM_OVERRIDE
+        virtual void If( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue ) LLVM_OVERRIDE
         {
+            headerTracker_.ifDirective( loc, conditionValue );
         }
 
-        virtual void Elif( clang::SourceLocation, clang::SourceRange conditionRange, bool, clang::SourceLocation ) LLVM_OVERRIDE
+        virtual void Elif( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
         {
+            headerTracker_.elifDirective( loc, conditionValue );
         }
 
-        virtual void Else( clang::SourceLocation, clang::SourceLocation ) LLVM_OVERRIDE
+        virtual void Else( clang::SourceLocation loc, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
         {
+            headerTracker_.elseDirective( loc );
         }
 
-        virtual void Endif( clang::SourceLocation, clang::SourceLocation ) LLVM_OVERRIDE
+        virtual void Endif( clang::SourceLocation loc, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
         {
+            headerTracker_.endifDirective( loc );
         }
 
     private:

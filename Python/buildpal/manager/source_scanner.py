@@ -69,7 +69,7 @@ class SourceScanner:
         total = hits + misses
         if total == 0:
             total = 1
-        return (hits, misses, hits / total)
+        return hits, misses, hits / total
 
     def add_task(self, task):
         task.note_time('queued for preprocessing')

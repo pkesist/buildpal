@@ -50,7 +50,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     commitMacros();
     assert( !fileStack_.empty() );
     Header const & parentHeader( fileStack_.back().header );
-    HeaderLocation::Enum const parentLocation( parentHeader.loc );
 
     // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
     // cached in our globalContentCache we will never read it, so its file
@@ -74,21 +73,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     }
 
     bool const relativeToParent( !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath ) );
-
-    HeaderLocation::Enum const headerLocation = relativeToParent
-        // This depends on the fact that source file location is 'relative'.
-        ? parentLocation 
-        : preprocessor().getHeaderSearchInfo().getFileDirFlavor( entry ) == clang::SrcMgr::C_System
-            ? HeaderLocation::system
-            : HeaderLocation::regular
-    ;
-
-    // Only files relative to source can have an empty search path.
-    assert( ( headerLocation == HeaderLocation::relative ) || !searchPath.empty() );
-    // If parent is user include, this cannot be relative to source file.
-    assert( ( parentLocation != HeaderLocation::regular ) || ( headerLocation != HeaderLocation::relative ) );
-    // If parent is system, this must be system.
-    assert( ( parentLocation != HeaderLocation::system ) || ( headerLocation == HeaderLocation::system ) );
 
     Dir dir;
     HeaderName headerName;
@@ -119,7 +103,7 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
             dir,
             headerName,
             contentEntry,
-            headerLocation
+            relativeToParent
         },
         entry
     };
@@ -229,7 +213,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
             Dir( mainFileEntry->getDir()->getName() ),
             HeaderName( llvm::sys::path::filename( fileName ) ),
             ContentEntryPtr(),
-            HeaderLocation::relative
+            true
         },
         mainFileEntry
     };

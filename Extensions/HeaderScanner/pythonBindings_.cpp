@@ -471,7 +471,7 @@ PyObject * PyPreprocessor_scanHeaders( PyPreprocessor * self, PyObject * args, P
             PyObject * headerEntry = PyTuple_New( 3 );
             PyTuple_SET_ITEM( headerEntry, 0, PyUnicode_FromStringAndSize( header->name.get().data(), header->name.get().size() ) );
 
-            PyObject * const isRelative( header->loc == HeaderLocation::relative ? Py_True : Py_False );
+            PyObject * const isRelative( header->relative ? Py_True : Py_False );
             Py_INCREF( isRelative );
             PyTuple_SET_ITEM( headerEntry, 1, isRelative );
         

@@ -52,22 +52,12 @@ DEFINE_FLYWEIGHT(llvm::SmallString<64>, HeaderName);
 DEFINE_FLYWEIGHT(llvm::SmallString<64>, MacroName);
 DEFINE_FLYWEIGHT(llvm::SmallString<64 + 32>, MacroValue);
 
-struct HeaderLocation
-{
-    enum Enum
-    {
-        relative,
-        regular,
-        system
-    };
-};
-
 struct Header
 {
     Dir dir;
     HeaderName name;
     ContentEntryPtr contentEntry;
-    HeaderLocation::Enum loc;
+    bool relative;
 };
 
 inline bool operator==( Header const & first, Header const & second )
@@ -159,6 +149,7 @@ public:
 
 private:
     std::size_t setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
+    bool naivePreprocessing( llvm::StringRef fileName, Headers & );
 
 private:
     clang::FileManager         & fileManager  ()       { return *fileManager_; }

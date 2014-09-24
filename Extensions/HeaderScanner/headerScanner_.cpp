@@ -15,6 +15,7 @@
 #include <clang/Lex/HeaderSearch.h>
 #include <clang/Lex/HeaderSearchOptions.h>
 #include <clang/Lex/LexDiagnostic.h>
+#include <clang/Lex/ModuleLoader.h>
 #include <clang/Lex/Preprocessor.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <clang/Rewrite/Frontend/Rewriters.h>
@@ -26,7 +27,23 @@
 
 #include <iostream>
 #include <windows.h>
-#undef ReplaceFile
+
+namespace
+{
+    struct DummyModuleLoader : public clang::ModuleLoader 
+    {
+        virtual clang::ModuleLoadResult loadModule(
+            clang::SourceLocation,
+            clang::ModuleIdPath,
+            clang::Module::NameVisibilityKind,
+            bool IsInclusionDirective) { return clang::ModuleLoadResult(); }
+        virtual void makeModuleVisible(
+            clang::Module *,
+            clang::Module::NameVisibilityKind,
+            clang::SourceLocation,
+            bool Complain) {}
+    } moduleLoader;
+}
 
 void normalize( llvm::SmallString<512> & path )
 {
@@ -95,6 +112,9 @@ namespace
             headerTracker_.inclusionDirective( searchPath, relativePath, fileName, isAngled, file );
         }
 
+#ifdef ReplaceFile
+#undef ReplaceFile
+#endif
         virtual void ReplaceFile( clang::FileEntry const * & file ) LLVM_OVERRIDE
         {
             headerTracker_.replaceFile( file );
@@ -247,84 +267,6 @@ Preprocessor::Preprocessor( Cache * cache )
     hsOpts_->Sysroot.clear();
 }
 
-std::size_t Preprocessor::setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef fileName )
-{
-    // Initialize file manager.
-    fileManager_.reset( new clang::FileManager( fsOpts_ ) );
-    fileManager().addStatCache( new MemorizeStatCalls_PreventOpenFile() );
-
-    // Initialize source manager.
-    sourceManager_.reset( new clang::SourceManager( *diagEng_, fileManager(), false ) );
-
-    // Setup search path.
-    headerSearch_.reset( new clang::HeaderSearch( hsOpts_, sourceManager(), *diagEng_, *langOpts_, &*targetInfo_ ) );
-    std::vector<clang::DirectoryLookup> searchPath;
-    std::size_t searchPathId( 0 );
-    for ( auto const & path : ppc.userSearchPath() )
-    {
-        clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
-        if ( entry )
-        {
-            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
-            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_User, false ) );
-        }
-    }
-
-    for ( auto const & path : ppc.systemSearchPath() )
-    {
-        clang::DirectoryEntry const * entry = fileManager().getDirectory( path );
-        if ( entry )
-        {
-            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
-            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );
-        }
-    }
-
-    headerSearch_->SetSearchPaths( searchPath, 0, ppc.userSearchPath().size(), false );
-
-    // Create main file.
-    clang::FileEntry const * mainFileEntry = fileManager().getFile( fileName );
-    if ( !mainFileEntry )
-    {
-        std::string error( "Could not find source file '" );
-        error.append( fileName.str() );
-        error.append( "'." );
-        throw std::runtime_error( error );
-    }
-
-    assert( !sourceManager().isFileOverridden( mainFileEntry ) );
-    sourceManager().overrideFileContents( mainFileEntry,
-        prepareSourceFile( fileManager(), *mainFileEntry ) );
-    sourceManager().createMainFileID( mainFileEntry );
-
-    // Setup new preprocessor instance.
-    preprocessor_.reset
-    (
-        new clang::Preprocessor
-        (
-            ppOpts_,
-            *diagEng_,
-            *langOpts_,
-            &*targetInfo_,
-            sourceManager(),
-            *headerSearch_,
-            moduleLoader_
-        )
-    );
-
-    std::string predefines;
-    llvm::raw_string_ostream predefinesStream( predefines );
-    clang::MacroBuilder macroBuilder( predefinesStream );
-    for ( PreprocessingContext::Defines::value_type const & macro : ppc.defines() )
-        macroBuilder.defineMacro( macro.first, macro.second );
-    for ( PreprocessingContext::Includes::value_type const & include : ppc.forcedIncludes() )
-        macroBuilder.append( llvm::Twine( "#include \"" ) + include + "\"" );
-    preprocessor().setPredefines( predefinesStream.str() );
-    preprocessor().SetSuppressIncludeNotFoundError( true );
-    preprocessor().SetMacroExpansionOnlyInDirectives();
-    return searchPathId;
-}
-
 namespace
 {
     struct DiagnosticConsumer : clang::DiagnosticConsumer
@@ -352,61 +294,139 @@ namespace
     };
 }
 
-
-bool Preprocessor::naivePreprocessing( llvm::StringRef fileName, Headers & result )
+struct NaiveCache
 {
-    // naive preprocessing
-    llvm::MemoryBuffer const * mainFileBuffer = sourceManager().getBuffer( sourceManager().getMainFileID() );
-    clang::FileEntry const * mainFileEntry = sourceManager().getFileEntryForID( sourceManager().getMainFileID() );
+    struct NaiveCacheEntry
+    {
+        Headers headers;
+        bool isComplex;
+    };
+
+    void markComplex( clang::FileEntry const & entry )
+    {
+        boost::unique_lock<boost::shared_mutex> const lock( mutex );
+        container[ entry.getUniqueID() ].isComplex = true;
+    }
+
+    void storeHeaders( clang::FileEntry const & entry, Headers const & headers )
+    {
+        llvm::sys::fs::UniqueID id = entry.getUniqueID();
+        boost::unique_lock<boost::shared_mutex> const lock( mutex );
+        container[ id ].isComplex = false;
+        container[ id ].headers = headers;
+    }
+
+    bool hasEntry( clang::FileEntry const & entry, bool & isComplex, Headers * & headers )
+    {
+        llvm::sys::fs::UniqueID id = entry.getUniqueID();
+        boost::shared_lock<boost::shared_mutex> const lock( mutex );
+        auto iter = container.find( id );
+        if ( iter == container.end() )
+            return false;
+        isComplex = iter->second.isComplex;
+        if ( !isComplex )
+            headers = &iter->second.headers;
+        return true;
+    }
+
+    boost::shared_mutex mutex;
+    std::map<llvm::sys::fs::UniqueID, NaiveCacheEntry> container;
+} naiveCache;
+
+bool Preprocessor::naivePreprocessing( clang::FileEntry const * mainFileEntry, clang::SourceManager & sourceManager, clang::HeaderSearch & headerSearch, Headers & result )
+{
+    llvm::MemoryBuffer const * mainFileBuffer = sourceManager.getMemoryBufferForFile( mainFileEntry );
     clang::Token tok;
     std::unordered_set<clang::FileEntry const *> alreadyVisited;
-    std::vector<std::unique_ptr<clang::Lexer> > lexerStack;
-    struct Entry
-    {
-        Header header;
-        clang::FileEntry const * fileEntry;
-    };
-    std::vector<Entry> fileStack;
-    lexerStack.emplace_back( new clang::Lexer( sourceManager().getMainFileID(), mainFileBuffer, sourceManager(), preprocessor().getLangOpts() ) );
-    Entry entry = {
-        {
-            Dir( mainFileEntry->getDir()->getName() ),
-            HeaderName( llvm::sys::path::filename( fileName ) ),
-            ContentEntryPtr(),
-            true
-        },
-        mainFileEntry
-    };
-    fileStack.push_back( entry );
-    bool canProcessNaively( true );
-    Headers headers;
 
-    while ( canProcessNaively && !lexerStack.empty() )
+    struct HeaderCtx
     {
-        clang::Lexer & curLexer( *lexerStack.back() );
+        HeaderCtx( Header const & h, clang::Lexer * l, clang::FileEntry const * f )
+            : currentHeader( h ), currentLexer( l ), fileEntry( f )
+        {
+        }
+
+        HeaderCtx( HeaderCtx && other )
+            : currentHeader( std::move( other.currentHeader ) ),
+            currentLexer( other.currentLexer ),
+            fileEntry( other.fileEntry )
+        {
+            other.currentLexer = 0;
+        }
+
+        HeaderCtx & operator=( HeaderCtx && other )
+        {
+            currentHeader = std::move( other.currentHeader );
+            currentLexer = other.currentLexer;
+            other.currentLexer = 0;
+            fileEntry = other.fileEntry;
+            return *this;
+        }
+
+        ~HeaderCtx()
+        {
+            delete currentLexer;
+        }
+
+        Header currentHeader;
+        clang::Lexer * currentLexer;
+        clang::FileEntry const * fileEntry;
+        Headers headers;
+    };
+
+    std::vector<HeaderCtx> fileStack;
+    Header header = 
+    {
+        Dir( mainFileEntry->getDir()->getName() ),
+        HeaderName( mainFileEntry->getName() ),
+        ContentEntryPtr(),
+        true
+    };
+
+    fileStack.push_back
+    (
+        HeaderCtx
+        (
+            header,
+            new clang::Lexer
+            (
+                sourceManager.getMainFileID(),
+                mainFileBuffer,
+                sourceManager,
+                langOpts()
+            ),
+            mainFileEntry
+        )
+    );
+
+    while ( true )
+    {
+        clang::Lexer & curLexer( *fileStack.back().currentLexer );
         while ( true )
         {
             bool const eof( curLexer.LexFromRawLexer( tok ) );
-            if ( eof )
-            {
-                lexerStack.pop_back();
-                break;
-            }
 
-            if ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() )
+            if ( !eof && ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() ) )
                 continue;
-            if ( curLexer.LexFromRawLexer( tok ) )
+            else if ( eof || curLexer.LexFromRawLexer( tok ) )
             {
-                lexerStack.pop_back();
-                headers.insert( fileStack.back().header );
+                HeaderCtx const & headerCtx( fileStack.back() );
+                naiveCache.storeHeaders( *headerCtx.fileEntry, headerCtx.headers );
+                Headers tmp( std::move( headerCtx.headers ) );
                 fileStack.pop_back();
-                break;
+                if ( fileStack.empty() )
+                {
+                    result.swap( tmp );
+                    return true;
+                }
+                else
+                {
+                    std::copy( tmp.begin(), tmp.end(), std::inserter( fileStack.back().headers, fileStack.back().headers.begin() ) );
+                    break;
+                }
             }
-            if ( tok.isNot( clang::tok::raw_identifier ) )
-                continue;
 
-            llvm::StringRef const identifier( tok.getRawIdentifierData(), tok.getLength() );
-            if ( identifier != "include" )
+            if ( tok.isNot( clang::tok::raw_identifier ) || ( llvm::StringRef( tok.getRawIdentifierData(), tok.getLength() ) != "include" ) )
                 continue;
 
             curLexer.LexIncludeFilename( tok );
@@ -414,17 +434,39 @@ bool Preprocessor::naivePreprocessing( llvm::StringRef fileName, Headers & resul
             llvm::SmallString<1024> relativePath;
             if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
             {
-                canProcessNaively = false;
-                break;
+                for ( HeaderCtx const & headerCtx : fileStack )
+                    if ( headerCtx.fileEntry != mainFileEntry )
+                        naiveCache.markComplex( *headerCtx.fileEntry );
+                return false;
             }
             bool const isAngled = tok.is( clang::tok::angle_string_literal );
 
             llvm::StringRef fileName( tok.getLiteralData() + 1, tok.getLength() - 2 );
             clang::DirectoryLookup const * curDir( 0 );
-            clang::FileEntry const * fileEntry( headerSearch_->LookupFile( fileName, true, 0, curDir, 
+            clang::FileEntry const * fileEntry( headerSearch.LookupFile( fileName, true, 0, curDir, 
                 fileStack.back().fileEntry, &searchPath, &relativePath, NULL ) );
             if ( !fileEntry || ( alreadyVisited.find( fileEntry ) != alreadyVisited.end() ) )
                 continue;
+
+            {
+                bool isComplex;
+                Headers * cacheHeaders;
+                if ( naiveCache.hasEntry( *fileEntry, isComplex, cacheHeaders ) )
+                {
+                    if ( isComplex )
+                    {
+                        for ( HeaderCtx const & headerCtx : fileStack )
+                            if ( headerCtx.fileEntry != mainFileEntry )
+                                naiveCache.markComplex( *headerCtx.fileEntry );
+                        return false;
+                    }
+                    else
+                    {
+                        std::copy( cacheHeaders->begin(), cacheHeaders->end(), std::inserter( fileStack.back().headers, fileStack.back().headers.begin() ) );
+                        continue;
+                    }
+                }
+            }
 
             Dir dir;
             HeaderName headerName;
@@ -432,8 +474,8 @@ bool Preprocessor::naivePreprocessing( llvm::StringRef fileName, Headers & resul
             bool const relativeToParent( !isAngled && ( fileStack.back().fileEntry->getDir()->getName() == searchPath ) );
             if ( relativeToParent )
             {
-                dir =  Dir( fileStack.back().header.dir );
-                llvm::StringRef const parentFilename = fileStack.back().header.name.get();
+                dir =  Dir( fileStack.back().currentHeader.dir );
+                llvm::StringRef const parentFilename = fileStack.back().currentHeader.name.get();
                 std::size_t const slashPos = parentFilename.find_last_of('/');
                 if ( slashPos == llvm::StringRef::npos )
                     headerName = HeaderName( relativePath );
@@ -450,42 +492,116 @@ bool Preprocessor::naivePreprocessing( llvm::StringRef fileName, Headers & resul
                 headerName = HeaderName( relativePath );
             }
 
-            ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( preprocessor().getFileManager(), fileEntry, NULL );
-            clang::FileID id = sourceManager().createFileID( fileEntry, tok.getLocation(), tok.is( clang::tok::string_literal ) ? clang::SrcMgr::C_User : clang::SrcMgr::C_System );
-            lexerStack.emplace_back( new clang::Lexer( id, contentEntry->buffer.get(), sourceManager(), preprocessor().getLangOpts() ) );
-            Entry entry = { 
-                {
-                    dir,
-                    headerName,
-                    contentEntry,
-                    relativeToParent
-                },
-                fileEntry
+            ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( sourceManager.getFileManager(), fileEntry, NULL );
+            clang::FileID id = sourceManager.createFileID( fileEntry, tok.getLocation(), tok.is( clang::tok::string_literal ) ? clang::SrcMgr::C_User : clang::SrcMgr::C_System );
+
+            Header header = {
+                dir,
+                headerName,
+                contentEntry,
+                relativeToParent
             };
-            fileStack.push_back( entry );
+
+            fileStack.push_back
+            (
+                HeaderCtx
+                ( 
+                    header,
+                    new clang::Lexer
+                    (
+                        id,
+                        contentEntry->buffer.get(),
+                        sourceManager,
+                        langOpts()
+                    ),
+                    fileEntry
+                )
+            );
             alreadyVisited.insert( fileEntry );
             break;
         }
     }
-
-    if ( canProcessNaively )
-    {
-        result.swap( headers );
-        return true;
-    }
-
+    // Never reached.
     return false;
 }
 
 bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
-    std::size_t const searchPathId = setupPreprocessor( ppc, fileName );
+    // Initialize file manager.
+    clang::FileManager fileManager( fsOpts_ );
+    fileManager.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 
-    if ( naivePreprocessing( fileName, headers ) )
+    // Initialize source manager.
+    clang::SourceManager sourceManager( *diagEng_, fileManager, false );
+
+    // Setup search path.
+    clang::HeaderSearch headerSearch( hsOpts_, sourceManager, *diagEng_, *langOpts_, &*targetInfo_ ) ;
+    std::vector<clang::DirectoryLookup> searchPath;
+    std::size_t searchPathId( 0 );
+    for ( auto const & path : ppc.userSearchPath() )
+    {
+        clang::DirectoryEntry const * entry = fileManager.getDirectory( path );
+        if ( entry )
+        {
+            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
+            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_User, false ) );
+        }
+    }
+
+    for ( auto const & path : ppc.systemSearchPath() )
+    {
+        clang::DirectoryEntry const * entry = fileManager.getDirectory( path );
+        if ( entry )
+        {
+            llvm::hash_combine( searchPathId, llvm::hash_combine_range( path.begin(), path.end() ) );
+            searchPath.push_back( clang::DirectoryLookup( entry, clang::SrcMgr::C_System, false ) );
+        }
+    }
+
+    headerSearch.SetSearchPaths( searchPath, 0, ppc.userSearchPath().size(), false );
+
+    // Create main file.
+    clang::FileEntry const * mainFileEntry = fileManager.getFile( fileName );
+    if ( !mainFileEntry )
+    {
+        std::string error( "Could not find source file '" );
+        error.append( fileName.str() );
+        error.append( "'." );
+        throw std::runtime_error( error );
+    }
+
+    assert( !sourceManager.isFileOverridden( mainFileEntry ) );
+    sourceManager.overrideFileContents( mainFileEntry,
+        prepareSourceFile( fileManager, *mainFileEntry ) );
+    sourceManager.createMainFileID( mainFileEntry );
+
+    if ( naivePreprocessing( mainFileEntry, sourceManager, headerSearch, headers ) )
         return true;
 
     // Do the real preprocessing.
-    HeaderTracker headerTracker( preprocessor(), searchPathId, cache_ );
+    clang::Preprocessor preprocessor
+    (
+        ppOpts_,
+        *diagEng_,
+        langOpts(),
+        &*targetInfo_,
+        sourceManager,
+        headerSearch,
+        moduleLoader
+    );
+
+    std::string predefines;
+    llvm::raw_string_ostream predefinesStream( predefines );
+    clang::MacroBuilder macroBuilder( predefinesStream );
+    for ( PreprocessingContext::Defines::value_type const & macro : ppc.defines() )
+        macroBuilder.defineMacro( macro.first, macro.second );
+    for ( PreprocessingContext::Includes::value_type const & include : ppc.forcedIncludes() )
+        macroBuilder.append( llvm::Twine( "#include \"" ) + include + "\"" );
+    preprocessor.setPredefines( predefinesStream.str() );
+    preprocessor.SetSuppressIncludeNotFoundError( true );
+    preprocessor.SetMacroExpansionOnlyInDirectives();
+
+    HeaderTracker headerTracker( preprocessor, searchPathId, cache_ );
     diagEng_->setClient( new DiagnosticConsumer( headerTracker ) );
     struct DiagnosticsSetup
     {
@@ -503,24 +619,24 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     } const diagnosticsGuard
     (
         *diagEng_->getClient(),
-        *langOpts_,
-        preprocessor()
+        langOpts(),
+        preprocessor
     );
 
-    preprocessor().addPPCallbacks( new PreprocessorCallbacks( headerTracker, fileName,
-        preprocessor(), headers, missingHeaders ) );
+    preprocessor.addPPCallbacks( new PreprocessorCallbacks( headerTracker, fileName,
+        preprocessor, headers, missingHeaders ) );
     
-    preprocessor().EnterMainSourceFile();
+    preprocessor.EnterMainSourceFile();
     if ( diagEng_->hasFatalErrorOccurred() )
         return false;
     while ( true )
     {
         clang::Token token;
-        preprocessor().LexNonComment( token );
+        preprocessor.LexNonComment( token );
         if ( token.is( clang::tok::eof ) )
             break;
     }
-    preprocessor().EndSourceFile();
+    preprocessor.EndSourceFile();
     return true;
 }
 

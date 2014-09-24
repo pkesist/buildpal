@@ -77,20 +77,6 @@ typedef std::set<Header> Headers;
 
 typedef std::set<std::string> HeaderList;
 
-struct DummyModuleLoader : public clang::ModuleLoader 
-{
-    virtual clang::ModuleLoadResult loadModule(
-        clang::SourceLocation,
-        clang::ModuleIdPath,
-        clang::Module::NameVisibilityKind,
-        bool IsInclusionDirective) { return clang::ModuleLoadResult(); }
-    virtual void makeModuleVisible(
-        clang::Module *,
-        clang::Module::NameVisibilityKind,
-        clang::SourceLocation,
-        bool Complain) {}
-};
-
 class PreprocessingContext
 {
 public:
@@ -148,16 +134,16 @@ public:
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
 private:
-    std::size_t setupPreprocessor( PreprocessingContext const & ppc, llvm::StringRef filename );
-    bool naivePreprocessing( llvm::StringRef fileName, Headers & );
+    bool naivePreprocessing
+    (
+        clang::FileEntry const *,
+        clang::SourceManager &,
+        clang::HeaderSearch &,
+        Headers &
+    );
 
 private:
-    clang::FileManager         & fileManager  ()       { return *fileManager_; }
-    clang::FileManager   const & fileManager  () const { return *fileManager_; }
-    clang::SourceManager       & sourceManager()       { return *sourceManager_; }
-    clang::SourceManager const & sourceManager() const { return *sourceManager_; }
-    clang::Preprocessor        & preprocessor ()       { return *preprocessor_; }
-    clang::Preprocessor  const & preprocessor () const { return *preprocessor_; }
+    clang::LangOptions & langOpts() { return *langOpts_; }
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
@@ -168,12 +154,7 @@ private:
     llvm::IntrusiveRefCntPtr<clang::TargetOptions> targetOpts_;
     llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo_;
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
-    DummyModuleLoader moduleLoader_;
     clang::FileSystemOptions fsOpts_;
-    llvm::OwningPtr<clang::FileManager> fileManager_;
-    llvm::OwningPtr<clang::SourceManager> sourceManager_;
-    llvm::OwningPtr<clang::HeaderSearch> headerSearch_;
-    llvm::OwningPtr<clang::Preprocessor> preprocessor_;
     Cache * cache_;
 };
 

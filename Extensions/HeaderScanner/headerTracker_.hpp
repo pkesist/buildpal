@@ -20,6 +20,8 @@
 #include <vector>
 //------------------------------------------------------------------------------
 
+class MacroState;
+
 namespace clang
 {
     class Preprocessor;

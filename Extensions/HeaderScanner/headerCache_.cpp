@@ -9,8 +9,6 @@
 #include <fstream>
 //------------------------------------------------------------------------------
 
-MacroValue undefinedMacroValue = MacroValue( llvm::StringRef( "", 1 ) );
-
 clang::FileEntry const * CacheEntry::getFileEntry(
     clang::SourceManager & sourceManager )
 {

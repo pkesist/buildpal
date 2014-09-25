@@ -248,5 +248,9 @@ namespace std
 
 llvm::MemoryBuffer * prepareSourceFile( clang::FileManager &, clang::FileEntry const & );
 
+#define DEFINE_FLYWEIGHT(base, name) \
+    struct name##Tag {}; \
+    typedef Flyweight<base, name##Tag> name;
+
 //------------------------------------------------------------------------------
 #endif

@@ -43,14 +43,9 @@ namespace llvm
 class Cache;
 class HeaderTracker;
 
-#define DEFINE_FLYWEIGHT(base, name) \
-    struct name##Tag {}; \
-    typedef Flyweight<base, name##Tag> name;
 
 DEFINE_FLYWEIGHT(llvm::SmallString<256>, Dir);
 DEFINE_FLYWEIGHT(llvm::SmallString<64>, HeaderName);
-DEFINE_FLYWEIGHT(llvm::SmallString<64>, MacroName);
-DEFINE_FLYWEIGHT(llvm::SmallString<64 + 32>, MacroValue);
 
 struct Header
 {

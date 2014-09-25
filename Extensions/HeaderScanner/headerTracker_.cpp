@@ -1,6 +1,7 @@
 #include "headerTracker_.hpp"
 
 #include "contentCache_.hpp"
+#include "macroState_.hpp"
 #include "utility_.hpp"
 
 #include <clang/Lex/Preprocessor.h>

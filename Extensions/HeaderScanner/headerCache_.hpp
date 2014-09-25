@@ -6,6 +6,7 @@
 //------------------------------------------------------------------------------
 #include "contentCache_.hpp"
 #include "headerScanner_.hpp"
+#include "macroState_.hpp"
 #include "utility_.hpp"
 
 #include <boost/intrusive_ptr.hpp>
@@ -40,8 +41,6 @@ namespace clang
     class FileEntry;
 }
 
-extern MacroValue undefinedMacroValue;
-
 struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
@@ -52,7 +51,6 @@ struct HeaderWithFileEntry
     clang::FileEntry const * file;
 };
 
-typedef std::pair<MacroName, MacroValue> Macro;
 typedef std::vector<Macro> UsedMacros;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,57 +92,6 @@ struct IndexedUsedMacros : public IndexedUsedMacrosBase
     {
         return addMacro( macroName, [&]( MacroName const & ) -> MacroValue { return macroValue; } );
     }
-};
-
-struct MacroState
-{
-private:
-    typedef std::unordered_map<MacroName, MacroValue> MacroValueMap;
-
-private:
-    MacroValueMap macroValueMap_;
-
-private:
-    MacroState( MacroState const & ms );
-    MacroState & operator=( MacroState const & ms );
-
-public:
-    MacroState() {}
-    MacroState( MacroState && ms ) :
-        macroValueMap_( std::move( ms.macroValueMap_ ) ) {}
-
-    void defineMacro( MacroName const & name, MacroValue const & value )
-    {
-        macroValueMap_[ name ] = value;
-    }
-
-    void undefineMacro( MacroName const & name )
-    {
-        defineMacro( name, undefinedMacroValue );
-    }
-
-    bool getMacroValue( MacroName const & name, MacroValue & value ) const
-    {
-        MacroValueMap::const_iterator const result = macroValueMap_.find( name );
-        if ( result == macroValueMap_.end() )
-            return false;
-        value = result->second;
-        return true;
-    }
-
-    MacroValue getMacroValue( MacroName const & name ) const
-    {
-        MacroValue value;
-        return getMacroValue( name, value ) ? value : undefinedMacroValue;
-    }
-
-    template <typename F>
-    void forEachMacro( F f ) const
-    {
-        std::for_each( macroValueMap_.begin(), macroValueMap_.end(), f );
-    }
-
-    std::size_t size() const { return macroValueMap_.size(); }
 };
 
 void intrusive_ptr_add_ref( CacheEntry * );

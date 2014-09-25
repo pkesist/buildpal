@@ -333,14 +333,17 @@ struct NaiveCache
     std::map<llvm::sys::fs::UniqueID, NaiveCacheEntry> container;
 } naiveCache;
 
-bool Preprocessor::naivePreprocessing( clang::FileEntry const * mainFileEntry, clang::SourceManager & sourceManager, clang::HeaderSearch & headerSearch, Headers & result )
+class NaivePreprocessor
 {
-    llvm::MemoryBuffer const * mainFileBuffer = sourceManager.getMemoryBufferForFile( mainFileEntry );
-    clang::Token tok;
-    std::unordered_set<clang::FileEntry const *> alreadyVisited;
-
+public:
     struct HeaderCtx
     {
+    private:
+        HeaderCtx( HeaderCtx const & );
+        HeaderCtx & operator=( HeaderCtx const & );
+
+    public:
+
         HeaderCtx( Header const & h, clang::Lexer * l, clang::FileEntry const * f )
             : currentHeader( h ), currentLexer( l ), fileEntry( f )
         {
@@ -374,151 +377,226 @@ bool Preprocessor::naivePreprocessing( clang::FileEntry const * mainFileEntry, c
         Headers headers;
     };
 
-    std::vector<HeaderCtx> fileStack;
-    Header header = 
-    {
-        Dir( mainFileEntry->getDir()->getName() ),
-        HeaderName( mainFileEntry->getName() ),
-        ContentEntryPtr(),
-        true
-    };
+    typedef std::vector<HeaderCtx> HeaderStack;
 
-    fileStack.push_back
+public:
+    NaivePreprocessor( clang::SourceManager & sourceManager, clang::HeaderSearch & headerSearch, clang::LangOptions & langOpts )
+        : sourceManager_( sourceManager ), headerSearch_( headerSearch ), langOpts_( langOpts )
+    {}
+
+    void pushHeader
     (
-        HeaderCtx
-        (
-            header,
-            new clang::Lexer
-            (
-                sourceManager.getMainFileID(),
-                mainFileBuffer,
-                sourceManager,
-                langOpts()
-            ),
-            mainFileEntry
-        )
-    );
-
-    while ( true )
+        Dir const & dir,
+        HeaderName const & name, 
+        clang::FileID id,
+        llvm::MemoryBuffer const * buffer,
+        clang::FileEntry const * entry,
+        ContentEntryPtr const & content,
+        bool relative
+    )
     {
-        clang::Lexer & curLexer( *fileStack.back().currentLexer );
-        while ( true )
-        {
-            bool const eof( curLexer.LexFromRawLexer( tok ) );
+        Header header = { dir, name, content, relative };
+        headerStack_.push_back
+        (
+            HeaderCtx
+            (
+                header,
+                new clang::Lexer
+                (
+                    id,
+                    buffer,
+                    sourceManager_,
+                    langOpts_
+                ),
+                entry
+            )
+        );
+        alreadyVisited_.insert( entry );
+    }
 
-            if ( !eof && ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() ) )
-                continue;
-            else if ( eof || curLexer.LexFromRawLexer( tok ) )
+    bool handleEof( Headers & result )
+    {
+        NaivePreprocessor::HeaderCtx const & headerCtx( headerStack_.back() );
+        naiveCache.storeHeaders( *headerCtx.fileEntry, headerCtx.headers );
+        Headers tmp( std::move( headerCtx.headers ) );
+        headerStack_.pop_back();
+        if ( headerStack_.empty() )
+        {
+            result.swap( tmp );
+            return true;
+        }
+        else
+        {
+            std::copy( tmp.begin(), tmp.end(), std::inserter( headerStack_.back().headers, headerStack_.back().headers.begin() ) );
+            return false;
+        }
+    }
+
+    bool handleInclude()
+    {
+        clang::Lexer & curLexer( *headerStack_.back().currentLexer );
+        clang::Token tok;
+        curLexer.LexIncludeFilename( tok );
+        llvm::SmallString<1024> searchPath;
+        llvm::SmallString<1024> relativePath;
+        if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
+        {
+            foundComplexInclude();
+            return false;
+        }
+        bool const isAngled = tok.is( clang::tok::angle_string_literal );
+
+        llvm::StringRef fileName( tok.getLiteralData() + 1, tok.getLength() - 2 );
+        clang::DirectoryLookup const * curDir( 0 );
+        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, true, 0, curDir, 
+            headerStack_.back().fileEntry, &searchPath, &relativePath, NULL ) );
+        if ( !fileEntry || ( alreadyVisited_.find( fileEntry ) != alreadyVisited_.end() ) )
+            return true;
+
+        {
+            bool isComplex;
+            Headers * cacheHeaders;
+            if ( naiveCache.hasEntry( *fileEntry, isComplex, cacheHeaders ) )
             {
-                HeaderCtx const & headerCtx( fileStack.back() );
-                naiveCache.storeHeaders( *headerCtx.fileEntry, headerCtx.headers );
-                Headers tmp( std::move( headerCtx.headers ) );
-                fileStack.pop_back();
-                if ( fileStack.empty() )
+                if ( isComplex )
                 {
-                    result.swap( tmp );
+                    foundComplexInclude();
+                    return false;
+                }
+                else
+                {
+                    std::copy( cacheHeaders->begin(), cacheHeaders->end(),
+                        std::inserter( headerStack_.back().headers,
+                        headerStack_.back().headers.begin() )
+                    );
                     return true;
                 }
-                else
-                {
-                    std::copy( tmp.begin(), tmp.end(), std::inserter( fileStack.back().headers, fileStack.back().headers.begin() ) );
-                    break;
-                }
             }
+        }
 
-            if ( tok.isNot( clang::tok::raw_identifier ) || ( llvm::StringRef( tok.getRawIdentifierData(), tok.getLength() ) != "include" ) )
-                continue;
+        Dir dir;
+        HeaderName headerName;
 
-            curLexer.LexIncludeFilename( tok );
-            llvm::SmallString<1024> searchPath;
-            llvm::SmallString<1024> relativePath;
-            if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
-            {
-                for ( HeaderCtx const & headerCtx : fileStack )
-                    if ( headerCtx.fileEntry != mainFileEntry )
-                        naiveCache.markComplex( *headerCtx.fileEntry );
-                return false;
-            }
-            bool const isAngled = tok.is( clang::tok::angle_string_literal );
-
-            llvm::StringRef fileName( tok.getLiteralData() + 1, tok.getLength() - 2 );
-            clang::DirectoryLookup const * curDir( 0 );
-            clang::FileEntry const * fileEntry( headerSearch.LookupFile( fileName, true, 0, curDir, 
-                fileStack.back().fileEntry, &searchPath, &relativePath, NULL ) );
-            if ( !fileEntry || ( alreadyVisited.find( fileEntry ) != alreadyVisited.end() ) )
-                continue;
-
-            {
-                bool isComplex;
-                Headers * cacheHeaders;
-                if ( naiveCache.hasEntry( *fileEntry, isComplex, cacheHeaders ) )
-                {
-                    if ( isComplex )
-                    {
-                        for ( HeaderCtx const & headerCtx : fileStack )
-                            if ( headerCtx.fileEntry != mainFileEntry )
-                                naiveCache.markComplex( *headerCtx.fileEntry );
-                        return false;
-                    }
-                    else
-                    {
-                        std::copy( cacheHeaders->begin(), cacheHeaders->end(), std::inserter( fileStack.back().headers, fileStack.back().headers.begin() ) );
-                        continue;
-                    }
-                }
-            }
-
-            Dir dir;
-            HeaderName headerName;
-
-            bool const relativeToParent( !isAngled && ( fileStack.back().fileEntry->getDir()->getName() == searchPath ) );
-            if ( relativeToParent )
-            {
-                dir =  Dir( fileStack.back().currentHeader.dir );
-                llvm::StringRef const parentFilename = fileStack.back().currentHeader.name.get();
-                std::size_t const slashPos = parentFilename.find_last_of('/');
-                if ( slashPos == llvm::StringRef::npos )
-                    headerName = HeaderName( relativePath );
-                else
-                {
-                    llvm::SmallString<512> fileName( parentFilename.data(), parentFilename.data() + slashPos + 1 );
-                    fileName.append( relativePath );
-                    headerName = HeaderName( fileName.str() );
-                }
-            }
+        bool const relativeToParent( !isAngled && ( headerStack_.back().fileEntry->getDir()->getName() == searchPath ) );
+        if ( relativeToParent )
+        {
+            dir =  Dir( headerStack_.back().currentHeader.dir );
+            llvm::StringRef const parentFilename = headerStack_.back().currentHeader.name.get();
+            std::size_t const slashPos = parentFilename.find_last_of('/');
+            if ( slashPos == llvm::StringRef::npos )
+                headerName = HeaderName( relativePath );
             else
             {
-                dir = Dir( searchPath );
-                headerName = HeaderName( relativePath );
+                llvm::SmallString<512> fileName( parentFilename.data(), parentFilename.data() + slashPos + 1 );
+                fileName.append( relativePath );
+                headerName = HeaderName( fileName.str() );
+            }
+        }
+        else
+        {
+            dir = Dir( searchPath );
+            headerName = HeaderName( relativePath );
+        }
+
+        ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( sourceManager_.getFileManager(), fileEntry, NULL );
+        clang::FileID const id = sourceManager_.createFileID
+        (
+            fileEntry,
+            tok.getLocation(),
+            isAngled
+                ? clang::SrcMgr::C_System
+                : clang::SrcMgr::C_User
+        );
+
+        pushHeader( 
+            dir,
+            headerName,
+            id,
+            contentEntry->buffer.get(),
+            fileEntry,
+            contentEntry,
+            relativeToParent
+        );
+        return true;
+    }
+
+    clang::Lexer & currentLexer() { return *headerStack_.back().currentLexer; }
+
+private:
+    void foundComplexInclude() const
+    {
+        std::for_each( headerStack_.begin() + 1, headerStack_.end(), []( HeaderCtx const & headerCtx )
+        {
+            naiveCache.markComplex( *headerCtx.fileEntry );
+        });
+    }
+
+private:
+    clang::SourceManager & sourceManager_;
+    clang::HeaderSearch & headerSearch_;
+    clang::LangOptions & langOpts_;
+    HeaderStack headerStack_;
+    std::unordered_set<clang::FileEntry const *> alreadyVisited_;
+};
+
+
+bool Preprocessor::naivePreprocessing
+(
+    clang::FileEntry const * mainFileEntry,
+    clang::SourceManager & sourceManager,
+    clang::HeaderSearch & headerSearch,
+    Headers & result
+)
+{
+    llvm::MemoryBuffer const * mainFileBuffer = sourceManager.getMemoryBufferForFile( mainFileEntry );
+    clang::Token tok;
+
+    NaivePreprocessor naivePreprocessor( sourceManager, headerSearch, *langOpts_ );
+    naivePreprocessor.pushHeader( 
+        Dir( mainFileEntry->getDir()->getName() ),
+        HeaderName( mainFileEntry->getName() ),
+        sourceManager.getMainFileID(),
+        mainFileBuffer,
+        mainFileEntry,
+        ContentEntryPtr(),
+        true
+    );
+    
+    while ( true )
+    {
+        while ( true )
+        {
+            if ( naivePreprocessor.currentLexer().LexFromRawLexer( tok ) )
+            {
+                if ( naivePreprocessor.handleEof( result ) )
+                    return true;
+                break;
             }
 
-            ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( sourceManager.getFileManager(), fileEntry, NULL );
-            clang::FileID id = sourceManager.createFileID( fileEntry, tok.getLocation(), tok.is( clang::tok::string_literal ) ? clang::SrcMgr::C_User : clang::SrcMgr::C_System );
+            if ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() )
+                continue;
 
-            Header header = {
-                dir,
-                headerName,
-                contentEntry,
-                relativeToParent
-            };
+            if ( naivePreprocessor.currentLexer().LexFromRawLexer( tok ) )
+            {
+                if ( naivePreprocessor.handleEof( result ) )
+                    return true;
+                break;
+            }
 
-            fileStack.push_back
-            (
-                HeaderCtx
-                ( 
-                    header,
-                    new clang::Lexer
-                    (
-                        id,
-                        contentEntry->buffer.get(),
-                        sourceManager,
-                        langOpts()
-                    ),
-                    fileEntry
-                )
-            );
-            alreadyVisited.insert( fileEntry );
-            break;
+            if ( tok.isNot( clang::tok::raw_identifier ) )
+                continue;
+
+            llvm::StringRef directive( tok.getRawIdentifierData(), tok.getLength() );
+
+            if ( directive == "include" )
+            {
+                if ( naivePreprocessor.handleInclude() )
+                    break;
+                else
+                    return false;
+            }
+            else
+                continue;
         }
     }
     // Never reached.

@@ -538,11 +538,22 @@ PyObject * PyPreprocessor_setMicrosoftMode( PyPreprocessor * self, PyObject * ar
     Py_RETURN_NONE;
 }
 
+PyObject * PyPreprocessor_filesPreprocessed( PyPreprocessor * self, PyObject * whatever )
+{
+    Statistics const & statistics( self->pp->statistics() );
+    PyObject * result = PyTuple_New( 3 );
+    PyTuple_SET_ITEM( result, 0, PyLong_FromSize_t( statistics.filesPreprocessedNaively + statistics.filesPreprocessedRegularly ) );
+    PyTuple_SET_ITEM( result, 1, PyLong_FromSize_t( statistics.filesPreprocessedNaively ) );
+    PyTuple_SET_ITEM( result, 2, PyLong_FromSize_t( statistics.filesPreprocessedRegularly ) );
+    return result;
+}
+
 PyMethodDef PyPreprocessor_methods[] =
 {
-    {"scan_headers", (PyCFunction)PyPreprocessor_scanHeaders     , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
-    {"set_ms_ext"  , (PyCFunction)PyPreprocessor_setMicrosoftExt , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
-    {"set_ms_mode" , (PyCFunction)PyPreprocessor_setMicrosoftMode, METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
+    {"scan_headers"      , (PyCFunction)PyPreprocessor_scanHeaders      , METH_VARARGS | METH_KEYWORDS, "Retrieve a list of include files."},
+    {"set_ms_ext"        , (PyCFunction)PyPreprocessor_setMicrosoftExt  , METH_VARARGS | METH_KEYWORDS, "Set MS extension mode."},
+    {"set_ms_mode"       , (PyCFunction)PyPreprocessor_setMicrosoftMode , METH_VARARGS | METH_KEYWORDS, "Set MS mode."},
+    {"files_preprocessed", (PyCFunction)PyPreprocessor_filesPreprocessed, METH_NOARGS                 , "Number of preprocessed files."},
     {NULL}
 };
 

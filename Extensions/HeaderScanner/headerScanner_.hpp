@@ -119,6 +119,14 @@ private:
     Includes forcedIncludes_;
 };
 
+struct Statistics
+{
+    Statistics() : filesPreprocessedRegularly( 0 ), filesPreprocessedNaively( 0 ) {}
+
+    std::atomic<std::size_t> filesPreprocessedRegularly;
+    std::atomic<std::size_t> filesPreprocessedNaively;
+};
+
 class Preprocessor
 {
 public:
@@ -128,14 +136,8 @@ public:
     void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
-private:
-    bool naivePreprocessing
-    (
-        clang::FileEntry const *,
-        clang::SourceManager &,
-        clang::HeaderSearch &,
-        Headers &
-    );
+    Statistics const & statistics() const { return statistics_; }
+    Statistics       & statistics()       { return statistics_; }
 
 private:
     clang::LangOptions & langOpts() { return *langOpts_; }
@@ -143,12 +145,11 @@ private:
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
     llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
-    llvm::IntrusiveRefCntPtr<clang::DiagnosticsEngine> diagEng_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
     llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
     llvm::IntrusiveRefCntPtr<clang::TargetOptions> targetOpts_;
-    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo_;
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
+    Statistics statistics_;
     clang::FileSystemOptions fsOpts_;
     Cache * cache_;
 };

@@ -165,49 +165,67 @@ class NodeDisplay(Frame):
         times = node.timer().as_dict() if node else {}
         self.node_times.refresh(times)
 
-class CacheStats(LabelFrame):
-    gui_events = ((GUIEvent.update_cache_stats, 'refresh'),)
+class PreprocessingStats(LabelFrame):
+    gui_events = (
+        (GUIEvent.update_cache_stats, 'refresh_cache_stats'),
+        (GUIEvent.update_preprocessed_count, 'refresh_pp_count'),
+        (GUIEvent.update_unassigned_tasks, 'refresh_unassigned_tasks'),
+    )
 
     def __init__(self, parent, **kw):
-        LabelFrame.__init__(self, parent, text = "Cache Statistics", **kw)
+        LabelFrame.__init__(self, parent, text = "Preprocessing Statistics", **kw)
         self.draw()
     
     def draw(self):
-        self.include_directives = StringVar()
-        self.cache_hits = StringVar()
-        self.cache_ratio = StringVar()
-        Separator(self).grid(row=0, column=0, columnspan=2, pady=5, sticky=E+W)
-        Label(self, text="Include Directives").grid(row=1, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.include_directives).grid(row=1, column=1)
-        Label(self, text="Cache Hits").grid(row=2, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.cache_hits).grid(row=2, column=1)
-        Separator(self).grid(row=3, column=0, columnspan=2, pady=5, sticky=E+W)
-        Label(self, text="Hit Ratio").grid(row=4, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=4, column=1)
-        Separator(self).grid(row=5, column=0, columnspan=2, pady=5, sticky=E+W)
+        self.preprocessed_total = StringVar()
+        Label(self, text="Preprocessed Sources").grid(row=0, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.preprocessed_total).grid(row=0, column=1)
 
-    def refresh(self, cache_stats):
+        self.preprocessed_naively = StringVar()
+        Label(self, text="Preprocessed Naively").grid(row=1, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.preprocessed_naively).grid(row=1, column=1)
+
+        self.preprocessed_regular = StringVar()
+        Label(self, text="Preprocessed Regularly").grid(row=2, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.preprocessed_regular).grid(row=2, column=1)
+
+        Separator(self).grid(row=3, column=0, columnspan=2, pady=5, sticky=E+W)
+
+        self.include_directives = StringVar()
+        Label(self, text="Include Directives").grid(row=4, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.include_directives).grid(row=4, column=1)
+
+        self.cache_hits = StringVar()
+        Label(self, text="Cache Hits").grid(row=5, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_hits).grid(row=5, column=1)
+
+        Separator(self).grid(row=6, column=0, columnspan=2, pady=5, sticky=E+W)
+
+        self.cache_ratio = StringVar()
+        Label(self, text="Hit Ratio").grid(row=7, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.cache_ratio).grid(row=7, column=1)
+
+        Separator(self).grid(row=8, column=0, columnspan=2, pady=5, sticky=E+W)
+
+        self.unassinged_tasks = StringVar()
+        Label(self, text="Unassigned Tasks").grid(row=9, sticky=W)
+        Entry(self, state=DISABLED, textvariable=self.unassinged_tasks).grid(row=9, column=1)
+        Separator(self).grid(row=10, column=0, columnspan=2, pady=5, sticky=E+W)
+
+    def refresh_unassigned_tasks(self, unassigned_tasks):
+        self.unassinged_tasks.set(unassigned_tasks)
+
+    def refresh_cache_stats(self, cache_stats):
         hits, misses, ratio = cache_stats
         self.include_directives.set(hits + misses)
         self.cache_hits.set(hits)
         self.cache_ratio.set("{:.2f}".format(ratio))
 
-class Miscellaneous(LabelFrame):
-    gui_events = ((GUIEvent.update_unassigned_tasks, 'refresh'),)
-
-    def __init__(self, parent, **kw):
-        LabelFrame.__init__(self, parent, text = "Miscellaneous", **kw)
-        self.draw()
-    
-    def draw(self):
-        self.unassinged_tasks = StringVar()
-        Separator(self).grid(row=0, column=0, columnspan=2, pady=5, sticky=E+W)
-        Label(self, text="Unassigned Tasks").grid(row=1, sticky=W)
-        Entry(self, state=DISABLED, textvariable=self.unassinged_tasks).grid(row=1, column=1)
-        Separator(self).grid(row=2, column=0, columnspan=2, pady=5, sticky=E+W)
-
-    def refresh(self, unassigned_tasks):
-        self.unassinged_tasks.set(unassigned_tasks)
+    def refresh_pp_count(self, pp_count):
+        total, naively, regular = pp_count
+        self.preprocessed_total.set(total)
+        self.preprocessed_naively.set(naively)
+        self.preprocessed_regular.set(regular)
 
 class GlobalDataFrame(Frame):
     def __init__(self, parent, **kw):
@@ -221,11 +239,9 @@ class GlobalDataFrame(Frame):
         self.global_times.grid(row=0, column=0, sticky=N+S+W+E)
 
         frame = Frame(self)
-        self.cache_stats = CacheStats(frame)
+        self.cache_stats = PreprocessingStats(frame)
         self.cache_stats.grid(sticky=N+S+W+E)
 
-        self.miscellaneous = Miscellaneous(frame)
-        self.miscellaneous.grid(row=1, sticky=N+S+W+E)
         frame.grid(row=0, column=1, sticky=N+S+W+E)
 
 class SettingsFrame(LabelFrame):

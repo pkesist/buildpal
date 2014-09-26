@@ -55,6 +55,7 @@ class SourceScanner:
     def __init__(self, notify, update_ui, thread_count=cpu_count() + 1):
         preprocessing.clear_content_cache()
         self.cache = preprocessing.Cache()
+        self.preprocessor = preprocessing.Preprocessor(self.cache)
         self.in_queue = Queue()
         self.closing = False
         self.threads = set()
@@ -76,7 +77,6 @@ class SourceScanner:
         self.in_queue.put(task)
 
     def __process_task_worker(self, notify, update_ui):
-        preprocessor = preprocessing.Preprocessor(self.cache)
         while True:
             task = self.in_queue.get()
             if task is self.ShutdownThread:
@@ -84,12 +84,13 @@ class SourceScanner:
             task.note_time('dequeued by preprocessor', 'waiting for preprocessor thread')
             try:
                 task.header_info, task.server_task.filelist, task.missing_headers = \
-                    header_info(preprocessor, task.preprocess_task)
+                    header_info(self.preprocessor, task.preprocess_task)
                 task.note_time('preprocessed', 'preprocessing time')
             except Exception as e:
                 notify(task, e)
             else:
                 update_ui(GUIEvent.update_cache_stats, self.get_cache_stats())
+                update_ui(GUIEvent.update_preprocessed_count, self.preprocessor.files_preprocessed())
                 notify(task)
 
     def __enter__(self):

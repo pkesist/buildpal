@@ -98,19 +98,6 @@ class ClientProcessor(MessageProtocol):
 
 class ManagerRunner:
     def __init__(self, port, n_pp_threads):
-        class CacheStats:
-            def __init__(self):
-                self.hits = 0
-                self.misses = 0
-                self.ratio = 0.0
-
-            def update(self, data):
-                self.hits, self.misses = data
-                total = self.hits + self.misses
-                if total == 0:
-                    total = 1
-                self.ratio = self.hits / total
-
         self.port = port
         self.compiler_info_cache = {}
         self.timer = Timer()

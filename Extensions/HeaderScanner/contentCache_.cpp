@@ -48,8 +48,8 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
             return *iter;
     }
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-    ContentEntryPtr newPtr( ContentEntryPtr( new ContentEntry( uniqueID, buffer.take(),
-        file->getModificationTime() ) ) );
+    ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer.take(),
+        file->getModificationTime() ) );
     content_.push_front( newPtr );
     contentSize_ += newPtr->size();
     unsigned int const maxContentCacheSize = 100 * 1024 * 1024;

@@ -40,7 +40,7 @@ class Cache;
 struct GetFileId
 {
     typedef llvm::sys::fs::UniqueID result_type;
-    result_type operator()( ContentEntryPtr p ) const
+    result_type operator()( ContentEntryPtr const & p ) const
     {
         return p->id_;
     }

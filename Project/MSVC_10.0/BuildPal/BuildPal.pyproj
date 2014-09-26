@@ -161,6 +161,10 @@
     <Content Include="Extensions\HeaderScanner\headerScanner_.hpp" />
     <Content Include="Extensions\HeaderScanner\headerTracker_.cpp" />
     <Content Include="Extensions\HeaderScanner\headerTracker_.hpp" />
+    <Content Include="Extensions\HeaderScanner\macroState_.cpp" />
+    <Content Include="Extensions\HeaderScanner\macroState_.hpp" />
+    <Content Include="Extensions\HeaderScanner\naivePreprocessor_.cpp" />
+    <Content Include="Extensions\HeaderScanner\naivePreprocessor_.hpp" />
     <Content Include="Extensions\HeaderScanner\PythonBindings_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.cpp" />
     <Content Include="Extensions\HeaderScanner\utility_.hpp" />

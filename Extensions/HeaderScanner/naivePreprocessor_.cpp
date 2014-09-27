@@ -61,34 +61,34 @@ private:
 
     public:
         HeaderCtx( Header const & h, clang::Lexer * l, clang::FileEntry const * f )
-            : currentHeader( h ), currentLexer( l ), fileEntry( f )
+            : currentHeader( h ), lexer( l ), fileEntry( f )
         {
         }
 
         HeaderCtx( HeaderCtx && other )
             : currentHeader( std::move( other.currentHeader ) ),
-            currentLexer( other.currentLexer ),
+            lexer( other.lexer ),
             fileEntry( other.fileEntry )
         {
-            other.currentLexer = 0;
+            other.lexer = 0;
         }
 
         HeaderCtx & operator=( HeaderCtx && other )
         {
             currentHeader = std::move( other.currentHeader );
-            currentLexer = other.currentLexer;
-            other.currentLexer = 0;
+            lexer = other.lexer;
+            other.lexer = 0;
             fileEntry = other.fileEntry;
             return *this;
         }
 
         ~HeaderCtx()
         {
-            delete currentLexer;
+            delete lexer;
         }
 
         Header currentHeader;
-        clang::Lexer * currentLexer;
+        clang::Lexer * lexer;
         clang::FileEntry const * fileEntry;
         Headers headers;
     };
@@ -185,6 +185,7 @@ private:
     {
         NaivePreprocessorImpl::HeaderCtx const & headerCtx( headerStack_.back() );
         naiveCache.storeHeaders( *headerCtx.fileEntry, headerCtx.headers );
+        Header header( headerStack_.back().currentHeader );
         Headers tmp( std::move( headerCtx.headers ) );
         headerStack_.pop_back();
         if ( headerStack_.empty() )
@@ -194,6 +195,7 @@ private:
         }
         else
         {
+            headerStack_.back().headers.insert( header );
             std::copy( tmp.begin(), tmp.end(), std::inserter( headerStack_.back().headers, headerStack_.back().headers.begin() ) );
             return false;
         }
@@ -201,9 +203,8 @@ private:
 
     bool handleInclude()
     {
-        clang::Lexer & curLexer( *headerStack_.back().currentLexer );
         clang::Token tok;
-        curLexer.LexIncludeFilename( tok );
+        currentLexer().LexIncludeFilename( tok );
         llvm::SmallString<1024> searchPath;
         llvm::SmallString<1024> relativePath;
         if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
@@ -287,7 +288,7 @@ private:
         return true;
     }
 
-    clang::Lexer & currentLexer() { return *headerStack_.back().currentLexer; }
+    clang::Lexer & currentLexer() { return *headerStack_.back().lexer; }
 
     bool getToken( clang::Token & tok, bool & done )
     {

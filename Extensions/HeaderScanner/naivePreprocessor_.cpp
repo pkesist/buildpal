@@ -216,7 +216,7 @@ private:
 
         llvm::StringRef fileName( tok.getLiteralData() + 1, tok.getLength() - 2 );
         clang::DirectoryLookup const * curDir( 0 );
-        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, true, 0, curDir, 
+        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, isAngled, 0, curDir, 
             headerStack_.back().fileEntry, &searchPath, &relativePath, NULL ) );
         if ( !fileEntry || ( alreadyVisited_.find( fileEntry ) != alreadyVisited_.end() ) )
             return true;
@@ -271,9 +271,7 @@ private:
         (
             fileEntry,
             tok.getLocation(),
-            isAngled
-                ? clang::SrcMgr::C_System
-                : clang::SrcMgr::C_User
+            headerSearch_.getFileDirFlavor( fileEntry )
         );
 
         pushHeader( 

@@ -69,7 +69,6 @@ private:
     static BOOL WINAPI closeHandle( HANDLE );
     static BOOL WINAPI getExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode );
     static BOOL WINAPI terminateProcess( HANDLE hProcess, UINT uExitCode );
-    static VOID WINAPI exitProcess( UINT uExitCode );
 
 public:
     static char const moduleName[];

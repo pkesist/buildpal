@@ -68,7 +68,8 @@ private:
         HeaderCtx( HeaderCtx && other )
             : currentHeader( std::move( other.currentHeader ) ),
             lexer( other.lexer ),
-            fileEntry( other.fileEntry )
+            fileEntry( other.fileEntry ),
+            headers( std::move( other.headers ) )
         {
             other.lexer = 0;
         }
@@ -79,6 +80,7 @@ private:
             lexer = other.lexer;
             other.lexer = 0;
             fileEntry = other.fileEntry;
+            headers.swap( other.headers );
             return *this;
         }
 
@@ -163,6 +165,10 @@ private:
     )
     {
         Header header = { dir, name, content, relative };
+
+        if ( !headerStack_.empty() )
+            headerStack_.back().headers.insert( header );
+
         headerStack_.push_back
         (
             HeaderCtx
@@ -185,7 +191,6 @@ private:
     {
         NaivePreprocessorImpl::HeaderCtx const & headerCtx( headerStack_.back() );
         naiveCache.storeHeaders( *headerCtx.fileEntry, headerCtx.headers );
-        Header header( headerStack_.back().currentHeader );
         Headers tmp( std::move( headerCtx.headers ) );
         headerStack_.pop_back();
         if ( headerStack_.empty() )
@@ -195,7 +200,6 @@ private:
         }
         else
         {
-            headerStack_.back().headers.insert( header );
             std::copy( tmp.begin(), tmp.end(), std::inserter( headerStack_.back().headers, headerStack_.back().headers.begin() ) );
             return false;
         }

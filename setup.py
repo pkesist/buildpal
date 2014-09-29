@@ -183,6 +183,8 @@ setup(name = 'buildpal',
                 'Extensions/HeaderScanner/headerCache_.cpp',
                 'Extensions/HeaderScanner/headerScanner_.cpp',
                 'Extensions/HeaderScanner/headerTracker_.cpp',
+                'Extensions/HeaderScanner/macroState_.cpp',
+                'Extensions/HeaderScanner/naivePreprocessor_.cpp',
                 'Extensions/HeaderScanner/pythonBindings_.cpp',
                 'Extensions/HeaderScanner/utility_.cpp',
             ]

@@ -2,6 +2,7 @@ from .utils import get_zip
 
 from distutils.cmd import Command
 from distutils.spawn import find_executable
+from distutils.errors import DistutilsFileError
 import distutils.ccompiler
 
 import os
@@ -107,6 +108,8 @@ class build_boost(Command):
         if b2_exe is None:
             subprocess.check_call(['bootstrap.bat'], cwd=build_dir, shell=True)
             b2_exe = find_executable('b2', build_dir)
+            if not b2_exe:
+                raise DistutilsFileError("Failed to find 'b2' executable.")
         
         if not self.complete_build and not self.boost_libs:
             return

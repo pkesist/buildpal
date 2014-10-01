@@ -128,8 +128,10 @@ def test_pragma_once(env):
 #endif
 ''')
     env.make_file('test.cpp', '''
-#include "a.h"
-#include "a.h"
+// turn off naive cache
+#define A_H "a.h"
+#include A_H
+#include A_H
 #ifdef XXX
 #include "xxx.h"
 #endif
@@ -253,3 +255,15 @@ def test_macro_def_change_in_child(env):
 ''')
 
     assert 'all_good.hpp' in env.run('test.cpp')
+
+
+def test_empty_directive(env):
+    env.make_file('header.h')
+    env.make_file('test.cpp', '''\
+#define XXX
+#pragma whatever
+#
+#include "header.h"
+''')
+
+    assert 'header.h' in env.run('test.cpp')

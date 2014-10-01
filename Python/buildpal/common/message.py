@@ -54,11 +54,12 @@ class MessageProtocol(asyncio.Protocol):
         self.transport = None
 
     def close(self):
-        if self.transport:
-            # Calling self.transport.close() from an event handler seems to
+        transport = self.transport
+        if transport:
+            # Calling transport.close() from an event handler seems to
             # cause errors, even if from a completely unrelated connection
             # (but in the same loop).
-            self.transport._loop.call_soon(self.transport.close)
+            transport._loop.call_soon(transport.close)
 
     def connection_made(self, transport):
         self.transport = transport

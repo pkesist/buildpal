@@ -1,7 +1,7 @@
-__pycache__
-/Documentation/_build
-/dist
-/build
+/build/
+/dist/
+/Documentation/_build/
+__pycache__/
 *.bak
 *.pyc
 *.pyo

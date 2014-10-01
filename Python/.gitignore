@@ -1,0 +1,4 @@
+/buildpal.egg-info/
+*.dll
+*.exe
+*.pyd

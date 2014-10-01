@@ -25,6 +25,7 @@ struct APIHookItem
 //     typedef ... Data;
 // };
 
+template <typename Data>
 struct APIHookHelper
 {
     struct HookEntry
@@ -35,7 +36,7 @@ struct APIHookHelper
     typedef std::vector<HookEntry> HookList;
 
     HookList hookList_;
-
+    Data data_;
     bool active_;
 
     APIHookHelper()
@@ -62,6 +63,7 @@ struct APIHookHelper
 
     ~APIHookHelper()
     {
+        active_ = false;
         MH_Uninitialize();
     }
 
@@ -90,29 +92,29 @@ struct APIHookHelper
     }
 
     bool active() const { return active_; }
+    Data & data() { return data_; }
 };
 
 template <typename Derived, typename Data>
-class APIHooks : public APIHookHelper
+class APIHooks : public APIHookHelper<Data>
 {
 public:
+    typedef Derived Derived;
     typedef Data Data;
-    typedef Derived Singleton;
 
 protected:
-    Data data;
-    static Singleton singleton;
+    static Derived singleton;
 
 public:
     static PROC original( PROC proc ) { return singleton.originalProc( proc ); }
     static bool isActive() { return singleton.active(); }
     static DWORD enable() { return singleton.installHooks(); }
     static DWORD disable() { return singleton.removeHooks(); }
-    static Data & getData() { return singleton.data; }
+    static Data & getData() { return singleton.data(); }
 };
 
 template <typename APIHookDescription, typename Data>
-typename APIHooks<APIHookDescription, Data>::Singleton APIHooks<APIHookDescription, Data>::singleton;
+typename APIHooks<APIHookDescription, Data>::Derived APIHooks<APIHookDescription, Data>::singleton;
 
 
 //----------------------------------------------------------------------------

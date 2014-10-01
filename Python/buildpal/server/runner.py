@@ -294,20 +294,15 @@ class CompileSession(Timer):
         command = [self.compiler_exe(), output] + self.task.call
         overrides = {}
 
-        if self.task.pdb_file:
-            pdb_handle, self.pdb_file = tempfile.mkstemp(
-                dir=tempdir, suffix='.pdb')
-            os.close(pdb_handle)
-            overrides[self.task.pdb_file] = self.pdb_file
-            command.append(compiler_options.set_pdb_file_option(
-                self.task.pdb_file))
-
         if self.task.pch_file:
             assert self.pch_file is not None
+            assert self.task.pch_header is not None
             overrides[self.task.pch_file[0]] = self.pch_file
             self.pch_file = self.task.pch_file[0]
             command.append(compiler_options.set_pch_file_option(
                 self.pch_file))
+            command.append(compiler_options.set_use_pch_file_option(
+                self.task.pch_header))
 
         include_dirs, src_loc = self.include_dirs_future.result()
         logging.debug("Include dirs:")
@@ -345,8 +340,9 @@ class CompileSession(Timer):
             if self.state == self.StateRunningCompiler:
                 if retcode == 0:
                     self.change_state(self.StateWaitForConfirmation)
+                durations_dict = dict((n, d) for e, (n, d) in self.time_durations())
                 self.sender.send_msg([b'SERVER_DONE', pickle.dumps(
-                    (retcode, stdout, stderr, self.durations))])
+                    (retcode, stdout, stderr, durations_dict))])
                 if retcode == 0:
                     self.reschedule_selfdestruct()
                 else:
@@ -393,15 +389,9 @@ class CompileSession(Timer):
 
         def compress_result():
             try:
-                result = compress_one(self.object_file)
-                if self.task.pdb_file:
-                    assert self.pdb_file
-                    result.extend(compress_one(self.pdb_file))
-                return result
+                return compress_one(self.object_file)
             finally:
                 os.remove(self.object_file)
-                if self.task.pdb_file:
-                    os.remove(self.pdb_file)
 
         def send_compressed(future):
             for buffer in future.result():
@@ -491,7 +481,6 @@ class ProcessRunner:
         self.ready.clear()
         assert self.current < self.limit
         compile_start = time()
-        session.times['waiting for job slot'] = compile_start - start
         self.current += 1
         try:
             with OverrideCreateProcess(file_maps):
@@ -500,7 +489,6 @@ class ProcessRunner:
                     stderr=subprocess.PIPE, loop=self.loop)
             stdout, stderr = yield from session.process.communicate()
             retcode = yield from session.process.wait()
-            session.times['compiler time'] = time() - compile_start
         finally:
             session.process = None
             self.current -= 1

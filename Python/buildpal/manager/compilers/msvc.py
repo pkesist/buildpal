@@ -49,21 +49,17 @@ class CompileOptions:
         return any((x in self.compiler.build_local_options() for x in self.value_dict))
 
     def create_pch_cmd(self):
-        if self.use_pdb_file():
-            return self.arg_values
-
         if self.compiler.create_pch_file_option() not in self.value_dict:
             return None
-
-        result = []
-        for name, value in zip(self.option_names, self.arg_values):
-            # Debug symbols database with PCH is currently not supported.
-            if name != 'Zi':
-                result.extend(value)
-        return result
+        return self.arg_values
 
     def should_invoke_linker(self):
         return self.value_dict.get(self.compiler.compile_no_link_option()) is None
+
+    def avoid_pch(self):
+        # Currently we don't know how to correctly handle PCH files with PDB
+        # debug info.
+        return 'Zi' in self.option_names
 
     def pch_header(self):
         opt = self.value_dict.get(self.compiler.use_pch_option())
@@ -81,9 +77,9 @@ class CompileOptions:
 
     def create_server_call(self):
         result = ['/c']
-        exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc', 'Tc', 'Tp']
+        exclude_opts = ['c', 'I', 'Fo', 'link', 'Fp', 'Yc', 'Tc', 'Tp', 'Yu', 'FI']
         for name, value in zip(self.option_names, self.arg_values):
-            if not self.use_pdb_file() and name == 'Zi':
+            if name == 'Zi':
                 # Disable generating PDB files when compiling cpp into obj.
                 # Store debug info in the obj file itself.
                 result.append('/Z7')
@@ -139,12 +135,6 @@ class CompileOptions:
         opt = self.value_dict.get(self.compiler.object_name_option())
         return opt[-1] if opt else None
 
-    def use_pdb_file(self):
-        # At the moment we do not know how to merge PDB file.
-        # We could use one pdb per object, but embedding debug
-        # info in the object file is much more feasable.
-        return False
-
     def files(self):
         sources = list(self.source_files())
         output = self.output_file()
@@ -162,17 +152,11 @@ class CompileOptions:
             return [os.path.splitext(os.path.basename(src))[0] + '.obj' for
                 src, _ in sources]
 
-        def make_target_dict(dest):
-            targets = dict(object_file=dest, all=[dest])
-            if self.use_pdb_file():
-                pdb_file = os.path.splitext(dest)[0] + '_buildpal.pdb'
-                targets['pdb_file'] = pdb_file
-                targets['all'].append(pdb_file)
-            return targets
 
         outputs = get_output_files()
         assert len(sources) == len(outputs)
-        return [(src, decorator, make_target_dict(dest)) for (src, decorator), dest in
+        return [(src, decorator, dict(object_file=dest, all=[dest])) for
+            (src, decorator), dest in
             zip(sources, outputs)]
 
     def link_options(self):
@@ -207,6 +191,9 @@ class MSVCCompiler:
     def set_define_option(cls, val): return '/D{}'.format(val)
 
     @classmethod
+    def set_use_pch_option(cls, val): return '/Yu{}'.format(val)
+
+    @classmethod
     def use_pch_option(cls): return 'Yu'
 
     @classmethod
@@ -217,9 +204,6 @@ class MSVCCompiler:
 
     @classmethod
     def set_pch_file_option(cls, val): return '/Fp{}'.format(val)
-
-    @classmethod
-    def set_pdb_file_option(cls, val): return '/Fd{}'.format(val)
 
     @classmethod
     def build_local_options(cls): 

@@ -73,15 +73,19 @@ class NodeManager:
         #    task.task_completed(0, b'', b'')
         #    return
 
-        if task.missing_headers and not (len(task.missing_headers) == 1 and
-                task.missing_headers[0] == task.preprocess_task.pch_header):
+        def headers_missing(task):
+            return task.missing_headers and task.preprocess_task.pch_header \
+                and ((len(task.missing_headers) != 1) or
+                (task.missing_headers[0] != task.preprocess_task.pch_header))
+
+        if headers_missing(task):
             error = "BUILDPAL ERROR: Cannot compile '{}' due to missing headers:\n".format(
                 task.source)
             missing_headers = str()
             for h in task.missing_headers:
                 missing_headers += "    {}\n".format(h)
-            logging.debug("Compile failure: Missing headers\n%s", missing_headers)
-            task.task_completed(-1, b'', (error + missing_headers).encode())
+            logging.debug("Cannot distribute: Missing headers\n%s", missing_headers)
+            task.cannot_distribute()
             return
         task.note_time('collected from preprocessor', 'preprocessed notification time')
         self.loop.call_soon_threadsafe(self.schedule_task, task)

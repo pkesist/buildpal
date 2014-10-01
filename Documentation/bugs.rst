@@ -1,3 +1,5 @@
+.. _bugs
+
 Bugs and caveats
 ================
 
@@ -12,8 +14,10 @@ Bugs and caveats
     switches it detects with ``/Z7``, i.e. debug info gets stored in the object
     file itself.
     
-    When generating precompiled headers there additional complications, so ``/Zi``
-    is just dropped. You won't get debug info for PCH itself.
+    Unfortunately ``/Zi`` and ``/Z7`` compiler options produce incompatible
+    precompiled headers. Consequently - you cannot have both PCH and ``/Zi``.
+    If you compile files with both PCH and ``/Zi``, BuildPal will discard PCH
+    and use the above ``/Z7`` hack.
 
 * Header cache and volatile search path
     Cache assumes that a fixed search path and header name will always

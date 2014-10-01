@@ -114,5 +114,6 @@ class Task(Timer):
             'pch_file' : self.pch_file[0] if self.pch_file else None,
             'sessions' : list(session.get_info() for session in
                 self.sessions_finished),
-            'times' : list(dict(time_point_name=a, time_point=b) for a, b in self.times.items())
+            'times' : list(dict(time_point_ord=o, time_point_name=n,
+                time_point=t) for o, (n, t) in self.time_points())
         }

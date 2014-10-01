@@ -72,10 +72,10 @@ class ClientProcessor(MessageProtocol):
 
         if self.command_processor.build_local():
             self.do_run_locally()
-            return True
+            return
 
         if self.command_processor.process_create_pch():
-            return True
+            return
 
         if executable in self.compiler_info_cache:
             self.command_processor.set_compiler_info(

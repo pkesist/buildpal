@@ -2,12 +2,12 @@ from .utils import *
 from .message import MessageProtocol, msg_to_bytes
 
 class ServerTask:
-    def __init__(self, fqdn, compiler_info, call, pch_file, includes, src_decorator, pdb_file=None):
+    def __init__(self, fqdn, compiler_info, call, pch_file, pch_header, includes, src_decorator):
         self.fqdn = fqdn
         self.compiler_info = compiler_info
         self.call = call
+        self.pch_header = pch_header
         self.pch_file = pch_file
-        self.pdb_file = pdb_file
         self.includes = includes
         self.src_decorator = src_decorator
         self.filelist = None

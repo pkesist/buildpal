@@ -38,8 +38,9 @@ class ClientTaskCompiler:
             call.append(compiler.set_include_option().format(include))
         for define in options.defines():
             call.append(compiler.set_define_option().format(define))
-        if options.pch_file:
+        if options.pch_file():
             call.append(compiler.set_pch_file_option().format(options.pch_file()))
+            call.append(compiler.set_use_pch_option().format(options.pch_header()))
         call.append(compiler.set_object_name_option().format(task.output))
         call.append(task.source)
         self.client_conn.do_execute_get_output(call)
@@ -122,7 +123,7 @@ class CommandProcessor:
             self.__client_task_compiler.task_done(msg)
 
     def update_task_ui(self, task):
-        for duration_name, duration in task.durations.items():
+        for index, (duration_name, duration) in task.time_durations():
             self.__global_timer.add_time(duration_name, duration)
         self.__update_ui(GUIEvent.update_global_timers, self.__global_timer.as_dict())
 
@@ -142,18 +143,20 @@ class CommandProcessor:
 
     def create_tasks(self, compiler_info):
         pch_file = None
-        pch_header = self.__options.pch_header()
-        if pch_header:
-            pch_file = self.__options.pch_file()
-            if not pch_file:
-                pch_file = os.path.splitext(pch_header)[0] + '.pch'
-            pch_file = os.path.join(self.__cwd, pch_file)
-            if not os.path.exists(pch_file):
-                raise Exception("PCH file '{}' does not exist.".format(
-                    pch_file))
-            pch_file = os.path.join(self.__cwd, pch_file)
-            pch_file_stat = os.stat(pch_file)
-            pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
+        pch_header = None
+        if not self.__options.avoid_pch():
+            pch_header = self.__options.pch_header()
+            if pch_header:
+                pch_file = self.__options.pch_file()
+                if not pch_file:
+                    pch_file = os.path.splitext(pch_header)[0] + '.pch'
+                pch_file = os.path.join(self.__cwd, pch_file)
+                if not os.path.exists(pch_file):
+                    raise Exception("PCH file '{}' does not exist.".format(
+                        pch_file))
+                pch_file = os.path.join(self.__cwd, pch_file)
+                pch_file_stat = os.stat(pch_file)
+                pch_file = (pch_file, pch_file_stat.st_size, pch_file_stat.st_mtime)
 
         def create_task(source, decorator, targets):
             if not os.path.isabs(source):
@@ -163,8 +166,8 @@ class CommandProcessor:
                     self.hostname,
                     compiler_info,
                     self.__options.create_server_call(),
+                    pch_header=pch_header,
                     pch_file=pch_file,
-                    pdb_file=targets.get('pdb_file'),
                     includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
                         self.__options.includes()] + self.__sysincludes,
                     src_decorator=decorator

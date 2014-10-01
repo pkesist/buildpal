@@ -51,13 +51,20 @@ class Profiler:
 
 class Timer:
     def __init__(self):
-        self.times = {}
-        self.durations = {}
-        self.last_time = None
+        self.times = []
+        self.time_point_names = []
+        self.time_interval_names = []
 
-    def note_time(self, time_point_name, interval_name=None):
+    def note_time(self, time_point_name, time_interval_name=None):
         curr_time = time()
-        self.times[time_point_name] = curr_time
-        if interval_name:
-            self.durations[interval_name] = curr_time - self.last_time
-        self.last_time = curr_time
+        self.times.append(curr_time)
+        self.time_point_names.append(time_point_name)
+        self.time_interval_names.append(time_interval_name)
+
+    def time_points(self):
+        return enumerate(zip(self.time_point_names, self.times))
+
+    def time_durations(self):
+        return ((x - 1, (self.time_interval_names[x],
+            self.times[x] - self.times[x - 1])) \
+            for x in range(1, len(self.time_interval_names)))

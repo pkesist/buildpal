@@ -23,6 +23,7 @@ class Database:
     times_table = [
         {'col_name': 'task_id'        , 'col_type': 'INTEGER', 'null': False,
             'ref': ('task', 'rowid')},
+        {'col_name': 'time_point_ord' , 'col_type': 'INTEGER', 'null': False},
         {'col_name': 'time_point_name', 'col_type': 'TEXT'   , 'null': False},
         {'col_name': 'time_point'     , 'col_type': 'REAL'   , 'null': False},]
 
@@ -111,7 +112,9 @@ class Database:
         converted_data = []
         for col_desc in table_desc:
             col_name = col_desc['col_name']
-            col_data = data.get(col_name) or extra_data.get(col_name)
+            col_data = data.get(col_name)
+            if col_data is None:
+                 col_data = extra_data.get(col_name)
             if col_data is None:
                 if col_desc['null']:
                     col_data = None
@@ -168,7 +171,7 @@ class Database:
         for task, task_id in zip(tasks, task_row_ids):
             sessions, session_row_ids = self.__select(conn, 'session', 'task_id', task_id, orderby='started')
             task['sessions'] = sessions
-            times, time_row_ids = self.__select(conn, 'times', 'task_id', task_id, orderby='time_point')
+            times, time_row_ids = self.__select(conn, 'times', 'task_id', task_id, orderby='time_point_ord')
             task['times'] = times
         command['tasks'] = tasks
         return command

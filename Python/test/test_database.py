@@ -23,10 +23,11 @@ def test_insert_and_select():
         'completed': time() + 10,
         'result': SessionResult.success}
 
-    times = [{'time_point_name' : 'time_point1', 'time_point': time()},
-            {'time_point_name' : 'time_point2', 'time_point': time()},
-            {'time_point_name' : 'time_point3', 'time_point': time()},
-            {'time_point_name' : 'time_point4', 'time_point': time()}]
+    times = [
+            {'time_point_name' : 'time_point1', 'time_point_ord': 1, 'time_point': time()},
+            {'time_point_name' : 'time_point2', 'time_point_ord': 2, 'time_point': time()},
+            {'time_point_name' : 'time_point3', 'time_point_ord': 3, 'time_point': time()},
+            {'time_point_name' : 'time_point4', 'time_point_ord': 4, 'time_point': time()}]
 
     task = {
         'source': 'asdf.cpp',

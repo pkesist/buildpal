@@ -69,9 +69,12 @@ Features
 
 * **PCH support**
 
-    ``BuildPal`` supports precompiled headers. Precompiled headers are
+    ``BuildPal`` supports precompiled headers _[1]. Precompiled headers are
     created locally, on the client machine and are transferred to slave machines
     as needed.
+
+.. [1] There are certain conditions upon which ``BuildPal`` will discard PCH and
+       compile without them. See :ref:`bugs`.
 
 * **Self-balancing**
 

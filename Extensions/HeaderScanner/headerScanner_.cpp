@@ -264,14 +264,14 @@ namespace
             }
         }
 
-        virtual void If( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue ) override
+        virtual void If( clang::SourceLocation loc, clang::SourceRange conditionRange, ConditionValueKind const conditionValue ) override
         {
-            headerTracker_.ifDirective( loc, conditionValue );
+            headerTracker_.ifDirective( loc, conditionValue == CVK_True );
         }
 
-        virtual void Elif( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue, clang::SourceLocation ifLoc ) override
+        virtual void Elif( clang::SourceLocation loc, clang::SourceRange conditionRange, ConditionValueKind const conditionValue, clang::SourceLocation ifLoc ) override
         {
-            headerTracker_.elifDirective( loc, conditionValue );
+            headerTracker_.elifDirective( loc, conditionValue == CVK_True );
         }
 
         virtual void Else( clang::SourceLocation loc, clang::SourceLocation ifLoc ) override

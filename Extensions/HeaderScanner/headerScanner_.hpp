@@ -21,6 +21,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Path.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -146,7 +147,7 @@ private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
     llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
-    llvm::IntrusiveRefCntPtr<clang::TargetOptions> targetOpts_;
+    std::shared_ptr<clang::TargetOptions> targetOpts_;
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
     Statistics statistics_;
     clang::FileSystemOptions fsOpts_;

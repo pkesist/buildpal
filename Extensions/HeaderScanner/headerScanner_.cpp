@@ -54,9 +54,9 @@ void normalize( llvm::SmallString<512> & path )
 
 namespace
 {
-    clang::TargetOptions * createTargetOptions()
+    std::shared_ptr<clang::TargetOptions> createTargetOptions()
     {
-        clang::TargetOptions * result = new clang::TargetOptions();
+        auto result = std::make_shared<clang::TargetOptions>();
         result->Triple = llvm::sys::getDefaultTargetTriple();
         return result;
     }
@@ -303,7 +303,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     clang::DiagnosticsEngine diagEng( diagID_, &*diagOpts_ );
     diagEng.setEnableAllWarnings( true );
 
-    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo( clang::TargetInfo::CreateTargetInfo( diagEng, &*targetOpts_ ) );
+    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo( clang::TargetInfo::CreateTargetInfo( diagEng, targetOpts_ ) );
 
     // Initialize source manager.
     clang::SourceManager sourceManager( diagEng, fileManager, false );

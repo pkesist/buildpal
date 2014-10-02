@@ -124,13 +124,16 @@ namespace
 
     struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
     {
-        // Prevent FileManager, HeaderSearch et al. to open files
-        // unexpectedly.
-        virtual clang::MemorizeStatCalls::LookupResult
-            getStat( char const * path, clang::FileData & fileData, bool isFile,
-            int * ) override
+        // Prevent FileManager, HeaderSearch et al. to open files unexpectedly.
+        virtual clang::MemorizeStatCalls::LookupResult getStat(
+            char const * path,
+            clang::FileData & fileData,
+            bool isFile,
+            std::unique_ptr<clang::vfs::File> *,
+            clang::vfs::FileSystem & fileSystem ) override
         {
-            return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
+            return clang::MemorizeStatCalls::getStat(
+                path, fileData, isFile, 0, fileSystem );
         }
     };
 

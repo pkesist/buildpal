@@ -3,6 +3,8 @@
 
 #include "headerCache_.hpp"
 #include "utility_.hpp"
+
+#include <memory>
 //------------------------------------------------------------------------------
 
 ContentCache ContentCache::singleton_;
@@ -38,7 +40,7 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
             return newPtr;
         }
     }
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer( prepareSourceFile( fm, *file ) );
+    std::unique_ptr<llvm::MemoryBuffer> buffer( prepareSourceFile( fm, *file ) );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
     {
         // Preform another search with upgrade ownership.
@@ -48,7 +50,7 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
             return *iter;
     }
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-    ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer.take(),
+    ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer.release(),
         file->getModificationTime() ) );
     content_.push_front( newPtr );
     contentSize_ += newPtr->size();

@@ -6,7 +6,6 @@
 
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/ADT/OwningPtr.h>
 
 #include <atomic>
 #include <ctime>
@@ -27,7 +26,7 @@ public:
         :
         refCount_( 0 ),
         id_( other.id_ ),
-        buffer( other.buffer.take() ),
+        buffer( other.buffer.release() ),
         checksum( other.checksum ),
         modified( other.modified )
     {
@@ -36,7 +35,7 @@ public:
     ContentEntry & operator=( ContentEntry && other )
     {
         id_ = other.id_;
-        buffer.reset( other.buffer.take() );
+        buffer.reset( other.buffer.release() );
         checksum = other.checksum;
         modified = other.modified;
         return *this;
@@ -45,7 +44,7 @@ public:
     std::size_t const size() const { return buffer->getBufferSize(); }
 
     llvm::sys::fs::UniqueID id_;
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer;
+    std::unique_ptr<llvm::MemoryBuffer> buffer;
     std::size_t checksum;
     std::time_t modified;
 

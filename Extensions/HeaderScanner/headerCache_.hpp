@@ -20,13 +20,14 @@
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/thread/mutex.hpp>
-  
+
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <atomic>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -183,7 +184,7 @@ private:
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
     std::string buffer_;
-    llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
+    std::unique_ptr<llvm::MemoryBuffer> memoryBuffer_;
 };
 
 

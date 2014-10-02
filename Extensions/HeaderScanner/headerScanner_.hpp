@@ -19,7 +19,6 @@
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/StringRef.h>
-#include <llvm/ADT/OwningPtr.h>
 #include <llvm/Support/Path.h>
 
 #include <set>

@@ -116,7 +116,7 @@ public:
     );
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
-    llvm::MemoryBuffer const * cachedContent();
+    llvm::MemoryBuffer * cachedContent();
 
     ~CacheEntry();
 

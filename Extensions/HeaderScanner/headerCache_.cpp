@@ -35,7 +35,7 @@ CacheEntryPtr CacheTree::find( MacroState const & macroState ) const
     return CacheEntryPtr();
 }
 
-llvm::MemoryBuffer const * CacheEntry::cachedContent()
+llvm::MemoryBuffer * CacheEntry::cachedContent()
 {
     if ( !memoryBuffer_ )
     {

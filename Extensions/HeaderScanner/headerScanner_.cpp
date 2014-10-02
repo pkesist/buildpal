@@ -116,6 +116,11 @@ namespace
             clang::Module::NameVisibilityKind,
             clang::SourceLocation,
             bool Complain) {}
+        virtual clang::GlobalModuleIndex * loadGlobalModuleIndex(
+            clang::SourceLocation TriggerLoc) { return NULL; }
+        virtual bool lookupMissingImports(
+            llvm::StringRef Name,
+            clang::SourceLocation TriggerLoc) { return false; }
     } moduleLoader;
 
     struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls

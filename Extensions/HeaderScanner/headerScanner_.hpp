@@ -132,7 +132,7 @@ public:
     explicit Preprocessor( Cache * cache );
 
     bool scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
-    void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
+    void setMicrosoftMode( bool value ) { langOpts_->MSVCCompat = value ? 1 : 0; }
     void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
 
     Statistics const & statistics() const { return statistics_; }

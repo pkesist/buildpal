@@ -67,7 +67,6 @@ Preprocessor::Preprocessor( Cache * cache )
     diagID_    ( new clang::DiagnosticIDs() ),
     diagOpts_  ( new clang::DiagnosticOptions() ),
     ppOpts_    ( new clang::PreprocessorOptions() ),
-    langOpts_  ( new clang::LangOptions() ),
     targetOpts_( createTargetOptions() ),
     hsOpts_    ( new clang::HeaderSearchOptions() ),
     cache_     ( cache )
@@ -309,7 +308,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     clang::SourceManager sourceManager( diagEng, fileManager, false );
 
     // Setup search path.
-    clang::HeaderSearch headerSearch( hsOpts_, sourceManager, diagEng, *langOpts_, &*targetInfo ) ;
+    clang::HeaderSearch headerSearch( hsOpts_, sourceManager, diagEng, langOpts(), &*targetInfo ) ;
     std::vector<clang::DirectoryLookup> searchPath;
     std::size_t searchPathId( 0 );
     for ( auto const & path : ppc.userSearchPath() )
@@ -351,7 +350,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         mainFileEntry, clang::SourceLocation(), clang::SrcMgr::C_User );
     sourceManager.setMainFileID( mainFileID );
 
-    if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, *langOpts_, ppc.forcedIncludes(), headers ).run() )
+    if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, langOpts(), ppc.forcedIncludes(), headers ).run() )
     {
         ++statistics().filesPreprocessedNaively;
         return true;

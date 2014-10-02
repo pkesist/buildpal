@@ -133,20 +133,20 @@ public:
     explicit Preprocessor( Cache * cache );
 
     bool scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
-    void setMicrosoftMode( bool value ) { langOpts_->MSVCCompat = value ? 1 : 0; }
-    void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
+    void setMicrosoftMode( bool value ) { langOpts_.MSVCCompat = value ? 1 : 0; }
+    void setMicrosoftExt ( bool value ) { langOpts_.MicrosoftExt = value ? 1 : 0; }
 
     Statistics const & statistics() const { return statistics_; }
     Statistics       & statistics()       { return statistics_; }
 
 private:
-    clang::LangOptions & langOpts() { return *langOpts_; }
+    clang::LangOptions & langOpts() { return langOpts_; }
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
     llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
-    llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
+    clang::LangOptions langOpts_;
     std::shared_ptr<clang::TargetOptions> targetOpts_;
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
     Statistics statistics_;

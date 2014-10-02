@@ -29,23 +29,6 @@
 #include <iostream>
 #include <windows.h>
 
-namespace
-{
-    struct DummyModuleLoader : public clang::ModuleLoader
-    {
-        virtual clang::ModuleLoadResult loadModule(
-            clang::SourceLocation,
-            clang::ModuleIdPath,
-            clang::Module::NameVisibilityKind,
-            bool IsInclusionDirective) { return clang::ModuleLoadResult(); }
-        virtual void makeModuleVisible(
-            clang::Module *,
-            clang::Module::NameVisibilityKind,
-            clang::SourceLocation,
-            bool Complain) {}
-    } moduleLoader;
-}
-
 void normalize( llvm::SmallString<512> & path )
 {
     llvm::SmallString<512> result;
@@ -71,6 +54,82 @@ void normalize( llvm::SmallString<512> & path )
 
 namespace
 {
+    clang::TargetOptions * createTargetOptions()
+    {
+        clang::TargetOptions * result = new clang::TargetOptions();
+        result->Triple = llvm::sys::getDefaultTargetTriple();
+        return result;
+    }
+}  // anonymous namespace
+
+Preprocessor::Preprocessor( Cache * cache )
+    :
+    diagID_    ( new clang::DiagnosticIDs() ),
+    diagOpts_  ( new clang::DiagnosticOptions() ),
+    ppOpts_    ( new clang::PreprocessorOptions() ),
+    langOpts_  ( new clang::LangOptions() ),
+    targetOpts_( createTargetOptions() ),
+    hsOpts_    ( new clang::HeaderSearchOptions() ),
+    cache_     ( cache )
+{
+    hsOpts_->UseBuiltinIncludes = false;
+    hsOpts_->UseStandardSystemIncludes = false;
+    hsOpts_->UseStandardCXXIncludes = false;
+    hsOpts_->Sysroot.clear();
+}
+
+namespace
+{
+    struct DiagnosticConsumer : clang::DiagnosticConsumer
+    {
+        HeaderTracker & headerTracker_;
+
+        explicit DiagnosticConsumer( HeaderTracker & headerTracker )
+            : headerTracker_( headerTracker )
+        {
+        }
+
+        virtual void HandleDiagnostic(
+            clang::DiagnosticsEngine::Level level,
+            clang::Diagnostic const & info)
+        {
+            if ( info.getID() == clang::diag::warn_pp_undef_identifier )
+            {
+                // We need to get notifications for identifiers which did not
+                // get expanded in order to create consistent cache key paths.
+                clang::IdentifierInfo const * identifier( info.getArgIdentifier( 0 ) );
+                if ( identifier )
+                    headerTracker_.macroUsed( identifier->getName() );
+            }
+        }
+    };
+
+    struct DummyModuleLoader : public clang::ModuleLoader
+    {
+        virtual clang::ModuleLoadResult loadModule(
+            clang::SourceLocation,
+            clang::ModuleIdPath,
+            clang::Module::NameVisibilityKind,
+            bool IsInclusionDirective) { return clang::ModuleLoadResult(); }
+        virtual void makeModuleVisible(
+            clang::Module *,
+            clang::Module::NameVisibilityKind,
+            clang::SourceLocation,
+            bool Complain) {}
+    } moduleLoader;
+
+    struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
+    {
+        // Prevent FileManager, HeaderSearch et al. to open files
+        // unexpectedly.
+        virtual clang::MemorizeStatCalls::LookupResult
+            getStat( char const * path, clang::FileData & fileData, bool isFile,
+            int * ) LLVM_OVERRIDE
+        {
+            return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
+        }
+    };
+
     class PreprocessorCallbacks : public clang::PPCallbacks
     {
     public:
@@ -228,69 +287,7 @@ namespace
         Headers & headers_;
         HeaderList & missingHeaders_;
     };
-
-    struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
-    {
-        // Prevent FileManager, HeaderSearch et al. to open files
-        // unexpectedly.
-        virtual clang::MemorizeStatCalls::LookupResult
-            getStat( char const * path, clang::FileData & fileData, bool isFile,
-            int * ) LLVM_OVERRIDE
-        {
-            return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
-        }
-    };
 }  // anonymous namespace
-
-clang::TargetOptions * createTargetOptions()
-{
-    clang::TargetOptions * result = new clang::TargetOptions();
-    result->Triple = llvm::sys::getDefaultTargetTriple();
-    return result;
-}
-
-Preprocessor::Preprocessor( Cache * cache )
-    :
-    diagID_    ( new clang::DiagnosticIDs() ),
-    diagOpts_  ( new clang::DiagnosticOptions() ),
-    ppOpts_    ( new clang::PreprocessorOptions() ),
-    langOpts_  ( new clang::LangOptions() ),
-    targetOpts_( createTargetOptions() ),
-    hsOpts_    ( new clang::HeaderSearchOptions() ),
-    cache_     ( cache )
-{
-    hsOpts_->UseBuiltinIncludes = false;
-    hsOpts_->UseStandardSystemIncludes = false;
-    hsOpts_->UseStandardCXXIncludes = false;
-    hsOpts_->Sysroot.clear();
-}
-
-namespace
-{
-    struct DiagnosticConsumer : clang::DiagnosticConsumer
-    {
-        HeaderTracker & headerTracker_;
-
-        explicit DiagnosticConsumer( HeaderTracker & headerTracker )
-            : headerTracker_( headerTracker )
-        {
-        }
-
-        virtual void HandleDiagnostic(
-            clang::DiagnosticsEngine::Level level,
-            clang::Diagnostic const & info)
-        {
-            if ( info.getID() == clang::diag::warn_pp_undef_identifier )
-            {
-                // We need to get notifications for identifiers which did not get expanded
-                // in order to create consistent cache key paths.
-                clang::IdentifierInfo const * identifier( info.getArgIdentifier( 0 ) );
-                if ( identifier )
-                    headerTracker_.macroUsed( identifier->getName() );
-            }
-        }
-    };
-}
 
 bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
@@ -398,8 +395,8 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         preprocessor
     );
 
-    preprocessor.addPPCallbacks( new PreprocessorCallbacks( headerTracker, fileName,
-        preprocessor, headers, missingHeaders ) );
+    preprocessor.addPPCallbacks( new PreprocessorCallbacks( headerTracker,
+        fileName, preprocessor, headers, missingHeaders ) );
 
     preprocessor.EnterMainSourceFile();
     if ( diagEng.hasFatalErrorOccurred() )

@@ -359,14 +359,15 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     // Do the real preprocessing.
     clang::Preprocessor preprocessor
     (
-        ppOpts_,
-        diagEng,
-        langOpts(),
-        &*targetInfo,
-        sourceManager,
-        headerSearch,
-        moduleLoader
-    );
+        ppOpts_,        // IntrusiveRefCntPtr<PreprocessorOptions> PPOpts,
+        diagEng,        // DiagnosticsEngine & diags,
+        langOpts(),     // LangOptions & opts,
+        sourceManager,  // SourceManager & SM,
+        headerSearch,   // HeaderSearch & Headers,
+        moduleLoader    // ModuleLoader & TheModuleLoader,
+                        // IdentifierInfoLookup * IILookup = nullptr,
+                        // bool OwnsHeaderSearch = false,
+    );                  // TranslationUnitKind TUKind = TU_Complete
 
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );

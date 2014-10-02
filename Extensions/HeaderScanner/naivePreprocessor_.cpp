@@ -221,7 +221,7 @@ private:
         llvm::SmallString<1024> searchPath;
         llvm::SmallString<1024> relativePath;
         clang::DirectoryLookup const * curDir( 0 );
-        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, isAngled, 0, curDir,
+        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, loc, isAngled, 0, curDir,
             headerStack_.back().fileEntry, &searchPath, &relativePath, NULL ) );
         if ( !fileEntry )
             return true;

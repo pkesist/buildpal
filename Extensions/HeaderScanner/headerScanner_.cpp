@@ -347,7 +347,9 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     assert( !sourceManager.isFileOverridden( mainFileEntry ) );
     sourceManager.overrideFileContents( mainFileEntry,
         prepareSourceFile( fileManager, *mainFileEntry ) );
-    sourceManager.createMainFileID( mainFileEntry );
+    auto const mainFileID = sourceManager.createFileID(
+        mainFileEntry, clang::SourceLocation(), clang::SrcMgr::C_User );
+    sourceManager.setMainFileID( mainFileID );
 
     if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, *langOpts_, ppc.forcedIncludes(), headers ).run() )
     {

@@ -187,13 +187,13 @@ void HeaderTracker::headerSkipped()
     if ( !cacheDisabled() )
     {
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-        clang::HeaderFileInfo const & headerInfo( headerSearch.getFileInfo( hwf.file ) );
-        assert( !headerInfo.ControllingMacroID );
+        clang::HeaderFileInfo const & headerFileInfo( headerSearch.getFileInfo( hwf.file ) );
+        assert( !headerFileInfo.ControllingMacroID );
         currentHeaderCtx().macroUsed( macroForPragmaOnce( *hwf.file ) );
-        if ( !headerInfo.isPragmaOnce )
+        if ( !headerFileInfo.isPragmaOnce )
         {
-            assert( headerInfo.ControllingMacro );
-            currentHeaderCtx().macroUsed( MacroName( headerInfo.ControllingMacro->getName() ) );
+            assert( headerFileInfo.ControllingMacro );
+            currentHeaderCtx().macroUsed( MacroName( headerFileInfo.ControllingMacro->getName() ) );
         }
     }
     currentHeaderCtx().addHeader( hwf.header );

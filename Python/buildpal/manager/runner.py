@@ -61,13 +61,13 @@ class ClientProcessor(MessageProtocol):
     def __handle_new_client(self, msg):
         compiler_name = msg[0].decode()
         executable = msg[1].decode()
-        sysincludes = msg[2].decode()
+        sysinclude_dirs = msg[2].decode()
         cwd = msg[3].decode()
         command = [x.decode() for x in msg[4:]]
         from .compilers import MSVCCompiler
         compiler = MSVCCompiler()
         self.command_processor = CommandProcessor(self, executable, cwd,
-            sysincludes, compiler, command, self.database_inserter,
+            sysinclude_dirs, compiler, command, self.database_inserter,
             self.global_timer, self.update_ui)
 
         if self.command_processor.build_local():

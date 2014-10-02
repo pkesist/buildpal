@@ -19,13 +19,13 @@ class Environment:
             file.write(content)
 
     @staticmethod
-    def collect_headers(filename, includes=[], defines=[],
-            sysincludes=[], use_cache=True):
+    def collect_headers(filename, include_dirs=[], defines=[],
+            sysinclude_dirs=[], use_cache=True):
         preprocessor = preprocessing.Preprocessor(preprocessing.Cache() if use_cache else None)
         ppc = preprocessing.PreprocessingContext()
-        for path in includes:
+        for path in include_dirs:
             ppc.add_include_path(path, False)
-        for path in sysincludes:
+        for path in sysinclude_dirs:
             ppc.add_include_path(path, True)
         for define in defines:
             define = define.split('=')
@@ -35,18 +35,18 @@ class Environment:
             ppc.add_macro(macro, value)
         return preprocessor.scan_headers(ppc, filename)
 
-    def run_worker(self, filename, includes=[], defines=[], use_cache=False):
+    def run_worker(self, filename, include_dirs=[], defines=[], use_cache=False):
         header_data, missing_headers = Environment.collect_headers(
             os.path.join(self.dir, filename),
-            includes=[os.path.join(self.dir, i) for i in includes],
+            include_dirs=[os.path.join(self.dir, i) for i in include_dirs],
             defines=defines, use_cache=use_cache)
         return set(x[0] for dir, headers in header_data for x in headers)
 
-    def run_nocache(self, filename, includes=[], defines=[]):
-        return self.run_worker(filename, includes, defines, use_cache=False)
+    def run_nocache(self, filename, include_dirs=[], defines=[]):
+        return self.run_worker(filename, include_dirs, defines, use_cache=False)
 
-    def run_withcache(self, filename, includes=[], defines=[]):
-        return self.run_worker(filename, includes, defines, use_cache=True)
+    def run_withcache(self, filename, include_dirs=[], defines=[]):
+        return self.run_worker(filename, include_dirs, defines, use_cache=True)
 
     def full_path(self, filename):
         return os.path.join(self.dir, filename)
@@ -75,7 +75,7 @@ def test_simple(env):
 #include <a.h>
 ''')
     assert not env.run('test2.cpp')
-    assert env.run('test2.cpp', includes=['.']) == {'a.h'}
+    assert env.run('test2.cpp', include_dirs=['.']) == {'a.h'}
 
 def test_macros(env):
     env.make_file('a.h')
@@ -105,13 +105,13 @@ def test_header_guard(env):
 #include "x.h"
 #include "x.h"
 ''')
-    assert env.run('test.cpp', includes=['aaa']) == \
+    assert env.run('test.cpp', include_dirs=['aaa']) == \
         {'a.h', 'x.h'}
 
     env.make_file('test2.cpp', '''
 #include "x.h"
 ''')
-    assert env.run('test2.cpp', includes=['aaa']) == \
+    assert env.run('test2.cpp', include_dirs=['aaa']) == \
         {'a.h', 'x.h'}
 
 def test_pragma_once(env):

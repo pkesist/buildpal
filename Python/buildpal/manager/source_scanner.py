@@ -11,14 +11,14 @@ from queue import Queue, Empty
 from threading import Thread
 from time import time
 
-def collect_headers(preprocessor, filename, includes, sysincludes,
+def collect_headers(preprocessor, filename, include_dirs, sysinclude_dirs,
         forced_includes, defines):
     preprocessor.set_ms_mode(True) # If MSVC.
     preprocessor.set_ms_ext(True) # Should depend on Ze & Za compiler options.
     ppc = preprocessing.PreprocessingContext()
-    for path in includes:
+    for path in include_dirs:
         ppc.add_include_path(path, False)
-    for path in sysincludes:
+    for path in sysinclude_dirs:
         ppc.add_include_path(path, True)
     for define in defines:
         define = define.split('=')
@@ -33,8 +33,8 @@ def collect_headers(preprocessor, filename, includes, sysincludes,
 
 def header_info(preprocessor, preprocess_task):
     header_info, missing_headers = collect_headers(preprocessor,
-        preprocess_task.source, preprocess_task.includes,
-        preprocess_task.sysincludes, preprocess_task.forced_includes,
+        preprocess_task.source, preprocess_task.include_dirs,
+        preprocess_task.sysinclude_dirs, preprocess_task.forced_includes,
         preprocess_task.macros)
     shared_file_list = []
     for dir, data in header_info:

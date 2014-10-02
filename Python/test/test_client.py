@@ -30,8 +30,8 @@ class ProtocolTester(MessageProtocol):
             assert os.path.exists(self.executable)
             assert os.path.isfile(self.executable)
             assert os.path.basename(self.executable) == 'cl.exe'
-            self.sysincludes = msg[2].decode().rstrip(';').split(';')
-            for path in self.sysincludes:
+            self.sysinclude_dirs = msg[2].decode().rstrip(';').split(';')
+            for path in self.sysinclude_dirs:
                 assert os.path.exists(path)
                 assert os.path.isdir(path)
             self.cwd = msg[3].decode()

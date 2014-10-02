@@ -43,7 +43,7 @@ class CompileOptions:
         return macros
 
     def forced_includes(self):
-        return self.value_dict.get('FI', [])
+        return self.value_dict.get(self.compiler.forced_include_option(), [])
 
     def should_build_locally(self):
         return any((x in self.compiler.build_local_options() for x in self.value_dict))
@@ -69,7 +69,7 @@ class CompileOptions:
         opt = self.value_dict.get(self.compiler.pch_file_option())
         return opt[-1] if opt else None
 
-    def includes(self):
+    def include_dirs(self):
         return self.value_dict[self.compiler.include_option()]
 
     def defines(self):
@@ -204,6 +204,12 @@ class MSVCCompiler:
 
     @classmethod
     def set_pch_file_option(cls, val): return '/Fp{}'.format(val)
+
+    @classmethod
+    def forced_include_option(cls): return 'FI'
+
+    @classmethod
+    def set_forced_include_option(self, val): return '/FI{}'.format(val)
 
     @classmethod
     def build_local_options(cls): 

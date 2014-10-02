@@ -62,7 +62,7 @@ class HeaderRepository:
             self.session_data[session_id] = needed_files
         return out_list
 
-    def prepare_dir(self, machine_id, session_id, new_files, includes):
+    def prepare_dir(self, machine_id, session_id, new_files, include_dirs):
         """
         We received files which we reported missing.
         """
@@ -84,7 +84,7 @@ class HeaderRepository:
                 # If not a part of needed_files, extract it directly to
                 # sandbox_dir and do not store it.
         src_file = self._process_temp_files(session_id, temp_files)
-        return includes, src_file
+        return include_dirs, src_file
 
     def create_shared(self, machine_id, session_id, remote_dir, name, checksum, content):
         create_shared = False

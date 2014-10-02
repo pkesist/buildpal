@@ -34,7 +34,7 @@ class ClientTaskCompiler:
     def compile_on_client(self, compiler, options, task):
         self.current_task = task
         call = options.create_server_call()
-        for include in options.includes():
+        for include in options.include_dirs():
             call.append(compiler.set_include_option().format(include))
         for define in options.defines():
             call.append(compiler.set_define_option().format(define))
@@ -60,13 +60,14 @@ class CommandProcessor:
 
     hostname = getfqdn()
 
-    def __init__(self, client_conn, executable, cwd, sysincludes, compiler,
+    def __init__(self, client_conn, executable, cwd, sysinclude_dirs, compiler,
             command, database_inserter, global_timer, update_ui):
         self.client_conn = client_conn
         self.compiler = compiler
         self.executable = executable
         self.compiler_info = None
-        self.__sysincludes = [x for x in sysincludes.split(os.path.pathsep) if x]
+        self.__sysinclude_dirs = [x for x in
+            sysinclude_dirs.split(os.path.pathsep) if x]
         self.__cwd = cwd
         self.__command = command
         self.__options = compiler.parse_options(command)
@@ -168,8 +169,9 @@ class CommandProcessor:
                     self.__options.create_server_call(),
                     pch_header=pch_header,
                     pch_file=pch_file,
-                    includes=[os.path.join(self.__cwd, rel_inc) for rel_inc in
-                        self.__options.includes()] + self.__sysincludes,
+                    include_dirs=[os.path.join(self.__cwd, rel_inc) for rel_inc in
+                        self.__options.include_dirs()] + self.__sysinclude_dirs,
+                    forced_includes=self.__options.forced_includes(),
                     src_decorator=decorator
                 ),
                 PreprocessTask(
@@ -177,8 +179,8 @@ class CommandProcessor:
                     self.__options.implicit_macros() + self.__options.defines()
                         + compiler_info.macros,
                     [os.path.join(self.__cwd, rel_inc) for rel_inc in
-                        self.__options.includes()],
-                    self.__sysincludes,
+                        self.__options.include_dirs()],
+                    self.__sysinclude_dirs,
                     self.__options.forced_includes(),
                     pch_header
                 ),

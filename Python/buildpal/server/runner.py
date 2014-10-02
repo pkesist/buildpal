@@ -292,17 +292,19 @@ class CompileSession(Timer):
         output = compiler_options.set_object_name_option(self.object_file)
 
         command = [self.compiler_exe(), output] + self.task.call
-        overrides = {}
+        file_overrides = {}
 
         if self.task.pch_file:
             assert self.pch_file is not None
             assert self.task.pch_header is not None
-            overrides[self.task.pch_file[0]] = self.pch_file
+            file_overrides[self.task.pch_file[0]] = self.pch_file
             self.pch_file = self.task.pch_file[0]
-            command.append(compiler_options.set_pch_file_option(
-                self.pch_file))
+            command.append(compiler_options.set_pch_file_option(self.pch_file))
             command.append(compiler_options.set_use_pch_file_option(
                 self.task.pch_header))
+            for include in self.task.forced_includes:
+                command.append(compiler_options.set_forced_include_option(
+                    include))
 
         include_dirs, src_loc = self.include_dirs_future.result()
         logging.debug("Include dirs:")
@@ -313,7 +315,7 @@ class CompileSession(Timer):
         command.append(self.task.src_decorator + src_loc)
 
         self.note_time('ready for compile', 'prepare for compile')
-        self.runner.run_compiler(self, command, tempdir, overrides,
+        self.runner.run_compiler(self, command, tempdir, file_overrides,
             self.__compile_completed)
 
     def __compile_completed(self, future):
@@ -437,7 +439,7 @@ class CompileSession(Timer):
     @async
     def prepare_include_dirs(self, new_files):
         result = self.runner.header_repository().prepare_dir(
-            self.task.fqdn, id(self), new_files, self.task.includes)
+            self.task.fqdn, id(self), new_files, self.task.include_dirs)
         self.note_time('include dir ready', 'preparing include dir')
         return result
 
@@ -524,11 +526,11 @@ class ServerRunner:
         return asyncio.async(self.loop.run_in_executor(self.misc_thread_pool(),
             callable, *args), loop=self.loop)
 
-    def run_compiler(self, session, args, cwd, overrides, done_callback):
+    def run_compiler(self, session, args, cwd, file_overrides, done_callback):
         file_maps = []
-        if overrides:
+        if file_overrides:
             file_map = map_files.FileMap()
-            for virtual_file, real_file in overrides.items():
+            for virtual_file, real_file in file_overrides.items():
                 file_map.map_file(virtual_file, real_file)
             file_maps.append(file_map)
         file_maps.extend(self.header_repository().get_mappings(

@@ -531,7 +531,7 @@ bool ConditionStack::skippable( clang::SourceLocation startLoc, clang::SourceLoc
         if ( tok.isNot( clang::tok::raw_identifier ) )
             continue;
 
-        llvm::StringRef const identifier( tok.getRawIdentifierData(), tok.getLength() );
+        llvm::StringRef const identifier( tok.getRawIdentifier() );
         if ( ( identifier == "define" ) || ( identifier == "undef" ) || ( identifier == "include" ) )
             return false;
     }

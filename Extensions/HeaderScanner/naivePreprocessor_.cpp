@@ -144,7 +144,7 @@ public:
             if ( !findPreprocessorDirective( tok ) )
                 return true;
 
-            llvm::StringRef directive( tok.getRawIdentifierData(), tok.getLength() );
+            llvm::StringRef const directive( tok.getRawIdentifier() );
             if ( directive == "include" )
             {
                 clang::Token tok;

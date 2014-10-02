@@ -5,7 +5,7 @@
 #include "clang/Driver/Options.h"
 #include "clang/Basic/Version.h"
 
-#if CLANG_VERSION_MAJOR != 3 || CLANG_VERSION_MINOR != 4
+#if CLANG_VERSION_MAJOR != 3 || CLANG_VERSION_MINOR != 5
 #error "Unexpected Clang version detected. Check supported compiler options."
 #endif
 

@@ -123,7 +123,7 @@ public:
         clang::FileID const mainFileID = sourceManager_.getMainFileID();
         clang::FileEntry const * mainFileEntry = sourceManager_.getFileEntryForID( mainFileID );
         llvm::MemoryBuffer const * mainFileBuffer = sourceManager_.getMemoryBufferForFile( mainFileEntry );
-        pushHeader( 
+        pushHeader(
             Dir( mainFileEntry->getDir()->getName() ),
             HeaderName( mainFileEntry->getName() ),
             mainFileID,
@@ -167,7 +167,7 @@ private:
     void pushHeader
     (
         Dir && dir,
-        HeaderName && name, 
+        HeaderName && name,
         clang::FileID id,
         clang::FileEntry const * entry,
         bool relative
@@ -221,7 +221,7 @@ private:
         llvm::SmallString<1024> searchPath;
         llvm::SmallString<1024> relativePath;
         clang::DirectoryLookup const * curDir( 0 );
-        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, isAngled, 0, curDir, 
+        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, isAngled, 0, curDir,
             headerStack_.back().fileEntry, &searchPath, &relativePath, NULL ) );
         if ( !fileEntry )
             return true;
@@ -282,7 +282,7 @@ private:
             headerSearch_.getFileDirFlavor( fileEntry )
         );
 
-        pushHeader( 
+        pushHeader(
             std::move( dir ),
             std::move( headerName ),
             id,

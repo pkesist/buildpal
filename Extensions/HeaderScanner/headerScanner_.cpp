@@ -31,7 +31,7 @@
 
 namespace
 {
-    struct DummyModuleLoader : public clang::ModuleLoader 
+    struct DummyModuleLoader : public clang::ModuleLoader
     {
         virtual clang::ModuleLoadResult loadModule(
             clang::SourceLocation,
@@ -162,12 +162,12 @@ namespace
 
         virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
         }
 
         virtual void MacroDefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
-            headerTracker_.macroDefined( macroNameTok.getIdentifierInfo()->getName(), md ); 
+            headerTracker_.macroDefined( macroNameTok.getIdentifierInfo()->getName(), md );
         }
 
         virtual void MacroUndefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
@@ -177,18 +177,18 @@ namespace
 
         virtual void Defined( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
         }
 
         virtual void Ifdef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
             headerTracker_.ifDirective( loc, md != NULL );
         }
 
         virtual void Ifndef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
         {
-            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() ); 
+            headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
             headerTracker_.ifDirective( loc, md == 0 );
         }
 
@@ -278,7 +278,7 @@ namespace
 
         virtual void HandleDiagnostic(
             clang::DiagnosticsEngine::Level level,
-            clang::Diagnostic const & info) 
+            clang::Diagnostic const & info)
         {
             if ( info.getID() == clang::diag::warn_pp_undef_identifier )
             {
@@ -400,7 +400,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
 
     preprocessor.addPPCallbacks( new PreprocessorCallbacks( headerTracker, fileName,
         preprocessor, headers, missingHeaders ) );
-    
+
     preprocessor.EnterMainSourceFile();
     if ( diagEng.hasFatalErrorOccurred() )
         return false;

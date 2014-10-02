@@ -187,7 +187,9 @@ void HeaderTracker::headerSkipped()
     if ( !cacheDisabled() )
     {
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-        clang::HeaderFileInfo const & headerFileInfo( headerSearch.getFileInfo( hwf.file ) );
+        clang::HeaderFileInfo headerFileInfo;
+        bool const mustSucceed = headerSearch.tryGetFileInfo( hwf.file, headerFileInfo );
+        assert( mustSucceed );
         assert( !headerFileInfo.ControllingMacroID );
         currentHeaderCtx().macroUsed( macroForPragmaOnce( *hwf.file ) );
         if ( !headerFileInfo.isPragmaOnce )

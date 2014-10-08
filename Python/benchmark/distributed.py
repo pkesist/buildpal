@@ -3,7 +3,6 @@ import os
 import sys
 import subprocess
 from tempfile import mkstemp
-from multiprocessing import cpu_count
 import signal
 import socket
 import time

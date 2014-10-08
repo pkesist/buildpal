@@ -27,7 +27,7 @@ class Database:
         {'col_name': 'time_point_name', 'col_type': 'TEXT'   , 'null': False},
         {'col_name': 'time_point'     , 'col_type': 'REAL'   , 'null': False},]
 
-    def convert_enum(type):
+    def convert_enum(enum_type):
         class ConvertEnum:
             @classmethod
             def to_db(cls, data):
@@ -35,7 +35,7 @@ class Database:
 
             @classmethod
             def from_db(cls, data):
-                return type(data)
+                return enum_type(data)
 
             @classmethod
             def db_type(cls):

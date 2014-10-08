@@ -36,9 +36,9 @@ def msg_to_bytes(msg):
 
 def msg_from_bytes(memview):
     offset = 0
-    (len,) = struct.unpack('!H', memview[offset:offset+2])
+    (length,) = struct.unpack('!H', memview[offset:offset+2])
     offset += 2
-    for i in range(len):
+    for _ in range(length):
         (part_len,) = struct.unpack('!I', memview[offset:offset+4])
         offset += 4
         yield MemoryViewWrapper(memview[offset:offset+part_len])
@@ -73,7 +73,6 @@ class MessageProtocol(asyncio.Protocol):
 
     def data_received(self, data):
         data_offset = 0
-        messages = []
         while data_offset != len(data):
             if not self.msg_len:
                 remaining = len(self.len_buff) - self.len_offset

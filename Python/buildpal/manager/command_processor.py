@@ -1,4 +1,3 @@
-from .compile_session import SessionResult
 from .task import Task, PreprocessTask
 from .gui_event import GUIEvent
 
@@ -7,7 +6,6 @@ from buildpal.common import ServerTask
 import os
 import struct
 import logging
-from time import time
 from socket import getfqdn
 
 class ClientTaskCompiler:
@@ -20,7 +18,7 @@ class ClientTaskCompiler:
     def client_ready(self):
         if self.tasks_waiting:
             self.current_task = self.tasks_waiting.pop(0)
-            self.compile_on_client(*current_task)
+            self.compile_on_client(*self.current_task)
         else:
             self._client_ready = True
 
@@ -29,7 +27,7 @@ class ClientTaskCompiler:
             self._client_ready = False
             self.compile_on_client(compiler, options, task)
         else:
-            self.tasks_waiting.append((compiler. options, taks))
+            self.tasks_waiting.append((compiler. options, task))
 
     def compile_on_client(self, compiler, options, task):
         self.current_task = task
@@ -123,7 +121,7 @@ class CommandProcessor:
             self.__client_task_compiler.task_done(msg)
 
     def update_task_ui(self, task):
-        for index, (duration_name, duration) in task.time_durations():
+        for _, (duration_name, duration) in task.time_durations():
             self.__global_timer.add_time(duration_name, duration)
         self.__update_ui(GUIEvent.update_global_timers, self.__global_timer.as_dict())
 
@@ -217,7 +215,7 @@ class CommandProcessor:
         exit_error_code = 0
         stdout = b''
         stderr = b''
-        for task, result in self.completed_tasks.items():
+        for _, result in self.completed_tasks.items():
             retcode, tmp_stdout, tmp_stderr = result
             if retcode != 0:
                 exit_error_code = retcode

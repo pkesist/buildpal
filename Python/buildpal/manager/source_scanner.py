@@ -1,15 +1,10 @@
 from .gui_event import GUIEvent
 
-from buildpal.common import SimpleTimer
-
 import preprocessing
-import os
 
-from collections import defaultdict
 from multiprocessing import cpu_count
-from queue import Queue, Empty
+from queue import Queue
 from threading import Thread
-from time import time
 
 def collect_headers(preprocessor, filename, includes, sysincludes,
         forced_includes, defines):
@@ -59,7 +54,7 @@ class SourceScanner:
         self.in_queue = Queue()
         self.closing = False
         self.threads = set()
-        for i in range(thread_count):
+        for _ in range(thread_count):
             thread = Thread(target=self.__process_task_worker, args=(notify, update_ui))
             self.threads.add(thread)
         for thread in self.threads:

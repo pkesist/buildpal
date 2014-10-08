@@ -4,10 +4,8 @@ import asyncio
 
 from io import BytesIO, StringIO
 from multiprocessing import cpu_count
-from time import sleep, time
-from struct import pack
+from time import time
 from concurrent.futures import ThreadPoolExecutor
-from threading import Thread
 
 from .header_repository import HeaderRepository
 from .pch_repository import PCHRepository
@@ -301,7 +299,7 @@ class CompileSession(Timer):
             self.pch_file = self.task.pch_file[0]
             command.append(compiler_options.set_pch_file_option(
                 self.pch_file))
-            command.append(compiler_options.set_use_pch_file_option(
+            command.append(compiler_options.set_use_pch_option(
                 self.task.pch_header))
 
         include_dirs, src_loc = self.include_dirs_future.result()

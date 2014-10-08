@@ -1,5 +1,3 @@
-import os
-import tempfile
 import zlib
 import pstats
 import cProfile
@@ -17,7 +15,7 @@ def compress_file(fileobj):
 
 def send_compressed_file(sender, fileobj, *args, **kwargs):
     for block in compress_file(fileobj):
-        sender((b'\x01', compressed_data), *args, **kwargs)
+        sender((b'\x01', block), *args, **kwargs)
     sender((b'\x00', b''), *args, **kwargs)
 
 def send_file(sender, file, *args, **kwargs):

@@ -34,7 +34,7 @@ class FixedNodeList(NodeInfoGetter):
     @staticmethod
     def get_nodes_from_ini_file(config, profile):
         if not profile in config:
-            raise Exception("ERROR: No '{}' section in '{}'.".format(profile, opts.ini_file))
+            raise Exception("ERROR: No '{}' section.".format(profile))
 
         nodes = []
         section = config[profile]
@@ -107,8 +107,6 @@ def get_config(ini_file):
     return config
 
 def main(opts, terminator=None):
-    config = None
-
     if opts.debug:
         import logging
         logging.basicConfig(fileName='manager_debug.log', level=logging.DEBUG)

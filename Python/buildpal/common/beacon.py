@@ -12,7 +12,7 @@ def _get_multicast_socket(multicast_address=BUILDPAL_MULTICAST_ADDRESS):
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
     addrinfo = socket.getaddrinfo('', 0, family=socket.AF_INET)
     addrinfo.extend(socket.getaddrinfo('localhost', 0, family=socket.AF_INET))
-    for _, _, _, _, (address, port) in addrinfo:
+    for _, _, _, _, (address, _) in addrinfo:
         mreq = struct.pack('=4s4s', socket.inet_aton(multicast_address), socket.inet_aton(address))
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return sock
@@ -92,7 +92,7 @@ def get_nodes_from_beacons(multicast_address=BUILDPAL_MULTICAST_ADDRESS,
         while True:
             sock.settimeout(0.1)
             try:
-                data, (address, port) = sock.recvfrom(256)
+                data, (address, _) = sock.recvfrom(256)
             except socket.timeout:
                 break
             result = _parse_response(data, address)

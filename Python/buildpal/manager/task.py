@@ -1,9 +1,6 @@
 from .compile_session import SessionResult
 from buildpal.common import Timer
 
-from time import time
-import logging
-
 class PreprocessTask:
     def __init__(self, source, macros, includes, sysincludes, forced_includes,
             pch_header):

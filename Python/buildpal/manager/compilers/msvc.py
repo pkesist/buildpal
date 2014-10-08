@@ -1,16 +1,11 @@
 import parse_args
 
-from .utils import get_batch_file_environment_side_effects
-
 from buildpal.common import CompilerInfo
 
 from collections import defaultdict
 
-import itertools
 import os
 import re
-import sys
-import logging
 import tempfile
 import zlib
 
@@ -31,7 +26,7 @@ class CompileOptions:
     def implicit_macros(self):
         macros = []
         add_extensions = True
-        for option_name, opt_value in zip(self.option_names, self.option_values):
+        for option_name in self.option_names:
             if option_name == 'Za':
                 add_extensions = False
             if option_name == 'Ze':

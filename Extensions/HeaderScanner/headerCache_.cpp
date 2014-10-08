@@ -1,4 +1,5 @@
 //------------------------------------------------------------------------------
+#include "contentCache_.hpp"
 #include "headerCache_.hpp"
 #include "headerTracker_.hpp"
 
@@ -7,6 +8,7 @@
 #include <boost/spirit/include/karma.hpp>
 
 #include <fstream>
+#include <functional>
 //------------------------------------------------------------------------------
 
 clang::FileEntry const * CacheEntry::getFileEntry(
@@ -96,6 +98,18 @@ CacheEntry::CacheEntry
     lastTimeHit_( currentTime )
 {
     contentLock_.clear();
+}
+
+Cache::Cache() :
+    counter_( 0 ), hits_( 0 ), misses_( 0 ),
+    conn_
+    (
+        ContentCache::singleton().registerFileChangedCallback
+        (
+            std::bind( &Cache::invalidate, this, std::placeholders::_1 )
+        )
+    )
+{
 }
 
 CacheEntryPtr Cache::addEntry

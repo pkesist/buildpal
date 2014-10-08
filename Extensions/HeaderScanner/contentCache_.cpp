@@ -7,11 +7,13 @@
 #include <memory>
 //------------------------------------------------------------------------------
 
-ContentCache ContentCache::singleton_;
-
-ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileEntry const * file, Cache * cache )
+llvm::ErrorOr<ContentEntryPtr> ContentCache::getOrCreate( llvm::Twine const & path )
 {
-    llvm::sys::fs::UniqueID const uniqueID = file->getUniqueID();
+    llvm::sys::fs::UniqueID uniqueID;
+    std::error_code error = llvm::sys::fs::getUniqueID( path, uniqueID );
+    if ( error )
+        return error;
+
     typedef Content::index<ByFileId>::type ContentByFileId;
     {
         boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
@@ -21,26 +23,34 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
         {
             ContentEntryPtr contentEntryPtr = *iter;
             readLock.unlock();
-            if ( contentEntryPtr->modified == file->getModificationTime() )
+            llvm::sys::fs::file_status currentStatus;
+            if ( std::error_code const statusError = llvm::sys::fs::status( path, currentStatus ) )
+                return statusError;
+            if ( contentEntryPtr->status.getLastModificationTime() == currentStatus.getLastModificationTime() )
             {
                 boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
                 Content::iterator listIter = content_.project<0>( iter );
                 content_.splice( content_.begin(), content_, listIter );
-                return *iter;
+                return contentEntryPtr;
             }
-            if ( cache )
-                cache->invalidate( *contentEntryPtr );
-            llvm::MemoryBuffer * memoryBuffer( prepareSourceFile( fm, *file ) );
+            llvm::MemoryBuffer * buffer( prepareSourceFile( path ) );
+            // Notify observers that this content entry is out of date.
+            contentChanged_( *contentEntryPtr );
             boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-            ContentEntryPtr newPtr( new ContentEntry( uniqueID, memoryBuffer,
-                file->getModificationTime() ) );
+            ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer, currentStatus ) );
             contentByFileId.erase( iter );
             content_.push_front( newPtr );
-            contentSize_ += newPtr->size() - contentEntryPtr->size();
+            contentSize_ += newPtr->size();
+            contentSize_ -= contentEntryPtr->size();
             return newPtr;
         }
     }
-    std::unique_ptr<llvm::MemoryBuffer> buffer( prepareSourceFile( fm, *file ) );
+    llvm::sys::fs::file_status status;
+    std::error_code const statusError = llvm::sys::fs::status( path, status );
+    if ( statusError )
+        return statusError;
+
+    llvm::MemoryBuffer * buffer( prepareSourceFile( path ) );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
     {
         // Preform another search with upgrade ownership.
@@ -50,8 +60,7 @@ ContentEntryPtr ContentCache::getOrCreate( clang::FileManager & fm, clang::FileE
             return *iter;
     }
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-    ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer.release(),
-        file->getModificationTime() ) );
+    ContentEntryPtr newPtr( new ContentEntry( uniqueID, buffer, status ) );
     content_.push_front( newPtr );
     contentSize_ += newPtr->size();
     unsigned int const maxContentCacheSize = 100 * 1024 * 1024;

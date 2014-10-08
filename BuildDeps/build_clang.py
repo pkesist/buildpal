@@ -58,9 +58,9 @@ class build_clang(Command):
         self.llvm_github_user = 'llvm-mirror'
         self.llvm_github_repo = 'llvm'
         self.llvm_github_branch = 'release_35'
-        self.clang_github_user = 'llvm-mirror'
+        self.clang_github_user = 'pkesist'
         self.clang_github_repo = 'clang'
-        self.clang_github_branch = 'release_35'
+        self.clang_github_branch = 'release_35_buildpal'
 
     def finalize_options(self):
         if not self.x64 and not self.x86:

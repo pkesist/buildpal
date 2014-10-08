@@ -28,7 +28,9 @@
 #include <unordered_set>
 #include <vector>
 
-//#define DEBUG_HEADERS 1
+#if 0
+#define DEBUG_HEADERS 1
+#endif
 
 namespace clang
 {

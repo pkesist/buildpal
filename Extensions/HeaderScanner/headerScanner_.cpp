@@ -193,6 +193,7 @@ namespace
             if ( reason == EnterFile )
             {
                 clang::FileID const fileId( preprocessor_.getSourceManager().getFileID( loc ) );
+                assert( preprocessor_.getSourceManager().getLocForStartOfFile( fileId ) == loc );
                 clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
@@ -299,7 +300,7 @@ namespace
 bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
     // Initialize file manager.
-    clang::FileManager fileManager( fsOpts_ );
+    clang::FileManager fileManager( fsOpts_, ContentCache::ptr() );
     fileManager.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 
     clang::DiagnosticsEngine diagEng( diagID_, &*diagOpts_ );
@@ -346,9 +347,6 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         throw std::runtime_error( error );
     }
 
-    assert( !sourceManager.isFileOverridden( mainFileEntry ) );
-    sourceManager.overrideFileContents( mainFileEntry,
-        prepareSourceFile( fileManager, *mainFileEntry ) );
     auto const mainFileID = sourceManager.createFileID(
         mainFileEntry, clang::SourceLocation(), clang::SrcMgr::C_User );
     sourceManager.setMainFileID( mainFileID );
@@ -371,6 +369,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
                         // IdentifierInfoLookup * IILookup = nullptr,
                         // bool OwnsHeaderSearch = false,
     );                  // TranslationUnitKind TUKind = TU_Complete
+    preprocessor.Initialize( *targetInfo );
 
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );

@@ -246,7 +246,7 @@ namespace std
     };
 }
 
-llvm::MemoryBuffer * prepareSourceFile( clang::FileManager &, clang::FileEntry const & );
+llvm::MemoryBuffer * prepareSourceFile( llvm::Twine const & path );
 
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \

@@ -237,10 +237,11 @@ public:
     void elseDirective( clang::SourceLocation );
     void endifDirective( clang::SourceLocation );
 
+    bool empty() const { return conditions.empty(); }
+
 private:
     bool skippable( clang::SourceLocation startLoc, clang::SourceLocation endLoc ) const;
-    bool hasCondition() const { return !conditions.empty(); }
-    Condition & condition() { return conditions.back(); }
+    Condition & condition() { assert( !empty() ); return conditions.back(); }
 
     bool lastConditionSkippable( clang::SourceLocation loc );
 };
@@ -310,17 +311,8 @@ private:
         conditionStack_.commit();
     }
 
-    void pushHeaderCtx( clang::FileEntry const * original, clang::FileEntry const * replacement, CacheEntryPtr const & cacheHit )
-    {
-        pCurrentCtx_ = new HeaderCtx( macroState_, original, replacement, cacheHit, pCurrentCtx_, preprocessor_ );
-    }
-
-    void popHeaderCtx()
-    {
-        HeaderCtx * result = pCurrentCtx_;
-        pCurrentCtx_ = pCurrentCtx_->parent();
-        delete result;
-    }
+    void pushHeaderCtx();
+    void popHeaderCtx();
 
     HeaderCtx & currentHeaderCtx()
     {

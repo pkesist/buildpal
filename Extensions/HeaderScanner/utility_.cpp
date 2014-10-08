@@ -43,14 +43,16 @@ namespace
         > converter;
         std::string utf8( converter.to_bytes( &input[0], &input[0] + input.size() ) );
         utf8.push_back('\0');
-        delete pMemoryBuffer;
         pMemoryBuffer = llvm::MemoryBuffer::getMemBufferCopy( utf8, "" );
     }
 }
 
-llvm::MemoryBuffer * prepareSourceFile( clang::FileManager & fileManager, clang::FileEntry const & fileEntry )
+llvm::MemoryBuffer * prepareSourceFile( llvm::Twine const & path )
 {
-    llvm::MemoryBuffer * memoryBuffer( fileManager.getBufferForFile( &fileEntry, 0, true ) );
-    convertEncodingIfNeeded( memoryBuffer );
-    return memoryBuffer;
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer> > result = llvm::MemoryBuffer::getFile( path );
+    if ( !result )
+        return 0;
+    llvm::MemoryBuffer * buf( result.get() );
+    convertEncodingIfNeeded( buf );
+    return buf;
 }

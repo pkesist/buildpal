@@ -8,58 +8,155 @@
 
 #include <unordered_set>
 
+struct IncludeDirective
+{
+    std::string filename;
+    clang::SourceLocation loc;
+    bool isAngled;
+};
+
+typedef std::vector<IncludeDirective> IncludeDirectives;
+
 namespace
 {
     struct NaiveCache
     {
-        struct NaiveCacheEntry
-        {
-            Headers headers;
-            bool isComplex;
-        };
 
-        void markComplex( clang::FileEntry const & entry, std::size_t searchPathId )
+        NaiveCache( ContentCache & contentCache )
+            : conn_
+            (
+                contentCache.registerFileChangedCallback
+                (
+                    std::bind( &NaiveCache::invalidate, this, std::placeholders::_1 )
+                )
+            )
         {
-            CacheKey const key = std::make_pair( entry.getUniqueID(), searchPathId );
-            boost::unique_lock<boost::shared_mutex> const lock( mutex );
-            container[ key ].isComplex = true;
         }
 
-        void storeHeaders( clang::FileEntry const & entry, std::size_t searchPathId, Headers && headers )
+        void store( clang::FileEntry const * entry, IncludeDirectives && includes )
         {
-            CacheKey const key = std::make_pair( entry.getUniqueID(), searchPathId );
             boost::unique_lock<boost::shared_mutex> const lock( mutex );
-            auto iter = container.find( key );
-            if ( iter != container.end() )
-            {
-                assert( ( iter == container.end() ) || !iter->second.isComplex );
-                assert( ( iter == container.end() ) || ( iter->second.headers == headers ) );
-            }
-            else
-            {
-                container[ key ].isComplex = false;
-                container[ key ].headers = headers;
-            }
+            container[ entry->getUniqueID() ] = std::move( includes );
         }
 
-        bool hasEntry( clang::FileEntry const & entry, std::size_t searchPathId, bool & isComplex, Headers & headers )
+        bool lookup( clang::FileEntry const * entry, IncludeDirectives & includes )
         {
             boost::shared_lock<boost::shared_mutex> const lock( mutex );
-            auto iter = container.find( std::make_pair( entry.getUniqueID(), searchPathId ) );
+            auto iter = container.find( entry->getUniqueID() );
             if ( iter == container.end() )
                 return false;
-            isComplex = iter->second.isComplex;
-            if ( !isComplex )
-                headers = iter->second.headers;
+            includes = iter->second;
             return true;
         }
 
     private:
+        struct HashUniqueId
+        {
+            std::size_t operator()( llvm::sys::fs::UniqueID const & val ) const
+            {
+                return llvm::hash_combine(
+                    llvm::hash_value( val.getDevice() ),
+                    llvm::hash_value( val.getFile() )
+                );
+            }
+        };
+
+        void invalidate( ContentEntry const & entry )
+        {
+            boost::shared_lock<boost::shared_mutex> const lock( mutex );
+            container.erase( entry.id_ );
+        }
+
+    private:
+        boost::signals2::scoped_connection conn_;
         boost::shared_mutex mutex;
-        typedef std::pair<llvm::sys::fs::UniqueID, std::size_t> CacheKey;
-        std::map<CacheKey, NaiveCacheEntry> container;
-    } naiveCache;
+        std::unordered_map<llvm::sys::fs::UniqueID, IncludeDirectives, HashUniqueId> container;
+    } naiveCache( ContentCache::singleton() );
 }  // anonymous namespace
+
+struct IncludeFinder
+{
+    struct NextIncludeResult
+    {
+        enum Enum
+        {
+            nirIncludeFound,
+            nirHeaderDone,
+            nirHeaderComplex
+        };
+    };
+
+    virtual NextIncludeResult::Enum nextInclude( IncludeDirective & ) = 0;
+};
+
+struct FixedIncludeFinder : IncludeFinder
+{
+    explicit FixedIncludeFinder( IncludeDirectives && includes )
+        : includes_( std::move( includes ) ),
+        iter_( includes_.begin() )
+    {
+    }
+        
+    NextIncludeResult::Enum nextInclude( IncludeDirective & d ) override
+    {
+        if ( iter_ == includes_.end() )
+            return NextIncludeResult::nirHeaderDone;
+        d = *(iter_++);
+        return NextIncludeResult::nirIncludeFound;
+    }
+
+    IncludeDirectives includes_;
+    IncludeDirectives::iterator iter_;
+};
+
+struct LexingIncludeFinder : IncludeFinder
+{
+    LexingIncludeFinder( std::unique_ptr<clang::Lexer> && lex, clang::FileEntry const * entry )
+        : lexer_( std::move( lex ) ), entry_( entry )
+    {
+    }
+
+    NextIncludeResult::Enum nextInclude( IncludeDirective & d ) override
+    {
+        clang::Token tok;
+        for ( ; ; )
+        {
+            if ( lexer().LexFromRawLexer( tok ) )
+            {
+                naiveCache.store( entry_, std::move( includes_ ) );
+                return NextIncludeResult::nirHeaderDone;
+            }
+            if ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() )
+                continue;
+            while ( tok.isNot( clang::tok::raw_identifier ) && ( tok.is( clang::tok::hash ) && tok.isAtStartOfLine() ) )
+            {
+                if ( lexer().LexFromRawLexer( tok ) )
+                    return NextIncludeResult::nirHeaderDone;
+            }
+            if ( tok.getRawIdentifier() != "include" )
+                continue;
+
+            lexer().setParsingPreprocessorDirective( true );
+            lexer().LexIncludeFilename( tok );
+            lexer().setParsingPreprocessorDirective( false );
+
+            if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
+                return NextIncludeResult::nirHeaderComplex;
+
+            d.filename = llvm::StringRef( tok.getLiteralData() + 1, tok.getLength() - 2 );
+            d.loc = tok.getLocation();
+            d.isAngled = tok.is( clang::tok::angle_string_literal );
+            includes_.push_back( d );
+            return NextIncludeResult::nirIncludeFound;
+        }
+    }
+
+    clang::Lexer & lexer() { return *lexer_; }
+
+    std::unique_ptr<clang::Lexer> lexer_;
+    clang::FileEntry const * entry_;
+    IncludeDirectives includes_;
+};
 
 class NaivePreprocessorImpl
 {
@@ -71,39 +168,32 @@ private:
         HeaderCtx & operator=( HeaderCtx const & );
 
     public:
-        HeaderCtx( Header const & h, clang::Lexer * l, clang::FileEntry const * f )
-            : currentHeader( h ), lexer( l ), fileEntry( f )
+        HeaderCtx( Header const & h, std::unique_ptr<IncludeFinder> i, clang::FileEntry const * f )
+            : currentHeader( h ), includeFinder( std::move( i ) ), fileEntry( f )
         {
         }
 
         HeaderCtx( HeaderCtx && other )
             : currentHeader( std::move( other.currentHeader ) ),
-            lexer( other.lexer ),
+            includeFinder( std::move( other.includeFinder ) ),
             fileEntry( other.fileEntry ),
-            headers( std::move( other.headers ) )
+            includes( std::move( other.includes ) )
         {
-            other.lexer = 0;
         }
 
         HeaderCtx & operator=( HeaderCtx && other )
         {
             currentHeader = std::move( other.currentHeader );
-            lexer = other.lexer;
-            other.lexer = 0;
+            includeFinder = std::move( other.includeFinder );
             fileEntry = other.fileEntry;
-            headers.swap( other.headers );
+            includes.swap( other.includes );
             return *this;
         }
 
-        ~HeaderCtx()
-        {
-            delete lexer;
-        }
-
         Header currentHeader;
-        clang::Lexer * lexer;
+        std::unique_ptr<IncludeFinder> includeFinder;
         clang::FileEntry const * fileEntry;
-        Headers headers;
+        IncludeDirectives includes;
     };
 
     typedef std::vector<HeaderCtx> HeaderStack;
@@ -133,34 +223,31 @@ public:
 
         for ( PreprocessingContext::Includes::value_type const & include : forcedIncludes_ )
         {
-            if ( !handleInclude( include, false, clang::SourceLocation() ) )
+            IncludeDirective includeDirective = { include, clang::SourceLocation(), false };
+            if ( !handleInclude( includeDirective ) )
                 return false;
         }
 
-        clang::Token tok;
-        while ( true )
+        while ( !headerStack_.empty() )
         {
-            clang::Token tok;
-            if ( !findPreprocessorDirective( tok ) )
-                return true;
-
-            llvm::StringRef const directive( tok.getRawIdentifier() );
-            if ( directive == "include" )
+            IncludeDirective includeDirective;
+            switch ( headerStack_.back().includeFinder->nextInclude( includeDirective ) )
             {
-                clang::Token tok;
-                currentLexer().LexIncludeFilename( tok );
-                if ( tok.isNot( clang::tok::angle_string_literal ) && tok.isNot( clang::tok::string_literal ) )
-                {
-                    foundComplexInclude();
+            case IncludeFinder::NextIncludeResult::nirIncludeFound:
+                if ( !handleInclude( includeDirective ) )
                     return false;
-                }
-                bool const isAngled = tok.is( clang::tok::angle_string_literal );
-                llvm::StringRef fileName( tok.getLiteralData() + 1, tok.getLength() - 2 );
-
-                if ( !handleInclude( fileName, isAngled, tok.getLocation() ) )
-                    return false;
+                break;
+            case IncludeFinder::NextIncludeResult::nirHeaderDone:
+                popHeader();
+                break;
+            case IncludeFinder::NextIncludeResult::nirHeaderComplex:
+                //foundComplexInclude();
+                return false;
             }
         }
+        result_.swap( allHeaders_ );
+        return true;
+
     }
 
 private:
@@ -173,88 +260,80 @@ private:
         bool relative
     )
     {
-        ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( sourceManager_.getFileManager(), entry, NULL );
+        ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( entry->getName() ).get();
         Header header = { dir, name, contentEntry, relative };
 
+        IncludeDirectives includeDirectives;
+        IncludeFinder * includeFinder;
+        if ( naiveCache.lookup( entry, includeDirectives ) )
+        {
+            includeFinder = new FixedIncludeFinder( std::move( includeDirectives ) );
+        }
+        else
+        {
+            includeFinder = new LexingIncludeFinder
+            (
+                std::unique_ptr<clang::Lexer>
+                (
+                    new clang::Lexer
+                    (
+                        id,
+                        contentEntry->buffer.get(),
+                        sourceManager_,
+                        langOpts_
+                    )
+                ),
+                entry
+            );
+        }
+    
         headerStack_.push_back
         (
             HeaderCtx
             (
                 header,
-                new clang::Lexer
-                (
-                    id,
-                    contentEntry->buffer.get(),
-                    sourceManager_,
-                    langOpts_
-                ),
+                std::unique_ptr<IncludeFinder>( includeFinder ),
                 entry
             )
         );
     }
 
-    bool handleEof()
+    void popHeader()
     {
         NaivePreprocessorImpl::HeaderCtx headerCtx( std::move( headerStack_.back() ) );
         headerStack_.pop_back();
-        if ( headerStack_.empty() )
-        {
-            result_.swap( headerCtx.headers );
-            return true;
-        }
-        else
-        {
-            headerCtx.headers.insert( headerCtx.currentHeader );
-            std::copy( headerCtx.headers.begin(), headerCtx.headers.end(),
-                std::inserter(
-                    headerStack_.back().headers,
-                    headerStack_.back().headers.begin()
-                )
-            );
-            naiveCache.storeHeaders( *headerCtx.fileEntry, searchPathId_, std::move( headerCtx.headers ) );
-            return false;
-        }
+        if ( !headerStack_.empty() )
+            allHeaders_.insert( headerCtx.currentHeader );
     }
 
-    bool handleInclude( llvm::StringRef fileName, bool isAngled, clang::SourceLocation loc )
+    bool handleInclude( IncludeDirective const & includeDirective )
     {
         llvm::SmallString<1024> searchPath;
         llvm::SmallString<1024> relativePath;
         clang::DirectoryLookup const * curDir( 0 );
-        clang::FileEntry const * fileEntry( headerSearch_.LookupFile( fileName, loc, isAngled, 0, curDir,
-            headerStack_.back().fileEntry, &searchPath, &relativePath, NULL ) );
-        if ( !fileEntry )
-            return true;
+		llvm::SmallVector<std::pair<clang::FileEntry const *, clang::DirectoryEntry const *>, 16> includers;
+		includers.push_back( std::make_pair( headerStack_.back().fileEntry, headerStack_.back().fileEntry->getDir() ) );
+        clang::FileEntry const * fileEntry(
+            headerSearch_.LookupFile(
+                includeDirective.filename,
+                includeDirective.loc,
+                includeDirective.isAngled,
+                0,
+                curDir,
+                includers,
+                &searchPath,
+                &relativePath,
+                NULL
+            )
+        );
 
-        if ( std::find_if( headerStack_.begin(), headerStack_.end(),
-            [=]( HeaderCtx const & headerCtx )
-            {
-                return headerCtx.fileEntry == fileEntry;
-            }) != headerStack_.end() )
+        if ( !fileEntry || !alreadyVisited_.insert( fileEntry ).second )
             return true;
-
-        {
-            bool isComplex;
-            Headers cacheHeaders;
-            if ( naiveCache.hasEntry( *fileEntry, searchPathId_, isComplex, cacheHeaders ) )
-            {
-                if ( isComplex )
-                {
-                    foundComplexInclude();
-                    return false;
-                }
-                std::copy( cacheHeaders.begin(), cacheHeaders.end(),
-                    std::inserter( headerStack_.back().headers,
-                    headerStack_.back().headers.begin() )
-                );
-                return true;
-            }
-        }
 
         Dir dir;
         HeaderName headerName;
 
-        bool const relativeToParent( !isAngled && ( headerStack_.back().fileEntry->getDir()->getName() == searchPath ) );
+        bool const relativeToParent( !includeDirective.isAngled && ( headerStack_.back().fileEntry->getDir()->getName() == searchPath ) );
         if ( relativeToParent )
         {
             dir =  Dir( headerStack_.back().currentHeader.dir );
@@ -278,7 +357,7 @@ private:
         clang::FileID const id = sourceManager_.createFileID
         (
             fileEntry,
-            loc,
+            includeDirective.loc,
             headerSearch_.getFileDirFlavor( fileEntry )
         );
 
@@ -292,49 +371,8 @@ private:
         return true;
     }
 
-    clang::Lexer & currentLexer() { return *headerStack_.back().lexer; }
-
-    bool getToken( clang::Token & tok, bool & done )
-    {
-        bool result = currentLexer().LexFromRawLexer( tok );
-        done = result ? handleEof() : false;
-        return !result;
-    }
-
-    bool findPreprocessorDirective( clang::Token & tok )
-    {
-        bool done = false;
-        while ( true )
-        {
-            if ( !getToken( tok, done ) )
-            {
-                if ( done )
-                    return false;
-                continue;
-            }
-            if ( tok.isNot( clang::tok::hash ) || !tok.isAtStartOfLine() )
-                continue;
-            while ( tok.is( clang::tok::hash ) && tok.isAtStartOfLine() )
-                if ( !getToken( tok, done ) )
-                {
-                    if ( done )
-                        return false;
-                    continue;
-                }
-            if ( tok.isNot( clang::tok::raw_identifier ) )
-                continue;
-            return true;
-        }
-    }
-
 private:
-    void foundComplexInclude() const
-    {
-        std::for_each( headerStack_.begin() + 1, headerStack_.end(), [this]( HeaderCtx const & headerCtx )
-        {
-            naiveCache.markComplex( *headerCtx.fileEntry, searchPathId_ );
-        });
-    }
+    typedef std::unordered_set<clang::FileEntry const *> AlreadyVisited;
 
 private:
     clang::SourceManager & sourceManager_;
@@ -342,6 +380,8 @@ private:
     std::size_t searchPathId_;
     clang::LangOptions & langOpts_;
     PreprocessingContext::Includes const & forcedIncludes_;
+    Headers allHeaders_;
+    AlreadyVisited alreadyVisited_;
     Headers & result_;
     HeaderStack headerStack_;
 };

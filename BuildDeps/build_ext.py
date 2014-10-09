@@ -29,11 +29,11 @@ class build_ext(_build_ext):
             self.extra_compile_args.append('/EHsc')
             if self._debug:
                 self.extra_compile_args.extend(['/Zi'])
-                self.extra_compile_args.extend(['/Od'])
-                self.extra_compile_args.extend(['/UNDEBUG'])
+                #self.extra_compile_args.extend(['/Od'])
+                #self.extra_compile_args.extend(['/UNDEBUG'])
                 self.extra_link_args.extend(['/DEBUG'])
-                #self.extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
-                #self.extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
+                self.extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
+                self.extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])
             else:
                 self.extra_compile_args.extend(['/GF', '/GL', '/GT', '/Gy'])
                 self.extra_link_args.extend(['/OPT:REF', '/OPT:ICF', '/LTCG'])

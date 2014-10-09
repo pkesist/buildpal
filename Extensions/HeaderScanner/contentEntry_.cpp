@@ -56,8 +56,8 @@ namespace
 }
 
 
-ContentEntry::ContentEntry( llvm::sys::fs::UniqueID id, llvm::MemoryBuffer * b, time_t const mod )
+ContentEntry::ContentEntry( llvm::sys::fs::UniqueID id, llvm::MemoryBuffer * b, llvm::sys::fs::file_status const & stat )
     :
-    id_( id ), buffer( b ), checksum( adler32( b ) ), modified( mod )
+    id_( id ), buffer( b ), checksum( adler32( b ) ), status( stat )
 {
 }

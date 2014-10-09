@@ -4,7 +4,6 @@
 #ifndef headerCache_HPP__A615CA5B_F047_45DE_8314_AF96E4F4FF86
 #define headerCache_HPP__A615CA5B_F047_45DE_8314_AF96E4F4FF86
 //------------------------------------------------------------------------------
-#include "contentCache_.hpp"
 #include "headerScanner_.hpp"
 #include "macroState_.hpp"
 #include "utility_.hpp"
@@ -17,16 +16,18 @@
 #include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index/sequenced_index.hpp>
+#include <boost/signals2/connection.hpp>
 #include <boost/thread/lock_algorithms.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/thread/mutex.hpp>
-  
+
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <atomic>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -115,7 +116,7 @@ public:
     );
 
     clang::FileEntry const * getFileEntry( clang::SourceManager & );
-    llvm::MemoryBuffer const * cachedContent();
+    llvm::MemoryBuffer * cachedContent();
 
     ~CacheEntry();
 
@@ -183,7 +184,7 @@ private:
     std::size_t lastTimeHit_;
     std::atomic_flag contentLock_;
     std::string buffer_;
-    llvm::OwningPtr<llvm::MemoryBuffer> memoryBuffer_;
+    std::unique_ptr<llvm::MemoryBuffer> memoryBuffer_;
 };
 
 
@@ -311,7 +312,8 @@ inline CacheEntry::~CacheEntry()
 class Cache
 {
 public:
-    Cache() : counter_( 0 ), hits_( 0 ), misses_( 0 ) {}
+    Cache();
+
     ~Cache()
     {
         // Clearing all cache entries will cause cache tree index
@@ -336,8 +338,6 @@ public:
         MacroState const &
     );
 
-    void invalidate( ContentEntry const & );
-
     std::size_t hits() const { return hits_; }
     std::size_t misses() const { return misses_; }
 
@@ -345,6 +345,7 @@ private:
     friend class CacheEntry;
 
 private:
+    void invalidate( ContentEntry const & );
     void maintenance();
     std::string uniqueFileName();
 
@@ -403,6 +404,7 @@ private:
     std::atomic<std::size_t> counter_;
     std::size_t hits_;
     std::size_t misses_;
+    boost::signals2::scoped_connection conn_;
 };
 
 

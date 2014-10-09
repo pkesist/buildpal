@@ -54,9 +54,9 @@ void normalize( llvm::SmallString<512> & path )
 
 namespace
 {
-    clang::TargetOptions * createTargetOptions()
+    std::shared_ptr<clang::TargetOptions> createTargetOptions()
     {
-        clang::TargetOptions * result = new clang::TargetOptions();
+        auto result = std::make_shared<clang::TargetOptions>();
         result->Triple = llvm::sys::getDefaultTargetTriple();
         return result;
     }
@@ -67,7 +67,6 @@ Preprocessor::Preprocessor( Cache * cache )
     diagID_    ( new clang::DiagnosticIDs() ),
     diagOpts_  ( new clang::DiagnosticOptions() ),
     ppOpts_    ( new clang::PreprocessorOptions() ),
-    langOpts_  ( new clang::LangOptions() ),
     targetOpts_( createTargetOptions() ),
     hsOpts_    ( new clang::HeaderSearchOptions() ),
     cache_     ( cache )
@@ -116,17 +115,25 @@ namespace
             clang::Module::NameVisibilityKind,
             clang::SourceLocation,
             bool Complain) {}
+        virtual clang::GlobalModuleIndex * loadGlobalModuleIndex(
+            clang::SourceLocation TriggerLoc) { return NULL; }
+        virtual bool lookupMissingImports(
+            llvm::StringRef Name,
+            clang::SourceLocation TriggerLoc) { return false; }
     } moduleLoader;
 
     struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
     {
-        // Prevent FileManager, HeaderSearch et al. to open files
-        // unexpectedly.
-        virtual clang::MemorizeStatCalls::LookupResult
-            getStat( char const * path, clang::FileData & fileData, bool isFile,
-            int * ) LLVM_OVERRIDE
+        // Prevent FileManager, HeaderSearch et al. to open files unexpectedly.
+        virtual clang::MemorizeStatCalls::LookupResult getStat(
+            char const * path,
+            clang::FileData & fileData,
+            bool isFile,
+            std::unique_ptr<clang::vfs::File> *,
+            clang::vfs::FileSystem & fileSystem ) override
         {
-            return clang::MemorizeStatCalls::getStat( path, fileData, isFile, 0 );
+            return clang::MemorizeStatCalls::getStat(
+                path, fileData, isFile, 0, fileSystem );
         }
     };
 
@@ -161,7 +168,7 @@ namespace
             clang::FileEntry const * file,
             llvm::StringRef searchPath,
             llvm::StringRef relativePath,
-            clang::Module const * imported) LLVM_OVERRIDE
+            clang::Module const * imported) override
         {
             if ( !file )
             {
@@ -175,17 +182,18 @@ namespace
 #ifdef ReplaceFile
 #undef ReplaceFile
 #endif
-        virtual void ReplaceFile( clang::FileEntry const * & file ) LLVM_OVERRIDE
+        virtual void ReplaceFile( clang::FileEntry const * & file ) override
         {
             headerTracker_.replaceFile( file );
         }
 
         virtual void FileChanged( clang::SourceLocation loc, FileChangeReason reason,
-            clang::SrcMgr::CharacteristicKind, clang::FileID exitedFID ) LLVM_OVERRIDE
+            clang::SrcMgr::CharacteristicKind, clang::FileID exitedFID ) override
         {
             if ( reason == EnterFile )
             {
                 clang::FileID const fileId( preprocessor_.getSourceManager().getFileID( loc ) );
+                assert( preprocessor_.getSourceManager().getLocForStartOfFile( fileId ) == loc );
                 clang::FileEntry const * const fileEntry( preprocessor_.getSourceManager().getFileEntryForID( fileId ) );
                 if ( !fileEntry )
                     return;
@@ -214,44 +222,44 @@ namespace
             clang::FileEntry const & fileEntry,
             clang::Token const &,
             clang::SrcMgr::CharacteristicKind
-        ) LLVM_OVERRIDE
+        ) override
         {
             headerTracker_.headerSkipped();
         }
 
-        virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * ) LLVM_OVERRIDE
+        virtual void MacroExpands( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange, clang::MacroArgs const * ) override
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
         }
 
-        virtual void MacroDefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void MacroDefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) override
         {
             headerTracker_.macroDefined( macroNameTok.getIdentifierInfo()->getName(), md );
         }
 
-        virtual void MacroUndefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void MacroUndefined( clang::Token const & macroNameTok, clang::MacroDirective const * md ) override
         {
             headerTracker_.macroUndefined( macroNameTok.getIdentifierInfo()->getName(), md );
         }
 
-        virtual void Defined( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange ) LLVM_OVERRIDE
+        virtual void Defined( clang::Token const & macroNameTok, clang::MacroDirective const * md, clang::SourceRange ) override
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
         }
 
-        virtual void Ifdef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void Ifdef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) override
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
             headerTracker_.ifDirective( loc, md != NULL );
         }
 
-        virtual void Ifndef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) LLVM_OVERRIDE
+        virtual void Ifndef(clang::SourceLocation loc, clang::Token const & macroNameTok, clang::MacroDirective const * md ) override
         {
             headerTracker_.macroUsed( macroNameTok.getIdentifierInfo()->getName() );
             headerTracker_.ifDirective( loc, md == 0 );
         }
 
-        virtual void PragmaDirective( clang::SourceLocation loc, clang::PragmaIntroducerKind introducer ) LLVM_OVERRIDE
+        virtual void PragmaDirective( clang::SourceLocation loc, clang::PragmaIntroducerKind introducer ) override
         {
             clang::Token const token( preprocessor_.LookAhead( 0 ) );
             if ( token.is( clang::tok::identifier ) && token.getIdentifierInfo()->getName() == "once" )
@@ -260,22 +268,22 @@ namespace
             }
         }
 
-        virtual void If( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue ) LLVM_OVERRIDE
+        virtual void If( clang::SourceLocation loc, clang::SourceRange conditionRange, ConditionValueKind const conditionValue ) override
         {
-            headerTracker_.ifDirective( loc, conditionValue );
+            headerTracker_.ifDirective( loc, conditionValue == CVK_True );
         }
 
-        virtual void Elif( clang::SourceLocation loc, clang::SourceRange conditionRange, bool conditionValue, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
+        virtual void Elif( clang::SourceLocation loc, clang::SourceRange conditionRange, ConditionValueKind const conditionValue, clang::SourceLocation ifLoc ) override
         {
-            headerTracker_.elifDirective( loc, conditionValue );
+            headerTracker_.elifDirective( loc, conditionValue == CVK_True );
         }
 
-        virtual void Else( clang::SourceLocation loc, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
+        virtual void Else( clang::SourceLocation loc, clang::SourceLocation ifLoc ) override
         {
             headerTracker_.elseDirective( loc );
         }
 
-        virtual void Endif( clang::SourceLocation loc, clang::SourceLocation ifLoc ) LLVM_OVERRIDE
+        virtual void Endif( clang::SourceLocation loc, clang::SourceLocation ifLoc ) override
         {
             headerTracker_.endifDirective( loc );
         }
@@ -292,19 +300,19 @@ namespace
 bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRef fileName, Headers & headers, HeaderList & missingHeaders )
 {
     // Initialize file manager.
-    clang::FileManager fileManager( fsOpts_ );
+    clang::FileManager fileManager( fsOpts_, ContentCache::ptr() );
     fileManager.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
 
     clang::DiagnosticsEngine diagEng( diagID_, &*diagOpts_ );
     diagEng.setEnableAllWarnings( true );
 
-    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo( clang::TargetInfo::CreateTargetInfo( diagEng, &*targetOpts_ ) );
+    llvm::IntrusiveRefCntPtr<clang::TargetInfo> targetInfo( clang::TargetInfo::CreateTargetInfo( diagEng, targetOpts_ ) );
 
     // Initialize source manager.
     clang::SourceManager sourceManager( diagEng, fileManager, false );
 
     // Setup search path.
-    clang::HeaderSearch headerSearch( hsOpts_, sourceManager, diagEng, *langOpts_, &*targetInfo ) ;
+    clang::HeaderSearch headerSearch( hsOpts_, sourceManager, diagEng, langOpts(), &*targetInfo ) ;
     std::vector<clang::DirectoryLookup> searchPath;
     std::size_t searchPathId( 0 );
     for ( auto const & path : ppc.userSearchPath() )
@@ -339,12 +347,11 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         throw std::runtime_error( error );
     }
 
-    assert( !sourceManager.isFileOverridden( mainFileEntry ) );
-    sourceManager.overrideFileContents( mainFileEntry,
-        prepareSourceFile( fileManager, *mainFileEntry ) );
-    sourceManager.createMainFileID( mainFileEntry );
+    auto const mainFileID = sourceManager.createFileID(
+        mainFileEntry, clang::SourceLocation(), clang::SrcMgr::C_User );
+    sourceManager.setMainFileID( mainFileID );
 
-    if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, *langOpts_, ppc.forcedIncludes(), headers ).run() )
+    if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, langOpts(), ppc.forcedIncludes(), headers ).run() )
     {
         ++statistics().filesPreprocessedNaively;
         return true;
@@ -353,14 +360,16 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
     // Do the real preprocessing.
     clang::Preprocessor preprocessor
     (
-        ppOpts_,
-        diagEng,
-        langOpts(),
-        &*targetInfo,
-        sourceManager,
-        headerSearch,
-        moduleLoader
-    );
+        ppOpts_,        // IntrusiveRefCntPtr<PreprocessorOptions> PPOpts,
+        diagEng,        // DiagnosticsEngine & diags,
+        langOpts(),     // LangOptions & opts,
+        sourceManager,  // SourceManager & SM,
+        headerSearch,   // HeaderSearch & Headers,
+        moduleLoader    // ModuleLoader & TheModuleLoader,
+                        // IdentifierInfoLookup * IILookup = nullptr,
+                        // bool OwnsHeaderSearch = false,
+    );                  // TranslationUnitKind TUKind = TU_Complete
+    preprocessor.Initialize( *targetInfo );
 
     std::string predefines;
     llvm::raw_string_ostream predefinesStream( predefines );

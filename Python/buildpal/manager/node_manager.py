@@ -1,4 +1,4 @@
-from .compile_session import ServerSession, SessionResult
+from .compile_session import ServerSession
 from .compressor import Compressor
 
 from buildpal.common import MessageProtocol
@@ -10,7 +10,6 @@ import struct
 from concurrent.futures import ThreadPoolExecutor
 from math import floor
 from collections import defaultdict
-from time import time
 from .gui_event import GUIEvent
 
 class NodeManager:
@@ -84,7 +83,7 @@ class NodeManager:
             missing_headers = str()
             for h in task.missing_headers:
                 missing_headers += "    {}\n".format(h)
-            logging.debug("Cannot distribute: Missing headers\n%s", missing_headers)
+            logging.debug("Cannot distribute: Missing headers\n%s", error + missing_headers)
             task.cannot_distribute()
             return
         task.note_time('collected from preprocessor', 'preprocessed notification time')

@@ -1,8 +1,6 @@
 import os
-import tempfile
 
 from collections import defaultdict
-from shutil import rmtree
 from hashlib import md5
 
 class PCHRepository:

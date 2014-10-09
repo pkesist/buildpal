@@ -62,17 +62,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
     // yet - allowed me to disable opening the file in the first place.
     // Make sure this file is loaded through globalContentCache, so that it
     // can be shared between different SourceManager instances.
-    ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate(
-        preprocessor().getFileManager(), entry, cacheDisabled() ? 0 : &cache() );
-    if ( !sourceManager().isFileOverridden( entry ) )
-    {
-        sourceManager().overrideFileContents( entry, contentEntry->buffer.get(), true );
-    }
-    else
-    {
-        assert( sourceManager().getMemoryBufferForFile( entry, 0 ) == contentEntry->buffer.get() );
-    }
-
     bool const relativeToParent( !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath ) );
 
     Dir dir;
@@ -103,12 +92,28 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         {
             dir,
             headerName,
-            contentEntry,
+            ContentCache::singleton().getOrCreate( entry->getName() ).get(),
             relativeToParent
         },
         entry
     };
     fileStack_.push_back( headerWithFileEntry );
+}
+
+void HeaderTracker::pushHeaderCtx()
+{
+    pCurrentCtx_ = new HeaderCtx( macroState_, fileStack_.back().file, replacement_, cacheHit_, pCurrentCtx_, preprocessor_ );
+    if ( !cacheHit_ )
+        currentHeaderCtx().macroUsed( macroForPragmaOnce( *fileStack_.back().file ) );
+    replacement_ = 0;
+    cacheHit_.reset();
+}
+
+void HeaderTracker::popHeaderCtx()
+{
+    HeaderCtx * result = pCurrentCtx_;
+    pCurrentCtx_ = pCurrentCtx_->parent();
+    delete result;
 }
 
 void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
@@ -187,7 +192,9 @@ void HeaderTracker::headerSkipped()
     if ( !cacheDisabled() )
     {
         clang::HeaderSearch const & headerSearch( preprocessor().getHeaderSearchInfo() );
-        clang::HeaderFileInfo const & headerFileInfo( headerSearch.getFileInfo( hwf.file ) );
+        clang::HeaderFileInfo headerFileInfo;
+        bool const mustSucceed = headerSearch.tryGetFileInfo( hwf.file, headerFileInfo );
+        assert( mustSucceed );
         assert( !headerFileInfo.ControllingMacroID );
         currentHeaderCtx().macroUsed( macroForPragmaOnce( *hwf.file ) );
         if ( !headerFileInfo.isPragmaOnce )
@@ -224,7 +231,7 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     logging_stream << "Entering source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
 
-    pushHeaderCtx( fileStack_.back().file, 0, CacheEntryPtr() );
+    pushHeaderCtx();
 }
 
 void HeaderTracker::enterHeader()
@@ -235,11 +242,7 @@ void HeaderTracker::enterHeader()
         logging_stream << "    ";
     logging_stream << "Entering header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
-    pushHeaderCtx( fileStack_.back().file, replacement_, cacheHit_ );
-    if ( !cacheHit_ )
-        currentHeaderCtx().macroUsed( macroForPragmaOnce( *fileStack_.back().file ) );
-    replacement_ = 0;
-    cacheHit_.reset();
+    pushHeaderCtx();
 }
 
 void HeaderTracker::leaveHeader()
@@ -340,7 +343,9 @@ namespace
         clang::SourceLocation const startLoc( macroInfo->getDefinitionLoc() );
         assert( !startLoc.isInvalid() );
         clang::SourceManager & sourceManager( preprocessor.getSourceManager() );
-        std::pair<clang::FileID, unsigned> startSpellingLoc( sourceManager.getDecomposedSpellingLoc( startLoc ) );
+        std::pair<clang::FileID, unsigned> startSpellingLoc( sourceManager.getDecomposedExpansionLoc( startLoc ) );
+        // We already know macro name, skip that.
+        startSpellingLoc.second += macroName.size();
         bool invalid;
         llvm::StringRef const buffer( sourceManager.getBufferData( startSpellingLoc.first, &invalid ) );
         assert( !invalid );
@@ -349,28 +354,23 @@ namespace
         llvm::StringRef result;
         if ( !tokCount )
         {
-            // Macro does not have any tokens. I have no idea how to get the length
-            // of the directive itself. Just go to the end of line and then back up
-            // until the first character. In case we see a backslash, just ignore it
-            // and keep backing up.
             char const * end = macroStart;
-            while ( *end != '\n' ) ++end;
-            --end;
-            while ( ( *end == '\t' ) || ( *end == ' ' ) || ( *end == '\r' ) || ( *end == '\\' ) ) --end;
-            result = llvm::StringRef( macroStart, end - macroStart + 1 );
+            if ( !macroInfo->isFunctionLike() )
+                return MacroValue( "" );
+
+            while ( *end != ')' ) ++end;
+            return MacroValue( llvm::StringRef( macroStart, end - macroStart ) );
         }
         else
         {
             clang::Token const & lastToken( macroInfo->getReplacementToken( tokCount - 1 ) );
             clang::SourceLocation const endLoc( lastToken.getLocation() );
-            std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedSpellingLoc( endLoc ) );
+            std::pair<clang::FileID, unsigned> endSpellingLoc( sourceManager.getDecomposedExpansionLoc( endLoc ) );
             endSpellingLoc.second += lastToken.getLength();
             assert( startSpellingLoc.first == endSpellingLoc.first );
             assert( startSpellingLoc.second <= endSpellingLoc.second );
-            result = llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second );
+            return MacroValue( llvm::StringRef( macroStart, endSpellingLoc.second - startSpellingLoc.second ) );
         }
-        // Result starts with macro name, skip that.
-        return MacroValue( llvm::StringRef( result.data() + macroName.size(), result.size() - macroName.size() ) );
     }
 }  // anonymous namespace
 
@@ -426,9 +426,9 @@ void ConditionStack::elifDirective( clang::SourceLocation loc, bool taken )
 #ifdef DEBUG_HEADERS
     logging_stream << "#elif directive (" << (taken ? "taken)" : "not taken)" ) << std::endl;
 #endif
-    if ( !hasCondition() )
+    if ( empty() )
     {
-        assert( macros.empty() );
+        commit();
         return;
     }
 
@@ -445,9 +445,9 @@ void ConditionStack::elseDirective( clang::SourceLocation loc )
 #ifdef DEBUG_HEADERS
     logging_stream << "#else directive" << std::endl;
 #endif
-    if ( !hasCondition() )
+    if ( empty() )
     {
-        assert( macros.empty() );
+        commit();
         return;
     }
 
@@ -470,7 +470,7 @@ void ConditionStack::endifDirective( clang::SourceLocation loc )
 #ifdef DEBUG_HEADERS
     logging_stream << "#endif directive" << std::endl;
 #endif
-    if ( !hasCondition() )
+    if ( empty() )
     {
         assert( macros.empty() );
         return;
@@ -512,8 +512,10 @@ bool ConditionStack::lastConditionSkippable( clang::SourceLocation loc )
 
 bool ConditionStack::skippable( clang::SourceLocation startLoc, clang::SourceLocation endLoc ) const
 {
-    char const * begin = preprocessor_.getSourceManager().getCharacterData( startLoc );
-    char const * end = preprocessor_.getSourceManager().getCharacterData( endLoc );
+    clang::SourceManager & sourceManager( preprocessor_.getSourceManager() );
+    assert( sourceManager.getFileID( startLoc ) == sourceManager.getFileID( endLoc ) );
+    char const * begin = sourceManager.getCharacterData( startLoc );
+    char const * end = sourceManager.getCharacterData( endLoc );
     std::size_t const contentSize( end - begin );
     tmpBuf_.reserve( contentSize + 1 );
     std::memcpy( tmpBuf_.data(), begin, contentSize );
@@ -531,10 +533,11 @@ bool ConditionStack::skippable( clang::SourceLocation startLoc, clang::SourceLoc
         if ( tok.isNot( clang::tok::raw_identifier ) )
             continue;
 
-        llvm::StringRef const identifier( tok.getRawIdentifierData(), tok.getLength() );
+        llvm::StringRef const identifier( tok.getRawIdentifier() );
         if ( ( identifier == "define" ) || ( identifier == "undef" ) || ( identifier == "include" ) )
             return false;
     }
     return true;
 }
+
 

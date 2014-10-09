@@ -19,16 +19,18 @@
 #include <llvm/ADT/Hashing.h>
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/ADT/StringRef.h>
-#include <llvm/ADT/OwningPtr.h>
 #include <llvm/Support/Path.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
 
-//#define DEBUG_HEADERS 1
+#if 0
+#define DEBUG_HEADERS 1
+#endif
 
 namespace clang
 {
@@ -133,21 +135,21 @@ public:
     explicit Preprocessor( Cache * cache );
 
     bool scanHeaders( PreprocessingContext const & ppc, llvm::StringRef filename, Headers &, HeaderList & missingHeaders );
-    void setMicrosoftMode( bool value ) { langOpts_->MicrosoftMode = value ? 1 : 0; }
-    void setMicrosoftExt ( bool value ) { langOpts_->MicrosoftExt = value ? 1 : 0; }
+    void setMicrosoftMode( bool value ) { langOpts_.MSVCCompat = value ? 1 : 0; }
+    void setMicrosoftExt ( bool value ) { langOpts_.MicrosoftExt = value ? 1 : 0; }
 
     Statistics const & statistics() const { return statistics_; }
     Statistics       & statistics()       { return statistics_; }
 
 private:
-    clang::LangOptions & langOpts() { return *langOpts_; }
+    clang::LangOptions & langOpts() { return langOpts_; }
 
 private:
     llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagID_;
     llvm::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts_;
     llvm::IntrusiveRefCntPtr<clang::PreprocessorOptions> ppOpts_;
-    llvm::IntrusiveRefCntPtr<clang::LangOptions> langOpts_;
-    llvm::IntrusiveRefCntPtr<clang::TargetOptions> targetOpts_;
+    clang::LangOptions langOpts_;
+    std::shared_ptr<clang::TargetOptions> targetOpts_;
     llvm::IntrusiveRefCntPtr<clang::HeaderSearchOptions> hsOpts_;
     Statistics statistics_;
     clang::FileSystemOptions fsOpts_;

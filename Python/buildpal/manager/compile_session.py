@@ -35,7 +35,7 @@ class ServerSession:
         def send_msg(self, data):
             self._send_msg([self._session_id] + list(data))
 
-    def __init__(self, id, task, send_msg, node, loop, executor, compressor,
+    def __init__(self, session_id, task, send_msg, node, loop, executor, compressor,
                  completion_callback):
         self.state = self.STATE_START
         self.task = task
@@ -46,7 +46,7 @@ class ServerSession:
         self.executor = executor
         self.compressor = compressor
         self.result = None
-        self.local_id = id
+        self.local_id = session_id
         self.send_msg = send_msg
         self.sender = None
         self.completion_callback = completion_callback

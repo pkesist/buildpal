@@ -1,7 +1,5 @@
 #include "createProcess.hpp"
 
-#include <Python.h>
-
 #if defined(MS_WIN32) && !defined(MS_WIN64)
 #define HANDLE_TO_PYNUM(handle) \
     PyLong_FromUnsignedLong((unsigned long) handle)

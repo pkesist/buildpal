@@ -14,10 +14,10 @@ class ServerTask:
         self.filelist = None
 
 class CompilerInfo:
-    def __init__(self, toolset, executable, id, macros):
+    def __init__(self, toolset, executable, compiler_id, macros):
         self.toolset = toolset
         self.executable = executable
-        self.id = id
+        self.id = compiler_id
         self.macros = macros
         self.files = None
 

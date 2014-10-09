@@ -6,7 +6,7 @@
 
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/ADT/OwningPtr.h>
+#include <clang/Basic/VirtualFileSystem.h>
 
 #include <atomic>
 #include <ctime>
@@ -19,35 +19,40 @@ private:
     ContentEntry & operator=( ContentEntry const & ); // = delete;
 
 public:
-    ContentEntry() : checksum( 0 ), modified( 0 ) {};
+    ContentEntry() : checksum( 0 ) {};
 
-    ContentEntry( llvm::sys::fs::UniqueID id, llvm::MemoryBuffer * buffer, time_t const modified );
+    ContentEntry
+    (
+        llvm::sys::fs::UniqueID id,
+        llvm::MemoryBuffer *,
+        llvm::sys::fs::file_status const &
+    );
 
     ContentEntry( ContentEntry && other )
         :
         refCount_( 0 ),
         id_( other.id_ ),
-        buffer( other.buffer.take() ),
+        buffer( other.buffer.release() ),
         checksum( other.checksum ),
-        modified( other.modified )
+        status( other.status )
     {
     }
 
     ContentEntry & operator=( ContentEntry && other )
     {
         id_ = other.id_;
-        buffer.reset( other.buffer.take() );
+        buffer.reset( other.buffer.release() );
         checksum = other.checksum;
-        modified = other.modified;
+        status = other.status;
         return *this;
     }
 
     std::size_t const size() const { return buffer->getBufferSize(); }
 
     llvm::sys::fs::UniqueID id_;
-    llvm::OwningPtr<llvm::MemoryBuffer> buffer;
+    std::unique_ptr<llvm::MemoryBuffer> buffer;
     std::size_t checksum;
-    std::time_t modified;
+    clang::vfs::Status status;
 
 private:
     mutable std::atomic<size_t> refCount_;

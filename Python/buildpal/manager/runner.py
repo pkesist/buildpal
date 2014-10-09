@@ -1,4 +1,4 @@
-from buildpal.common import SimpleTimer, MessageProtocol
+from buildpal.common import MessageProtocol
 
 from .source_scanner import SourceScanner
 from .command_processor import CommandProcessor
@@ -6,19 +6,15 @@ from .database import Database, DatabaseInserter
 from .timer import Timer
 from .node_manager import NodeManager
 from .console import ConsolePrinter
-from .gui_event import GUIEvent
 
 from struct import pack as struct_pack
 
 import asyncio
 import os
-import sys
 
 from multiprocessing import cpu_count
 from subprocess import list2cmdline
 from tempfile import mkstemp
-from threading import Thread
-from time import time
 
 class ClientProcessor(MessageProtocol):
     def __init__(self, compiler_info_cache, task_created_func, database_inserter,
@@ -60,6 +56,7 @@ class ClientProcessor(MessageProtocol):
 
     def __handle_new_client(self, msg):
         compiler_name = msg[0].decode()
+        assert compiler_name == 'msvc'
         executable = msg[1].decode()
         sysinclude_dirs = msg[2].decode()
         cwd = msg[3].decode()

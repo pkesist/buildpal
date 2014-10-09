@@ -6,11 +6,10 @@ from datetime import datetime
 
 from collections import defaultdict
 from operator import itemgetter
-from threading import Thread, Lock
+from threading import Lock
 from time import time
 from multiprocessing import cpu_count
 
-from .runner import ManagerRunner
 from .gui_event import GUIEvent
 
 class MyTreeView(Treeview):

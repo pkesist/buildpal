@@ -54,13 +54,13 @@ class build_clang(Command):
         self.x64 = None
         self.jobs = None
         self.clang_src_dir = 'llvm_clang_src'
-        self.clang_build_dir = 'llvm_clang_build'
+        self.clang_build_dir = 'llvm_clang_35_build_msvc_11'
         self.llvm_github_user = 'llvm-mirror'
         self.llvm_github_repo = 'llvm'
-        self.llvm_github_branch = 'release_34'
+        self.llvm_github_branch = 'release_35'
         self.clang_github_user = 'pkesist'
         self.clang_github_repo = 'clang'
-        self.clang_github_branch = 'release_34_buildpal'
+        self.clang_github_branch = 'release_35_buildpal'
 
     def finalize_options(self):
         if not self.x64 and not self.x86:

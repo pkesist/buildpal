@@ -5,6 +5,7 @@ import asyncio
 from io import BytesIO, StringIO
 from multiprocessing import cpu_count
 from struct import pack
+from time import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .header_repository import HeaderRepository

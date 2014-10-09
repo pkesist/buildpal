@@ -311,8 +311,9 @@ private:
         llvm::SmallString<1024> searchPath;
         llvm::SmallString<1024> relativePath;
         clang::DirectoryLookup const * curDir( 0 );
-		llvm::SmallVector<std::pair<clang::FileEntry const *, clang::DirectoryEntry const *>, 16> includers;
-		includers.push_back( std::make_pair( headerStack_.back().fileEntry, headerStack_.back().fileEntry->getDir() ) );
+        // Will be used with Clang 3.6.
+        //llvm::SmallVector<std::pair<clang::FileEntry const *, clang::DirectoryEntry const *>, 16> includers;
+        //includers.push_back( std::make_pair( headerStack_.back().fileEntry, headerStack_.back().fileEntry->getDir() ) );
         clang::FileEntry const * fileEntry(
             headerSearch_.LookupFile(
                 includeDirective.filename,
@@ -320,7 +321,7 @@ private:
                 includeDirective.isAngled,
                 0,
                 curDir,
-                includers,
+                headerStack_.back().fileEntry,
                 &searchPath,
                 &relativePath,
                 NULL

@@ -66,11 +66,14 @@ struct CachedFile : public clang::vfs::File
         bool isVolatile
     ) override
     {
-        result = llvm::MemoryBuffer::getMemBuffer
+        result.reset
         (
-            content_->buffer->getBuffer(),
-            name.str(),
-            requiresNullTerminator
+            llvm::MemoryBuffer::getMemBuffer
+            (
+                content_->buffer->getBuffer(),
+                name.str(),
+                requiresNullTerminator
+            )
         );
         return std::error_code();
     }

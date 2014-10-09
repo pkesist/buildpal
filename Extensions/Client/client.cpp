@@ -557,9 +557,7 @@ int distributedCompile(
 
     if ( !llvm::cl::ExpandResponseFiles( saver, llvm::cl::TokenizeWindowsCommandLine, argv ) )
     {
-        // ExpandResponseFiles always returns false, even on success.
-        // Fixed in trunk, but did not make it to Clang 3.4.
-        //return fallback.complete( "Failed to expand response files." );
+        return fallback.complete( "Failed to expand response files." );
     }
 
     for ( ArgVector::const_iterator iter( argv.begin() + 1 ); iter != argv.end(); ++iter )

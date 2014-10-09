@@ -48,8 +48,12 @@ typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 
 struct HeaderWithFileEntry
 {
-    Header header;
+    Dir dir;
+    HeaderName name;
+    bool relative;
     clang::FileEntry const * file;
+
+    Header makeHeader() const;
 };
 
 typedef std::vector<Macro> UsedMacros;

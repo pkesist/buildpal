@@ -35,6 +35,18 @@ namespace
     };
 }
 
+Header HeaderWithFileEntry::makeHeader() const
+{
+    Header result =
+    {
+        dir,
+        name,
+        ContentCache::singleton().lookup( file->getName(), file->getUniqueID() ).get(),
+        relative
+    };
+    return result;
+}
+
 MacroName macroForPragmaOnce( clang::FileEntry const & entry )
 {
     llvm::sys::fs::UniqueID const & fileId = entry.getUniqueID();
@@ -50,7 +62,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 {
     commitMacros();
     assert( !fileStack_.empty() );
-    Header const & parentHeader( fileStack_.back().header );
 
     // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
     // cached in our globalContentCache we will never read it, so its file
@@ -69,8 +80,8 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 
     if ( relativeToParent )
     {
-        dir =  Dir( fileStack_.back().header.dir );
-        llvm::StringRef const parentFilename = fileStack_.back().header.name.get();
+        dir =  Dir( fileStack_.back().dir );
+        llvm::StringRef const parentFilename = fileStack_.back().name.get();
         std::size_t const slashPos = parentFilename.find_last_of('/');
         if ( slashPos == llvm::StringRef::npos )
             headerName = HeaderName( relativePath );
@@ -89,12 +100,9 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 
     HeaderWithFileEntry const headerWithFileEntry =
     {
-        {
-            dir,
-            headerName,
-            ContentCache::singleton().getOrCreate( entry->getName() ).get(),
-            relativeToParent
-        },
+        dir,
+        headerName,
+        relativeToParent,
         entry
     };
     fileStack_.push_back( headerWithFileEntry );
@@ -203,7 +211,8 @@ void HeaderTracker::headerSkipped()
             currentHeaderCtx().macroUsed( MacroName( headerFileInfo.ControllingMacro->getName() ) );
         }
     }
-    currentHeaderCtx().addHeader( hwf.header );
+    
+    currentHeaderCtx().addHeader( hwf.makeHeader() );
 }
 
 clang::SourceManager & HeaderTracker::sourceManager() const
@@ -217,13 +226,10 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
     assert( mainFileEntry );
     HeaderWithFileEntry const hwf =
     {
-        {
             Dir( mainFileEntry->getDir()->getName() ),
             HeaderName( llvm::sys::path::filename( fileName ) ),
-            ContentEntryPtr(),
-            true
-        },
-        mainFileEntry
+            true,
+            mainFileEntry
     };
 
     fileStack_.push_back( hwf );
@@ -262,7 +268,7 @@ void HeaderTracker::leaveHeader()
         currentHeaderCtx().addToCache( cache(), searchPathId_, fileStack_.back().file );
     currentHeaderCtx().propagateToParent();
     popHeaderCtx();
-    currentHeaderCtx().addHeader( fileStack_.back().header );
+    currentHeaderCtx().addHeader( fileStack_.back().makeHeader() );
 }
 
 void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file )

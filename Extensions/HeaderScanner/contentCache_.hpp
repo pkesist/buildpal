@@ -43,7 +43,7 @@ struct GetFileId
     typedef llvm::sys::fs::UniqueID result_type;
     result_type operator()( ContentEntryPtr const & p ) const
     {
-        return p->id_;
+        return p->status.getUniqueID();
     }
 };
 
@@ -145,6 +145,18 @@ public:
 
     llvm::ErrorOr<ContentEntryPtr> getOrCreate( llvm::Twine const & path );
 
+    // Fast version, without stat calls unless opening for the first time.
+    llvm::ErrorOr<ContentEntryPtr> lookup( llvm::Twine const & path, llvm::sys::fs::UniqueID const & );
+
+    ContentEntryPtr get( llvm::sys::fs::UniqueID const & id )
+    {
+        boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
+        typedef Content::index<ByFileId>::type ContentByFileId;
+        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
+        ContentByFileId::const_iterator const iter( contentByFileId.find( id ) );
+        return iter != contentByFileId.end() ? *iter : ContentEntryPtr();
+    }
+
     void clear()
     {
         boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
@@ -159,12 +171,10 @@ public:
     }
 
 private:
+    ContentEntryPtr addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & );
+
     std::error_code openFileForRead( llvm::Twine const & path, std::unique_ptr<clang::vfs::File> & result ) override
     {
-        llvm::sys::fs::UniqueID id;
-        std::error_code error = llvm::sys::fs::getUniqueID( path, id );
-        if ( error )
-            return error;
         llvm::ErrorOr<ContentEntryPtr> contentEntry( getOrCreate( path ) );
         if ( contentEntry )
             result.reset( new CachedFile( contentEntry.get() ) );

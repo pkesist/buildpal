@@ -19,6 +19,12 @@ typedef std::vector<IncludeDirective> IncludeDirectives;
 
 namespace
 {
+    struct NaiveCacheEntry
+    {
+        bool complex;    
+        IncludeDirectives includes;    
+    };
+
     struct NaiveCache
     {
 
@@ -33,19 +39,28 @@ namespace
         {
         }
 
+        void markComplex( clang::FileEntry const * entry )
+        {
+            boost::unique_lock<boost::shared_mutex> const lock( mutex );
+            container[ entry->getUniqueID() ].complex = true;
+        }
+        
         void store( clang::FileEntry const * entry, IncludeDirectives && includes )
         {
             boost::unique_lock<boost::shared_mutex> const lock( mutex );
-            container[ entry->getUniqueID() ] = std::move( includes );
+            container[ entry->getUniqueID() ].complex = false;
+            container[ entry->getUniqueID() ].includes = std::move( includes );
         }
 
-        bool lookup( clang::FileEntry const * entry, IncludeDirectives & includes )
+        bool lookup( clang::FileEntry const * entry, bool & complex, IncludeDirectives & includes )
         {
             boost::shared_lock<boost::shared_mutex> const lock( mutex );
             auto iter = container.find( entry->getUniqueID() );
             if ( iter == container.end() )
                 return false;
-            includes = iter->second;
+            complex = iter->second.complex;
+            if ( !complex )
+                includes = iter->second.includes;
             return true;
         }
 
@@ -64,13 +79,13 @@ namespace
         void invalidate( ContentEntry const & entry )
         {
             boost::shared_lock<boost::shared_mutex> const lock( mutex );
-            container.erase( entry.id_ );
+            container.erase( entry.status.getUniqueID() );
         }
 
     private:
         boost::signals2::scoped_connection conn_;
         boost::shared_mutex mutex;
-        std::unordered_map<llvm::sys::fs::UniqueID, IncludeDirectives, HashUniqueId> container;
+        std::unordered_map<llvm::sys::fs::UniqueID, NaiveCacheEntry, HashUniqueId> container;
     } naiveCache( ContentCache::singleton() );
 }  // anonymous namespace
 
@@ -131,7 +146,10 @@ struct LexingIncludeFinder : IncludeFinder
             while ( tok.isNot( clang::tok::raw_identifier ) && ( tok.is( clang::tok::hash ) && tok.isAtStartOfLine() ) )
             {
                 if ( lexer().LexFromRawLexer( tok ) )
+                {
+                    naiveCache.store( entry_, std::move( includes_ ) );
                     return NextIncludeResult::nirHeaderDone;
+                }
             }
             if ( tok.getRawIdentifier() != "include" )
                 continue;
@@ -241,7 +259,8 @@ public:
                 popHeader();
                 break;
             case IncludeFinder::NextIncludeResult::nirHeaderComplex:
-                //foundComplexInclude();
+                for ( NaivePreprocessorImpl::HeaderCtx const & headerCtx : headerStack_ )
+                    naiveCache.markComplex( headerCtx.fileEntry );
                 return false;
             }
         }
@@ -257,17 +276,17 @@ private:
         HeaderName && name,
         clang::FileID id,
         clang::FileEntry const * entry,
-        bool relative
+        bool relative,
+        IncludeDirectives * includeDirectives = 0
     )
     {
         ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( entry->getName() ).get();
         Header header = { dir, name, contentEntry, relative };
 
-        IncludeDirectives includeDirectives;
         IncludeFinder * includeFinder;
-        if ( naiveCache.lookup( entry, includeDirectives ) )
+        if ( includeDirectives )
         {
-            includeFinder = new FixedIncludeFinder( std::move( includeDirectives ) );
+            includeFinder = new FixedIncludeFinder( std::move( *includeDirectives ) );
         }
         else
         {
@@ -331,6 +350,15 @@ private:
         if ( !fileEntry || !alreadyVisited_.insert( fileEntry ).second )
             return true;
 
+        bool foundInCache;
+        bool complex;
+        IncludeDirectives cachedIncludeDirectives;
+        if ( foundInCache = naiveCache.lookup( fileEntry, complex, cachedIncludeDirectives ) )
+        {
+            if ( complex )
+                return false;
+        }
+
         Dir dir;
         HeaderName headerName;
 
@@ -367,7 +395,8 @@ private:
             std::move( headerName ),
             id,
             fileEntry,
-            relativeToParent
+            relativeToParent,
+            foundInCache ? &cachedIncludeDirectives : 0
         );
         return true;
     }

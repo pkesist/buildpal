@@ -23,7 +23,6 @@ public:
 
     ContentEntry
     (
-        llvm::sys::fs::UniqueID id,
         llvm::MemoryBuffer *,
         llvm::sys::fs::file_status const &
     );
@@ -31,7 +30,6 @@ public:
     ContentEntry( ContentEntry && other )
         :
         refCount_( 0 ),
-        id_( other.id_ ),
         buffer( other.buffer.release() ),
         checksum( other.checksum ),
         status( other.status )
@@ -40,7 +38,6 @@ public:
 
     ContentEntry & operator=( ContentEntry && other )
     {
-        id_ = other.id_;
         buffer.reset( other.buffer.release() );
         checksum = other.checksum;
         status = other.status;
@@ -49,7 +46,6 @@ public:
 
     std::size_t const size() const { return buffer->getBufferSize(); }
 
-    llvm::sys::fs::UniqueID id_;
     std::unique_ptr<llvm::MemoryBuffer> buffer;
     std::size_t checksum;
     clang::vfs::Status status;

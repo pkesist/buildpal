@@ -218,12 +218,12 @@ private:
 
 public:
     NaivePreprocessorImpl( clang::SourceManager & sourceManager,
-        clang::HeaderSearch & headerSearch, std::size_t searchPathId,
-        clang::LangOptions & langOpts, PreprocessingContext::Includes const &
-        forcedIncludes, Headers & result )
+        clang::HeaderSearch & headerSearch, clang::LangOptions & langOpts,
+        PreprocessingContext::Includes const & forcedIncludes,
+        Headers & result )
         : sourceManager_( sourceManager ), headerSearch_( headerSearch ),
-        searchPathId_( searchPathId ), langOpts_( langOpts ),
-        forcedIncludes_( forcedIncludes ), result_( result )
+        langOpts_( langOpts ), forcedIncludes_( forcedIncludes ),
+        result_( result )
     {}
 
     bool run()
@@ -407,7 +407,6 @@ private:
 private:
     clang::SourceManager & sourceManager_;
     clang::HeaderSearch & headerSearch_;
-    std::size_t searchPathId_;
     clang::LangOptions & langOpts_;
     PreprocessingContext::Includes const & forcedIncludes_;
     Headers allHeaders_;
@@ -418,12 +417,12 @@ private:
 
 
 NaivePreprocessor::NaivePreprocessor( clang::SourceManager & sourceManager,
-        clang::HeaderSearch & headerSearch, std::size_t searchPathId,
+        clang::HeaderSearch & headerSearch,
         clang::LangOptions & langOpts, PreprocessingContext::Includes const &
         forcedIncludes, Headers & result
     ) :
     pImpl_( new NaivePreprocessorImpl( sourceManager, headerSearch,
-        searchPathId, langOpts, forcedIncludes, result ) )
+        langOpts, forcedIncludes, result ) )
 {
 }
 

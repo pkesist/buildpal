@@ -336,7 +336,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
         mainFileEntry, clang::SourceLocation(), clang::SrcMgr::C_User );
     sourceManager.setMainFileID( mainFileID );
 
-    if ( NaivePreprocessor( sourceManager, headerSearch, searchPathId, langOpts(), ppc.forcedIncludes(), headers ).run() )
+    if ( NaivePreprocessor( sourceManager, headerSearch, langOpts(), ppc.forcedIncludes(), headers ).run() )
     {
         ++statistics().filesPreprocessedNaively;
         return true;

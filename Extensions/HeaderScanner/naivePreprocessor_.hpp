@@ -20,8 +20,7 @@ class NaivePreprocessor
 {
 public:
     NaivePreprocessor( clang::SourceManager & sourceManager,
-        clang::HeaderSearch & headerSearch, std::size_t searchPathId,
-        clang::LangOptions & langOpts,
+        clang::HeaderSearch & headerSearch, clang::LangOptions & langOpts,
         PreprocessingContext::Includes const & forcedIncludes,
         Headers & result
     );

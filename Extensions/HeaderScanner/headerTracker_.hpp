@@ -198,7 +198,7 @@ private:
         {}
     };
 
-    typedef std::list<Condition> Conditions;
+    typedef std::vector<Condition> Conditions;
 
     Macros macros;
     Conditions conditions;
@@ -244,6 +244,50 @@ private:
     Condition & condition() { assert( !empty() ); return conditions.back(); }
 
     bool lastConditionSkippable( clang::SourceLocation loc );
+};
+
+struct HeaderWithFileEntry
+{
+private:
+    HeaderWithFileEntry( HeaderWithFileEntry const & ); // = delete 
+    HeaderWithFileEntry & operator=( HeaderWithFileEntry const & ); // = delete
+
+public:
+    HeaderWithFileEntry( Dir const & dirParam, HeaderName const & nameParam, bool relativeParam,
+        clang::FileEntry const * fileParam ) : dir( dirParam ),
+        name( nameParam ), relative( relativeParam ),
+        file( fileParam )
+    {
+    }
+
+
+    HeaderWithFileEntry( HeaderWithFileEntry && h )
+        :
+        dir( std::move( h.dir ) ),
+        name( std::move( h.name ) ),
+        relative( h.relative ),
+        file( h.file ),
+        pHeaderCtx( std::move( h.pHeaderCtx ) )
+    {
+    }
+
+    HeaderWithFileEntry & operator=( HeaderWithFileEntry && h )
+    {
+        dir = std::move( h.dir );
+        name = std::move( h.name );
+        relative = h.relative;
+        file = h.file;
+        pHeaderCtx = std::move( h.pHeaderCtx );
+    }
+
+public:
+    Dir dir;
+    HeaderName name;
+    bool relative;
+    clang::FileEntry const * file;
+    std::unique_ptr<HeaderCtx> pHeaderCtx;
+
+    Header makeHeader() const;
 };
 
 class HeaderTracker
@@ -311,8 +355,8 @@ private:
         conditionStack_.commit();
     }
 
-    void pushHeaderCtx();
-    void popHeaderCtx();
+    void enterFile();
+    void exitFile();
 
     HeaderCtx & currentHeaderCtx()
     {

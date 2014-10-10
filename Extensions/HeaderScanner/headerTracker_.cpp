@@ -98,30 +98,43 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
         headerName = HeaderName( relativePath );
     }
 
-    HeaderWithFileEntry const headerWithFileEntry =
-    {
+    fileStack_.emplace_back
+    (
         dir,
         headerName,
         relativeToParent,
         entry
-    };
-    fileStack_.push_back( headerWithFileEntry );
+    );
 }
 
-void HeaderTracker::pushHeaderCtx()
+void HeaderTracker::enterFile()
 {
-    pCurrentCtx_ = new HeaderCtx( macroState_, fileStack_.back().file, replacement_, cacheHit_, pCurrentCtx_, preprocessor_ );
+    fileStack_.back().pHeaderCtx.reset
+    (
+        new HeaderCtx
+        (
+            macroState_,
+            fileStack_.back().file,
+            replacement_,
+            cacheHit_,
+            pCurrentCtx_,
+            preprocessor_
+        )
+    );
+    pCurrentCtx_ = fileStack_.back().pHeaderCtx.get();
     if ( !cacheHit_ )
         currentHeaderCtx().macroUsed( macroForPragmaOnce( *fileStack_.back().file ) );
     replacement_ = 0;
     cacheHit_.reset();
 }
 
-void HeaderTracker::popHeaderCtx()
+void HeaderTracker::exitFile()
 {
     HeaderCtx * result = pCurrentCtx_;
     pCurrentCtx_ = pCurrentCtx_->parent();
-    delete result;
+    fileStack_.back().pHeaderCtx.reset();
+    if ( hasCurrentHeaderCtx() )
+        currentHeaderCtx().addHeader( fileStack_.back().makeHeader() );
 }
 
 void HeaderTracker::replaceFile( clang::FileEntry const * & entry )
@@ -224,20 +237,18 @@ void HeaderTracker::enterSourceFile( clang::FileEntry const * mainFileEntry, llv
 {
     assert( !hasCurrentHeaderCtx() );
     assert( mainFileEntry );
-    HeaderWithFileEntry const hwf =
-    {
-            Dir( mainFileEntry->getDir()->getName() ),
-            HeaderName( llvm::sys::path::filename( fileName ) ),
-            true,
-            mainFileEntry
-    };
-
-    fileStack_.push_back( hwf );
+    fileStack_.emplace_back
+    (
+        Dir( mainFileEntry->getDir()->getName() ),
+        HeaderName( llvm::sys::path::filename( fileName ) ),
+        true,
+        mainFileEntry
+    );
 #ifdef DEBUG_HEADERS
     logging_stream << "Entering source file: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
 
-    pushHeaderCtx();
+    enterFile();
 }
 
 void HeaderTracker::enterHeader()
@@ -248,7 +259,7 @@ void HeaderTracker::enterHeader()
         logging_stream << "    ";
     logging_stream << "Entering header: '" << std::string( fileStack_.back().file->getName() ) << '\'' << std::endl;
 #endif
-    pushHeaderCtx();
+    enterFile();
 }
 
 void HeaderTracker::leaveHeader()
@@ -267,8 +278,7 @@ void HeaderTracker::leaveHeader()
     if ( !cacheDisabled() && currentHeaderCtx().isViableForCache() )
         currentHeaderCtx().addToCache( cache(), searchPathId_, fileStack_.back().file );
     currentHeaderCtx().propagateToParent();
-    popHeaderCtx();
-    currentHeaderCtx().addHeader( fileStack_.back().makeHeader() );
+    exitFile();
 }
 
 void HeaderCtx::addToCache( Cache & cache, std::size_t const searchPathId, clang::FileEntry const * file )
@@ -323,7 +333,7 @@ void HeaderTracker::exitSourceFile( Headers & headers )
     }
     // Remove ref from cache entries.
     usedCacheEntries_.clear();
-    popHeaderCtx();
+    exitFile();
 }
 
 void HeaderTracker::macroUsed( llvm::StringRef name )
@@ -420,7 +430,7 @@ void ConditionStack::ifDirective( clang::SourceLocation loc, bool taken )
 #ifdef DEBUG_HEADERS
     logging_stream << "#if directive (" << ( taken ? "taken)" : "not taken)" ) << std::endl;
 #endif
-    conditions.push_back( Condition( loc ) );
+    conditions.emplace_back( loc );
     condition().macros.swap( macros );
     condition().lastBranchTaken = taken;
     if ( taken )

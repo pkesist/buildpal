@@ -46,16 +46,6 @@ struct MacroUsage { enum Enum { defined, undefined }; };
 class CacheEntry;
 typedef boost::intrusive_ptr<CacheEntry> CacheEntryPtr;
 
-struct HeaderWithFileEntry
-{
-    Dir dir;
-    HeaderName name;
-    bool relative;
-    clang::FileEntry const * file;
-
-    Header makeHeader() const;
-};
-
 typedef std::vector<Macro> UsedMacros;
 
 ////////////////////////////////////////////////////////////////////////////////

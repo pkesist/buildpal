@@ -16,6 +16,7 @@ ContentEntryPtr ContentCache::addNewEntry( llvm::Twine const & path, llvm::sys::
         return *iter;
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
     ContentEntryPtr newPtr( new ContentEntry( buffer.release(), status ) );
+    newPtr->status.setName( path.str() );
     content_.push_front( newPtr );
     contentSize_ += newPtr->size();
     unsigned int const maxContentCacheSize = 100 * 1024 * 1024;

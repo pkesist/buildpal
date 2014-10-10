@@ -246,14 +246,14 @@ private:
     bool lastConditionSkippable( clang::SourceLocation loc );
 };
 
-struct HeaderWithFileEntry
+struct IncludedHeaders
 {
 private:
-    HeaderWithFileEntry( HeaderWithFileEntry const & ); // = delete 
-    HeaderWithFileEntry & operator=( HeaderWithFileEntry const & ); // = delete
+    IncludedHeaders( IncludedHeaders const & ); // = delete 
+    IncludedHeaders & operator=( IncludedHeaders const & ); // = delete
 
 public:
-    HeaderWithFileEntry( Dir const & dirParam, HeaderName const & nameParam, bool relativeParam,
+    IncludedHeaders( Dir const & dirParam, HeaderName const & nameParam, bool relativeParam,
         clang::FileEntry const * fileParam ) : dir( dirParam ),
         name( nameParam ), relative( relativeParam ),
         file( fileParam )
@@ -261,7 +261,7 @@ public:
     }
 
 
-    HeaderWithFileEntry( HeaderWithFileEntry && h )
+    IncludedHeaders( IncludedHeaders && h )
         :
         dir( std::move( h.dir ) ),
         name( std::move( h.name ) ),
@@ -271,7 +271,7 @@ public:
     {
     }
 
-    HeaderWithFileEntry & operator=( HeaderWithFileEntry && h )
+    IncludedHeaders & operator=( IncludedHeaders && h )
     {
         dir = std::move( h.dir );
         name = std::move( h.name );
@@ -280,20 +280,20 @@ public:
         pHeaderCtx = std::move( h.pHeaderCtx );
     }
 
+    Header makeHeader() const;
+
 public:
     Dir dir;
     HeaderName name;
     bool relative;
     clang::FileEntry const * file;
     std::unique_ptr<HeaderCtx> pHeaderCtx;
-
-    Header makeHeader() const;
 };
 
 class HeaderTracker
 {
 private:
-    typedef std::vector<HeaderWithFileEntry> IncludeStack;
+    typedef std::vector<IncludedHeaders> IncludeStack;
     typedef std::map<clang::FileEntry const *, CacheEntryPtr> UsedCacheEntries;
 
     clang::Preprocessor & preprocessor_;

@@ -122,21 +122,6 @@ namespace
             clang::SourceLocation TriggerLoc) { return false; }
     } moduleLoader;
 
-    struct MemorizeStatCalls_PreventOpenFile : public clang::MemorizeStatCalls
-    {
-        // Prevent FileManager, HeaderSearch et al. to open files unexpectedly.
-        virtual clang::MemorizeStatCalls::LookupResult getStat(
-            char const * path,
-            clang::FileData & fileData,
-            bool isFile,
-            std::unique_ptr<clang::vfs::File> *,
-            clang::vfs::FileSystem & fileSystem ) override
-        {
-            return clang::MemorizeStatCalls::getStat(
-                path, fileData, isFile, 0, fileSystem );
-        }
-    };
-
     class PreprocessorCallbacks : public clang::PPCallbacks
     {
     public:
@@ -301,7 +286,7 @@ bool Preprocessor::scanHeaders( PreprocessingContext const & ppc, llvm::StringRe
 {
     // Initialize file manager.
     clang::FileManager fileManager( fsOpts_, ContentCache::ptr() );
-    fileManager.addStatCache( new MemorizeStatCalls_PreventOpenFile() );
+    fileManager.addStatCache( new clang::MemorizeStatCalls() );
 
     clang::DiagnosticsEngine diagEng( diagID_, &*diagOpts_ );
     diagEng.setEnableAllWarnings( true );

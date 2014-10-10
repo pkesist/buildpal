@@ -35,13 +35,17 @@ namespace
     };
 }
 
-Header HeaderWithFileEntry::makeHeader() const
+Header IncludedHeaders::makeHeader() const
 {
     Header result =
     {
         dir,
         name,
-        ContentCache::singleton().lookup( file->getName(), file->getUniqueID() ).get(),
+        ContentCache::singleton().lookup
+        (
+            file->getName(),
+            file->getUniqueID()
+        ).get(),
         relative
     };
     return result;
@@ -62,17 +66,6 @@ void HeaderTracker::inclusionDirective( llvm::StringRef searchPath, llvm::String
 {
     commitMacros();
     assert( !fileStack_.empty() );
-
-    // Usually after LookupFile() the resulting 'entry' is ::open()-ed. If it is
-    // cached in our globalContentCache we will never read it, so its file
-    // handle will be leaked. We could do ::close(), but this seems like
-    // a wrong to do at this level. This is what
-    // MemorizeStatCalls_PreventOpenFile is about - with it, the file is not
-    // opened in LookupFile().
-    // I'd prefer if Clang just allowed me to call entry->closeFD(), or better
-    // yet - allowed me to disable opening the file in the first place.
-    // Make sure this file is loaded through globalContentCache, so that it
-    // can be shared between different SourceManager instances.
     bool const relativeToParent( !isAngled && ( fileStack_.back().file->getDir()->getName() == searchPath ) );
 
     Dir dir;
@@ -198,7 +191,7 @@ void HeaderTracker::headerSkipped()
 {
     assert( !fileStack_.empty() );
     assert( hasCurrentHeaderCtx() );
-    HeaderWithFileEntry const & hwf( fileStack_.back() );
+    IncludedHeaders const & hwf( fileStack_.back() );
     PopBackGuard<IncludeStack> const popIncludeStack( fileStack_ );
 
 #ifdef DEBUG_HEADERS

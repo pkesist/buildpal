@@ -79,7 +79,10 @@ struct CachedFile : public clang::vfs::File
     }
 
     std::error_code close() override { return std::error_code(); }
-    void setName( llvm::StringRef name ) override {}
+    void setName( llvm::StringRef name ) override
+    {
+        content_->status.setName( name );
+    }
 };
 
 class RealFSDirIter : public clang::vfs::detail::DirIterImpl

@@ -7,9 +7,12 @@
 #include <memory>
 //------------------------------------------------------------------------------
 
-ContentEntryPtr ContentCache::addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & status )
+llvm::ErrorOr<ContentEntryPtr> ContentCache::addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & status )
 {
-    std::unique_ptr<llvm::MemoryBuffer> buffer( prepareSourceFile( path ) );
+    llvm::ErrorOr<llvm::MemoryBuffer *> srcFile( prepareSourceFile( path ) );
+    if ( std::error_code error = srcFile.getError() )
+        return error;
+    std::unique_ptr<llvm::MemoryBuffer> buffer( srcFile.get() );
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
     auto iter = content_.get<ByFileId>().find( status.getUniqueID() );
     if ( iter != content_.get<ByFileId>().end() )
@@ -68,11 +71,14 @@ llvm::ErrorOr<ContentEntryPtr> ContentCache::getOrCreate( llvm::Twine const & pa
                 content_.splice( content_.begin(), content_, listIter );
                 return contentEntryPtr;
             }
-            llvm::MemoryBuffer * buffer( prepareSourceFile( path ) );
+            llvm::ErrorOr<llvm::MemoryBuffer *> srcFile( prepareSourceFile( path ) );
+            if ( std::error_code error = srcFile.getError() )
+                return error;
+            std::unique_ptr<llvm::MemoryBuffer> buffer( srcFile.get() );
             // Notify observers that this content entry is out of date.
             contentChanged_( *contentEntryPtr );
             boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-            ContentEntryPtr newPtr( new ContentEntry( buffer, currentStatus ) );
+            ContentEntryPtr newPtr( new ContentEntry( buffer.release(), currentStatus ) );
             contentByFileId.erase( iter );
             content_.push_front( newPtr );
             contentSize_ += newPtr->size();

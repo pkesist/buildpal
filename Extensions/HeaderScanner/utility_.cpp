@@ -47,11 +47,11 @@ namespace
     }
 }
 
-llvm::MemoryBuffer * prepareSourceFile( llvm::Twine const & path )
+llvm::ErrorOr<llvm::MemoryBuffer *> prepareSourceFile( llvm::Twine const & path )
 {
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer> > result = llvm::MemoryBuffer::getFile( path );
-    if ( !result )
-        return 0;
+    if ( std::error_code error = result.getError() )
+        return error;
     llvm::MemoryBuffer * buf( result.get().release() );
     convertEncodingIfNeeded( buf );
     return buf;

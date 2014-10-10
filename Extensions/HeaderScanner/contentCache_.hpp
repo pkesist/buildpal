@@ -174,7 +174,7 @@ public:
     }
 
 private:
-    ContentEntryPtr addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & );
+    llvm::ErrorOr<ContentEntryPtr> addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & );
 
     std::error_code openFileForRead( llvm::Twine const & path, std::unique_ptr<clang::vfs::File> & result ) override
     {

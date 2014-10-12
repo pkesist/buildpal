@@ -7,19 +7,34 @@
 #include <memory>
 //------------------------------------------------------------------------------
 
-llvm::ErrorOr<ContentEntryPtr> ContentCache::addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & status )
+llvm::ErrorOr<clang::vfs::Status> ContentCache::status( llvm::Twine const & path )
 {
-    llvm::ErrorOr<llvm::MemoryBuffer *> srcFile( prepareSourceFile( path ) );
-    if ( std::error_code error = srcFile.getError() )
+    llvm::ErrorOr<ContentEntryPtr> contentEntry = getOrCreate( path );
+    if ( contentEntry )
+        return contentEntry.get()->status;
+    llvm::sys::fs::file_status tmpStat;
+    std::error_code error = llvm::sys::fs::status( path, tmpStat );
+    if ( error )
         return error;
-    std::unique_ptr<llvm::MemoryBuffer> buffer( srcFile.get() );
+    clang::vfs::Status status( tmpStat );
+    status.setName( path.str() );
+    return status;
+}
+
+llvm::ErrorOr<ContentEntryPtr> ContentCache::addNewEntry( llvm::Twine const & path )
+{
+    llvm::ErrorOr<ContentEntryPtr> newPtrE = ContentEntry::create( path );
+    if ( std::error_code ec = newPtrE.getError() )
+        return ec;
+
+    ContentEntryPtr const & newPtr = newPtrE.get();
+
     boost::upgrade_lock<boost::shared_mutex> upgradeLock( contentMutex_ );
-    auto iter = content_.get<ByFileId>().find( status.getUniqueID() );
-    if ( iter != content_.get<ByFileId>().end() )
+    auto iter = content_.get<ByName>().find( path.str() );
+    if ( iter != content_.get<ByName>().end() )
         return *iter;
+
     boost::upgrade_to_unique_lock<boost::shared_mutex> const exclusiveLock( upgradeLock );
-    ContentEntryPtr newPtr( new ContentEntry( buffer.release(), status ) );
-    newPtr->status.setName( path.str() );
     content_.push_front( newPtr );
     contentSize_ += newPtr->size();
     unsigned int const maxContentCacheSize = 100 * 1024 * 1024;
@@ -31,62 +46,22 @@ llvm::ErrorOr<ContentEntryPtr> ContentCache::addNewEntry( llvm::Twine const & pa
     return newPtr;
 }
 
-llvm::ErrorOr<ContentEntryPtr> ContentCache::lookup( llvm::Twine const & path, llvm::sys::fs::UniqueID const & uniqueID )
-{
-    typedef Content::index<ByFileId>::type ContentByFileId;
-    {
-        boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
-        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
-        ContentByFileId::const_iterator const iter( contentByFileId.find( uniqueID ) );
-        if ( iter != contentByFileId.end() )
-            return *iter;
-    }
-    llvm::sys::fs::file_status currentStatus;
-    if ( std::error_code const statusError = llvm::sys::fs::status( path, currentStatus ) )
-        return statusError;
-    return addNewEntry( path, currentStatus );
-}
-
 llvm::ErrorOr<ContentEntryPtr> ContentCache::getOrCreate( llvm::Twine const & path )
 {
-    llvm::sys::fs::file_status currentStatus;
-    if ( std::error_code const statusError = llvm::sys::fs::status( path, currentStatus ) )
-        return statusError;
-
-    llvm::sys::fs::UniqueID const uniqueID = currentStatus.getUniqueID();
-
-    typedef Content::index<ByFileId>::type ContentByFileId;
+    typedef Content::index<ByName>::type ContentByName;
+    boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
+    ContentByName & contentByName( content_.get<ByName>() );
+    ContentByName::const_iterator const iter( contentByName.find( path.str() ) );
+    if ( iter == contentByName.end() )
     {
-        boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
-        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
-        ContentByFileId::const_iterator const iter( contentByFileId.find( uniqueID ) );
-        if ( iter != contentByFileId.end() )
-        {
-            ContentEntryPtr contentEntryPtr = *iter;
-            readLock.unlock();
-            if ( contentEntryPtr->status.getLastModificationTime() == currentStatus.getLastModificationTime() )
-            {
-                boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-                Content::iterator listIter = content_.project<0>( iter );
-                content_.splice( content_.begin(), content_, listIter );
-                return contentEntryPtr;
-            }
-            llvm::ErrorOr<llvm::MemoryBuffer *> srcFile( prepareSourceFile( path ) );
-            if ( std::error_code error = srcFile.getError() )
-                return error;
-            std::unique_ptr<llvm::MemoryBuffer> buffer( srcFile.get() );
-            // Notify observers that this content entry is out of date.
-            contentChanged_( *contentEntryPtr );
-            boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
-            ContentEntryPtr newPtr( new ContentEntry( buffer.release(), currentStatus ) );
-            contentByFileId.erase( iter );
-            content_.push_front( newPtr );
-            contentSize_ += newPtr->size();
-            contentSize_ -= contentEntryPtr->size();
-            return newPtr;
-        }
+        readLock.unlock();
+        return addNewEntry( path );
     }
-    return addNewEntry( path, currentStatus );
+    readLock.unlock();
+    boost::unique_lock<boost::shared_mutex> const exclusiveLock( contentMutex_ );
+    Content::iterator listIter = content_.project<0>( iter );
+    content_.splice( content_.begin(), content_, listIter );
+    return *iter;
 }
 
 

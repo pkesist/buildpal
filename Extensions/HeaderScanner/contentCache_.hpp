@@ -38,16 +38,16 @@ struct HashUniqueFileId
     }
 };
 
-struct GetFileId
+struct GetName
 {
-    typedef llvm::sys::fs::UniqueID result_type;
+    typedef llvm::StringRef result_type;
     result_type operator()( ContentEntryPtr const & p ) const
     {
-        return p->status.getUniqueID();
+        return p->status.getName();
     }
 };
 
-struct ByFileId {};
+struct ByName {};
 
 struct CachedFile : public clang::vfs::File
 {
@@ -129,6 +129,14 @@ public:
     }
 };
 
+struct HashString
+{
+    inline std::size_t operator()( llvm::StringRef ref ) const
+    {
+        return llvm::hash_combine_range( ref.data(), ref.data() + ref.size() );
+    }
+};
+
 class ContentCache : public clang::vfs::FileSystem
 {
 public:
@@ -137,9 +145,9 @@ public:
         boost::multi_index::indexed_by<
             boost::multi_index::sequenced<>,
             boost::multi_index::hashed_unique<
-                boost::multi_index::tag<ByFileId>,
-                GetFileId,
-                HashUniqueFileId
+                boost::multi_index::tag<ByName>,
+                GetName,
+                HashString
             >
         >
     > Content;
@@ -147,18 +155,6 @@ public:
     ContentCache() : contentSize_( 0 ) {}
 
     llvm::ErrorOr<ContentEntryPtr> getOrCreate( llvm::Twine const & path );
-
-    // Fast version, without stat calls unless opening for the first time.
-    llvm::ErrorOr<ContentEntryPtr> lookup( llvm::Twine const & path, llvm::sys::fs::UniqueID const & );
-
-    ContentEntryPtr get( llvm::sys::fs::UniqueID const & id )
-    {
-        boost::shared_lock<boost::shared_mutex> readLock( contentMutex_ );
-        typedef Content::index<ByFileId>::type ContentByFileId;
-        ContentByFileId & contentByFileId( content_.get<ByFileId>() );
-        ContentByFileId::const_iterator const iter( contentByFileId.find( id ) );
-        return iter != contentByFileId.end() ? *iter : ContentEntryPtr();
-    }
 
     void clear()
     {
@@ -174,7 +170,7 @@ public:
     }
 
 private:
-    llvm::ErrorOr<ContentEntryPtr> addNewEntry( llvm::Twine const & path, llvm::sys::fs::file_status const & );
+    llvm::ErrorOr<ContentEntryPtr> addNewEntry( llvm::Twine const & path );
 
     std::error_code openFileForRead( llvm::Twine const & path, std::unique_ptr<clang::vfs::File> & result ) override
     {
@@ -189,15 +185,7 @@ private:
         return clang::vfs::directory_iterator( std::make_shared<RealFSDirIter>( dir, e ) );
     }
 
-    llvm::ErrorOr<clang::vfs::Status> status( llvm::Twine const & path )
-    {
-        llvm::sys::fs::file_status stat;
-        if ( std::error_code e = llvm::sys::fs::status( path, stat ) )
-          return e;
-        clang::vfs::Status result( stat );
-        result.setName( path.str() );
-        return result;
-    }
+    llvm::ErrorOr<clang::vfs::Status> status( llvm::Twine const & path );
 
 public:
     static llvm::IntrusiveRefCntPtr<ContentCache> & ptr()

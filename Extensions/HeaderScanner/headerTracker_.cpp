@@ -41,11 +41,7 @@ Header IncludedHeaders::makeHeader() const
     {
         dir,
         name,
-        ContentCache::singleton().lookup
-        (
-            file->getName(),
-            file->getUniqueID()
-        ).get(),
+        ContentCache::singleton().getOrCreate( file->getName() ).get(),
         relative
     };
     return result;

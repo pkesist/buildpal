@@ -281,7 +281,6 @@ private:
     )
     {
         ContentEntryPtr contentEntry = ContentCache::singleton().getOrCreate( entry->getName() ).get();
-        Header header = { dir, name, contentEntry, relative };
 
         IncludeFinder * includeFinder;
         if ( includeDirectives )
@@ -306,6 +305,7 @@ private:
             );
         }
     
+        Header header = { dir, name, contentEntry, relative };
         headerStack_.push_back
         (
             HeaderCtx

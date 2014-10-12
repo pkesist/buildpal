@@ -12,6 +12,9 @@
 #include <ctime>
 #include <memory>
 
+class ContentEntry;
+typedef boost::intrusive_ptr<ContentEntry> ContentEntryPtr;
+
 class ContentEntry
 {
 private:
@@ -19,30 +22,7 @@ private:
     ContentEntry & operator=( ContentEntry const & ); // = delete;
 
 public:
-    ContentEntry() : checksum( 0 ) {};
-
-    ContentEntry
-    (
-        llvm::MemoryBuffer *,
-        llvm::sys::fs::file_status const &
-    );
-
-    ContentEntry( ContentEntry && other )
-        :
-        refCount_( 0 ),
-        buffer( other.buffer.release() ),
-        checksum( other.checksum ),
-        status( other.status )
-    {
-    }
-
-    ContentEntry & operator=( ContentEntry && other )
-    {
-        buffer.reset( other.buffer.release() );
-        checksum = other.checksum;
-        status = other.status;
-        return *this;
-    }
+    static llvm::ErrorOr<ContentEntryPtr> create( llvm::Twine const & path );
 
     std::size_t const size() const { return buffer->getBufferSize(); }
 
@@ -51,6 +31,8 @@ public:
     clang::vfs::Status status;
 
 private:
+    explicit ContentEntry( llvm::MemoryBuffer *, clang::vfs::Status const & );
+
     mutable std::atomic<size_t> refCount_;
 
     friend void intrusive_ptr_add_ref( ContentEntry * );
@@ -73,8 +55,6 @@ private:
 
 inline void intrusive_ptr_add_ref( ContentEntry * c ) { c->addRef(); }
 inline void intrusive_ptr_release( ContentEntry * c ) { c->decRef(); }
-
-typedef boost::intrusive_ptr<ContentEntry> ContentEntryPtr;
 
 
 //------------------------------------------------------------------------------

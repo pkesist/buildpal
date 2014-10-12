@@ -75,14 +75,6 @@ struct HashValue
     }
 };
 
-struct HashString
-{
-    inline std::size_t operator()( llvm::StringRef ref ) const
-    {
-        return boost::hash_range( ref.data(), ref.data() + ref.size() );
-    }
-};
-
 template <typename T>
 struct Container : public std::unordered_set<Value<T>, HashValue<T> > {};
 
@@ -245,8 +237,6 @@ namespace std
         }
     };
 }
-
-llvm::ErrorOr<llvm::MemoryBuffer *> prepareSourceFile( llvm::Twine const & path );
 
 #define DEFINE_FLYWEIGHT(base, name) \
     struct name##Tag {}; \

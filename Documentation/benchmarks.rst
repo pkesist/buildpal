@@ -49,3 +49,10 @@ Clang
 .. todo::
 
     Measure Clang build times.
+
+Chrome
+------
+
+.. todo::
+
+    Measure Chrome build times.
